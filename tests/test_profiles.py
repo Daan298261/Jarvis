@@ -125,3 +125,40 @@ def test_unloaded_snapshot_uses_profile_context():
         assert {p["name"] for p in snap["profiles"]} == EXPECTED_PROFILES
 
     asyncio.run(_run())
+
+
+def test_profile_gguf_finds_weights_on_extra_volume(tmp_path, monkeypatch):
+    from app.inference import profiles as profiles_mod
+
+    models = tmp_path / "models"
+    extra = tmp_path / "D"
+    named = extra / "Models"
+    models.mkdir()
+    named.mkdir(parents=True)
+    usb = named / "Qwen3.5-27B-Q4_K_M.gguf"
+    usb.write_bytes(b"gguf")
+    projector = extra / "mmproj-F16.gguf"
+    projector.write_bytes(b"gguf")
+    clutter = extra / "Photos"
+    clutter.mkdir()
+    (clutter / "Qwen3.5-27B-Q4_K_M.gguf").write_bytes(b"gguf")
+    monkeypatch.setattr(profiles_mod, "models_dir", lambda: models)
+    monkeypatch.setattr("app.config.extra_volume_roots", lambda: [extra])
+
+    expert = PROFILES["expert"]
+    assert profile_gguf(expert) == usb
+    resolved = resolve_profile("expert")
+    assert resolved.name == "expert"
+    assert profile_gguf(resolved) == usb
+    assert profiles_mod.mmproj_path(expert) == projector
+
+
+def test_profile_from_gguf_path_keeps_absolute_file(tmp_path):
+    from app.inference.profiles import profile_from_gguf_path
+
+    gguf = tmp_path / "owner-model-Q4_K_M.gguf"
+    gguf.write_bytes(b"gguf")
+    profile = profile_from_gguf_path(gguf)
+    assert profile.absolute_path == str(gguf)
+    assert profile_gguf(profile) == gguf
+    assert profile.filename == gguf.name

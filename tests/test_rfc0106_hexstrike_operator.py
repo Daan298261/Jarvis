@@ -89,6 +89,28 @@ async def test_mcp_registration_hook_builds_loopback_server_and_refreshes_runtim
     assert "127.0.0.1:8888" in stdio["args"][stdio["args"].index("--server") + 1]
 
 
+def test_hexstrike_mcp_stdio_launch_drops_http_proxy(operator_store, monkeypatch):
+    from app.tools.mcp_runtime import prepare_stdio_launch
+
+    install = operator_store / "hexstrike-ai"
+    install.mkdir()
+    (install / "hexstrike_mcp.py").write_text("# mcp entry\n", encoding="utf-8")
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setenv("https_proxy", "http://10.8.0.1:3128")
+    servers = build_hexstrike_mcp_server(
+        install_path=install,
+        python_executable="python",
+        host="127.0.0.1",
+        port=8888,
+    )
+    launch = prepare_stdio_launch(servers[0])
+    assert "HTTP_PROXY" not in launch["env"]
+    assert "https_proxy" not in launch["env"]
+    assert launch["env"]["HEXSTRIKE_HOST"] == "127.0.0.1"
+    assert launch["env"]["HEXSTRIKE_PORT"] == "8888"
+    assert "--stdio" in launch["args"]
+
+
 def test_mcp_registration_refuses_non_loopback_host(operator_store):
     servers = build_hexstrike_mcp_server(
         install_path=operator_store,
@@ -137,6 +159,127 @@ async def test_operate_creates_job_and_uses_post_operator(operator_store, monkey
     assert job["upstream_pid"] == 9911
     assert (operator_store / "hexstrike" / "jobs" / job["id"] / "result.json").is_file()
     assert any(action == "operate_started" for action, _ in events)
+
+
+@pytest.mark.asyncio
+async def test_operate_http_nmap_binds_lan_nic(operator_store, monkeypatch):
+    from app.security.target_registry import add_target
+
+    async def fake_status(*, enrich=True):
+        return SimpleNamespace(
+            running=True,
+            install_path=str(operator_store),
+            tools={"nmap": "ok"},
+            host="127.0.0.1",
+            port=8888,
+            python_executable="python",
+        )
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    monkeypatch.setattr("app.security.target_registry.data_dir", lambda: operator_store)
+    _nmap_on_path(monkeypatch)
+    monkeypatch.setattr(
+        "psutil.net_if_addrs",
+        lambda: {
+            "eth0": [
+                SimpleNamespace(family=__import__("socket").AF_INET, address="192.168.1.12", netmask="255.255.255.0"),
+            ],
+        },
+    )
+    add_target(kind="cidr", value="192.168.1.0/24", notes="home")
+    await refresh_discovered_catalog(force=True)
+    seen: list[dict] = []
+
+    async def fake_post(path, payload):
+        assert path == "api/tools/nmap"
+        seen.append(payload)
+        return {"hosts": []}
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    job = await operate("http:nmap", {"target": "192.168.1.0/24", "scan_type": "-sn"})
+    assert job["status"] == "succeeded"
+    assert seen[0]["additional_args"] == "-T3 -S 192.168.1.12 -e eth0"
+
+
+@pytest.mark.asyncio
+async def test_operate_http_nuclei_binds_lan_nic(operator_store, monkeypatch):
+    from app.security.target_registry import add_target
+
+    async def fake_status(*, enrich=True):
+        return SimpleNamespace(
+            running=True,
+            install_path=str(operator_store),
+            tools={"nuclei": "ok"},
+            host="127.0.0.1",
+            port=8888,
+            python_executable="python",
+        )
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    monkeypatch.setattr("app.security.target_registry.data_dir", lambda: operator_store)
+    monkeypatch.setattr(
+        "psutil.net_if_addrs",
+        lambda: {
+            "eth0": [
+                SimpleNamespace(family=__import__("socket").AF_INET, address="192.168.1.12", netmask="255.255.255.0"),
+            ],
+        },
+    )
+    add_target(kind="cidr", value="192.168.1.0/24", notes="home")
+    await refresh_discovered_catalog(force=True)
+    seen: list[dict] = []
+
+    async def fake_post(path, payload):
+        assert path == "api/tools/nuclei"
+        seen.append(payload)
+        return {"pid": 42, "status": "started"}
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    job = await operate("http:nuclei", {"url": "http://192.168.1.40:8080/", "additional_args": "-t http/"})
+    assert job["status"] == "succeeded"
+    assert seen[0]["additional_args"] == "-t http/ -source-ip 192.168.1.12 -interface eth0"
+    assert seen[0]["url"] == "http://192.168.1.40:8080/"
+
+
+@pytest.mark.asyncio
+async def test_operate_http_gobuster_uses_lan_http_proxy(operator_store, monkeypatch):
+    from app.security.target_registry import add_target
+
+    async def fake_status(*, enrich=True):
+        return SimpleNamespace(
+            running=True,
+            install_path=str(operator_store),
+            tools={"gobuster": "ok"},
+            host="127.0.0.1",
+            port=8888,
+            python_executable="python",
+        )
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    monkeypatch.setattr("app.security.target_registry.data_dir", lambda: operator_store)
+    monkeypatch.setattr(
+        "psutil.net_if_addrs",
+        lambda: {
+            "eth0": [
+                SimpleNamespace(family=__import__("socket").AF_INET, address="192.168.1.12", netmask="255.255.255.0"),
+            ],
+        },
+    )
+    add_target(kind="cidr", value="192.168.1.0/24", notes="home")
+    await refresh_discovered_catalog(force=True)
+    seen: list[dict] = []
+
+    async def fake_post(path, payload):
+        assert path == "api/tools/gobuster"
+        seen.append(payload)
+        return {"pid": 7, "status": "started"}
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    job = await operate("http:gobuster", {"url": "http://192.168.1.40/", "additional_args": "-w wordlist.txt"})
+    assert job["status"] == "succeeded"
+    args = seen[0]["additional_args"]
+    assert args.startswith("-w wordlist.txt --proxy http://127.0.0.1:")
+    assert seen[0]["url"] == "http://192.168.1.40/"
 
 
 @pytest.mark.asyncio
@@ -252,3 +395,141 @@ async def test_operate_rejects_dependency_catalog_rows(operator_store, monkeypat
 def test_install_pin_constants_unchanged():
     assert APPROVED_HEXSTRIKE_REMOTE == "https://github.com/0x4m4/hexstrike-ai.git"
     assert len(APPROVED_HEXSTRIKE_COMMIT) == 40
+
+
+def _nmap_on_path(monkeypatch):
+    import shutil as _shutil
+
+    real_which = _shutil.which
+
+    def _which(name, *args, **kwargs):
+        if str(name).lower() == "nmap":
+            return "/usr/bin/nmap"
+        return real_which(name, *args, **kwargs)
+
+    monkeypatch.setattr("app.security.hexstrike_operator.shutil.which", _which)
+
+
+@pytest.mark.asyncio
+async def test_lan_inventory_catalog_available_when_suite_stopped(operator_store, monkeypatch):
+    from app.security import hexstrike_operator as hop
+
+    HEXSTRIKE._process = None
+    HEXSTRIKE._loopback_healthy = False
+    hop._CATALOG_CACHE = []
+    _nmap_on_path(monkeypatch)
+
+    async def fake_status(*, enrich=True):
+        return SimpleNamespace(
+            running=False,
+            install_path=str(operator_store),
+            tools={},
+            host="127.0.0.1",
+            port=8888,
+            python_executable="python",
+            optional_stubs=[],
+        )
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    catalog = await refresh_discovered_catalog(force=True)
+    lan = next(item for item in catalog if item["id"] == "defensive:lan_inventory")
+    assert lan["available"] is True
+    assert lan["input_schema"]["required"] == []
+    host = next(item for item in catalog if item["id"] == "defensive:host_baseline")
+    assert host["available"] is False
+
+    hop._CATALOG_CACHE = []
+    offline = discovered_catalog()
+    lan_offline = next(item for item in offline if item["id"] == "defensive:lan_inventory")
+    assert lan_offline["available"] is True
+
+
+@pytest.mark.asyncio
+async def test_operate_lan_inventory_empty_scope_starts_stopped_suite(operator_store, monkeypatch):
+    from app.security import hexstrike_operator as hop
+
+    HEXSTRIKE._process = None
+    HEXSTRIKE._loopback_healthy = False
+    hop._CATALOG_CACHE = []
+    _nmap_on_path(monkeypatch)
+    monkeypatch.setattr("app.security.hexstrike_defensive.data_dir", lambda: operator_store)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.discover_private_lan_cidrs",
+        lambda: ["10.2.0.0/16"],
+    )
+    started = {"count": 0}
+
+    async def fake_status(*, enrich=False):
+        return SimpleNamespace(
+            running=False,
+            last_error="",
+            install_path=str(operator_store),
+            tools={},
+            host="127.0.0.1",
+            port=8888,
+            python_executable="python",
+            optional_stubs=[],
+        )
+
+    async def fake_start():
+        started["count"] += 1
+        return SimpleNamespace(running=True, last_error="")
+
+    async def fake_post(path, payload):
+        assert path == "api/tools/nmap"
+        assert payload["target"] == "10.2.0.0/16"
+        return {"hosts": []}
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    monkeypatch.setattr(HEXSTRIKE, "ensure_started", fake_start)
+    monkeypatch.setattr(HEXSTRIKE, "post_defensive", fake_post)
+    await refresh_discovered_catalog(force=True)
+    job = await operate("defensive:lan_inventory", {})
+    assert job["status"] == "succeeded"
+    assert started["count"] == 1
+    assert job["result"]["scope_id"] == "lan"
+
+
+@pytest.mark.asyncio
+async def test_lan_inventory_catalog_available_when_suite_installed_without_host_nmap(
+    operator_store, monkeypatch
+):
+    from app.security import hexstrike_operator as hop
+
+    HEXSTRIKE._process = None
+    HEXSTRIKE._loopback_healthy = False
+    hop._CATALOG_CACHE = []
+
+    import shutil as _shutil
+
+    real_which = _shutil.which
+
+    def _which_no_nmap(name, *args, **kwargs):
+        if str(name).lower() == "nmap":
+            return None
+        return real_which(name, *args, **kwargs)
+
+    monkeypatch.setattr("app.security.hexstrike_operator.shutil.which", _which_no_nmap)
+    monkeypatch.setattr(
+        HEXSTRIKE,
+        "_base_status",
+        lambda: SimpleNamespace(installed=True, running=False, optional_stubs=[]),
+    )
+
+    async def fake_status(*, enrich=True):
+        return SimpleNamespace(
+            running=False,
+            installed=True,
+            install_path=str(operator_store),
+            tools={},
+            host="127.0.0.1",
+            port=8888,
+            python_executable="python",
+            optional_stubs=[],
+        )
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    catalog = await refresh_discovered_catalog(force=True)
+    lan = next(item for item in catalog if item["id"] == "defensive:lan_inventory")
+    assert lan["available"] is True
+    assert lan["missing_dependencies"] == []

@@ -31,7 +31,16 @@ from .context_window import (
     parse_n_keep_overflow,
 )
 from .inference_prompt import sanitize_messages_for_inference
-from .profiles import ModelProfile, declared_profiles, profile_gguf, qwen38_9b_profile, resolve_mmproj, resolve_profile
+from .profiles import (
+    PROFILES,
+    ModelProfile,
+    declared_profiles,
+    profile_from_gguf_path,
+    profile_gguf,
+    qwen38_9b_profile,
+    resolve_mmproj,
+    resolve_profile,
+)
 from .prompt_budget import (
     ModelCapacityExceeded,
     is_context_overflow,
@@ -89,6 +98,7 @@ class InferenceState:
     advertised_models: list[str] | None = None
     health_path: str = ""
     remote_model: str = ""
+    gguf_path: str = ""
 
 
 def _with_context(profile: ModelProfile, context_size: int) -> ModelProfile:
@@ -100,6 +110,30 @@ def _default_load_context(profile: ModelProfile) -> int:
     if profile.name == "fast":
         return min(8192, cap)
     return min(32768, cap)
+
+
+def _profile_from_gguf_or_name(
+    settings: AppSettings,
+    profile_name: str | None,
+    *,
+    gguf_path: str | None = None,
+    stored_gguf: str = "",
+    context_size: int | None = None,
+) -> ModelProfile:
+    requested = (profile_name or "").strip()
+    path = str(gguf_path or "").strip()
+    if not path:
+        if requested in PROFILES:
+            path = ""
+        else:
+            path = str(stored_gguf or "").strip()
+    if path:
+        profile = profile_from_gguf_path(Path(path))
+    else:
+        profile = resolve_profile(requested or settings.inference.profile)
+    if context_size:
+        profile = _with_context(profile, int(context_size))
+    return profile
 
 
 def _message_text(message: ChatMessage) -> str:
@@ -221,6 +255,22 @@ class InferenceManager:
         self._lock = asyncio.Lock()
         self.provider: OpenAICompatProvider | None = None
 
+    def _active_profile(
+        self,
+        settings: AppSettings,
+        profile_name: str | None = None,
+        *,
+        gguf_path: str | None = None,
+        context_size: int | None = None,
+    ) -> ModelProfile:
+        return _profile_from_gguf_or_name(
+            settings,
+            profile_name or self.state.profile,
+            gguf_path=gguf_path,
+            stored_gguf=self.state.gguf_path,
+            context_size=context_size,
+        )
+
     def base_url(self, settings: AppSettings) -> str:
         return f"http://{settings.inference.host}:{settings.inference.port}/v1"
 
@@ -230,7 +280,7 @@ class InferenceManager:
             return chosen
         if advertised:
             return advertised[0]
-        profile = resolve_profile(self.state.profile or settings.inference.profile)
+        profile = self._active_profile(settings)
         return profile.alias or "Qwen3.5-9B"
 
     def provider_api_key(self, settings: AppSettings) -> str:
@@ -353,7 +403,7 @@ class InferenceManager:
         if not self.provider:
             raise RuntimeError("Inference model is not loaded")
         app_settings = settings or load_settings()
-        profile = resolve_profile(self.state.profile or app_settings.inference.profile)
+        profile = self._active_profile(app_settings)
         typed = [
             message if isinstance(message, ChatMessage) else ChatMessage(role="user", content=str(message))
             for message in messages
@@ -486,7 +536,7 @@ class InferenceManager:
         if not self.provider:
             raise RuntimeError("Inference model is not loaded")
         app_settings = settings or load_settings()
-        profile = resolve_profile(self.state.profile or app_settings.inference.profile)
+        profile = self._active_profile(app_settings)
         typed = [
             message if isinstance(message, ChatMessage) else ChatMessage(role="user", content=str(message))
             for message in messages
@@ -565,17 +615,23 @@ class InferenceManager:
         context_size: int | None = None,
         force: bool = False,
         vision: bool | None = None,
+        gguf_path: str | None = None,
     ) -> InferenceState:
         async with self._lock:
-            profile = resolve_profile(profile_name or settings.inference.profile)
-            if context_size:
-                profile = _with_context(profile, int(context_size))
+            profile = self._active_profile(
+                settings,
+                profile_name,
+                gguf_path=gguf_path,
+                context_size=context_size,
+            )
             backend = resolve_backend(settings)
+            model = profile_gguf(profile)
             same = (
                 not force
                 and self.backend
                 and self.state.loaded
                 and self.state.profile == profile.name
+                and self.state.model_path == str(model)
                 and self.backend.name == backend.name
                 and int(self.state.context_size or 0) >= int(profile.context_size or 0)
                 and (not vision or self.state.vision_loaded)
@@ -587,6 +643,7 @@ class InferenceManager:
                 profile.name,
                 context_size=context_size or profile.context_size,
                 vision=vision,
+                gguf_path=gguf_path if gguf_path is not None else (profile.absolute_path or None),
             )
 
     async def ensure_runtime(
@@ -627,7 +684,7 @@ class InferenceManager:
             return self.state
         manages = bool(self.backend and getattr(self.backend, "manages_process", False))
         if not manages:
-            profile = resolve_profile(self.state.profile or settings.inference.profile)
+            profile = self._active_profile(settings)
             projector = resolve_mmproj(profile)
             self.state.vision_loaded = True
             self.state.vision = True
@@ -678,8 +735,14 @@ class InferenceManager:
         context_size: int | None,
         vision: bool | None,
         force: bool = False,
+        gguf_path: str | None = None,
     ) -> InferenceState:
-        profile = resolve_profile(profile_name or settings.inference.profile)
+        profile = self._active_profile(
+            settings,
+            profile_name,
+            gguf_path=gguf_path,
+            context_size=context_size,
+        )
         backend = resolve_backend(settings)
         model = profile_gguf(profile)
         want_vision = self._vision_requested(settings, vision)
@@ -701,6 +764,7 @@ class InferenceManager:
             and self.backend
             and self.state.loaded
             and self.state.profile == profile.name
+            and self.state.model_path == str(model)
             and self.backend.name == backend.name
             and (self.state.context_size or 0) >= want_context
             and (not want_vision or self.state.vision_loaded)
@@ -795,6 +859,7 @@ class InferenceManager:
         self.state.profile = profile.name
         self.state.quant = profile.quant
         self.state.model_path = str(model) if backend.requires_local_files else ""
+        self.state.gguf_path = str(profile.absolute_path or "") if backend.requires_local_files else ""
         projector = resolve_mmproj(profile) if vision else None
         self.state.vision_loaded = bool(vision and projector is not None)
         self.state.mmproj_path = str(projector) if self.state.vision_loaded else ""
@@ -919,7 +984,7 @@ class InferenceManager:
     def live_state_overlay(self) -> dict[str, Any]:
         """Cheap in-memory fields for status-cache readers (no GPU/HTTP probes)."""
         settings = load_settings()
-        profile = resolve_profile(self.state.profile or settings.inference.profile)
+        profile = self._active_profile(settings)
         active_model = None
         if self.state.loaded:
             active_model = (
@@ -959,7 +1024,7 @@ class InferenceManager:
         return self._assemble_snapshot(settings, healthy=False)
 
     def _assemble_snapshot(self, settings: AppSettings, *, healthy: bool) -> dict[str, Any]:
-        profile = resolve_profile(self.state.profile or settings.inference.profile)
+        profile = self._active_profile(settings)
         context_target = min(
             int(settings.inference.context_size or 32768),
             int(profile.context_size or 32768),

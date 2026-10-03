@@ -28,6 +28,9 @@ def voicestudio_probe_endpoint(timeout: float = 2.0) -> bool:
     candidates = [f"{base}/health", f"{base}/v1/models", f"{base}/v1/audio/voices", f"{base}/docs"]
     for url in candidates:
         try:
+            from ..policy.network_http import require_http_url_allowed
+
+            require_http_url_allowed(url, tool="web_fetch")
             req = urllib.request.Request(url, headers=voicestudio_auth_headers())
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 if 200 <= resp.status < 400:
@@ -94,6 +97,9 @@ class VoiceStudioAdapter:
     def list_voices(self, timeout: float = 3.0) -> list[dict[str, Any]]:
         url = f"{self.base_url}/v1/audio/voices"
         try:
+            from ..policy.network_http import require_http_url_allowed
+
+            require_http_url_allowed(url, tool="web_fetch")
             req = urllib.request.Request(url, headers=voicestudio_auth_headers())
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
@@ -127,6 +133,9 @@ class VoiceStudioAdapter:
         data = json.dumps(payload).encode("utf-8")
         headers = voicestudio_auth_headers()
         headers["Content-Type"] = "application/json"
+        from ..policy.network_http import require_http_url_allowed
+
+        require_http_url_allowed(url, tool="web_fetch")
         req = urllib.request.Request(url, data=data, headers=headers, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -192,6 +201,9 @@ class VoiceStudioAdapter:
         body = b"\r\n".join(lines)
         headers = voicestudio_auth_headers()
         headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
+        from ..policy.network_http import require_http_url_allowed
+
+        require_http_url_allowed(url, tool="web_fetch")
         req = urllib.request.Request(url, data=body, headers=headers, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:

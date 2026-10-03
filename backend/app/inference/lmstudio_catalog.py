@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import shutil
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..config import load_settings
+from ..config import data_dir, load_settings, resolved_data_sidecar_dir
 from ..hardware import detect_hardware
 from .backends import suggested_port
 from .runtime_profiles import (
@@ -66,9 +68,12 @@ def catalog_data_path() -> Path:
 
 
 def catalog_store_root() -> Path:
-    from ..config import data_dir
-
-    path = data_dir() / "lmstudio-catalog"
+    path = resolved_data_sidecar_dir(
+        "lmstudio-catalog",
+        local=data_dir() / "lmstudio-catalog",
+        markers=(USER_STATE_FILE,),
+        need_bytes=256 * 1024**2,
+    )
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -92,6 +97,301 @@ def resolve_models_root() -> Path:
     return default_models_root()
 
 
+# Named folders on extra volumes (USB, D:). Do not rglob the whole drive.
+_EXTRA_VOLUME_MODEL_RELATIVES = (
+    "Models",
+    "models",
+    "GGUF",
+    "gguf",
+    "HuggingFace",
+    "huggingface",
+    "Hugging Face",
+    ".lmstudio/models",
+    "llama.cpp",
+    "Jarvis/models",
+    "Jarvis/Models",
+    "Jarvis/GGUF",
+)
+
+
+def extra_volume_model_roots() -> list[Path]:
+    """Model directories on extra volumes (`D:\\Models`, USB `GGUF`, …)."""
+    from ..config import extra_volume_roots
+
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for volume in extra_volume_roots():
+        for relative in _EXTRA_VOLUME_MODEL_RELATIVES:
+            candidate = volume / Path(relative)
+            try:
+                if not candidate.is_dir():
+                    continue
+                resolved = candidate.resolve()
+            except OSError:
+                continue
+            key = str(resolved).replace("\\", "/").lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            roots.append(candidate)
+    return roots
+
+
+def extra_volume_free_bytes() -> int:
+    """Largest free space among currently mounted extra volumes."""
+    from ..config import extra_volume_roots
+
+    best = 0
+    for volume in extra_volume_roots():
+        try:
+            free = int(shutil.disk_usage(volume).free)
+        except OSError:
+            continue
+        if free > best:
+            best = free
+    return best
+
+
+def extra_volume_install_root(*, need_bytes: int = 0) -> Path | None:
+    """`Jarvis/models` on the extra volume with the most free space that fits."""
+    from ..config import extra_volume_roots
+
+    required = int(need_bytes or 0)
+    best: Path | None = None
+    best_free = 0
+    for volume in extra_volume_roots():
+        try:
+            free = int(shutil.disk_usage(volume).free)
+        except OSError:
+            continue
+        if required and free < required:
+            continue
+        if free > best_free:
+            best_free = free
+            best = volume / "Jarvis" / "models"
+    return best
+
+
+def preferred_gguf_install_dir(relative_dir: str = "", *, need_bytes: int = 0) -> Path:
+    """Install under `models/` when that volume fits; otherwise extra-drive `Jarvis/models`."""
+    from ..config import models_dir
+
+    local_root = models_dir()
+    local = local_root / str(relative_dir or "") if relative_dir else local_root
+    required = int(need_bytes or 0)
+    try:
+        local_free = int(shutil.disk_usage(local_root).free)
+    except OSError:
+        local_free = 0
+    if required <= 0 or local_free >= required:
+        return local
+    extra = extra_volume_install_root(need_bytes=required)
+    if extra is None:
+        return local
+    return extra / str(relative_dir or "") if relative_dir else extra
+
+
+def extra_volume_named_model_dir(*relative: str, marker: str = "") -> Path | None:
+    """Named folder under extra-volume model roots, if `marker` exists (or the folder is non-empty)."""
+    parts = [str(part).strip() for part in relative if str(part).strip()]
+    if not parts:
+        return None
+    needle = str(marker or "").strip()
+    for root in extra_volume_model_roots():
+        candidate = root.joinpath(*parts)
+        try:
+            if needle:
+                hit = candidate / needle
+                if hit.is_file() or hit.is_dir():
+                    return candidate
+            elif candidate.is_dir() and any(candidate.iterdir()):
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
+def resolved_cache_dir(
+    name: str,
+    *,
+    local: Path,
+    markers: tuple[str, ...] = (),
+    need_bytes: int,
+) -> Path:
+    """Keep `local` when that volume fits or already has files; else extra-drive `Jarvis/models/<name>`."""
+    slug = str(name or "").strip()
+    if not slug:
+        return local
+    for marker in markers:
+        try:
+            hit = local / marker
+            if hit.is_file() or hit.is_dir():
+                return local
+        except OSError:
+            continue
+    if not markers:
+        try:
+            if local.is_dir() and any(local.iterdir()):
+                return local
+        except OSError:
+            pass
+    for marker in markers or ("",):
+        extra = extra_volume_named_model_dir(slug, marker=marker)
+        if extra is not None:
+            return extra
+    required = int(need_bytes or 0)
+    try:
+        probe = local if local.exists() else local.parent
+        if not probe.exists():
+            from ..config import repo_root
+
+            probe = repo_root()
+        local_free = int(shutil.disk_usage(probe).free)
+    except OSError:
+        local_free = 0
+    extra_root = extra_volume_install_root(need_bytes=required)
+    if extra_root is not None and required > 0 and local_free < required:
+        return extra_root / slug
+    return local
+
+
+def resolved_tts_model_dir(name: str, *, markers: tuple[str, ...] = (), need_bytes: int) -> Path:
+    """`models/tts/<name>`, or extra-drive `Jarvis/models/tts/<name>` when C: cannot fit."""
+    from ..config import models_dir as live_models_dir
+
+    slug = str(name or "").strip()
+    local = live_models_dir() / "tts" / slug if slug else live_models_dir() / "tts"
+    if not slug:
+        return local
+    for marker in markers:
+        try:
+            hit = local / marker
+            if hit.is_file() or hit.is_dir():
+                return local
+        except OSError:
+            continue
+    if not markers:
+        try:
+            if local.is_dir() and any(local.iterdir()):
+                return local
+        except OSError:
+            pass
+    for marker in markers or ("",):
+        extra = extra_volume_named_model_dir("tts", slug, marker=marker)
+        if extra is not None:
+            return extra
+    return preferred_gguf_install_dir(f"tts/{slug}", need_bytes=need_bytes)
+
+
+def default_huggingface_home() -> Path:
+    env = (os.environ.get("HF_HOME") or "").strip()
+    if env:
+        return Path(env)
+    return Path.home() / ".cache" / "huggingface"
+
+
+def resolved_huggingface_home() -> Path:
+    """Keep `~/.cache/huggingface` when that volume fits; else extra-drive `Jarvis/models/huggingface`."""
+    local = default_huggingface_home()
+    if (os.environ.get("HF_HOME") or "").strip():
+        return local
+    dest = resolved_cache_dir(
+        "huggingface",
+        local=local,
+        markers=("hub",),
+        need_bytes=3 * 1024**3,
+    )
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest
+
+
+def apply_huggingface_home() -> Path:
+    """Point Hugging Face Hub at extra-drive cache when C: cannot fit Chatterbox/Kokoro blobs."""
+    dest = resolved_huggingface_home()
+    dest.mkdir(parents=True, exist_ok=True)
+    if (os.environ.get("HF_HOME") or "").strip():
+        return dest
+    default = Path.home() / ".cache" / "huggingface"
+    try:
+        same = dest.resolve() == default.resolve()
+    except OSError:
+        same = dest == default
+    if not same:
+        os.environ["HF_HOME"] = str(dest)
+        os.environ["HF_HUB_CACHE"] = str(dest / "hub")
+    return dest
+
+
+def extra_volume_file_named(filename: str) -> Path | None:
+    """Find a named GGUF (including mmproj) on extra-volume model folders or roots."""
+    needle = str(filename or "").strip()
+    if not needle:
+        return None
+    lower = needle.lower()
+    for root in extra_volume_model_roots():
+        try:
+            for path in root.rglob(needle):
+                if path.is_file():
+                    return path
+            for path in root.rglob("*.gguf"):
+                if path.is_file() and path.name.lower() == lower:
+                    return path
+        except OSError:
+            continue
+    for path in extra_volume_loose_ggufs():
+        if path.name.lower() == lower:
+            return path
+    return None
+
+
+def extra_volume_loose_ggufs() -> list[Path]:
+    """`*.gguf` sitting on an extra volume root (not nested in Photos, etc.)."""
+    from ..config import extra_volume_roots
+
+    files: list[Path] = []
+    seen: set[str] = set()
+    for volume in extra_volume_roots():
+        try:
+            matches = list(volume.glob("*.gguf"))
+        except OSError:
+            continue
+        for path in matches:
+            try:
+                if not path.is_file():
+                    continue
+                key = str(path.resolve()).replace("\\", "/").lower()
+            except OSError:
+                continue
+            if key in seen:
+                continue
+            seen.add(key)
+            files.append(path)
+    return files
+
+
+def owner_gguf_roots() -> list[Path]:
+    """LM Studio root plus named extra-volume model folders."""
+    roots: list[Path] = []
+    seen: set[str] = set()
+
+    def add(path: Path) -> None:
+        try:
+            if not path.exists():
+                return
+        except OSError:
+            return
+        key = str(path).replace("\\", "/").lower()
+        if key in seen:
+            return
+        seen.add(key)
+        roots.append(path)
+
+    add(resolve_models_root())
+    for extra in extra_volume_model_roots():
+        add(extra)
+    return roots
+
+
 def probe_vram_gb() -> float | None:
     info = detect_hardware(force=True)
     if info.vram_total_mib is None:
@@ -113,23 +413,64 @@ def file_weight_gb(path: Path) -> float:
         return 0.0
 
 
-def discover_ggufs(models_root: Path | None = None) -> list[DiscoveredGguf]:
-    root = models_root or resolve_models_root()
-    if not root.exists():
+def _iter_gguf_files(root: Path, *, recursive: bool) -> list[Path]:
+    try:
+        if not root.exists():
+            return []
+        iterator = root.rglob("*.gguf") if recursive else root.glob("*.gguf")
+        return [path for path in iterator if path.is_file()]
+    except OSError:
         return []
+
+
+def _gguf_record(path: Path) -> DiscoveredGguf | None:
+    if "mmproj" in path.name.lower():
+        return None
+    return DiscoveredGguf(
+        filename=path.name,
+        path=str(path),
+        weight_gb=file_weight_gb(path),
+        quantization=parse_quantization(path.name),
+    )
+
+
+def _collect_ggufs(paths: list[Path], *, recursive: bool) -> list[DiscoveredGguf]:
     found: list[DiscoveredGguf] = []
-    for path in sorted(root.rglob("*.gguf")):
-        name_lower = path.name.lower()
-        if "mmproj" in name_lower:
+    seen: set[str] = set()
+    for root in paths:
+        for path in _iter_gguf_files(root, recursive=recursive):
+            item = _gguf_record(path)
+            if item is None:
+                continue
+            key = item.path.replace("\\", "/").lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append(item)
+    return found
+
+
+def discover_ggufs(models_root: Path | None = None) -> list[DiscoveredGguf]:
+    """Index GGUFs under one root, or the owner union when `models_root` is omitted.
+
+    Explicit `models_root` stays a single-tree scan (tests and custom settings).
+    The default union is LM Studio plus named folders on extra volumes and
+    loose `*.gguf` files on those volume roots — never a full-drive rglob.
+    """
+    if models_root is not None:
+        return sorted(_collect_ggufs([models_root], recursive=True), key=lambda item: item.path.lower())
+    found = _collect_ggufs(owner_gguf_roots(), recursive=True)
+    seen = {item.path.replace("\\", "/").lower() for item in found}
+    for path in extra_volume_loose_ggufs():
+        item = _gguf_record(path)
+        if item is None:
             continue
-        found.append(
-            DiscoveredGguf(
-                filename=path.name,
-                path=str(path),
-                weight_gb=file_weight_gb(path),
-                quantization=parse_quantization(path.name),
-            )
-        )
+        key = item.path.replace("\\", "/").lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(item)
+    found.sort(key=lambda item: item.path.lower())
     return found
 
 
@@ -276,7 +617,7 @@ def sort_profiles(profiles: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def build_catalog(*, show_hidden: bool = False, models_root: Path | None = None) -> dict[str, Any]:
     seed = _load_seed_catalog()
     root = models_root or resolve_models_root()
-    discovered = discover_ggufs(root)
+    discovered = discover_ggufs(models_root) if models_root is not None else discover_ggufs()
     with _lock:
         state = _load_user_state_unlocked()
         profiles: list[dict[str, Any]] = []
@@ -302,9 +643,11 @@ def build_catalog(*, show_hidden: bool = False, models_root: Path | None = None)
             for item in discovered
             if item.path not in matched_paths
         ]
+    extra_roots = extra_volume_model_roots() if models_root is None else []
     return {
         "catalog_version": str(seed.get("catalog_version") or "unknown"),
         "models_root": str(root),
+        "extra_roots": [str(path) for path in extra_roots],
         "vram_gb": probe_vram_gb(),
         "profiles": sort_profiles(profiles),
         "ungraded": ungraded,
@@ -464,9 +807,11 @@ def select_catalog_profile(profile_id: str, *, models_root: Path | None = None) 
 
 def discovery_payload(*, models_root: Path | None = None) -> dict[str, Any]:
     root = models_root or resolve_models_root()
-    items = discover_ggufs(root)
+    items = discover_ggufs(models_root) if models_root is not None else discover_ggufs()
+    extra_roots = extra_volume_model_roots() if models_root is None else []
     return {
         "models_root": str(root),
+        "extra_roots": [str(path) for path in extra_roots],
         "count": len(items),
         "models": [
             {
@@ -479,3 +824,85 @@ def discovery_payload(*, models_root: Path | None = None) -> dict[str, Any]:
             for item in items
         ],
     }
+
+
+def _discovered_runtime_name(path: Path) -> str:
+    digest = hashlib.sha1(str(path).encode("utf-8", errors="replace")).hexdigest()[:10]
+    stem = re.sub(r"[^a-z0-9]+", "-", path.stem.lower()).strip("-")[:24] or "local"
+    return f"gguf-{stem}-{digest}"
+
+
+def select_discovered_gguf(path: str, *, models_root: Path | None = None) -> RuntimeProfile:
+    """Bind an owner-discovered GGUF (including extra-drive files) to llama.cpp."""
+    raw = str(path or "").strip()
+    if not raw:
+        raise ValueError("path is required")
+    items = discover_ggufs() if models_root is None else discover_ggufs(models_root)
+    try:
+        target_key = str(Path(raw).expanduser().resolve()).replace("\\", "/").lower()
+    except OSError:
+        target_key = raw.replace("\\", "/").lower()
+    match: DiscoveredGguf | None = None
+    for item in items:
+        try:
+            key = str(Path(item.path).resolve()).replace("\\", "/").lower()
+        except OSError:
+            key = item.path.replace("\\", "/").lower()
+        if key == target_key or item.path == raw:
+            match = item
+            break
+    if match is None:
+        raise KeyError(f"gguf not in owner catalog: {raw}")
+    resolved = Path(match.path)
+    name = _discovered_runtime_name(resolved)
+    settings = load_settings()
+    endpoint = f"{settings.inference.host}:{suggested_port('llama.cpp', settings.inference.port)}"
+    existing = next(
+        (item for item in list_runtime_profiles() if (item.gguf_path or "") == str(resolved) or item.name == name),
+        None,
+    )
+    if existing is not None:
+        return update_runtime_profile(
+            existing.id,
+            label=match.filename,
+            model=resolved.stem,
+            provider="local-llama",
+            endpoint=endpoint,
+            quantization=match.quantization,
+            privacy_class=PRIVACY_LOCAL_ONLY,
+            is_local=True,
+            capability_tags=["llm_inference", "text", "owner-gguf"],
+            description=f"Owner GGUF {match.filename}",
+            gguf_path=str(resolved),
+        )
+    taken = {item.name for item in list_runtime_profiles()}
+    if name in taken:
+        profile = next(item for item in list_runtime_profiles() if item.name == name)
+        return update_runtime_profile(
+            profile.id,
+            label=match.filename,
+            model=resolved.stem,
+            provider="local-llama",
+            endpoint=endpoint,
+            quantization=match.quantization,
+            privacy_class=PRIVACY_LOCAL_ONLY,
+            is_local=True,
+            capability_tags=["llm_inference", "text", "owner-gguf"],
+            description=f"Owner GGUF {match.filename}",
+            gguf_path=str(resolved),
+        )
+    return create_runtime_profile(
+        name=name,
+        label=match.filename,
+        model=resolved.stem,
+        provider="local-llama",
+        endpoint=endpoint,
+        context_limit=32768,
+        quantization=match.quantization,
+        privacy_class=PRIVACY_LOCAL_ONLY,
+        cost_ceiling_usd=0.0,
+        capability_tags=["llm_inference", "text", "owner-gguf"],
+        is_local=True,
+        description=f"Owner GGUF {match.filename}",
+        gguf_path=str(resolved),
+    )

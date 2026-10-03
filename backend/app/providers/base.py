@@ -92,6 +92,12 @@ class ModelProvider:
 
     async def health(self) -> bool:
         root = self.base_url[:-3] if self.base_url.endswith("/v1") else self.base_url
+        from ..policy.network_http import require_http_url_allowed
+
+        try:
+            require_http_url_allowed(root.rstrip("/") + "/health", tool="web_fetch")
+        except PermissionError:
+            return False
         try:
             async with httpx.AsyncClient(timeout=4) as client:
                 for path in ("/health", "/v1/models", "/models"):

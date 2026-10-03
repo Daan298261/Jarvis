@@ -45,7 +45,7 @@ def _default_http_post(
     timeout: float,
 ) -> tuple[int, dict[str, Any] | None, str]:
     try:
-        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+        with httpx.Client(timeout=timeout, follow_redirects=False) as client:
             response = client.post(url, headers=headers, json=body)
     except httpx.TimeoutException as exc:
         raise JevHttpError(f"TypeSafe Jev request timed out after {timeout:.2f}s", status_code=None) from exc
@@ -77,6 +77,12 @@ def post_systemone(
         "Accept": "application/json",
     }
     body = {"model": TYPESAFE_MODEL, "state": state, "questions": questions}
+    from ..policy.network_http import require_http_url_allowed
+
+    try:
+        require_http_url_allowed(TYPESAFE_SYSTEMONE_URL, tool="web_fetch")
+    except PermissionError as exc:
+        raise JevHttpError(str(exc), status_code=403) from exc
     poster = _HTTP_POST or _default_http_post
     status, payload, raw = poster(TYPESAFE_SYSTEMONE_URL, headers, body, timeout)
     if status in {401, 403}:

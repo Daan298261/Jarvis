@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..config import data_dir, default_allowed_directories, load_settings
+from ..config import data_dir, live_allowed_directories, load_settings, resolved_data_sidecar_dir
 from ..tools.mcp_runtime import MCP
 from .hexstrike import HEXSTRIKE, audit_hexstrike
 from .hexstrike_compat import ALWAYS_STUBBED_OPTIONALS, DISABLED_MESSAGE, package_is_stubbed
@@ -49,13 +49,17 @@ _AVAILABLE_STATUSES = frozenset({"ok", "ready", "available", "installed", "true"
 _JOB_ID_RE = re.compile(r"^[a-f0-9-]{8,64}$", re.IGNORECASE)
 _LOCK = threading.RLock()
 _CATALOG_CACHE: list[dict[str, Any]] = []
-_CATALOG_PATH_NAME = "hexstrike/catalog.json"
 
 
 def _catalog_path() -> Path:
-    path = data_dir() / _CATALOG_PATH_NAME
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
+    path = resolved_data_sidecar_dir(
+        "hexstrike-catalog",
+        local=data_dir() / "hexstrike",
+        markers=("catalog.json",),
+        need_bytes=256 * 1024**2,
+    )
+    path.mkdir(parents=True, exist_ok=True)
+    return path / "catalog.json"
 
 
 def _persist_catalog(rows: list[dict[str, Any]]) -> None:
@@ -87,7 +91,12 @@ def _utcnow() -> str:
 
 
 def jobs_root() -> Path:
-    path = data_dir() / "hexstrike" / "jobs"
+    path = resolved_data_sidecar_dir(
+        "hexstrike-jobs",
+        local=data_dir() / "hexstrike" / "jobs",
+        markers=(),
+        need_bytes=512 * 1024**2,
+    )
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -113,7 +122,7 @@ def artifact_path_allowed(candidate: Path) -> bool:
     from ..config import LOCAL_NETWORK_SCOPE
     from ..tools.safety import _is_unc_path, _private_lan_unc
 
-    roots = settings.allowed_directories or default_allowed_directories()
+    roots = live_allowed_directories(settings.allowed_directories)
     if LOCAL_NETWORK_SCOPE in roots and _is_unc_path(str(candidate)) and _private_lan_unc(str(candidate)):
         return True
     allowed = []
@@ -284,16 +293,32 @@ def _capabilities_from_mcp(*, suite_running: bool) -> list[dict[str, Any]]:
     return rows
 
 
+def _lan_inventory_missing(host_tool: str | None, *, suite_running: bool) -> list[str]:
+    if host_tool and shutil.which(host_tool):
+        return []
+    if suite_running:
+        return []
+    try:
+        if bool(HEXSTRIKE._base_status().installed):
+            return []
+    except Exception:
+        pass
+    return [host_tool] if host_tool else ["nmap"]
+
+
 def _capabilities_from_defensive(*, suite_running: bool) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for item in CAPABILITIES:
         host_tool = _DEFENSIVE_HOST_TOOLS.get(item.id)
         missing: list[str] = []
-        if host_tool and shutil.which(host_tool) is None:
+        if item.id == "lan_inventory":
+            missing = _lan_inventory_missing(host_tool, suite_running=suite_running)
+        elif host_tool and shutil.which(host_tool) is None:
             missing.append(host_tool)
         # threat_intel_lookup needs no local binary; still requires a live suite only for
         # other defensive actions that POST upstream — CVE lookup is Jarvis-side.
-        needs_suite = item.id != "threat_intel_lookup"
+        # lan_inventory can use HexStrike nmap or a host nmap ping-scan.
+        needs_suite = item.id not in {"threat_intel_lookup", "lan_inventory"}
         available = (not missing) and (suite_running or not needs_suite)
         if needs_suite and not suite_running:
             missing = missing or ["hexstrike-suite"]
@@ -310,9 +335,13 @@ def _capabilities_from_defensive(*, suite_running: bool) -> list[dict[str, Any]]
                     ""
                     if available
                     else (
-                        f"Missing host tool `{host_tool}`."
-                        if host_tool and host_tool in missing
-                        else "HexStrike suite is not running."
+                        "Install nmap or HexStrike to inventory the private LAN."
+                        if item.id == "lan_inventory"
+                        else (
+                            f"Missing host tool `{host_tool}`."
+                            if host_tool and host_tool in missing
+                            else "HexStrike suite is not running."
+                        )
                     )
                 ),
                 "input_schema": {
@@ -321,7 +350,7 @@ def _capabilities_from_defensive(*, suite_running: bool) -> list[dict[str, Any]]
                         "scope_id": {"type": "string"},
                         "options": {"type": "object"},
                     },
-                    "required": ["scope_id"],
+                    "required": [] if item.id == "lan_inventory" else ["scope_id"],
                 },
             }
         )
@@ -737,7 +766,7 @@ async def operate(capability_id: str, arguments: dict[str, Any] | None = None) -
     if (
         not live.running
         and source == "defensive"
-        and str(capability.get("defensive_action")) != "threat_intel_lookup"
+        and str(capability.get("defensive_action")) not in {"threat_intel_lookup", "lan_inventory"}
     ):
         raise RuntimeError("capability unavailable: HexStrike suite is not running")
     args = arguments or {}
@@ -794,8 +823,42 @@ async def operate(capability_id: str, arguments: dict[str, Any] | None = None) -
             if not tool_result.success:
                 job["error"] = tool_result.error or "MCP tool failed"
         else:
+            from .hexstrike import normalize_upstream_path
+            from .hexstrike_defensive import (
+                bind_hexstrike_lan_payload,
+                execute_operator_nmap,
+                execute_operator_snmp,
+                execute_operator_iface_tool,
+                execute_operator_smb,
+                execute_operator_smb_python,
+                execute_operator_hydra,
+                execute_operator_ldap,
+                looks_like_snmp_tool,
+                looks_like_iface_host_tool,
+                looks_like_smb_tool,
+                looks_like_smb_python_tool,
+                looks_like_hydra_tool,
+                looks_like_ldap_tool,
+            )
+
             path = str(capability.get("upstream_path") or "")
-            result = await HEXSTRIKE.post_operator(path, args)
+            payload = args if isinstance(args, dict) else {}
+            if normalize_upstream_path(path) == "api/tools/nmap":
+                result = await execute_operator_nmap(payload)
+            elif looks_like_snmp_tool(path):
+                result = await execute_operator_snmp(path, payload)
+            elif looks_like_smb_tool(path):
+                result = await execute_operator_smb(path, payload)
+            elif looks_like_smb_python_tool(path):
+                result = await execute_operator_smb_python(path, payload)
+            elif looks_like_hydra_tool(path):
+                result = await execute_operator_hydra(path, payload)
+            elif looks_like_ldap_tool(path):
+                result = await execute_operator_ldap(path, payload)
+            elif looks_like_iface_host_tool(path):
+                result = await execute_operator_iface_tool(path, payload)
+            else:
+                result = await HEXSTRIKE.post_operator(path, bind_hexstrike_lan_payload(path, payload))
             job["result"] = result if isinstance(result, dict) else {"value": result}
             if isinstance(result, dict):
                 raw_pid = result.get("pid") or result.get("process_id")

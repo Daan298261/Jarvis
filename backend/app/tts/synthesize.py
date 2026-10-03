@@ -37,6 +37,9 @@ def reset_chatterbox_cache() -> None:
 def _load_chatterbox_model(device: str):
     from chatterbox.tts import ChatterboxTTS  # type: ignore[import-not-found]
 
+    from ..inference.lmstudio_catalog import apply_huggingface_home
+
+    apply_huggingface_home()
     return ChatterboxTTS.from_pretrained(device=device)
 
 
@@ -361,12 +364,26 @@ async def _synthesize_piper(text: str, *, voice: str, profile: VoiceProfile | No
 
 
 def _resolve_piper_onnx(voice: str, profile: VoiceProfile | None) -> Path | None:
+    from .engines import resolved_piper_voices_dir
+
     candidates: list[Path] = []
     if profile and profile.tts.pack_path:
         pack = repo_root() / profile.tts.pack_path
-        candidates.extend(pack.glob("*.onnx"))
-    if voice:
-        candidates.extend((repo_root() / "models" / "tts" / "piper").glob(f"*{voice}*.onnx"))
+        if pack.is_dir():
+            candidates.extend(pack.glob("*.onnx"))
+    voices_dir = resolved_piper_voices_dir()
+    if voices_dir.is_dir():
+        if voice:
+            candidates.extend(voices_dir.glob(f"*{voice}*.onnx"))
+        else:
+            candidates.extend(voices_dir.glob("*.onnx"))
+    local = repo_root() / "models" / "tts" / "piper"
+    try:
+        same_local = local.resolve() == voices_dir.resolve()
+    except OSError:
+        same_local = local == voices_dir
+    if voice and local.is_dir() and not same_local:
+        candidates.extend(local.glob(f"*{voice}*.onnx"))
     for path in candidates:
         if path.is_file():
             return path

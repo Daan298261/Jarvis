@@ -422,6 +422,27 @@ def test_download_allowlist_accepts_member():
         assert catalog_download.allowlisted_source(member_id) is not None
 
 
+def test_catalog_zip_and_clone_honor_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    ran = {"n": 0}
+
+    def boom(*_args, **_kwargs):
+        ran["n"] += 1
+        raise AssertionError("must not fetch when internet is denied")
+
+    monkeypatch.setattr("app.modules.catalog_download.subprocess.run", boom)
+    dest = tmp_path / "mod"
+    with pytest.raises(PermissionError):
+        catalog_download._run_git_clone("https://github.com/usestrix/strix", dest)
+    with pytest.raises(PermissionError):
+        catalog_download._run_zip_download("https://github.com/usestrix/strix", dest)
+    assert ran["n"] == 0
+
+
 def test_catalog_api_available(jarvis_env, monkeypatch):
     monkeypatch.setattr("app.main.load_settings", lambda: jarvis_env["settings"])
     monkeypatch.setattr("app.auth.load_settings", lambda: jarvis_env["settings"])
@@ -481,3 +502,36 @@ def test_skill_pack_start_fails_closed(jarvis_env, monkeypatch, tmp_path):
         "/api/modules/catalog/cybersecurity/tools/anthropic-cybersecurity-skills/start"
     )
     assert response.status_code == 400
+
+
+def test_dest_extra_uses_usb_jarvis_projects(tmp_path, monkeypatch):
+    extra = tmp_path / "USB"
+    extra.mkdir()
+    monkeypatch.setattr("app.config.extra_volume_roots", lambda: [extra])
+    root = catalog_download._dest_root("extra")
+    assert root == extra / "Jarvis" / "projects"
+    assert root.is_dir()
+
+
+def test_dest_path_clones_into_allowed_usb_folder(tmp_path, monkeypatch):
+    extra = tmp_path / "USB" / "tools"
+    extra.mkdir(parents=True)
+    monkeypatch.setattr(
+        "app.config.live_allowed_directories",
+        lambda existing=None: [str(tmp_path)],
+    )
+    root = catalog_download._dest_root("library", dest_path=str(extra))
+    assert root.resolve() == extra.resolve()
+
+
+def test_dest_path_outside_workspace_is_refused(tmp_path, monkeypatch):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    allowed = tmp_path / "inside"
+    allowed.mkdir()
+    monkeypatch.setattr(
+        "app.config.live_allowed_directories",
+        lambda existing=None: [str(allowed)],
+    )
+    with pytest.raises(PermissionError):
+        catalog_download._dest_root("library", dest_path=str(outside))

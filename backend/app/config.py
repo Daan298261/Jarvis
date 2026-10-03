@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Any, Literal
 
@@ -22,7 +23,12 @@ def data_dir() -> Path:
 
 
 def logs_dir() -> Path:
-    path = repo_root() / "logs"
+    path = resolved_data_sidecar_dir(
+        "logs",
+        local=repo_root() / "logs",
+        markers=("jarvis.log", "llama-server.log"),
+        need_bytes=256 * 1024**2,
+    )
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -34,13 +40,19 @@ def models_dir() -> Path:
 
 
 def queue_dir() -> Path:
-    path = data_dir() / "queue"
+    path = resolved_data_sidecar_dir(
+        "queue",
+        local=data_dir() / "queue",
+        markers=("pending", "processed", "failed"),
+        need_bytes=256 * 1024**2,
+    )
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def runtime_dir() -> Path:
-    return repo_root() / "runtime" / "llama.cpp"
+    """llama.cpp folder. Extra-drive `Jarvis/runtime` when C: cannot fit a fresh install."""
+    return named_runtime_dir("llama.cpp", markers=("llama-server.exe", "llama-server"))
 
 
 def settings_path() -> Path:
@@ -587,6 +599,328 @@ def _posix_owner_roots() -> list[Path]:
     return roots
 
 
+def os_volume_root() -> Path:
+    """System volume (`C:\\` or `/`). Extra-drive scans skip this root."""
+    if os.name == "nt":
+        return Path(Path.home().anchor or "C:\\")
+    return Path("/")
+
+
+def _posix_volume_parent_children(parent: Path) -> list[Path]:
+    """USB labels live under `/media/<user>/<label>` or `/mnt/<label>`."""
+    try:
+        children = [path for path in parent.iterdir() if path.is_dir()]
+    except OSError:
+        return []
+    two_level = parent in {Path("/media"), Path("/run/media")} or parent.name == "media"
+    if not two_level:
+        return children
+    found: list[Path] = []
+    for child in children:
+        try:
+            grandchildren = [path for path in child.iterdir() if path.is_dir()]
+        except OSError:
+            grandchildren = []
+        if grandchildren:
+            found.extend(grandchildren)
+        else:
+            found.append(child)
+    return found
+
+
+def extra_volume_roots() -> list[Path]:
+    """Mounted owner volumes that are not the OS system volume.
+
+    USB sticks, `D:`, mapped drives, `/media` mounts — places an owner copies
+    GGUFs or archives when the system volume is full. Does not include `/` or
+    `C:\\`, and does not recurse into those trees.
+    """
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return []
+    os_root = os_volume_root()
+    try:
+        os_resolved = os_root.resolve()
+    except OSError:
+        os_resolved = os_root
+    skip_keys = {
+        str(os_root).replace("\\", "/").rstrip("/").lower(),
+        str(os_resolved).replace("\\", "/").rstrip("/").lower(),
+        "",
+        "/",
+    }
+    raw = _windows_owner_drives() if os.name == "nt" else _posix_owner_roots()
+    expanded: list[Path] = []
+    posix_parents = {Path("/media"), Path("/mnt"), Path("/run/media")}
+    for root in raw:
+        if os.name != "nt" and (root in posix_parents or root.name in {"media", "mnt"}):
+            expanded.extend(_posix_volume_parent_children(root))
+            continue
+        expanded.append(root)
+    out: list[Path] = []
+    seen: set[str] = set()
+    for root in expanded:
+        try:
+            if not root.exists():
+                continue
+            resolved = root.resolve()
+        except OSError:
+            continue
+        key = str(resolved).replace("\\", "/").rstrip("/").lower()
+        if key in skip_keys or key in seen or resolved == os_resolved:
+            continue
+        seen.add(key)
+        out.append(root)
+    return out
+
+
+_RUNTIME_NEED_BYTES = 2 * 1024**3
+
+
+def extra_volume_runtime_root(*, need_bytes: int = 0) -> Path | None:
+    """`Jarvis/runtime` on the extra volume with the most free space that fits."""
+    required = int(need_bytes or 0)
+    best: Path | None = None
+    best_free = 0
+    for volume in extra_volume_roots():
+        try:
+            free = int(shutil.disk_usage(volume).free)
+        except OSError:
+            continue
+        if required and free < required:
+            continue
+        if free > best_free:
+            best_free = free
+            best = volume / "Jarvis" / "runtime"
+    return best
+
+
+def extra_volume_named_runtime_dirs(name: str) -> list[Path]:
+    """Candidate sidecar folders on extra volumes (`Jarvis/runtime/<name>`)."""
+    slug = str(name or "").strip()
+    if not slug:
+        return []
+    out: list[Path] = []
+    seen: set[str] = set()
+    for volume in extra_volume_roots():
+        for rel in (
+            Path("Jarvis") / "runtime" / slug,
+            Path("runtime") / slug,
+            Path("Jarvis") / slug,
+        ):
+            candidate = volume / rel
+            key = str(candidate).replace("\\", "/").lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(candidate)
+    return out
+
+
+def _runtime_marker_path(root: Path, marker: str) -> Path:
+    parts = [part for part in str(marker or "").replace("\\", "/").split("/") if part and part != "."]
+    return root.joinpath(*parts) if parts else root
+
+
+def discover_named_runtime_dir(name: str, *, marker: str) -> Path | None:
+    """Existing local or extra-drive sidecar that already has `marker`."""
+    slug = str(name or "").strip()
+    needle = str(marker or "").strip()
+    if not slug or not needle:
+        return None
+    candidates = [repo_root() / "runtime" / slug, *extra_volume_named_runtime_dirs(slug)]
+    for root in candidates:
+        try:
+            hit = _runtime_marker_path(root, needle)
+            if hit.is_file() or hit.is_dir():
+                return root
+        except OSError:
+            continue
+    return None
+
+
+def named_runtime_dir(
+    name: str,
+    *,
+    markers: str | tuple[str, ...] = "",
+    need_bytes: int = _RUNTIME_NEED_BYTES,
+) -> Path:
+    """Discover an existing sidecar, else `preferred_runtime_install_dir`."""
+    needles = markers if isinstance(markers, tuple) else ((markers,) if markers else ())
+    for needle in needles:
+        existing = discover_named_runtime_dir(name, marker=needle)
+        if existing is not None:
+            return existing
+    return preferred_runtime_install_dir(name, need_bytes=need_bytes)
+
+
+def preferred_runtime_install_dir(name: str, *, need_bytes: int = _RUNTIME_NEED_BYTES) -> Path:
+    """Install under `runtime/<name>` when that volume fits; else extra-drive `Jarvis/runtime`."""
+    slug = str(name or "").strip() or "runtime"
+    local = repo_root() / "runtime" / slug
+    required = int(need_bytes or 0)
+    try:
+        local_free = int(shutil.disk_usage(repo_root()).free)
+    except OSError:
+        local_free = 0
+    if required <= 0 or local_free >= required:
+        return local
+    extra = extra_volume_runtime_root(need_bytes=required)
+    if extra is None:
+        return local
+    return extra / slug
+
+
+_DATA_SIDECAR_NEED_BYTES = 1024**3
+_PLAYWRIGHT_NEED_BYTES = 1024**3
+
+
+def resolved_data_sidecar_dir(
+    name: str,
+    *,
+    local: Path,
+    markers: tuple[str, ...] = (),
+    need_bytes: int = _DATA_SIDECAR_NEED_BYTES,
+) -> Path:
+    """Keep `local` when that volume fits or already has files; else extra-drive `Jarvis/runtime/<name>`."""
+    slug = str(name or "").strip()
+    if not slug:
+        return local
+    for marker in markers:
+        try:
+            hit = _runtime_marker_path(local, marker)
+            if hit.is_file() or hit.is_dir():
+                return local
+        except OSError:
+            continue
+    if not markers:
+        try:
+            if local.is_dir() and any(local.iterdir()):
+                return local
+        except OSError:
+            pass
+    for marker in markers or ("",):
+        for candidate in extra_volume_named_runtime_dirs(slug):
+            try:
+                if marker:
+                    hit = _runtime_marker_path(candidate, marker)
+                    if hit.is_file() or hit.is_dir():
+                        return candidate
+                elif candidate.is_dir() and any(candidate.iterdir()):
+                    return candidate
+            except OSError:
+                continue
+    required = int(need_bytes or 0)
+    try:
+        probe = local if local.exists() else local.parent
+        if not probe.exists():
+            probe = repo_root()
+        local_free = int(shutil.disk_usage(probe).free)
+    except OSError:
+        local_free = 0
+    extra_root = extra_volume_runtime_root(need_bytes=required)
+    if extra_root is not None and required > 0 and local_free < required:
+        return extra_root / slug
+    return local
+
+
+def playwright_user_data_dir() -> Path:
+    """Playwright persistent profile. Extra-drive `Jarvis/runtime/browser-profile` when C: cannot fit."""
+    dest = resolved_data_sidecar_dir(
+        "browser-profile",
+        local=data_dir() / "browser-profile",
+        markers=("Local State", "Default"),
+        need_bytes=_DATA_SIDECAR_NEED_BYTES,
+    )
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest
+
+
+def browser_use_user_data_dir() -> Path:
+    """Browser Use profile. Extra-drive `Jarvis/runtime/browser-use-profile` when C: cannot fit."""
+    dest = resolved_data_sidecar_dir(
+        "browser-use-profile",
+        local=data_dir() / "browser-use-profile",
+        markers=("Local State", "Default"),
+        need_bytes=_DATA_SIDECAR_NEED_BYTES,
+    )
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest
+
+
+def default_playwright_browsers_dir() -> Path:
+    """Playwright's own default (`%LOCALAPPDATA%\\ms-playwright` or `~/.cache/ms-playwright`)."""
+    if os.name == "nt":
+        local = (os.environ.get("LOCALAPPDATA") or "").strip()
+        root = Path(local) if local else Path.home() / "AppData" / "Local"
+        return root / "ms-playwright"
+    xdg = (os.environ.get("XDG_CACHE_HOME") or "").strip()
+    cache = Path(xdg) if xdg else Path.home() / ".cache"
+    return cache / "ms-playwright"
+
+
+def _playwright_chromium_present(root: Path) -> bool:
+    try:
+        if not root.is_dir():
+            return False
+        for child in root.iterdir():
+            name = child.name.lower()
+            if child.is_dir() and (name.startswith("chromium") or name.startswith("ffmpeg")):
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def extra_volume_playwright_browsers_dir() -> Path | None:
+    for candidate in extra_volume_named_runtime_dirs("ms-playwright"):
+        if _playwright_chromium_present(candidate):
+            return candidate
+    return None
+
+
+def playwright_browsers_dir() -> Path:
+    """Chromium folder. Extra-drive `Jarvis/runtime/ms-playwright` when C: cannot fit a fresh install."""
+    for raw in (
+        os.environ.get("JARVIS_PLAYWRIGHT_BROWSERS"),
+        os.environ.get("PLAYWRIGHT_BROWSERS_PATH"),
+    ):
+        text = (raw or "").strip()
+        if text:
+            return Path(text).expanduser()
+    extra_existing = extra_volume_playwright_browsers_dir()
+    if extra_existing is not None:
+        return extra_existing
+    local = default_playwright_browsers_dir()
+    if _playwright_chromium_present(local):
+        return local
+    required = _PLAYWRIGHT_NEED_BYTES
+    try:
+        probe = local if local.exists() else local.parent
+        if not probe.exists():
+            probe = Path.home()
+        local_free = int(shutil.disk_usage(probe).free)
+    except OSError:
+        local_free = 0
+    extra_root = extra_volume_runtime_root(need_bytes=required)
+    if extra_root is not None and local_free < required:
+        return extra_root / "ms-playwright"
+    return local
+
+
+def apply_playwright_browsers_path() -> Path:
+    """Point Playwright at extra-drive Chromium when that is the install dest."""
+    dest = playwright_browsers_dir()
+    dest.mkdir(parents=True, exist_ok=True)
+    default = default_playwright_browsers_dir()
+    try:
+        same = dest.resolve() == default.resolve()
+    except OSError:
+        same = False
+    if not same:
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(dest)
+    return dest
+
+
 def default_allowed_directories() -> list[str]:
     home = Path.home()
     candidates = [
@@ -649,3 +983,47 @@ def sanitize_allowed_directories(existing: list[str] | None) -> list[str]:
             seen.add(key)
             cleaned.append(item)
     return cleaned
+
+
+def live_allowed_directories(existing: list[str] | None = None) -> list[str]:
+    """Saved workspace plus currently mounted owner drives (USB, D:, /media).
+
+    Tool registry already unions on each call. LTA recovery, HexStrike local
+    evidence, and the security target registry must use this too so a plugged-in
+    volume is usable without a settings save.
+    """
+    if existing is None:
+        existing = list(getattr(load_settings(), "allowed_directories", None) or [])
+    return sanitize_allowed_directories(list(existing or []))
+
+
+def live_workspace_roots_from_context(raw: Any = None) -> list[str]:
+    """Tool context or AppSettings → live owner workspace (USB / D: / /media union).
+
+    Browser file:// gates and tools that skip ToolRegistry._live_context still need
+    a plugged-in volume without a settings save. A dict with no allowed_directories
+    key stays unbound (empty list) so unit tests that construct tools without a
+    registry keep the historical unrestricted cwd; pass None to load settings.
+    """
+    if raw is None:
+        return live_allowed_directories()
+    if isinstance(raw, AppSettings):
+        return live_allowed_directories(list(raw.allowed_directories or []))
+    if isinstance(raw, dict):
+        if "allowed_directories" not in raw:
+            return []
+        return live_allowed_directories(list(raw.get("allowed_directories") or []))
+    existing = list(getattr(raw, "allowed_directories", None) or [])
+    return live_allowed_directories(existing if existing else None)
+
+
+def live_tool_workspace_roots(raw: Any = None) -> list[str]:
+    """Workspace roots for tools that deny paths when the allowlist is empty.
+
+    Terminal/python keep ``live_workspace_roots_from_context({})`` as unbound cwd.
+    Desktop screenshots, Browser Use file://, and ingest constructed without a
+    registry getter must load settings so a plugged-in USB is still in scope.
+    """
+    if raw is None or (isinstance(raw, dict) and "allowed_directories" not in raw):
+        return live_allowed_directories()
+    return live_workspace_roots_from_context(raw)

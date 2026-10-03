@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..config import data_dir
+from ..config import data_dir, resolved_data_sidecar_dir
 from .redaction import redact_trajectory_payload
 from .schema import JarvisTrajectoryV1, SCHEMA_VERSION
 
@@ -16,7 +16,12 @@ INDEX_FILE = "index.json"
 
 
 def trajectories_root() -> Path:
-    path = data_dir() / "trajectories"
+    path = resolved_data_sidecar_dir(
+        "trajectories",
+        local=data_dir() / "trajectories",
+        markers=("index.json",),
+        need_bytes=256 * 1024**2,
+    )
     path.mkdir(parents=True, exist_ok=True)
     return path
 

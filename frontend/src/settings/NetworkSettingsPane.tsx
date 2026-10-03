@@ -149,9 +149,10 @@ export function NetworkSettingsPane({
       <div className="card grid settings-pane-card">
         <h2>Phone pairing</h2>
         <p className="lede" style={{ margin: "0 0 12px" }}>
-          Pair the Android companion with a 6-digit code and QR. Pairing controls live under{" "}
+          Pair the Android companion with a 6-digit code and QR after Prepare connection maps TCP 4781.
+          Controls live under{" "}
           <Link to={settingsSubmenuPath("phone-pairing")}>Phone Pairing</Link> in Settings.{" "}
-          <Link to="/phone">Android companion home</Link> covers offline generic APK pairing.
+          <Link to="/phone">Android companion home</Link> is the same flow plus the LAN PWA.
         </p>
       </div>
 

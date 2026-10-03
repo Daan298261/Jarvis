@@ -181,7 +181,13 @@ def _installed(model: dict[str, Any]) -> bool:
     filename = str(model.get("filename") or "")
     if not relative_dir or not filename:
         return False
-    return (models_dir() / relative_dir / filename).exists()
+    local = models_dir() / relative_dir / filename
+    if local.exists():
+        return True
+    from .inference.lmstudio_catalog import extra_volume_file_named
+
+    found = extra_volume_file_named(filename)
+    return bool(found and found.exists())
 
 
 def _model_row(model_id: str, *, status: str, selected: bool, reason: str = "") -> dict[str, Any]:
@@ -234,7 +240,11 @@ def _lm_studio_status() -> dict[str, Any]:
 
 
 def _disk_plan(info: HardwareInfo, download_models: list[dict[str, Any]], lm_studio: dict[str, Any]) -> dict[str, Any]:
-    free = float(info.disk_free_gb or 0)
+    from .inference.lmstudio_catalog import extra_volume_free_bytes, preferred_gguf_install_dir
+
+    os_free = float(info.disk_free_gb or 0)
+    extra_free = extra_volume_free_bytes() / (1024**3)
+    free = max(os_free, extra_free)
     model_download = sum(float(row.get("estimated_disk_gb") or 0) for row in download_models)
     runtime_overhead = BASE_INSTALL_GB
     lm_gb = LM_STUDIO_APP_GB if lm_studio.get("required") and not lm_studio.get("installed") else 0.0
@@ -242,8 +252,30 @@ def _disk_plan(info: HardwareInfo, download_models: list[dict[str, Any]], lm_stu
     required_with_reserve = round(required + SAFETY_RESERVE_GB, 1)
     enough = free >= required_with_reserve
     shortfall = max(0.0, round(required_with_reserve - free, 1))
+    need_bytes = int(required_with_reserve * (1024**3)) if required_with_reserve > 0 else 0
+    install_root = preferred_gguf_install_dir("", need_bytes=need_bytes)
+    try:
+        using_extra = install_root.resolve() != models_dir().resolve()
+    except OSError:
+        using_extra = False
+    if enough and using_extra:
+        message = (
+            f"Enough disk space on an extra drive: about {free:.0f} GB free; "
+            f"this setup needs about {required:.0f} GB plus a {SAFETY_RESERVE_GB:.0f} GB reserve. "
+            f"GGUFs will land under {install_root}."
+        )
+    elif enough:
+        message = (
+            f"Enough disk space: about {free:.0f} GB free; this setup needs about {required:.0f} GB plus a {SAFETY_RESERVE_GB:.0f} GB reserve."
+        )
+    else:
+        message = (
+            f"Not enough disk space: need about {shortfall:.0f} GB more free before installing the selected models."
+        )
     return {
         "free_gb": round(free, 1),
+        "os_free_gb": round(os_free, 1),
+        "extra_free_gb": round(extra_free, 1),
         "required_download_gb": round(model_download, 1),
         "jarvis_runtime_gb": runtime_overhead,
         "lm_studio_gb": lm_gb,
@@ -252,11 +284,9 @@ def _disk_plan(info: HardwareInfo, download_models: list[dict[str, Any]], lm_stu
         "free_after_gb": round(free - required, 1),
         "enough": enough,
         "shortfall_gb": shortfall,
-        "message": (
-            f"Enough disk space: about {free:.0f} GB free; this setup needs about {required:.0f} GB plus a {SAFETY_RESERVE_GB:.0f} GB reserve."
-            if enough
-            else f"Not enough disk space: need about {shortfall:.0f} GB more free before installing the selected models."
-        ),
+        "install_root": str(install_root),
+        "using_extra_volume": using_extra,
+        "message": message,
     }
 
 
@@ -267,10 +297,14 @@ def _mobile_plan() -> dict[str, Any]:
         "apk_supported": True,
         "pairing_script": "data/setup/configure-mobile-access.ps1",
         "same_lan": "pair from Phone after this PC allows LAN access",
-        "remote_access": "tailscale",
+        "remote_access": "companion TLS 4781",
         "router_forwarding_required": False,
-        "router_forwarding": "opt-in only",
-        "reason": "Direct internet port-forwarding is not required. Jarvis prefers LAN pairing or an authenticated private overlay (Tailscale) so the API is not exposed raw to the public internet.",
+        "router_forwarding": "opt-in TCP 4781 via UPnP, NAT-PMP, PCP, OpenWrt SSH, or reverse tunnel",
+        "reason": (
+            "Pair on the same LAN first. Off-LAN uses Jarvis > Phone > Prepare connection, which maps "
+            "companion TLS 4781 only (UPnP, NAT-PMP, PCP, gateway SSH, or SSH reverse tunnel). "
+            "Portal 4780, SSH, and router admin are never forwarded."
+        ),
     }
 
 
@@ -377,7 +411,7 @@ def plan_interview(answers: dict[str, Any] | None = None, hw: HardwareInfo | Non
         "Ornith 1.5 9B Q4_K_M remains the local bootstrap/fallback model.",
         disk["message"],
         "LM Studio is optional; Jarvis uses its bundled llama.cpp runtime by default.",
-        "Phone access defaults to LAN or Tailscale; Jarvis does not silently open a public router port.",
+        "Phone access defaults to LAN pairing; off-LAN uses Phone > Prepare connection for TCP 4781 only.",
     ]
     if install_expert:
         reasoning.append("A 27B local expert is selected for harder work and may use RAM offload when it does not fully fit VRAM.")
@@ -410,14 +444,21 @@ def render_download_script(plan: dict[str, Any]) -> str:
     models = list(plan.get("download_models") or [])
     disk = dict(plan.get("disk") or {})
     required = float(disk.get("required_with_reserve_gb") or 0)
+    using_extra = bool(disk.get("using_extra_volume"))
+    extra_root = str(disk.get("install_root") or "").strip()
+    models_assign = (
+        f"$Models = {_ps_quote(extra_root)}"
+        if using_extra and extra_root
+        else "$Models = Join-Path $Root 'models'"
+    )
     lines = [
         "#Requires -Version 5.1",
         "# Generated by Jarvis onboarding (RFC-0049). Safe to re-run.",
         "$ErrorActionPreference = 'Stop'",
         "$Root = (Resolve-Path (Join-Path $PSScriptRoot '..\\..')).Path",
-        "$Models = Join-Path $Root 'models'",
+        models_assign,
         f"$RequiredGb = {required:.1f}",
-        "$drive = Get-PSDrive -Name ([System.IO.Path]::GetPathRoot($Root).TrimEnd('\\').TrimEnd(':'))",
+        "$drive = Get-PSDrive -Name ([System.IO.Path]::GetPathRoot($Models).TrimEnd('\\').TrimEnd(':'))",
         "$FreeGb = [math]::Round($drive.Free / 1GB, 1)",
         "if ($RequiredGb -gt 0 -and $FreeGb -lt $RequiredGb) { throw \"Not enough disk space. Need about $RequiredGb GB including reserve; only $FreeGb GB is free.\" }",
         "$Python = Join-Path $Root '.venv\\Scripts\\python.exe'",
@@ -431,24 +472,34 @@ def render_download_script(plan: dict[str, Any]) -> str:
         "if (-not (Test-Path $Hf)) { $Hf = (Get-Command hf -ErrorAction SilentlyContinue).Source }",
         "if (-not $Hf) { throw 'huggingface_hub installed but hf CLI was not found.' }",
         "$env:HF_XET_HIGH_PERFORMANCE = '1'",
-        "",
-        "function Install-JarvisModel([string]$Repo, [string]$Include, [string]$Dir, [string]$Canonical) {",
-        "  $dest = Join-Path $Models $Dir",
-        "  $target = Join-Path $dest $Canonical",
-        "  if ((Test-Path $target) -and ((Get-Item $target).Length -gt 0)) { Write-Host \"Already present: $Canonical\"; return }",
-        "  New-Item -ItemType Directory -Force -Path $dest | Out-Null",
-        "  Write-Host \"Downloading $Repo ($Include)...\" -ForegroundColor Cyan",
-        "  & $Hf download $Repo --include $Include --local-dir $dest",
-        "  if ($LASTEXITCODE -ne 0) { throw \"Download failed: $Repo\" }",
-        "  if (-not (Test-Path $target)) {",
-        "    $found = Get-ChildItem -Path $dest -Recurse -File | Where-Object { $_.Name -like $Include } | Select-Object -First 1",
-        "    if (-not $found) { throw \"Download completed but no file matched $Include\" }",
-        "    if ($found.FullName -ne $target) { Copy-Item -Force $found.FullName $target }",
-        "  }",
-        "  Write-Host \"Ready: $target\" -ForegroundColor Green",
-        "}",
-        "",
     ]
+    if using_extra and extra_root:
+        lines.append("$env:HF_HOME = Join-Path $Models 'huggingface'")
+        lines.append("$env:HF_HUB_CACHE = Join-Path $env:HF_HOME 'hub'")
+        lines.append("New-Item -ItemType Directory -Force -Path $env:HF_HUB_CACHE | Out-Null")
+    lines.append("")
+    lines.append("function Install-JarvisModel([string]$Repo, [string]$Include, [string]$Dir, [string]$Canonical) {")
+    lines.append("  $dest = Join-Path $Models $Dir")
+    lines.append("  $target = Join-Path $dest $Canonical")
+    lines.append(
+        "  if ((Test-Path $target) -and ((Get-Item $target).Length -gt 0)) { "
+        'Write-Host "Already present: $Canonical"; return }'
+    )
+    lines.append("  New-Item -ItemType Directory -Force -Path $dest | Out-Null")
+    lines.append('  Write-Host "Downloading $Repo ($Include)..." -ForegroundColor Cyan')
+    lines.append("  & $Hf download $Repo --include $Include --local-dir $dest")
+    lines.append('  if ($LASTEXITCODE -ne 0) { throw "Download failed: $Repo" }')
+    lines.append("  if (-not (Test-Path $target)) {")
+    lines.append(
+        "    $found = Get-ChildItem -Path $dest -Recurse -File | "
+        "Where-Object { $_.Name -like $Include } | Select-Object -First 1"
+    )
+    lines.append('    if (-not $found) { throw "Download completed but no file matched $Include" }')
+    lines.append("    if ($found.FullName -ne $target) { Copy-Item -Force $found.FullName $target }")
+    lines.append("  }")
+    lines.append('  Write-Host "Ready: $target" -ForegroundColor Green')
+    lines.append("}")
+    lines.append("")
     if not models:
         lines.append("Write-Host 'All selected downloadable models are already present.' -ForegroundColor Green")
     else:
@@ -495,20 +546,18 @@ def render_mobile_script(plan: dict[str, Any]) -> str:
             "param([switch]$UseRouterPortForward)",
             "$ErrorActionPreference = 'Stop'",
             "$Port = 4781",
+            "$BeaconPort = 4782",
             "Write-Host 'Configuring Jarvis phone access...' -ForegroundColor Cyan",
             "if (Get-Command netsh -ErrorAction SilentlyContinue) {",
             "  netsh advfirewall firewall delete rule name='Jarvis Phone LAN' | Out-Null",
             "  netsh advfirewall firewall delete rule name='Jarvis companion TLS 4781' | Out-Null",
+            "  netsh advfirewall firewall delete rule name='Jarvis companion LAN beacon 4782' | Out-Null",
             "  netsh advfirewall firewall add rule name='Jarvis companion TLS 4781' dir=in action=allow protocol=TCP localport=$Port profile=any | Out-Null",
+            "  netsh advfirewall firewall add rule name='Jarvis companion LAN beacon 4782' dir=in action=allow protocol=UDP localport=$BeaconPort profile=any | Out-Null",
             "}",
-            "if (-not (Get-Command tailscale -ErrorAction SilentlyContinue)) {",
-            "  if (Get-Command winget -ErrorAction SilentlyContinue) { winget install --id Tailscale.Tailscale -e --accept-package-agreements --accept-source-agreements }",
-            "}",
-            "if (Get-Command tailscale -ErrorAction SilentlyContinue) {",
-            "  Write-Host 'Tailscale available. Sign in once if this PC is not already connected; no router port forwarding is needed.' -ForegroundColor Green",
-            "}",
+            "Write-Host 'LAN pairing is ready. Off-LAN: open Jarvis > Phone > Prepare connection to map companion TLS 4781 (UPnP, NAT-PMP, PCP, gateway SSH, or reverse tunnel).' -ForegroundColor Green",
             "if ($UseRouterPortForward) {",
-            "  Write-Warning 'Do not forward portal TCP 4780. Open Jarvis > Phone > Prepare connection to map companion TLS 4781 only (UPnP, NAT-PMP, PCP, gateway SSH, or reverse tunnel).'",
+            "  Write-Warning 'Do not forward portal TCP 4780. Prepare connection maps companion TLS 4781 only.'",
             "}",
             "Write-Host 'Phone access preparation complete. Open Jarvis > Phone for companion pairing.' -ForegroundColor Green",
             "",

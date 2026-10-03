@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from ..tools.owner_paths import direct_child_env
+
 _PYTEST_COUNTS = re.compile(
     r"(?P<failed>\d+)\s+failed|(?P<passed>\d+)\s+passed|(?P<error>\d+)\s+error|(?P<skipped>\d+)\s+skipped",
     re.I,
@@ -16,6 +18,7 @@ async def _run(args: list[str], cwd: str, timeout: int) -> dict[str, Any]:
     proc = await asyncio.create_subprocess_exec(
         *args,
         cwd=cwd,
+        env=direct_child_env(),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )

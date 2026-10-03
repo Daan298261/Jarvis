@@ -197,3 +197,19 @@ async def test_openscad_missing_install_cta(jarvis_env, monkeypatch):
 
 def test_applies_coding_contract_for_implement_prompt():
     assert applies_coding_execution_contract("please implement a unit test for the api", "mixed")
+
+
+def test_dcc_output_defaults_to_documents_and_extra_drive(tmp_path, monkeypatch):
+    from app.tools.dcc_tools import dcc_output_path
+
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    extra = tmp_path / "E"
+    extra.mkdir()
+    blend = extra / "widget.blend"
+    blend.write_bytes(b"x")
+    monkeypatch.setattr("app.tools.owner_paths.Path.home", classmethod(lambda cls: tmp_path))
+    default = dcc_output_path(blend, None, [str(tmp_path)])
+    assert default == docs / "widget.stl"
+    onto = dcc_output_path(blend, str(extra), [str(tmp_path)], suffix=".obj")
+    assert onto == extra / "widget.obj"

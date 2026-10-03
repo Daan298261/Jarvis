@@ -38,7 +38,6 @@ from .store import (
 )
 from ..db.session import SessionLocal
 from ..db.models import ContextFact
-from ..config import data_dir
 
 
 class ContextRepoError(ValueError):
@@ -408,4 +407,6 @@ async def get_entry_permissions(agent_id: str, entry_id: str) -> list[dict[str, 
 
 
 def context_repo_data_path() -> str:
-    return str(data_dir() / "context-repos")
+    from .store import context_repos_root
+
+    return str(context_repos_root())

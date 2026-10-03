@@ -43,6 +43,9 @@ async def test_native_backend_executes_named_click(monkeypatch):
     calls: list[dict] = []
 
     class FakeDesktop:
+        def __init__(self, context_getter=None) -> None:
+            self.context_getter = context_getter
+
         async def execute(self, **kwargs):
             calls.append(kwargs)
             action = kwargs.get("action")

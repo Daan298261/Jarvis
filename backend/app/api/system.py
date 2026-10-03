@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from ..agent.acp import acp_status
-from ..config import load_settings
+from ..config import live_allowed_directories, load_settings
 from ..hardware import detect_hardware, hardware_dict
 from ..inference.benchmarks import list_benchmarks
 from ..inference.hardware_gate import hardware_purchase_gate
@@ -48,7 +48,7 @@ async def system_info():
         "lan_access": settings.lan_access,
         "autonomy": settings.autonomy,
         "execution_mode": settings.execution_mode,
-        "allowed_directories": settings.allowed_directories,
+        "allowed_directories": live_allowed_directories(settings.allowed_directories),
         "capabilities": capability_snapshot(),
         "jarvis_mcp": jarvis_mcp_manifest(),
         "cursor_acp": acp_status(),

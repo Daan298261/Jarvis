@@ -35,6 +35,65 @@ def test_beacon_round_trip_rejects_probes_and_bad_pins():
     assert parse_beacon(encode_beacon({**payload, "server_pin": "short"})) is None
 
 
+def test_beacon_send_plan_uses_each_rfc1918_nic():
+    from app.mobile.lan_beacon import beacon_reply_source, beacon_send_plan
+
+    plan = beacon_send_plan(["10.8.0.2", "192.168.1.12"])
+    assert ("192.168.1.12", "192.168.1.255") in plan
+    assert ("10.8.0.2", "10.8.0.255") in plan
+    assert ("192.168.1.12", "255.255.255.255") in plan
+    assert ("10.8.0.2", "255.255.255.255") in plan
+    assert beacon_reply_source("192.168.1.40", ["10.8.0.2", "192.168.1.12"]) == "192.168.1.12"
+    assert beacon_reply_source("10.8.0.9", ["10.8.0.2", "192.168.1.12"]) == "10.8.0.2"
+    assert beacon_reply_source("8.8.8.8", ["192.168.1.12"]) == ""
+
+
+def test_send_beacon_datagram_binds_source_nic(monkeypatch):
+    from app.mobile.lan_beacon import send_beacon_datagram
+
+    sent: list[tuple[str, tuple]] = []
+
+    class FakeSock:
+        def __init__(self, *args, **kwargs):
+            self.bound = ""
+
+        def setsockopt(self, *args, **kwargs):
+            return None
+
+        def bind(self, addr):
+            self.bound = addr[0]
+
+        def sendto(self, blob, dest):
+            del blob
+            sent.append((self.bound, dest))
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("socket.socket", lambda *a, **k: FakeSock())
+    send_beacon_datagram(b"x", "192.168.1.40", 54321, "192.168.1.12")
+    assert sent == [("192.168.1.12", ("192.168.1.40", 54321))]
+
+
+def test_beacon_protocol_replies_from_peer_subnet(monkeypatch):
+    from app.mobile.lan_beacon import _BeaconProtocol
+
+    seen: list[tuple[str, str, int]] = []
+    monkeypatch.setattr(
+        "app.mobile.lan_beacon.send_beacon_datagram",
+        lambda blob, dest, port, source="": seen.append((source, dest, int(port))),
+    )
+    monkeypatch.setattr(
+        "app.mobile.lan_beacon.beacon_reply_source",
+        lambda peer, bind_ips=None: "192.168.1.12" if str(peer).startswith("192.168.1.") else "",
+    )
+    proto = _BeaconProtocol(
+        lambda peer="": {"https": "https://192.168.1.12:4781", "server_pin": "a" * 64, "name": "Jarvis"}
+    )
+    proto.datagram_received(b'JARVIS1\n{"probe":true}', ("192.168.1.40", 54321))
+    assert seen == [("192.168.1.12", "192.168.1.40", 54321)]
+
+
 def test_public_beacon_payload_needs_pin_and_endpoint():
     assert public_beacon_payload({"state": "disabled", "endpoints": []}) is None
     snapshot = {
@@ -51,6 +110,54 @@ def test_public_beacon_payload_needs_pin_and_endpoint():
         }
     )
     assert wan_first["https"] == "https://192.168.1.12:4781"
+    skip_cgnat = public_beacon_payload(
+        {
+            "server_pin": "b" * 64,
+            "endpoints": ["https://100.64.1.8:4781", "https://192.168.1.12:4781"],
+        }
+    )
+    assert skip_cgnat["https"] == "https://192.168.1.12:4781"
+    vpn_first = public_beacon_payload(
+        {
+            "server_pin": "b" * 64,
+            "endpoints": [
+                "https://home.example.test:4781",
+                "https://10.8.0.2:4781",
+                "https://192.168.1.12:4781",
+            ],
+        },
+        prefer_host="192.168.1.40",
+    )
+    assert vpn_first["https"] == "https://192.168.1.12:4781"
+    mapped = public_beacon_payload(
+        {
+            "server_pin": "b" * 64,
+            "mapped_lan_ip": "192.168.1.12",
+            "endpoints": [
+                "https://10.8.0.2:4781",
+                "https://192.168.1.12:4781",
+                "https://203.0.113.8:4781",
+            ],
+        }
+    )
+    assert mapped["https"] == "https://192.168.1.12:4781"
+    wan_only = public_beacon_payload(
+        {
+            "server_pin": "b" * 64,
+            "endpoints": ["https://home.example.test:4781", "https://203.0.113.8:4781"],
+        }
+    )
+    assert wan_only is None
+    from app.mobile.lan_beacon import prefer_lan_https
+
+    assert prefer_lan_https(
+        ["https://home.example.test:4781", "https://192.168.1.12:4781"],
+        "home.example.test",
+    ) == "https://192.168.1.12:4781"
+    assert prefer_lan_https(
+        ["https://192.168.1.12:4781"],
+        "192.168.1.1",
+    ) == "https://192.168.1.12:4781"
 
 
 def test_lan_enroll_is_pending_until_owner_confirms(companion_env):

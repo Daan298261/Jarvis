@@ -35,6 +35,23 @@ describe("companion WAN prepare body", () => {
     assert.equal("gateway_password" in body, false)
   })
 
+  test("remote reverse tunnel password is sent and never hydrated from snapshot", () => {
+    const body = wan.connectionPrepareBody(true, true, {
+      ...wan.EMPTY_WAN_FORM,
+      wan_method: "ssh_reverse",
+      ssh_host: "vpn.example.test",
+      ssh_user: "taco",
+      ssh_password: "vps-pass",
+    })
+    assert.equal(body.ssh_password, "vps-pass")
+    assert.equal("ssh_identity_file" in body, false)
+    const form = wan.wanFormFromSnapshot({
+      wan: { wan_method: "ssh_reverse", ssh_host: "vpn.example.test", ssh_password: "nope" },
+    })
+    assert.equal(form.ssh_password, "")
+    assert.equal(form.ssh_host, "vpn.example.test")
+  })
+
   test("remote reverse tunnel includes ssh port", () => {
     const body = wan.connectionPrepareBody(true, true, {
       ...wan.EMPTY_WAN_FORM,
@@ -81,5 +98,11 @@ describe("companion WAN prepare body", () => {
       wan_public_host: "home.example.test",
     })
     assert.equal(body.wan_public_host, "home.example.test")
+  })
+
+  test("internet prepare defaults include auto WAN method", () => {
+    const body = wan.connectionPrepareBody(true, true, wan.EMPTY_WAN_FORM)
+    assert.equal(body.remote, true)
+    assert.equal(body.wan_method, "auto")
   })
 })

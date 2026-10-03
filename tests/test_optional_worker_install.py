@@ -195,6 +195,41 @@ def test_clone_repo_rejects_unlisted_url(tmp_path):
         raise AssertionError("unlisted git URL must be refused")
 
 
+def test_clone_repo_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    ran = {"n": 0}
+    monkeypatch.setattr(install_mod, "_run", lambda *_a, **_k: ran.__setitem__("n", 1) or (0, ""))
+    monkeypatch.setattr(install_mod.shutil, "which", lambda _name: "/usr/bin/git")
+    try:
+        install_mod._clone_repo(install_mod.UFO_GIT_URL, tmp_path / "ufo")
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError("UFO clone must refuse when internet is denied")
+    assert ran["n"] == 0
+
+
+def test_pip_packages_honor_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    ran = {"n": 0}
+    monkeypatch.setattr(install_mod, "_run", lambda *_a, **_k: ran.__setitem__("n", 1) or (0, ""))
+    try:
+        install_mod._install_attempt("browser-use", install_mod.SPECS["browser-use"][0])
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError("browser-use pip must refuse when internet is denied")
+    assert ran["n"] == 0
+
+
 async def test_start_install_returns_existing_in_flight_job(monkeypatch):
     class DummyTask:
         def done(self) -> bool:

@@ -20,7 +20,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from ..config import logs_dir, repo_root
+from ..config import logs_dir, named_runtime_dir
 
 logger = logging.getLogger(__name__)
 
@@ -226,7 +226,7 @@ def _write_pth(name: str, target: Path) -> Path:
 
 
 def _optional_worker_root() -> Path:
-    path = repo_root() / "runtime" / "optional-workers"
+    path = named_runtime_dir("optional-workers", markers=("microsoft-ufo/.git/HEAD",))
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -234,6 +234,9 @@ def _optional_worker_root() -> Path:
 def _clone_repo(url: str, dest: Path) -> None:
     if url != UFO_GIT_URL:
         raise RuntimeError("Refusing to clone an unlisted repository")
+    from ..policy.network_http import require_http_url_allowed
+
+    require_http_url_allowed(url, tool="web_fetch")
     git = shutil.which("git")
     if not git:
         raise RuntimeError("Git is required to install Microsoft UFO. Install Git for Windows and retry.")
@@ -259,7 +262,18 @@ def _refresh_import_path() -> None:
         os.environ["PATH"] = prefix + os.pathsep + current
 
 
+def _require_pypi() -> None:
+    from ..policy.network_http import require_http_url_allowed
+
+    require_http_url_allowed("https://pypi.org/simple/", tool="web_fetch")
+
+
 def _playwright_chromium() -> None:
+    from ..config import apply_playwright_browsers_path
+    from ..policy.network_http import require_http_url_allowed
+
+    require_http_url_allowed("https://cdn.playwright.dev/", tool="web_fetch")
+    apply_playwright_browsers_path()
     code, output = _run([sys.executable, "-m", "playwright", "install", "chromium"], timeout=600)
     if code != 0:
         logger.warning("Playwright Chromium extra step failed: %s", _tail(output))
@@ -275,6 +289,7 @@ def _install_attempt(worker_id: str, attempt: InstallAttempt) -> None:
             requirements = dest / "requirements.txt"
             if not requirements.is_file():
                 raise RuntimeError(f"{dest} has no requirements.txt")
+            _require_pypi()
             _set_job(worker_id, detail="Installing UFO Python requirements…")
             code, output = _run(_pip_cmd("-r", str(requirements)), cwd=dest)
             outputs.append(output)
@@ -283,6 +298,7 @@ def _install_attempt(worker_id: str, attempt: InstallAttempt) -> None:
                 raise RuntimeError(f"pip install -r requirements.txt failed:\n{_tail(output)}")
         _write_pth(attempt.git_dirname.replace("-", "_"), dest)
     elif attempt.pip_packages:
+        _require_pypi()
         _set_job(worker_id, detail=f"Installing {' '.join(attempt.pip_packages)}…")
         code, output = _run(_pip_cmd(*attempt.pip_packages))
         outputs.append(output)

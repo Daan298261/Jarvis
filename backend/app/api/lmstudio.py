@@ -15,6 +15,7 @@ from ..inference.lmstudio_catalog import (
     build_catalog,
     discovery_payload,
     select_catalog_profile,
+    select_discovered_gguf,
     set_profile_override,
     set_profile_pin,
 )
@@ -105,6 +106,31 @@ async def select_profile(profile_id: str):
     return payload
 
 
+class DiscoverSelectBody(BaseModel):
+    path: str
+
+
 @router.get("/discovery")
 async def get_discovery():
     return discovery_payload()
+
+
+@router.post("/discovery/select")
+async def select_discovered(body: DiscoverSelectBody):
+    try:
+        profile = select_discovered_gguf(body.path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        await activate_runtime_profile(profile)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:500]) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)[:500]) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)[:500]) from exc
+    payload = profile.as_dict()
+    payload["load"] = runtime_activation_snapshot()
+    return payload

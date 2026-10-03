@@ -35,11 +35,24 @@ class ExternalIngestTool(Tool):
         from .browser_use import BrowserUseTool
 
         url = (kwargs.get("url") or "").strip()
+        if not url:
+            return ToolResult(False, "", error="url is required")
+        from ..policy.computer_permissions import evaluate_tool_permissions
+
+        gate = evaluate_tool_permissions("external_ingest", {"url": url})
+        if gate.status == "deny":
+            return ToolResult(False, "", error=gate.reason)
+        if gate.status == "ask":
+            return ToolResult(
+                False,
+                "",
+                error=gate.reason or "Permission required before ingesting from the network.",
+            )
         headless = kwargs.get("headless")
         ctx = self.context_getter() or {}
         browser_settings = ctx if isinstance(ctx, dict) else {}
         browser = BrowserTool(lambda: browser_settings)
-        browser_use = BrowserUseTool()
+        browser_use = BrowserUseTool(lambda: browser_settings)
         try:
             payload = await ingest_url(
                 url,

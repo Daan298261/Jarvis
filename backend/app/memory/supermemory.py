@@ -141,8 +141,19 @@ async def _request_json(method: str, path: str, *, payload: dict[str, Any] | Non
     if not key:
         raise SupermemoryNotConfigured("Supermemory API key is not configured")
     headers = {"Authorization": f"Bearer {key}", "Accept": "application/json"}
+    target = f"{base_url}{path}"
+    from ..policy.network_http import require_http_url_allowed
+
     try:
-        async with httpx.AsyncClient(timeout=settings.timeout_ms / 1000.0, trust_env=False) as client:
+        require_http_url_allowed(target, tool="web_fetch")
+    except PermissionError as exc:
+        raise SupermemoryError(str(exc)) from exc
+    try:
+        async with httpx.AsyncClient(
+            timeout=settings.timeout_ms / 1000.0,
+            trust_env=False,
+            follow_redirects=False,
+        ) as client:
             response = await client.request(method, f"{base_url}{path}", headers=headers, json=payload)
             response.raise_for_status()
             data = {"ok": True} if response.status_code == 204 or not response.content else response.json()

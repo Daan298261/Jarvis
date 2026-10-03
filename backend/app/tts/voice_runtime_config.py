@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from ..config import load_settings, models_dir, repo_root
+from ..config import load_settings, repo_root
 
 
 def voicestudio_base_url() -> str:
@@ -36,7 +36,22 @@ def voicestudio_auth_headers() -> dict[str, str]:
 
 
 def whisper_model_dir_marker() -> Path:
-    return models_dir() / "whisper" / ".jarvis_faster_whisper_dir"
+    return whisper_models_dir() / ".jarvis_faster_whisper_dir"
+
+
+def whisper_models_dir() -> Path:
+    """`models/whisper`, or extra-drive `Jarvis/models/whisper` when C: cannot fit."""
+    from ..config import models_dir as live_models_dir
+    from ..inference.lmstudio_catalog import resolved_cache_dir
+
+    dest = resolved_cache_dir(
+        "whisper",
+        local=live_models_dir() / "whisper",
+        markers=("base", "ggml-base.bin", "ggml-base.en.bin", "base.pt", "tiny.pt", "small.pt"),
+        need_bytes=1024**3,
+    )
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest
 
 
 def resolved_faster_whisper_model() -> str | None:
@@ -68,7 +83,7 @@ def resolved_faster_whisper_model() -> str | None:
             if path.is_dir() or path.is_file():
                 return text
 
-    base_dir = models_dir() / "whisper" / "base"
+    base_dir = whisper_models_dir() / "base"
     if base_dir.is_dir() and any(base_dir.iterdir()):
         return str(base_dir)
 

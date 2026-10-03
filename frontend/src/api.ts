@@ -690,6 +690,7 @@ export type RuntimeProfile = {
   specialization_tags: string[]
   is_local: boolean
   description: string
+  gguf_path?: string
 }
 
 export type RuntimeProfileIn = {
@@ -971,6 +972,16 @@ export async function selectLmStudioProfile(profileId: string): Promise<RuntimeP
   )
 }
 
+export async function selectDiscoveredGguf(path: string): Promise<RuntimeProfile & { load?: Record<string, unknown> }> {
+  return api<RuntimeProfile & { load?: Record<string, unknown> }>(
+    "/api/lmstudio/discovery/select",
+    {
+      method: "POST",
+      body: JSON.stringify({ path }),
+    },
+  )
+}
+
 export type RuntimeActivateResponse = {
   ok: boolean
   profile: RuntimeProfile
@@ -1187,6 +1198,10 @@ export async function installHexStrikeDependencies(tool?: string): Promise<{
 
 export async function listHexStrikeScopes(): Promise<{ scopes: HexStrikeScope[] }> {
   return api<{ scopes: HexStrikeScope[] }>("/api/hexstrike/scopes")
+}
+
+export async function ensureDefaultLanScope(): Promise<HexStrikeScope> {
+  return api<HexStrikeScope>("/api/hexstrike/scopes/default-lan", { method: "POST" })
 }
 
 export async function upsertHexStrikeScope(
@@ -5091,7 +5106,11 @@ export async function setCybersecurityToolEnabled(
 
 export async function downloadModuleCatalogEntry(
   entryId: string,
-  options?: { mode?: "clone" | "zip"; dest?: "desktop_projects" | "library" },
+  options?: {
+    mode?: "clone" | "zip"
+    dest?: "desktop_projects" | "library" | "documents_projects" | "extra" | "auto"
+    dest_path?: string
+  },
 ): Promise<CybersecurityActionResult> {
   const result = await fetchCybersecurityJson<{ job_id?: string; detail?: string; message?: string }>(
     `/api/modules/catalog/${encodeURIComponent(entryId)}/download`,
@@ -5099,7 +5118,8 @@ export async function downloadModuleCatalogEntry(
       method: "POST",
       body: JSON.stringify({
         mode: options?.mode ?? "clone",
-        dest: options?.dest ?? "library",
+        dest: options?.dest ?? "auto",
+        dest_path: options?.dest_path ?? "",
       }),
     },
   )

@@ -11,6 +11,7 @@ from ..security.hexstrike import HEXSTRIKE, audit_hexstrike, gateway_allows
 from ..security.hexstrike_defensive import (
     CAPABILITY_BY_ID,
     capability_snapshot,
+    ensure_default_lan_scope,
     execute_defensive,
     list_jobs as list_defensive_jobs,
     list_scopes,
@@ -71,7 +72,7 @@ class HexStrikeActionIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: str = Field(min_length=1, max_length=80)
-    scope_id: str = Field(min_length=1, max_length=80)
+    scope_id: str = Field(default="", max_length=80)
     options: HexStrikeActionOptions = Field(default_factory=HexStrikeActionOptions)
 
 
@@ -458,19 +459,43 @@ async def hexstrike_scopes():
     return {"scopes": list_scopes()}
 
 
+@router.post("/scopes/default-lan")
+async def hexstrike_scope_default_lan():
+    _require_hexstrike_module_entitlement()
+    _require_permissions_grant(
+        ["network.local"],
+        action_kind="hexstrike.scope.default_lan",
+        context={"kind": "private_cidr"},
+    )
+    try:
+        return ensure_default_lan_scope()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.put("/scopes/{scope_id}")
 async def hexstrike_scope_put(scope_id: str, body: HexStrikeScopeIn):
-    _require_operator_grant(
-        "blue.static_rules",
-        action_kind="hexstrike.scope.put",
-        context={
-            "scope_id": scope_id,
-            "kind": body.kind,
-            "value": body.value,
-            "label": body.label,
-            "attested_owned": body.attested_owned,
-        },
-    )
+    kind = (body.kind or "").strip().lower()
+    context = {
+        "scope_id": scope_id,
+        "kind": body.kind,
+        "value": body.value,
+        "label": body.label,
+        "attested_owned": body.attested_owned,
+    }
+    if kind in {"private_host", "private_cidr"}:
+        _require_hexstrike_module_entitlement()
+        _require_permissions_grant(
+            ["network.local"],
+            action_kind="hexstrike.scope.put",
+            context=context,
+        )
+    else:
+        _require_operator_grant(
+            "blue.static_rules",
+            action_kind="hexstrike.scope.put",
+            context=context,
+        )
     try:
         return upsert_scope(
             scope_id,

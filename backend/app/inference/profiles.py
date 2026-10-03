@@ -226,12 +226,57 @@ def declared_profiles() -> list[ModelProfile]:
 
 def profile_gguf(profile: ModelProfile) -> Path:
     if profile.absolute_path:
-        return Path(profile.absolute_path)
-    return models_dir() / profile.repo_dir / profile.filename
+        bound = Path(profile.absolute_path)
+        if bound.exists():
+            return bound
+    local = models_dir() / profile.repo_dir / profile.filename
+    if local.exists():
+        return local
+    from .lmstudio_catalog import extra_volume_file_named
+
+    extra = extra_volume_file_named(profile.filename)
+    return extra if extra is not None else local
 
 
 def mmproj_path(profile: ModelProfile) -> Path:
-    return models_dir() / profile.repo_dir / profile.mmproj_filename
+    local = models_dir() / profile.repo_dir / profile.mmproj_filename
+    if not profile.mmproj_filename or local.exists():
+        return local
+    from .lmstudio_catalog import extra_volume_file_named
+
+    extra = extra_volume_file_named(profile.mmproj_filename)
+    return extra if extra is not None else local
+
+
+def profile_from_gguf_path(path: Path) -> ModelProfile:
+    """Ad-hoc llama.cpp profile for a discovered owner GGUF (USB/`D:\\Models`)."""
+    from .lmstudio_catalog import parse_quantization
+
+    resolved = Path(path)
+    quant = parse_quantization(resolved.name) or "Q4"
+    stem = resolved.stem or "local-gguf"
+    return ModelProfile(
+        name="local_gguf",
+        label=stem,
+        quant=quant,
+        filename=resolved.name,
+        family="local-gguf",
+        alias=stem,
+        repo="local/gguf",
+        repo_dir=resolved.parent.name,
+        mmproj_filename="",
+        thinking=True,
+        thinking_mode="selective",
+        context_size=32768,
+        temperature=0.6,
+        top_p=0.95,
+        top_k=20,
+        presence_penalty=0.0,
+        description=f"Owner GGUF at {resolved}",
+        vision=False,
+        fallbacks=("bootstrap", "balanced"),
+        absolute_path=str(resolved),
+    )
 
 
 def resolve_mmproj(profile: ModelProfile | None = None) -> Path | None:

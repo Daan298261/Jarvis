@@ -1,19 +1,70 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urljoin, urlparse
 
 import httpx
 
+from ..config import live_workspace_roots_from_context
+from ..policy.network_http import _with_lan_bind
 from .base import RiskLevel, Tool, ToolResult
-from .safety import resolve_allowed_path
+from .owner_paths import resolve_owner_file_path
 
 _ALLOWED_SCHEMES = {"http", "https"}
 _MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
 _FETCH_ATTEMPTS = 3
 _RETRY_STATUS = {502, 503, 504}
+_REDIRECT_STATUS = {301, 302, 303, 307, 308}
+_MAX_REDIRECTS = 8
+_TEXT_TYPES = (
+    "text/",
+    "application/json",
+    "application/xml",
+    "application/javascript",
+    "application/xhtml",
+    "application/ld+json",
+)
+_FILENAME_RE = re.compile(
+    r"filename\*=UTF-8''([^;]+)|filename=\"([^\"]+)\"|filename=([^;]+)",
+    re.I,
+)
+
+
+def suggested_fetch_name(url: str, headers: Any) -> str:
+    disp = ""
+    if headers is not None:
+        disp = str(getattr(headers, "get", lambda *_: "")("content-disposition") or "")
+        if not disp and isinstance(headers, dict):
+            disp = str(headers.get("content-disposition") or headers.get("Content-Disposition") or "")
+    match = _FILENAME_RE.search(disp)
+    if match:
+        name = unquote((match.group(1) or match.group(2) or match.group(3) or "").strip().strip('"'))
+        name = Path(name).name
+        if name:
+            return name
+    leaf = Path(urlparse(url).path).name
+    if leaf and "." in leaf:
+        return leaf
+    return "download"
+
+
+def looks_downloadable_body(content_type: str, headers: Any, raw: bytes) -> bool:
+    disp = ""
+    if headers is not None:
+        disp = str(getattr(headers, "get", lambda *_: "")("content-disposition") or "").lower()
+        if not disp and isinstance(headers, dict):
+            disp = str(headers.get("content-disposition") or headers.get("Content-Disposition") or "").lower()
+    if "attachment" in disp:
+        return True
+    ctype = (content_type or "").split(";")[0].strip().lower()
+    if not ctype:
+        return b"\x00" in raw[:4096]
+    if any(ctype.startswith(prefix) or ctype == prefix.rstrip("/") for prefix in _TEXT_TYPES):
+        return False
+    return True
 
 
 class WebFetchTool(Tool):
@@ -21,8 +72,9 @@ class WebFetchTool(Tool):
     description = (
         "HTTP GET/POST/HEAD for public web pages and APIs. Separate from the browser tool. "
         "Use this for research, downloading text, posting JSON, and checking endpoints. "
-        "Optional path saves the response body into an allowed directory. Do not send secrets. "
-        "Only http and https URLs are allowed."
+        "Optional path saves the body into an allowed folder (including extra drives). "
+        "PDFs, zips, images, and Content-Disposition attachments without a path go to the "
+        "owner's Downloads folder. Do not send secrets. Only http and https URLs are allowed."
     )
     risk = RiskLevel.MEDIUM
     effect_class = "external"
@@ -36,7 +88,10 @@ class WebFetchTool(Tool):
             "headers": {"type": "object"},
             "body": {"type": "string"},
             "json_body": {"type": "object"},
-            "path": {"type": "string", "description": "Optional path in an allowed directory to save the body"},
+            "path": {
+                "type": "string",
+                "description": "Optional save path or folder. Omit for HTML/JSON; binaries go to Downloads.",
+            },
             "timeout_seconds": {"type": "number", "default": 30},
         },
         "required": ["url"],
@@ -73,42 +128,67 @@ class WebFetchTool(Tool):
             headers.update({str(key): str(value) for key, value in extra.items()})
         json_body = kwargs.get("json_body") if isinstance(kwargs.get("json_body"), dict) else None
         body = kwargs.get("body")
-        save_path = kwargs.get("path")
-        resolved_path: Path | None = None
-        if save_path:
-            ctx = self.context_getter() or {}
-            allowed = ctx.get("allowed_directories") or []
-            try:
-                resolved_path = resolve_allowed_path(str(save_path), allowed)
-            except PermissionError as exc:
-                return ToolResult(False, "", error=str(exc))
+        save_path = str(kwargs.get("path") or "").strip()
+        ctx = self.context_getter() or {}
+        allowed = live_workspace_roots_from_context(ctx)
 
         try:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=timeout, headers=headers) as client:
+            async with httpx.AsyncClient(
+                **_with_lan_bind(
+                    {
+                        "follow_redirects": False,
+                        "timeout": timeout,
+                        "headers": headers,
+                    },
+                    url,
+                    async_client=True,
+                )
+            ) as client:
                 request_kwargs: dict[str, Any] = {}
                 if json_body is not None:
                     request_kwargs["json"] = json_body
                 elif body is not None:
                     request_kwargs["content"] = body
+                current_url = url
+                current_method = method
+                current_kwargs = dict(request_kwargs)
+                hops = 0
                 last_error: Exception | None = None
                 response = None
-                for attempt in range(_FETCH_ATTEMPTS):
-                    try:
-                        response = await client.request(method, url, **request_kwargs)
-                    except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError) as exc:
-                        last_error = exc
-                        await asyncio.sleep(0.15 * (attempt + 1))
-                        continue
-                    if (
-                        method in {"GET", "HEAD"}
-                        and response.status_code in _RETRY_STATUS
-                        and attempt + 1 < _FETCH_ATTEMPTS
-                    ):
-                        await asyncio.sleep(0.15 * (attempt + 1))
-                        continue
-                    break
-                if response is None:
-                    raise last_error or RuntimeError("web_fetch failed")
+                while True:
+                    response = None
+                    for attempt in range(_FETCH_ATTEMPTS):
+                        try:
+                            response = await client.request(current_method, current_url, **current_kwargs)
+                        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError) as exc:
+                            last_error = exc
+                            await asyncio.sleep(0.15 * (attempt + 1))
+                            continue
+                        if (
+                            current_method in {"GET", "HEAD"}
+                            and response.status_code in _RETRY_STATUS
+                            and attempt + 1 < _FETCH_ATTEMPTS
+                        ):
+                            await asyncio.sleep(0.15 * (attempt + 1))
+                            continue
+                        break
+                    if response is None:
+                        raise last_error or RuntimeError("web_fetch failed")
+                    location = (response.headers.get("location") or "").strip()
+                    if response.status_code not in _REDIRECT_STATUS or not location or hops >= _MAX_REDIRECTS:
+                        break
+                    nxt = urljoin(str(response.url), location)
+                    hop_scheme = (urlparse(nxt).scheme or "").lower()
+                    if hop_scheme not in _ALLOWED_SCHEMES:
+                        return ToolResult(False, "", error="Blocked URL scheme. Only http and https URLs are allowed (http/https only)")
+                    hop_gate = evaluate_tool_permissions("web_fetch", {"url": nxt, "method": current_method})
+                    if hop_gate.status != "allow":
+                        return ToolResult(False, "", error=hop_gate.reason or "Permission required before fetching from the network.")
+                    hops += 1
+                    current_url = nxt
+                    if response.status_code in {301, 302, 303} and current_method == "POST":
+                        current_method = "GET"
+                        current_kwargs = {}
             content_type = response.headers.get("content-type") or ""
             raw = getattr(response, "content", None)
             if raw is None:
@@ -117,7 +197,26 @@ class WebFetchTool(Tool):
             truncated_bytes = len(raw) > _MAX_DOWNLOAD_BYTES
             if truncated_bytes:
                 raw = raw[:_MAX_DOWNLOAD_BYTES]
-            text = (getattr(response, "text", None) or raw.decode("utf-8", errors="replace"))[:limit]
+            filename = suggested_fetch_name(str(getattr(response, "url", "") or current_url), response.headers)
+            resolved_path = None
+            if save_path:
+                resolved_path = resolve_owner_file_path(
+                    save_path,
+                    suggested_name=filename,
+                    allowed=allowed,
+                    fallback_dirs=("Downloads",),
+                )
+            elif method != "HEAD" and looks_downloadable_body(content_type, response.headers, raw):
+                resolved_path = resolve_owner_file_path(
+                    None,
+                    suggested_name=filename,
+                    allowed=allowed,
+                    fallback_dirs=("Downloads",),
+                )
+            binary = looks_downloadable_body(content_type, response.headers, raw)
+            text = ""
+            if not binary:
+                text = (getattr(response, "text", None) or raw.decode("utf-8", errors="replace"))[:limit]
             saved = ""
             if resolved_path is not None:
                 resolved_path.parent.mkdir(parents=True, exist_ok=True)

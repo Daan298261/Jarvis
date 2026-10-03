@@ -3,13 +3,16 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import logging
+from pathlib import Path
 from typing import Any
 
-from ..config import AppSettings, data_dir, load_settings
+from ..config import AppSettings, browser_use_user_data_dir, load_settings
+from ..tools.owner_paths import CHROMIUM_NO_PROXY_ARGS, PLAYWRIGHT_DIRECT_PROXY, owner_downloads_dir
 from .browser_structured import (
     browser_use_tool_result_data,
     format_browser_use_output,
     structured_payload_from_history,
+    visited_urls_from_history,
 )
 from .local_llm import local_browser_use_model, local_chat_openai_for_browser_use
 
@@ -61,6 +64,46 @@ async def reset_browser_use_session_async() -> None:
             return
         except Exception as exc:
             logger.debug("browser-use session %s failed during reset: %s", method_name, exc)
+
+
+def browser_use_session_kwargs(headless: bool, profile_dir: Path) -> dict[str, Any]:
+    """Browser Use session/profile kwargs; downloads go to the owner's Downloads folder."""
+    no_proxy = list(CHROMIUM_NO_PROXY_ARGS)
+    return {
+        "headless": headless,
+        "keep_alive": True,
+        "user_data_dir": str(profile_dir),
+        "downloads_path": str(owner_downloads_dir()),
+        "args": no_proxy,
+        "extra_chromium_args": no_proxy,
+        "proxy": dict(PLAYWRIGHT_DIRECT_PROXY),
+    }
+
+
+def _construct_with_supported_kwargs(cls: Any, kwargs: dict[str, Any]) -> Any:
+    """Call *cls* with only kwargs its __init__ accepts (older Browser Use drops extras)."""
+    import inspect
+
+    try:
+        signature = inspect.signature(cls.__init__)
+    except (TypeError, ValueError):
+        return cls(**kwargs)
+    if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values()):
+        return cls(**kwargs)
+    allowed = {
+        name
+        for name, param in signature.parameters.items()
+        if name != "self"
+        and param.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    }
+    return cls(**{key: value for key, value in kwargs.items() if key in allowed})
+
+
+def _browser_profile_with_downloads(profile_cls: Any, kwargs: dict[str, Any]) -> Any:
+    try:
+        return profile_cls(**kwargs)
+    except TypeError:
+        return _construct_with_supported_kwargs(profile_cls, kwargs)
 
 
 def network_permission_block(tool_name: str, *, goal: str, url: str | None) -> str | None:
@@ -165,6 +208,16 @@ class BrowserUseBackend:
                 error=f"Browser Use failed: {exc}. Fall back to the Playwright browser tool.",
             )
         structured = structured_payload_from_history(history, start_url=cleaned_url)
+        if not skip_permission_check:
+            hops = visited_urls_from_history(history, start_url=cleaned_url)
+            final_url = str(structured.get("url") or "").strip()
+            if final_url and final_url not in hops:
+                hops.append(final_url)
+            for hop in hops:
+                blocked = network_permission_block("browser_use", goal=cleaned_goal, url=hop)
+                if blocked:
+                    await reset_browser_use_session_async()
+                    return ToolResult(False, "", error=blocked)
         output = format_browser_use_output(structured)
         data = browser_use_tool_result_data(
             goal=cleaned_goal,
@@ -185,27 +238,25 @@ class BrowserUseBackend:
             return BrowserSession
 
     def _build_browser_session(self, settings: AppSettings) -> Any:
+        from ..config import apply_playwright_browsers_path
+
+        apply_playwright_browsers_path()
         BrowserSession = self._browser_session_class()
-        profile_dir = data_dir() / "browser-use-profile"
-        profile_dir.mkdir(parents=True, exist_ok=True)
+        profile_dir = browser_use_user_data_dir()
         headless = bool(settings.browser.headless)
-        kwargs: dict[str, Any] = {"headless": headless, "user_data_dir": str(profile_dir)}
+        kwargs = browser_use_session_kwargs(headless, profile_dir)
         try:
             from browser_use import BrowserProfile
 
-            profile = BrowserProfile(
-                headless=headless,
-                keep_alive=True,
-                user_data_dir=str(profile_dir),
-            )
+            profile = _browser_profile_with_downloads(BrowserProfile, kwargs)
             return BrowserSession(browser_profile=profile)
         except (ImportError, TypeError):
             pass
         try:
-            return BrowserSession(**kwargs, keep_alive=True)
+            return BrowserSession(**kwargs)
         except TypeError:
             try:
-                return BrowserSession(**kwargs)
+                return _construct_with_supported_kwargs(BrowserSession, kwargs)
             except TypeError:
                 return BrowserSession(headless=headless)
 
@@ -232,6 +283,12 @@ class BrowserUseBackend:
                 started = start()
                 if hasattr(started, "__await__"):
                     await started
+                try:
+                    from ..tools.browser import install_browser_use_lan_intercept
+
+                    await install_browser_use_lan_intercept(session)
+                except Exception as exc:
+                    logger.debug("Browser Use LAN intercept skipped: %s", exc)
                 async with _SESSION_LOCK:
                     _SESSION_STARTED = True
             except Exception as exc:
@@ -285,12 +342,13 @@ class BrowserUseBackend:
 
 
 # Re-export structured helpers for tests and ingest callers.
-from .browser_structured import browser_use_ingest_payload, browser_use_tool_result_data  # noqa: E402
+from .browser_structured import browser_use_ingest_payload, browser_use_tool_result_data, visited_urls_from_history  # noqa: E402
 
 __all__ = [
     "BrowserUseBackend",
     "DEFAULT_BROWSER_BACKEND",
     "browser_use_ingest_payload",
+    "browser_use_session_kwargs",
     "browser_use_tool_result_data",
     "format_browser_use_output",
     "network_permission_block",
@@ -298,4 +356,5 @@ __all__ = [
     "reset_browser_use_session",
     "reset_browser_use_session_async",
     "structured_payload_from_history",
+    "visited_urls_from_history",
 ]

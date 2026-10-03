@@ -8,6 +8,8 @@ from urllib.parse import quote_plus, urljoin
 
 import httpx
 
+from ..policy.network_http import gated_get
+
 _TAG_RE = re.compile(r"<[^>]+>")
 _RESULT_RE = re.compile(
     r'<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
@@ -40,10 +42,14 @@ async def search_public_web(query: str, *, max_results: int = 2, client: httpx.A
     if not cleaned:
         return []
     url = "https://html.duckduckgo.com/html/?q=" + quote_plus(cleaned[:200])
-    own_client = client is None
-    http = client or httpx.AsyncClient(follow_redirects=True, timeout=12.0, headers={"User-Agent": "JarvisHelp/1.0"})
     try:
-        response = await http.get(url)
+        response = await gated_get(
+            url,
+            tool="web_fetch",
+            timeout=12.0,
+            headers={"User-Agent": "JarvisHelp/1.0"},
+            client=client,
+        )
         if response.status_code >= 400:
             return []
         hits: list[dict[str, str]] = []
@@ -59,23 +65,21 @@ async def search_public_web(query: str, *, max_results: int = 2, client: httpx.A
         return hits
     except Exception:
         return []
-    finally:
-        if own_client:
-            await http.aclose()
 
 
 async def fetch_public_page(url: str, *, max_chars: int = 2500, client: httpx.AsyncClient | None = None) -> str:
     if not (url or "").startswith(("http://", "https://")):
         return ""
-    own_client = client is None
-    http = client or httpx.AsyncClient(follow_redirects=True, timeout=12.0, headers={"User-Agent": "JarvisHelp/1.0"})
     try:
-        response = await http.get(url)
+        response = await gated_get(
+            url,
+            tool="web_fetch",
+            timeout=12.0,
+            headers={"User-Agent": "JarvisHelp/1.0"},
+            client=client,
+        )
         if response.status_code >= 400:
             return ""
         return _strip_html(response.text or "")[:max_chars]
     except Exception:
         return ""
-    finally:
-        if own_client:
-            await http.aclose()

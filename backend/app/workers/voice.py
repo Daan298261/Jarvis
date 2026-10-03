@@ -13,8 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..config import load_settings, models_dir, repo_root
-from ..tts.voice_runtime_config import resolved_faster_whisper_model
+from ..config import load_settings, repo_root
+from ..tts.voice_runtime_config import resolved_faster_whisper_model, whisper_models_dir
 from ..tts.engines import (
     engine_availability,
     engine_chain_for_profile,
@@ -64,7 +64,7 @@ def whisper_model_candidates() -> list[Path]:
     if resolved:
         out.append(Path(resolved).expanduser())
     env = os.environ.get("JARVIS_WHISPER_MODEL") or ""
-    root = models_dir() / "whisper"
+    root = whisper_models_dir()
     names = [
         "ggml-base.bin",
         "ggml-base.en.bin",
@@ -428,7 +428,7 @@ def _transcribe_openai_whisper(path: Path, model_path: Path | None) -> str:
     if model_path and model_path.is_file():
         model = whisper.load_model(str(model_path))
     else:
-        download_root = str(models_dir() / "whisper")
+        download_root = str(whisper_models_dir())
         try:
             model = whisper.load_model("base", download_root=download_root, in_memory=False)
         except Exception as exc:

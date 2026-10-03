@@ -29,7 +29,7 @@ def test_resolved_faster_whisper_model_uses_marker(jarvis_env, monkeypatch):
     (base_dir / "config.json").write_text("{}", encoding="utf-8")
     marker = whisper_root / ".jarvis_faster_whisper_dir"
     marker.write_text(str(base_dir), encoding="utf-8")
-    monkeypatch.setattr("app.tts.voice_runtime_config.models_dir", lambda: tmp / "models")
+    monkeypatch.setattr("app.config.models_dir", lambda: tmp / "models")
     assert resolved_faster_whisper_model() == str(base_dir)
 
 

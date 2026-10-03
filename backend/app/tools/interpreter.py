@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..config import load_settings
+from ..config import live_workspace_roots_from_context, load_settings
 from ..workers.interpreter import OpenInterpreterBackend
 from .base import RiskLevel, Tool, ToolResult
-from .safety import resolve_allowed_path
+from .owner_paths import resolve_project_dir
 
 _BACKEND = OpenInterpreterBackend()
 
@@ -15,7 +15,8 @@ class OpenInterpreterTool(Tool):
     description = (
         "Optional Open Interpreter code/shell worker. Delegate substantial coding or environment "
         "jobs here, then Jarvis must still inspect the diff and run tests. If Open Interpreter is "
-        "missing, use filesystem, python, git, and terminal instead."
+        "missing, use filesystem, python, git, and terminal instead. "
+        "Omit path to work in Documents; a folder on USB/`D:` is accepted."
     )
     risk = RiskLevel.HIGH
     parameters = {
@@ -23,7 +24,10 @@ class OpenInterpreterTool(Tool):
         "properties": {
             "action": {"type": "string", "enum": ["status", "delegate"]},
             "goal": {"type": "string", "description": "What the worker should change or run"},
-            "path": {"type": "string", "description": "Working directory inside allowed paths"},
+            "path": {
+                "type": "string",
+                "description": "Working directory (USB/`D:` allowed; omit for Documents)",
+            },
         },
         "required": ["action"],
     }
@@ -38,14 +42,18 @@ class OpenInterpreterTool(Tool):
             return ToolResult(True, probe["detail"], data=probe)
         if action != "delegate":
             return ToolResult(False, "", error=f"Unknown action {action}")
+        from ..policy.computer_permissions import tool_permission_error
+
+        denied = tool_permission_error("open_interpreter", kwargs)
+        if denied:
+            return ToolResult(False, "", error=denied)
         goal = kwargs.get("goal")
         if not goal:
             return ToolResult(False, "", error="goal is required")
         context = self.context_getter() if self.context_getter else {}
-        allowed = list(context.get("allowed_directories") or [])
-        raw_path = kwargs.get("path") or (allowed[0] if allowed else ".")
+        allowed = live_workspace_roots_from_context(context)
         try:
-            path = resolve_allowed_path(str(raw_path), allowed)
+            path = resolve_project_dir(kwargs.get("path"), allowed)
         except PermissionError as exc:
             return ToolResult(False, "", error=str(exc))
         settings = load_settings()

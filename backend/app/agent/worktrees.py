@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..config import data_dir, repo_root
+from ..config import data_dir, repo_root, resolved_data_sidecar_dir
 
 TRIAL_BRANCH_PREFIX = "jarvis/autonomous-trial-"
 CODING_BRANCH_PREFIX = "jarvis/coding-task-"
@@ -41,9 +41,15 @@ class WorktreeSpec:
 
 
 def worktrees_root() -> Path:
-    path = data_dir() / "worktrees"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    """`data/worktrees`, or extra-drive `Jarvis/runtime/worktrees` when C: cannot fit."""
+    dest = resolved_data_sidecar_dir(
+        "worktrees",
+        local=data_dir() / "worktrees",
+        markers=(REGISTRY_NAME, CODING_TASKS_NAME),
+        need_bytes=2 * 1024**3,
+    )
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest
 
 
 def _registry_path() -> Path:

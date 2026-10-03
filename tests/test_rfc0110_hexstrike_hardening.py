@@ -14,6 +14,7 @@ from app.security.hexstrike_operator import sync_operator_surface
 from app.security.hexstrike_tools import (
     allowed_pip_package_names,
     install_dependency_by_id,
+    install_host_tool,
     install_pip_package,
 )
 
@@ -234,6 +235,47 @@ async def test_pip_install_rejects_arbitrary_package(hardened_env, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_pip_install_honors_internet_deny(hardened_env, monkeypatch):
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    monkeypatch.setattr(
+        "app.security.hexstrike_tools._hexstrike_python",
+        lambda install_path="": "/usr/bin/python3",
+    )
+    monkeypatch.setattr(
+        "app.security.hexstrike_tools.allowed_pip_package_names",
+        lambda install_path="": {"requests"},
+    )
+    ran = {"n": 0}
+
+    async def boom(*_args, **_kwargs):
+        ran["n"] += 1
+        raise AssertionError("must not pip when internet is denied")
+
+    monkeypatch.setattr("app.security.hexstrike_tools.asyncio.create_subprocess_exec", boom)
+    result = await install_pip_package("requests", install_path=str(hardened_env["tmp"] / "hexstrike-ai"))
+    assert result.ok is False
+    assert ran["n"] == 0
+
+
+@pytest.mark.asyncio
+async def test_winget_install_honors_internet_deny(hardened_env, monkeypatch):
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    monkeypatch.setattr("app.security.hexstrike_tools.shutil.which", lambda *_args, **_kwargs: None)
+    ran = {"n": 0}
+
+    async def boom(*_args, **_kwargs):
+        ran["n"] += 1
+        raise AssertionError("must not winget when internet is denied")
+
+    monkeypatch.setattr("app.security.hexstrike_tools.asyncio.create_subprocess_exec", boom)
+    result = await install_host_tool("nmap")
+    assert result.ok is False
+    assert ran["n"] == 0
+
+
+@pytest.mark.asyncio
 async def test_pip_install_requires_hexstrike_python_not_sys_executable(hardened_env):
     result = await install_dependency_by_id("pip:requests", install_path="")
     assert result.ok is False
@@ -246,3 +288,58 @@ def test_tool_install_parks_instead_of_auto_session(hardened_env):
     response = client.post("/api/hexstrike/tools/nmap/install")
     assert response.status_code == 428
     assert response.json()["detail"]["action_kind"] == "hexstrike.tool.install"
+
+
+def test_private_lan_scope_put_does_not_require_suite_grant(hardened_env):
+    client = TestClient(app)
+    lan = client.put(
+        "/api/hexstrike/scopes/home-lan",
+        json={
+            "kind": "private_cidr",
+            "value": "192.168.20.0/24",
+            "label": "Home",
+            "attested_owned": True,
+        },
+    )
+    assert lan.status_code == 200, lan.text
+    assert lan.json()["kind"] == "private_cidr"
+    parked = client.put(
+        "/api/hexstrike/scopes/host-path",
+        json={
+            "kind": "local_path",
+            "value": str(hardened_env["tmp"]),
+            "label": "Evidence",
+            "attested_owned": True,
+        },
+    )
+    assert parked.status_code == 428
+    detail = parked.json()["detail"]
+    assert "cyber.hexstrike" in detail.get("permission_ids", [detail.get("permission_id")])
+
+
+def test_default_lan_scope_endpoint_uses_nic_cidr(hardened_env, monkeypatch):
+    monkeypatch.setattr("app.security.hexstrike_defensive.data_dir", lambda: hardened_env["tmp"])
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.discover_private_lan_cidrs",
+        lambda: ["192.168.20.0/24"],
+    )
+    client = TestClient(app)
+    created = client.post("/api/hexstrike/scopes/default-lan")
+    assert created.status_code == 200, created.text
+    body = created.json()
+    assert body["id"] == "lan"
+    assert body["kind"] == "private_cidr"
+    assert body["value"] == "192.168.20.0/24"
+    assert body["label"] == "This PC's LAN"
+    again = client.post("/api/hexstrike/scopes/default-lan")
+    assert again.status_code == 200
+    assert again.json()["id"] == "lan"
+
+
+def test_default_lan_scope_endpoint_422_without_rfc1918(hardened_env, monkeypatch):
+    monkeypatch.setattr("app.security.hexstrike_defensive.data_dir", lambda: hardened_env["tmp"])
+    monkeypatch.setattr("app.security.hexstrike_defensive.discover_private_lan_cidrs", lambda: [])
+    client = TestClient(app)
+    missing = client.post("/api/hexstrike/scopes/default-lan")
+    assert missing.status_code == 422
+    assert "RFC1918" in missing.json()["detail"]

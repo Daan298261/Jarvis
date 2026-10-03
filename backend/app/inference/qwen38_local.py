@@ -85,28 +85,43 @@ def _lmstudio_root() -> Path:
     return resolve_models_root()
 
 
-def discover_qwen38_9b_candidates(extra_roots: list[Path] | None = None) -> list[DiscoveredQwen38]:
-    roots = [models_dir(), _lmstudio_root()]
+def _owner_gguf_paths(extra_roots: list[Path] | None = None) -> list[Path]:
+    from .lmstudio_catalog import extra_volume_loose_ggufs, extra_volume_model_roots
+
+    roots = [models_dir(), _lmstudio_root(), *extra_volume_model_roots()]
     if extra_roots:
         roots.extend(extra_roots)
     seen: set[str] = set()
-    found: list[DiscoveredQwen38] = []
+    paths: list[Path] = []
     for root in roots:
         for path in _iter_ggufs(root):
             marker = str(path.resolve()) if path.exists() else str(path)
             if marker in seen:
                 continue
-            if not is_qwen38_9b_filename(path.name):
-                continue
             seen.add(marker)
-            found.append(
-                DiscoveredQwen38(
-                    path=path,
-                    filename=path.name,
-                    uncensored=is_uncensored_filename(path.name),
-                    quantization=_quant_from_name(path.name),
-                )
+            paths.append(path)
+    for path in extra_volume_loose_ggufs():
+        marker = str(path.resolve()) if path.exists() else str(path)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        paths.append(path)
+    return paths
+
+
+def discover_qwen38_9b_candidates(extra_roots: list[Path] | None = None) -> list[DiscoveredQwen38]:
+    found: list[DiscoveredQwen38] = []
+    for path in _owner_gguf_paths(extra_roots):
+        if not is_qwen38_9b_filename(path.name):
+            continue
+        found.append(
+            DiscoveredQwen38(
+                path=path,
+                filename=path.name,
+                uncensored=is_uncensored_filename(path.name),
+                quantization=_quant_from_name(path.name),
             )
+        )
     found.sort(key=lambda item: (not item.uncensored, _quant_rank(item.quantization), item.filename.lower()))
     return found
 
@@ -122,27 +137,18 @@ def discover_qwen38_9b_uncensored(extra_roots: list[Path] | None = None) -> Disc
 
 def discover_qwen38_27b_heretic(extra_roots: list[Path] | None = None) -> DiscoveredQwen38 | None:
     """Find the requested internal Qwen3.8 27B Heretic/RVN quantization."""
-    roots = [models_dir(), _lmstudio_root()]
-    if extra_roots:
-        roots.extend(extra_roots)
     found: list[DiscoveredQwen38] = []
-    seen: set[str] = set()
-    for root in roots:
-        for path in _iter_ggufs(root):
-            if not is_qwen38_27b_heretic_path(path):
-                continue
-            marker = str(path.resolve()) if path.exists() else str(path)
-            if marker in seen:
-                continue
-            seen.add(marker)
-            found.append(
-                DiscoveredQwen38(
-                    path=path,
-                    filename=path.name,
-                    uncensored=True,
-                    quantization=_quant_from_name(path.name),
-                )
+    for path in _owner_gguf_paths(extra_roots):
+        if not is_qwen38_27b_heretic_path(path):
+            continue
+        found.append(
+            DiscoveredQwen38(
+                path=path,
+                filename=path.name,
+                uncensored=True,
+                quantization=_quant_from_name(path.name),
             )
+        )
     found.sort(key=lambda item: (item.filename.lower() != HERETIC_27B_FILENAME.lower(), _quant_rank(item.quantization), item.filename.lower()))
     return found[0] if found else None
 

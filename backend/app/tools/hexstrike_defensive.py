@@ -20,14 +20,14 @@ class HexStrikeDefensiveTool(Tool):
         "type": "object",
         "properties": {
             "action": {"type": "string", "enum": sorted(CAPABILITY_BY_ID)},
-            "scope_id": {"type": "string", "minLength": 1, "maxLength": 80},
+            "scope_id": {"type": "string", "maxLength": 80},
             "options": {
                 "type": "object",
                 "properties": {"cve": {"type": "string", "pattern": "^CVE-[0-9]{4}-[0-9]{4,}$"}},
                 "additionalProperties": False,
             },
         },
-        "required": ["action", "scope_id"],
+        "required": ["action"],
         "additionalProperties": False,
     }
 

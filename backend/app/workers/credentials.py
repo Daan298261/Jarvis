@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..config import data_dir
+from ..config import data_dir, resolved_data_sidecar_dir
 
 _lock = threading.RLock()
 
@@ -35,7 +35,13 @@ class WorkerCredential:
 
 
 def credentials_root() -> Path:
-    path = data_dir() / "worker-environments" / ".credentials"
+    dest = resolved_data_sidecar_dir(
+        "worker-environments",
+        local=data_dir() / "worker-environments",
+        markers=("registry.json",),
+        need_bytes=2 * 1024**3,
+    )
+    path = dest / ".credentials"
     path.mkdir(parents=True, exist_ok=True)
     return path
 

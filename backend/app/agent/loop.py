@@ -195,8 +195,11 @@ from .self_dev import KillSwitchActive, kill_switch_active
 
 
 def _environment_block(settings: AppSettings) -> str:
+    from ..config import live_allowed_directories
+
     home = Path.home()
-    allowed = "\n".join(f"- {p}" for p in (settings.allowed_directories or []))
+    roots = live_allowed_directories(settings.allowed_directories)
+    allowed = "\n".join(f"- {p}" for p in roots)
     return (
         "\n\nEnvironment:\n"
         f"- Windows user profile: {home}\n"

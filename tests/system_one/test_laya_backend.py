@@ -95,6 +95,25 @@ def test_ensure_package_does_not_pip_under_pytest(monkeypatch):
         laya_pins.ensure_package()
 
 
+def test_laya_install_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    monkeypatch.setattr(laya_pins, "ensure_package", lambda: "0.3.21")
+    called = {"n": 0}
+
+    def boom(*_args, **_kwargs):
+        called["n"] += 1
+        raise AssertionError("must not download Laya when internet is denied")
+
+    monkeypatch.setattr("huggingface_hub.snapshot_download", boom)
+    with pytest.raises(PermissionError):
+        laya_pins.install_managed()
+    assert called["n"] == 0
+
+
 def test_choice_shortlist_keeps_hints_and_none_within_option_budget():
     choices = tuple(f"tool_{i}" for i in range(40)) + ("none",)
     question = Question(id="tool_select", type="choice", prompt="Which tool?", choices=choices)

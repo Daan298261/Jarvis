@@ -9,7 +9,10 @@ import venv
 from pathlib import Path
 from typing import Any
 
+from ..config import live_workspace_roots_from_context
 from .base import RiskLevel, Tool, ToolResult
+from .owner_paths import python_child_env, resolve_workspace_dir, workspace_cwd
+from .safety import resolve_allowed_path
 
 _PY_ACTIONS = ("run_code", "run_file", "create_venv", "install")
 
@@ -57,7 +60,9 @@ class PythonTool(Tool):
         "install. Put the script in `code` (run_code) or an absolute `path` (run_file) — never "
         "inside `action`. For copying files or folders use filesystem action=copy instead of a "
         "script. Prefer create_venv for project-specific packages. working_directory should "
-        "be the project root when installing dependencies."
+        "be the project root when installing dependencies. Omit working_directory to run in "
+        "Documents; USB/`D:` paths are allowed. working_directory, path, and venv_path "
+        "may be on extra drives inside the allowed workspace."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -74,11 +79,24 @@ class PythonTool(Tool):
         "required": ["action"],
     }
 
+    def __init__(self, context_getter=None) -> None:
+        self.context_getter = context_getter or (lambda: {})
+
+    def _allowed(self) -> list[str]:
+        return live_workspace_roots_from_context(self.context_getter() if callable(self.context_getter) else {})
+
+    def _dir(self, raw: str | None) -> str | None:
+        return resolve_workspace_dir(raw, self._allowed())
+
+    def _cwd(self, raw: str | None) -> str | None:
+        return workspace_cwd(raw, self._allowed())
+
     async def _run(self, args: list[str], cwd: str | None, timeout: int) -> ToolResult:
         started = time.time()
         proc = await asyncio.create_subprocess_exec(
             *args,
             cwd=cwd,
+            env=python_child_env(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -122,10 +140,19 @@ class PythonTool(Tool):
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         kwargs = normalize_python_call(kwargs)
+        from ..policy.computer_permissions import tool_permission_error
+
+        denied = tool_permission_error("python", kwargs)
+        if denied:
+            return ToolResult(False, "", error=denied)
         action = kwargs.get("action")
-        cwd = kwargs.get("working_directory")
-        timeout = int(kwargs.get("timeout_seconds") or 120)
-        venv_path = kwargs.get("venv_path")
+        try:
+            cwd = self._cwd(kwargs.get("working_directory"))
+            timeout = int(kwargs.get("timeout_seconds") or 120)
+            venv_raw = kwargs.get("venv_path")
+            venv_path = self._dir(venv_raw) if venv_raw else None
+        except PermissionError as exc:
+            return ToolResult(False, "", error=str(exc))
         py = self._python_bin(venv_path)
         try:
             if action == "run_code":
@@ -148,7 +175,10 @@ class PythonTool(Tool):
                 path = kwargs.get("path")
                 if not path:
                     return ToolResult(False, "", error="path is required")
-                resolved = self._resolve_script(str(path), cwd)
+                resolved = self._resolve_script(str(Path(str(path)).expanduser()), cwd)
+                allowed = self._allowed()
+                if allowed:
+                    resolved = Path(resolve_allowed_path(str(resolved), allowed))
                 if not resolved.is_file():
                     return ToolResult(
                         False,
@@ -163,6 +193,9 @@ class PythonTool(Tool):
                 path = Path(kwargs.get("venv_path") or kwargs.get("path") or ".venv")
                 if cwd:
                     path = Path(cwd) / path if not path.is_absolute() else path
+                allowed = self._allowed()
+                if allowed:
+                    path = Path(resolve_allowed_path(str(path.expanduser()), allowed))
                 venv.EnvBuilder(with_pip=True).create(str(path))
                 return ToolResult(True, f"Created virtualenv at {path}")
             if action == "install":

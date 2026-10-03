@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..config import data_dir, default_allowed_directories, load_settings
+from ..config import data_dir, live_allowed_directories, load_settings, resolved_data_sidecar_dir
 from ..tools.safety import resolve_allowed_path
 from .lta_certs import (
     ResolvedKey,
@@ -67,7 +67,12 @@ class AccessEntry:
 
 
 def jobs_root() -> Path:
-    path = data_dir() / "lta-extract"
+    path = resolved_data_sidecar_dir(
+        "lta-extract",
+        local=data_dir() / "lta-extract",
+        markers=("index.json",),
+        need_bytes=512 * 1024**2,
+    )
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -151,7 +156,7 @@ def audit_lta(event: str, **fields: Any) -> None:
 def assert_path_allowed(path: str | Path) -> Path:
     """RFC-0079: deny paths outside allowed_directories / owner grant."""
     settings = load_settings()
-    roots = list(settings.allowed_directories or default_allowed_directories())
+    roots = live_allowed_directories(settings.allowed_directories)
     try:
         return resolve_allowed_path(str(path), roots)
     except PermissionError as exc:

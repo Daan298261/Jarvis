@@ -94,7 +94,7 @@ async def test_record_case_result_persists(jarvis_env):
 
 
 def test_agent_suite_endpoints(jarvis_env, monkeypatch):
-    monkeypatch.setattr("app.api.model.data_dir", lambda: jarvis_env["tmp"])
+    monkeypatch.setattr("app.inference.live_agent_suite.data_dir", lambda: jarvis_env["tmp"])
     client = TestClient(app)
     listed = client.get("/api/model/agent-suite")
     assert listed.status_code == 200

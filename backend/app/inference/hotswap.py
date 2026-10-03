@@ -214,6 +214,7 @@ async def activate_runtime_profile(runtime: RuntimeProfile, *, force: bool = Fal
             profile_name,
             context_size=context_size,
             force=force,
+            gguf_path=(runtime.gguf_path or "").strip() or None,
         )
     except FileNotFoundError as exc:
         raise RuntimeError(

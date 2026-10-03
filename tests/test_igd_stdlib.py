@@ -7,6 +7,8 @@ import pytest
 from app.mobile.igd import (
     StdlibIGD,
     accept_ssdp_peer,
+    igd_auth_candidates,
+    igd_http_bind,
     is_wan_connection_service,
     parse_igd_control,
     parse_ssdp_location,
@@ -45,9 +47,16 @@ def test_ssdp_and_control_url_parsing():
     with pytest.raises(ValueError):
         parse_ssdp_location("HTTP/1.1 200 OK\r\nLOCATION: http://8.8.8.8/desc.xml\r\n\r\n")
     with pytest.raises(ValueError):
+        parse_ssdp_location("HTTP/1.1 200 OK\r\nLOCATION: http://100.64.0.1/desc.xml\r\n\r\n")
+    with pytest.raises(ValueError):
         parse_ssdp_location("HTTP/1.1 200 OK\r\nLOCATION: https://evil.example/desc.xml\r\n\r\n")
     assert accept_ssdp_peer(("192.168.1.1", 1900))
     assert not accept_ssdp_peer(("8.8.8.8", 1900))
+    assert not accept_ssdp_peer(("100.64.0.1", 1900))
+    assert igd_http_bind("192.168.1.12") == "192.168.1.12"
+    assert igd_http_bind("10.8.0.2") == "10.8.0.2"
+    assert igd_http_bind("8.8.8.8") == ""
+    assert igd_http_bind("100.64.1.8") == ""
     assert is_wan_connection_service("urn:schemas-upnp-org:service:WANIPConnection:2")
     v2 = DESC.replace("WANIPConnection:1", "WANIPConnection:2")
     control, service = parse_igd_control(v2, "http://192.168.1.1:5000/rootDesc.xml")
@@ -68,26 +77,64 @@ def test_soap_addportmapping_is_tcp_4781_only():
         router.addportmapping(22, "TCP", "192.168.1.12", 22, "Jarvis", "", 3600)
     with pytest.raises(ValueError):
         router.addportmapping(4781, "TCP", "8.8.8.8", 4781, "Jarvis", "", 3600)
+    with pytest.raises(ValueError):
+        router.addportmapping(4781, "TCP", "100.64.1.8", 4781, "Jarvis", "", 3600)
 
 
 def test_lookup_egress_ipv4_accepts_global_and_rejects_private(monkeypatch):
     class FakeClient:
         def __init__(self, *args, **kwargs):
             pass
-        def __enter__(self):
-            return self
-        def __exit__(self, *args):
-            return False
-        def get(self, url):
+
+        def close(self):
+            return None
+
+        def get(self, url, **kwargs):
             from types import SimpleNamespace
 
             if "ipify" in url:
-                return SimpleNamespace(text="8.8.4.4")
-            return SimpleNamespace(text="10.0.0.1")
+                return SimpleNamespace(status_code=200, headers={}, url=url, text="8.8.4.4")
+            return SimpleNamespace(status_code=200, headers={}, url=url, text="10.0.0.1")
 
-    monkeypatch.setattr("app.mobile.wan_forward.httpx.Client", FakeClient)
+    monkeypatch.setattr("app.policy.network_http.httpx.Client", FakeClient)
     assert lookup_egress_ipv4() == "8.8.4.4"
     assert ipaddress.ip_address("8.8.4.4").is_global
+
+    class TestNetClient(FakeClient):
+        def get(self, url, **kwargs):
+            from types import SimpleNamespace
+
+            return SimpleNamespace(status_code=200, headers={}, url=url, text="203.0.113.9")
+
+    monkeypatch.setattr("app.policy.network_http.httpx.Client", TestNetClient)
+    assert lookup_egress_ipv4() == "203.0.113.9"
+
+
+def test_lookup_egress_ipv4_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    seen = {"n": 0}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def close(self):
+            return None
+
+        def get(self, url, **kwargs):
+            seen["n"] += 1
+            from types import SimpleNamespace
+
+            return SimpleNamespace(status_code=200, headers={}, url=url, text="8.8.4.4")
+
+    monkeypatch.setattr("app.policy.network_http.httpx.Client", FakeClient)
+    with pytest.raises(ValueError):
+        lookup_egress_ipv4()
+    assert seen["n"] == 0
 
 
 def test_mapped_address_is_egress_detects_double_nat(monkeypatch):
@@ -106,7 +153,11 @@ def test_mapped_address_is_egress_detects_double_nat(monkeypatch):
 
 
 def test_windows_firewall_helper_skips_on_linux():
+    from app.mobile.wan_forward import ensure_companion_firewall, ensure_private_firewall_4782
+
     assert ensure_private_firewall_4781() == "skipped"
+    assert ensure_private_firewall_4782() == "skipped"
+    assert ensure_companion_firewall() == {"tcp_4781": "skipped", "udp_4782": "skipped"}
 
 
 def test_windows_firewall_rule_covers_every_profile():
@@ -127,6 +178,28 @@ def test_windows_firewall_rule_covers_every_profile():
     assert firewall_4781_covers_all_profiles("Profiles: Domain,Private,Public")
     assert firewall_4781_covers_all_profiles("Profiles: Any")
     assert not firewall_4781_covers_all_profiles("Profiles: Private")
+
+
+def test_windows_firewall_udp_beacon_rule_covers_every_profile():
+    from app.mobile import lan_beacon
+    from app.mobile.wan_forward import (
+        BEACON_PORT,
+        FIREWALL_BEACON_RULE_NAME,
+        firewall_4781_covers_all_profiles,
+        firewall_4782_add_argv,
+        firewall_4782_upgrade_argv,
+    )
+
+    added = " ".join(firewall_4782_add_argv())
+    assert FIREWALL_BEACON_RULE_NAME in added
+    assert f"localport={BEACON_PORT}" in added
+    assert BEACON_PORT == lan_beacon.BEACON_PORT == 4782
+    assert "protocol=UDP" in added
+    assert "profile=any" in added
+    assert "4780" not in added
+    assert "TCP" not in added
+    assert "profile=any" in " ".join(firewall_4782_upgrade_argv())
+    assert firewall_4781_covers_all_profiles("Profiles: Any")
 
 
 def test_windows_firewall_upgrades_private_only_rule(monkeypatch):
@@ -152,6 +225,35 @@ def test_windows_firewall_upgrades_private_only_rule(monkeypatch):
     assert ensure_private_firewall_4781() == "upgraded"
     joined = [" ".join(item) for item in calls]
     assert any(" set " in row and "profile=any" in row for row in joined)
+
+
+def test_windows_firewall_companion_helper_adds_udp_beacon(monkeypatch):
+    import subprocess
+    from types import SimpleNamespace
+
+    from app.mobile.wan_forward import (
+        FIREWALL_BEACON_RULE_NAME,
+        FIREWALL_RULE_NAME,
+        ensure_companion_firewall,
+    )
+
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+        if "show" in argv:
+            return SimpleNamespace(returncode=1, stdout="", stderr="No rules match")
+        return SimpleNamespace(returncode=0, stdout="Ok.\n", stderr="")
+
+    monkeypatch.setattr("app.mobile.wan_forward.os.name", "nt")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert ensure_companion_firewall() == {"tcp_4781": "added", "udp_4782": "added"}
+    joined = [" ".join(item) for item in calls]
+    assert any(FIREWALL_RULE_NAME in row and "add" in row and "protocol=TCP" in row for row in joined)
+    assert any(
+        FIREWALL_BEACON_RULE_NAME in row and "add" in row and "protocol=UDP" in row for row in joined
+    )
+    assert any("localport=4782" in row and "profile=any" in row for row in joined)
 
 
 def test_stdlib_igd_maps_4781_and_treats_soap_fault_as_empty(monkeypatch):
@@ -188,6 +290,7 @@ def test_stdlib_igd_maps_4781_and_treats_soap_fault_as_empty(monkeypatch):
             raise AssertionError(action)
 
     monkeypatch.setattr("app.mobile.igd.httpx.Client", FakeClient)
+    monkeypatch.setattr("app.mobile.connectivity.lan_hosts", lambda: ["192.168.1.12"])
     router = StdlibIGD(
         "http://192.168.1.1:5000/upnp/control/WANIPConn1",
         "urn:schemas-upnp-org:service:WANIPConnection:1",
@@ -285,3 +388,252 @@ def test_stdlib_igd_retries_http_digest_logon(monkeypatch):
     )
     assert router.externalipaddress() == "8.8.4.4"
     assert any(isinstance(item, httpx.DigestAuth) for item in auths)
+
+
+def test_igd_password_only_logon_tries_admin_then_empty_user():
+    from types import SimpleNamespace
+
+    from app.mobile.igd import apply_igd_logon, lan_igd_request
+
+    assert igd_auth_candidates("", "") == []
+    assert igd_auth_candidates("root", "secret") == [("root", "secret")]
+    assert igd_auth_candidates("", "secret") == [("admin", "secret"), ("", "secret")]
+    router = SimpleNamespace()
+    assert apply_igd_logon(router, "", "secret") == "admin"
+    assert router.username == "admin"
+    assert router.password == "secret"
+    assert apply_igd_logon(router, "", "") == ""
+
+    auths: list[object] = []
+
+    class Client:
+        def post(self, url, auth=None, **kwargs):
+            auths.append(auth)
+            if auth == ("admin", "secret"):
+                return SimpleNamespace(status_code=401, text="no", headers={})
+            if auth == ("", "secret"):
+                return SimpleNamespace(status_code=200, text="ok", headers={})
+            return SimpleNamespace(status_code=401, text="no", headers={})
+
+    response = lan_igd_request(Client(), "post", "http://192.168.1.1/ctl", "", "secret", content=b"")
+    assert response.status_code == 200
+    assert auths == [("admin", "secret"), ("", "secret")]
+
+
+def test_stdlib_igd_internal_client_follows_igd_subnet_not_vpn(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.mobile.igd import stdlib_igd_candidate
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, url, auth=None, **kwargs):
+            return SimpleNamespace(status_code=200, text=DESC, headers={})
+
+        def post(self, url, content, headers, auth=None):
+            return SimpleNamespace(
+                status_code=200,
+                text='<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><NewExternalIPAddress>8.8.4.4</NewExternalIPAddress></s:Body></s:Envelope>',
+                headers={},
+            )
+
+    monkeypatch.setattr("app.mobile.igd.httpx.Client", FakeClient)
+    monkeypatch.setattr("app.mobile.igd.ssdp_search_locations", lambda: ["http://192.168.1.1:5000/rootDesc.xml"])
+    monkeypatch.setattr("app.api.mobile._lan_hosts", lambda: ["10.8.0.2", "192.168.1.12"])
+    monkeypatch.setattr("app.mobile.igd._udp_lan_ipv4", lambda: "10.8.0.2")
+    router, public = stdlib_igd_candidate(lanaddr="10.8.0.2")
+    assert public == "8.8.4.4"
+    assert router.lanaddr == "192.168.1.12"
+
+
+def test_ssdp_probe_plan_unicasts_home_gateway_from_lan_nic():
+    from app.mobile.igd import ssdp_probe_plan
+
+    plan = ssdp_probe_plan(
+        bind_ips=["10.8.0.2", "192.168.1.12"],
+        gateways=["10.8.0.1", "192.168.1.1"],
+    )
+    assert ("192.168.1.12", "192.168.1.1", 1900) in plan
+    assert ("10.8.0.2", "10.8.0.1", 1900) in plan
+    assert ("192.168.1.12", "239.255.255.250", 1900) in plan
+    assert ("10.8.0.2", "239.255.255.250", 1900) in plan
+    assert ("", "239.255.255.250", 1900) not in plan
+    assert ("192.168.1.12", "10.8.0.1", 1900) not in plan
+    empty = ssdp_probe_plan(bind_ips=[], gateways=["192.168.1.1"])
+    assert ("", "239.255.255.250", 1900) in empty
+    assert ("", "192.168.1.1", 1900) in empty
+
+
+def test_stdlib_igd_skips_inner_location_without_public_ip(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.mobile.igd import stdlib_igd_candidate
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, url, auth=None, **kwargs):
+            return SimpleNamespace(status_code=200, text=DESC, headers={})
+
+        def post(self, url, content, headers, auth=None):
+            if "10.0.0.1" in url:
+                body = "10.0.0.1"
+            else:
+                body = "8.8.4.4"
+            return SimpleNamespace(
+                status_code=200,
+                text=f'<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><NewExternalIPAddress>{body}</NewExternalIPAddress></s:Body></s:Envelope>',
+                headers={},
+            )
+
+    monkeypatch.setattr("app.mobile.igd.httpx.Client", FakeClient)
+    monkeypatch.setattr(
+        "app.mobile.igd.ssdp_search_locations",
+        lambda: ["http://10.0.0.1:5000/rootDesc.xml", "http://192.168.1.1:5000/rootDesc.xml"],
+    )
+    monkeypatch.setattr("app.api.mobile._lan_hosts", lambda: ["10.0.0.8", "192.168.1.12"])
+    monkeypatch.setattr("app.mobile.igd._udp_lan_ipv4", lambda: "10.0.0.8")
+    router, public = stdlib_igd_candidate()
+    assert public == "8.8.4.4"
+    assert router.lanaddr == "192.168.1.12"
+
+
+def test_ssdp_search_locations_sends_from_each_nic(monkeypatch):
+    from app.mobile.igd import ssdp_search_locations
+
+    sent: list[tuple[str, tuple]] = []
+
+    class FakeSock:
+        def __init__(self, *args, **kwargs):
+            self.bind_ip = ""
+            self.queue: list[tuple[bytes, tuple]] = []
+
+        def setsockopt(self, *args, **kwargs):
+            return None
+
+        def settimeout(self, *args, **kwargs):
+            return None
+
+        def bind(self, addr):
+            self.bind_ip = addr[0]
+            if self.bind_ip == "192.168.1.12":
+                self.queue = [(SSDP.encode(), ("192.168.1.1", 1900))]
+
+        def sendto(self, payload, dest):
+            del payload
+            sent.append((self.bind_ip, dest))
+
+        def recvfrom(self, _size):
+            if self.queue:
+                return self.queue.pop(0)
+            raise TimeoutError
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(
+        "app.mobile.igd.ssdp_probe_plan",
+        lambda: [
+            ("192.168.1.12", "239.255.255.250", 1900),
+            ("192.168.1.12", "192.168.1.1", 1900),
+            ("10.8.0.2", "239.255.255.250", 1900),
+            ("10.8.0.2", "10.8.0.1", 1900),
+        ],
+    )
+    monkeypatch.setattr("app.mobile.wan_forward.rfc1918_mapping_gateways", lambda: ["192.168.1.1", "10.8.0.1"])
+    monkeypatch.setattr("socket.socket", lambda *a, **k: FakeSock())
+    monkeypatch.setattr("select.select", lambda r, _w, _x, _t: (r, [], []))
+    found = ssdp_search_locations(timeout=0.4)
+    assert found[0] == "http://192.168.1.1:5000/rootDesc.xml"
+    dests = {item[1] for item in sent}
+    assert ("192.168.1.1", 1900) in dests
+    assert ("10.8.0.1", 1900) in dests
+    assert {item[0] for item in sent} == {"192.168.1.12", "10.8.0.2"}
+
+
+def test_router_candidate_tries_next_nic_when_inner_igd_has_no_public_ip(monkeypatch):
+    from app.mobile import connectivity
+
+    seen: list[str] = []
+
+    class Inner:
+        discoverdelay = 0
+
+        def discover(self):
+            return 1
+
+        def selectigd(self):
+            return True
+
+        def externalipaddress(self):
+            return "10.0.0.1"
+
+    class Home:
+        discoverdelay = 0
+
+        def discover(self):
+            return 1
+
+        def selectigd(self):
+            return True
+
+        def externalipaddress(self):
+            return "8.8.8.8"
+
+    def fake_client(multicastif: str = ""):
+        seen.append(multicastif)
+        return Inner() if multicastif != "192.168.1.12" else Home()
+
+    monkeypatch.setattr(connectivity, "_miniupnpc_client", fake_client)
+    monkeypatch.setattr(connectivity, "_upnp_multicast_ifs", lambda: ["10.0.0.8", "192.168.1.12"])
+    monkeypatch.setattr(
+        "app.mobile.igd.stdlib_igd_candidate",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("stdlib IGD must not run after home miniupnpc mapped")),
+    )
+    router, public = connectivity.router_candidate()
+    assert public == "8.8.8.8"
+    assert seen == ["10.0.0.8", "192.168.1.12"]
+    assert isinstance(router, Home)
+
+
+def test_router_candidate_uses_stdlib_when_miniupnpc_wan_is_private(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.mobile import connectivity
+
+    class Inner:
+        discoverdelay = 0
+
+        def discover(self):
+            return 1
+
+        def selectigd(self):
+            return True
+
+        def externalipaddress(self):
+            return "10.0.0.1"
+
+    monkeypatch.setattr(connectivity, "_miniupnpc_client", lambda multicastif="": Inner())
+    monkeypatch.setattr(connectivity, "_upnp_multicast_ifs", lambda: ["10.0.0.8"])
+    monkeypatch.setattr(
+        "app.mobile.igd.stdlib_igd_candidate",
+        lambda *a, **k: (SimpleNamespace(kind="stdlib"), "8.8.4.4"),
+    )
+    router, public = connectivity.router_candidate()
+    assert public == "8.8.4.4"
+    assert getattr(router, "kind") == "stdlib"

@@ -5,28 +5,44 @@ forwarding arbitrary upstream paths, flags, commands, or MCP tools.
 """
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import json
 import re
+import shlex
+import shutil
+import socket
 import threading
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
-import httpx
-
-from ..config import data_dir, default_allowed_directories, load_settings
+from ..config import data_dir, live_allowed_directories, load_settings
 from .hexstrike import HEXSTRIKE, audit_hexstrike
 
 _SCOPE_FILE = "hexstrike-scopes.json"
 _JOB_FILE = "hexstrike-jobs.json"
 _LOCK = threading.RLock()
-_CONTAINER_RE = re.compile(r"^[a-z0-9][a-z0-9._/-]*(?::[a-zA-Z0-9._-]+|@sha256:[a-f0-9]{64})?$")
+# Hub names (`alpine:3.20`) and LAN registries (`192.168.1.50:5000/app:tag`).
+# The repository must contain a letter so a CIDR (`192.168.1.0/24`) is not an image.
+_CONTAINER_RE = re.compile(
+    r"^(?:(?:localhost|\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)"
+    r"(?::\d{1,5})?/)?"
+    r"[a-z0-9]*[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*"
+    r"(?::[a-zA-Z0-9._-]+|@sha256:[a-f0-9]{64})?$"
+)
 _CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
 
 SCOPE_KINDS = frozenset({"private_host", "private_cidr", "local_path", "container_image", "local_infrastructure"})
+DEFAULT_LAN_SCOPE_ID = "lan"
+_RFC1918 = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+)
 
 
 @dataclass(frozen=True)
@@ -97,7 +113,7 @@ def _local_path(value: str) -> str:
         raise ValueError("local evidence paths must be absolute")
     resolved = candidate.resolve(strict=False)
     settings = load_settings()
-    roots = settings.allowed_directories or default_allowed_directories()
+    roots = live_allowed_directories(settings.allowed_directories)
     from ..config import LOCAL_NETWORK_SCOPE
     from ..tools.safety import _is_unc_path, _private_lan_unc
 
@@ -224,6 +240,1631 @@ def get_scope(scope_id: str) -> dict[str, Any]:
     return scope
 
 
+def preferred_lan_cidrs() -> list[str]:
+    """RFC1918 interface CIDRs with the default-gateway subnet first (home LAN before VPN)."""
+    cidrs = discover_private_lan_cidrs()
+    if not cidrs:
+        return []
+    gw = ""
+    try:
+        from ..mobile.wan_forward import default_gateway_ipv4
+
+        gw = default_gateway_ipv4()
+    except Exception:
+        gw = ""
+    try:
+        gateway = ipaddress.ip_address((gw or "").strip())
+    except ValueError:
+        return list(cidrs)
+    preferred: list[str] = []
+    rest: list[str] = []
+    for cidr in cidrs:
+        try:
+            network = ipaddress.ip_network(cidr, strict=False)
+        except ValueError:
+            continue
+        if gateway in network:
+            preferred.append(cidr)
+        else:
+            rest.append(cidr)
+    return preferred + rest
+
+
+def extra_lan_scope_id(cidr: str) -> str:
+    return "lan-" + str(cidr).replace(".", "-").replace("/", "-")
+
+
+def _upsert_additional_lan_scopes(cidrs: list[str]) -> None:
+    for cidr in cidrs:
+        ident = extra_lan_scope_id(cidr)
+        if ident == DEFAULT_LAN_SCOPE_ID:
+            continue
+        upsert_scope(
+            ident,
+            kind="private_cidr",
+            value=cidr,
+            label=f"This PC's LAN {cidr}",
+            attested_owned=True,
+        )
+
+
+def rfc1918_nic_addrs() -> list[tuple[str, ipaddress.IPv4Interface]]:
+    """(interface name, IPv4Interface) for every RFC1918 NIC this PC currently holds."""
+    try:
+        import psutil
+    except ImportError:
+        return []
+    found: list[tuple[str, ipaddress.IPv4Interface]] = []
+    try:
+        nics = psutil.net_if_addrs().items()
+    except Exception:
+        return []
+    for name, addrs in nics:
+        for addr in addrs:
+            if getattr(addr, "family", None) != socket.AF_INET:
+                continue
+            ip_text = (getattr(addr, "address", None) or "").split("%", 1)[0]
+            mask = getattr(addr, "netmask", None) or "255.255.255.0"
+            try:
+                interface = ipaddress.IPv4Interface(f"{ip_text}/{mask}")
+            except ValueError:
+                continue
+            if not any(interface.ip in net for net in _RFC1918):
+                continue
+            if interface.network.prefixlen < 8 or interface.network.prefixlen > 30:
+                continue
+            found.append((str(name or ""), interface))
+    return found
+
+
+def discover_private_lan_cidrs() -> list[str]:
+    """RFC1918 CIDRs from this PC's interfaces — owner LAN only, never CGNAT or public."""
+    found: list[str] = []
+    seen: set[str] = set()
+    for _name, interface in rfc1918_nic_addrs():
+        cidr = str(interface.network)
+        if cidr in seen:
+            continue
+        seen.add(cidr)
+        found.append(cidr)
+    return found
+
+
+def lan_bind_nic(target: str) -> tuple[str, str]:
+    """On-link RFC1918 (iface, source IP) for an IP, CIDR, or LAN hostname.
+
+    ``lan_scan_bind`` only accepts literal IPs. gobuster of ``http://nas.local/``
+    must still pin the home NIC after mDNS/DNS yields an RFC1918 address.
+    """
+    iface, source = lan_scan_bind(target)
+    if source:
+        return iface, source
+    host = bindable_lan_host(target) or (target or "").strip()
+    if not host:
+        return ("", "")
+    from ..mobile.wan_forward import lan_http_bind_for_url, lan_source_ipv4_for_peer
+
+    bind = lan_source_ipv4_for_peer(host)
+    if not bind:
+        bind = lan_http_bind_for_url(f"http://{host}")
+    if not bind:
+        return ("", "")
+    for name, interface in rfc1918_nic_addrs():
+        if str(interface.ip) == bind:
+            return (name, bind)
+    return ("", bind)
+
+
+def lan_nic_detail(target: str) -> tuple[str, str, str]:
+    """On-link RFC1918 (iface, source IP, broadcast) for nmblookup ``-i``/``-B``."""
+    iface, source = lan_bind_nic(target)
+    if not source:
+        return ("", "", "")
+    for name, interface in rfc1918_nic_addrs():
+        if str(interface.ip) == source:
+            return (name or iface, source, str(interface.network.broadcast_address))
+    return (iface, source, "")
+
+
+def preferred_lan_bind_target() -> str:
+    """Home-LAN CIDR for NetBIOS broadcasts that name no host (``nmblookup '*'``)."""
+    cidrs = preferred_lan_cidrs()
+    return cidrs[0] if cidrs else ""
+
+
+def lan_scan_bind(target: str) -> tuple[str, str]:
+    """This PC's (interface name, IPv4) on the same RFC1918 network as *target*.
+
+    LAN inventory must send from that NIC. A VPN default route would otherwise
+    make nmap probe the tunnel instead of the owner's LAN.
+    """
+    cleaned = (target or "").strip()
+    if not cleaned:
+        return ("", "")
+    try:
+        if "/" in cleaned:
+            needle: ipaddress.IPv4Address | ipaddress.IPv4Network = ipaddress.ip_network(
+                cleaned, strict=False
+            )
+            host_mode = False
+        else:
+            needle = ipaddress.ip_address(cleaned)
+            host_mode = True
+    except ValueError:
+        return ("", "")
+    if getattr(needle, "version", 4) != 4:
+        return ("", "")
+    matches: list[tuple[int, str, str]] = []
+    for name, interface in rfc1918_nic_addrs():
+        if host_mode:
+            if needle not in interface.network and needle != interface.ip:
+                continue
+        elif interface.ip not in needle and not needle.overlaps(interface.network):
+            continue
+        matches.append((interface.network.prefixlen, name, str(interface.ip)))
+    if not matches:
+        return ("", "")
+    matches.sort(key=lambda item: (-item[0], item[1], item[2]))
+    return (matches[0][1], matches[0][2])
+
+
+def nmap_lan_bind_args(target: str) -> list[str]:
+    """nmap argv that pins the scan to the on-link RFC1918 NIC for *target*."""
+    iface, source = lan_scan_bind(target)
+    args: list[str] = []
+    if source:
+        args.extend(["-S", source])
+    if iface:
+        args.extend(["-e", iface])
+    return args
+
+
+def hexstrike_nmap_can_bind_interface(iface: str) -> bool:
+    """HexStrike nmap uses additional_args.split(); spaced Windows NIC names cannot round-trip."""
+    text = str(iface or "")
+    return bool(text) and not any(ch.isspace() for ch in text)
+
+
+def lan_inventory_uses_host_nmap(target: str) -> bool:
+    """Prefer argv host nmap when HexStrike would split a Windows NIC name like Ethernet 2."""
+    return lan_uses_host_iface_argv(target)
+
+
+def lan_uses_host_iface_argv(target: str) -> bool:
+    """True when the on-link NIC name would be split by HexStrike additional_args.split()."""
+    iface, source = lan_bind_nic(target)
+    return bool(iface) and bool(source) and not hexstrike_nmap_can_bind_interface(iface)
+
+
+def nmap_lan_additional_args(target: str, base: str = "-T3") -> str:
+    """HexStrike nmap additional_args: timing plus source bind.
+
+    Interface names with whitespace are omitted from the string payload (HexStrike
+    splits additional_args). LAN inventory then uses host nmap argv so ``-e`` still
+    binds that NIC. ``-S`` remains on the suite string when the scan still goes
+    through HexStrike.
+    """
+    iface, source = lan_scan_bind(target)
+    parts = [str(base or "").strip()]
+    if source:
+        parts.extend(["-S", source])
+    if hexstrike_nmap_can_bind_interface(iface):
+        parts.extend(["-e", iface])
+    return " ".join(part for part in parts if part)
+
+
+def looks_like_nmap_tool(name: str) -> bool:
+    """HexStrike MCP/HTTP ids such as ``mcp_hexstrike_ai_nmap`` or ``http:nmap``."""
+    return hexstrike_tool_stem(name) == "nmap"
+
+
+def hexstrike_tool_stem(name: str) -> str:
+    """Last path/id segment: ``http:nuclei`` / ``api/tools/httpx`` / ``mcp_hexstrike_ai_naabu``."""
+    text = str(name or "").strip().lower().replace("-", "_")
+    if not text:
+        return ""
+    if "/" in text:
+        text = text.rsplit("/", 1)[-1]
+    if ":" in text:
+        text = text.rsplit(":", 1)[-1]
+    if "_" in text:
+        text = text.rsplit("_", 1)[-1]
+    return text
+
+
+def hexstrike_lan_tool_id(tool: str) -> str:
+    """Stem that keeps hyphenated LAN tools such as ``arp-scan`` (not last token ``scan``)."""
+    text = str(tool or "").strip().lower().replace("-", "_")
+    if "/" in text:
+        text = text.rsplit("/", 1)[-1]
+    if ":" in text:
+        text = text.rsplit(":", 1)[-1]
+    from ..tools.lan_snmp import SNMP_TOOL_STEMS
+
+    for ident in ("arp_scan", "enum4linux_ng", "impacket_smbclient", *sorted(SNMP_TOOL_STEMS)):
+        if text == ident or text.endswith(f"_{ident}"):
+            return ident
+    return hexstrike_tool_stem(tool)
+
+
+def looks_like_snmp_tool(name: str) -> bool:
+    """HexStrike MCP/HTTP ids such as ``mcp_hexstrike_ai_snmpwalk`` or ``http:snmpget``."""
+    from ..tools.lan_snmp import SNMP_TOOL_STEMS
+
+    return hexstrike_lan_tool_id(name) in SNMP_TOOL_STEMS
+
+
+_SMB_TOOL_STEMS = frozenset({"smbclient", "smbget", "rpcclient", "smbtree"})
+
+
+def looks_like_smb_tool(name: str) -> bool:
+    """HexStrike MCP/HTTP ids such as ``mcp_hexstrike_ai_smbclient`` or ``http:smbget``."""
+    return hexstrike_lan_tool_id(name) in _SMB_TOOL_STEMS
+
+
+_SMB_PYTHON_STEMS = frozenset(
+    {
+        "smbmap",
+        "enum4linux",
+        "enum4linux_ng",
+        "netexec",
+        "nxc",
+        "crackmapexec",
+        "cme",
+        "impacket_smbclient",
+    }
+)
+_SMB_PYTHON_BINARY = {
+    "enum4linux_ng": "enum4linux-ng",
+    "impacket_smbclient": "impacket-smbclient",
+}
+_SMB_PYTHON_FALLBACK_STEMS = ("smbmap", "netexec", "nxc", "impacket_smbclient")
+
+
+def looks_like_smb_python_tool(name: str) -> bool:
+    """HexStrike MCP/HTTP ids such as ``mcp_hexstrike_ai_smbmap`` or ``http:nxc``."""
+    return hexstrike_lan_tool_id(name) in _SMB_PYTHON_STEMS
+
+
+_HYDRA_TOOL_STEMS = frozenset({"hydra"})
+_HYDRA_SERVICE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
+
+
+def looks_like_hydra_tool(name: str) -> bool:
+    """HexStrike MCP/HTTP ids such as ``mcp_hexstrike_ai_hydra`` or ``http:thc-hydra``."""
+    return hexstrike_lan_tool_id(name) in _HYDRA_TOOL_STEMS
+
+
+_LDAP_TOOL_STEMS = frozenset(
+    {
+        "ldapsearch",
+        "ldapwhoami",
+        "ldapmodify",
+        "ldapadd",
+        "ldapdelete",
+        "ldapcompare",
+        "ldapmodrdn",
+        "ldappasswd",
+    }
+)
+
+
+def looks_like_ldap_tool(name: str) -> bool:
+    """HexStrike MCP/HTTP ids such as ``mcp_hexstrike_ai_ldapsearch`` or ``http:ldapwhoami``."""
+    return hexstrike_lan_tool_id(name) in _LDAP_TOOL_STEMS
+
+
+def looks_like_iface_host_tool(name: str) -> bool:
+    """LAN scanners whose iface flags cannot round-trip a spaced Windows NIC name."""
+    return hexstrike_lan_tool_id(name) in _IFACE_HOST_STEMS
+
+
+def nmap_target_from_payload(payload: dict[str, Any] | None) -> str:
+    row = payload if isinstance(payload, dict) else {}
+    for key in ("target", "host", "ip", "address"):
+        text = str(row.get(key) or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def container_registry_host(ref: str) -> str:
+    """Registry host in a docker/trivy image ref (``192.168.1.50:5000/app:tag``).
+
+    Official Hub names (``nginx``, ``library/nginx``) and CIDRs have no registry host.
+    """
+    text = str(ref or "").strip().strip("'\"")
+    if not text or text.startswith("-"):
+        return ""
+    lowered = text.lower()
+    if lowered.startswith("docker://"):
+        text = text[9:]
+    text = re.sub(r"@[A-Za-z0-9]+:[A-Za-z0-9+._=-]+$", "", text)
+    first, sep, rest = text.partition("/")
+    if not sep or not rest:
+        return ""
+    if rest.isdigit() and len(rest) <= 2:
+        return ""
+    if first.lower() == "localhost" or "." in first or ":" in first:
+        return first.split(":", 1)[0]
+    return ""
+
+
+def bindable_lan_host(raw: str) -> str:
+    """Hostname/CIDR HexStrike can bind: URLs and ``host:port`` become the host."""
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    if "://" in text:
+        return (urlparse(text).hostname or "").strip()
+    registry = container_registry_host(text)
+    if registry:
+        return registry
+    if text.startswith("[") and "]" in text:
+        return text[1 : text.index("]")]
+    if "/" in text:
+        return text
+    if text.count(":") == 1:
+        host, port = text.rsplit(":", 1)
+        if port.isdigit():
+            return host
+    return text
+
+
+def lan_bind_target(payload: dict[str, Any] | None) -> str:
+    row = payload if isinstance(payload, dict) else {}
+    raw = nmap_target_from_payload(row)
+    if not raw:
+        for key in ("url", "uri", "endpoint", "image", "container_image"):
+            text = str(row.get(key) or "").strip()
+            if text:
+                raw = text
+                break
+    if not raw:
+        urls = row.get("urls")
+        if isinstance(urls, str) and urls.strip():
+            raw = urls.strip()
+        elif isinstance(urls, list):
+            for item in urls:
+                text = str(item or "").strip()
+                if text:
+                    raw = text
+                    break
+    return bindable_lan_host(raw)
+
+
+_IPV4_IN_TEXT = re.compile(r"(?<![\d])(\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?)(?![\d])")
+
+
+def ipv4_or_lan_host_from_tokens(tokens: list[str]) -> str:
+    """First RFC1918-looking IPv4, CIDR, or ``.local``/``.lan`` name in argv tokens."""
+    for item in tokens:
+        text = str(item or "").strip().strip("'\"")
+        if not text:
+            continue
+        host = text.split("%", 1)[0]
+        if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?(?::\d+)?", host):
+            return host.split(":", 1)[0]
+        lowered = host.lower().rstrip(".")
+        if lowered.endswith((".local", ".lan", ".home.arpa")):
+            return host.split(":", 1)[0] if host.count(":") == 1 and host.rsplit(":", 1)[-1].isdigit() else host
+        match = _IPV4_IN_TEXT.search(text)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def _hexstrike_args_key(payload: dict[str, Any]) -> str:
+    for key in ("additional_args", "extra_args", "args"):
+        if key in payload:
+            return key
+    return "additional_args"
+
+
+def bind_hexstrike_nmap_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Pin HexStrike operator nmap of an on-link RFC1918 target to that NIC."""
+    return bind_hexstrike_lan_payload("nmap", payload)
+
+
+_PD_SOURCE_TOOLS = frozenset({"nuclei", "httpx", "naabu"})
+# Tools with no source-bind CLI: forward HTTP through the process-local LAN proxy.
+_HTTP_PROXY_FLAG = {
+    "gobuster": "--proxy",
+    "ffuf": "-x",
+    "dirsearch": "--proxy",
+    "feroxbuster": "--proxy",
+    "sqlmap": "--proxy",
+    "nikto": "-useproxy",
+    "katana": "-proxy",
+    "whatweb": "--proxy",
+    "wpscan": "--proxy",
+    "wafw00f": "--proxy",
+    "wfuzz": "-p",
+    "arjun": "--proxy",
+    "gau": "--proxy",
+    "dalfox": "--proxy",
+    "trivy": "--proxy",
+    "grype": "--proxy",
+    "ncrack": "--proxy",
+}
+_HTTP_PROXY_SKIP = {
+    "gobuster": frozenset({"-p", "--proxy"}),
+    "ffuf": frozenset({"-x"}),
+    "dirsearch": frozenset({"--proxy"}),
+    "feroxbuster": frozenset({"-p", "--proxy", "--replay-proxy"}),
+    "sqlmap": frozenset({"--proxy"}),
+    "nikto": frozenset({"-useproxy", "--useproxy"}),
+    "katana": frozenset({"-proxy", "-p"}),
+    "whatweb": frozenset({"--proxy"}),
+    "wpscan": frozenset({"--proxy"}),
+    "wafw00f": frozenset({"-p", "--proxy"}),
+    "wfuzz": frozenset({"-p"}),
+    "arjun": frozenset({"-p", "--proxy"}),
+    "gau": frozenset({"--proxy"}),
+    "dalfox": frozenset({"--proxy"}),
+    "trivy": frozenset({"--proxy"}),
+    "grype": frozenset({"--proxy", "--http-proxy"}),
+    "ncrack": frozenset({"--proxy"}),
+}
+_PROXY_HOST_PORT = frozenset({"whatweb", "wfuzz"})
+_CAPTURE_STEMS = frozenset({"tcpdump", "tshark", "dumpcap"})
+_HPING_STEMS = frozenset({"hping", "hping3"})
+_ARP_HOST_STEMS = frozenset({"arp_scan", "arping", "fping", "nmblookup"})
+_SCAN_HOST_STEMS = _PD_SOURCE_TOOLS | frozenset({"masscan", "rustscan"})
+_IFACE_HOST_STEMS = _CAPTURE_STEMS | _HPING_STEMS | _ARP_HOST_STEMS | _SCAN_HOST_STEMS
+_IFACE_HOST_BINARY = {"arp_scan": "arp-scan"}
+_IFACE_STRIP_FLAGS = {
+    "arp_scan": frozenset({"-i", "--interface", "-I", "--arpspa", "--localip"}),
+    "arping": frozenset({"-i", "--interface", "-I", "-s"}),
+    "fping": frozenset({"-i", "--interface", "-I", "-S"}),
+    "nmblookup": frozenset({"-i", "--interface", "-I", "-B", "--broadcast"}),
+    "nuclei": frozenset({"-source-ip", "-interface", "--interface"}),
+    "httpx": frozenset({"-source-ip", "-interface", "--interface"}),
+    "naabu": frozenset({"-source-ip", "-interface", "--interface"}),
+    "masscan": frozenset({"--source-ip", "-e", "-S", "--adapter-ip"}),
+    "rustscan": frozenset({"-S", "-e", "-interface", "--interface"}),
+    "smbclient": frozenset({"--option", "-s", "--configfile"}),
+    "smbget": frozenset({"--option", "-s", "--configfile"}),
+    "rpcclient": frozenset({"--option", "-s", "--configfile"}),
+    "smbtree": frozenset({"--option", "-s", "--configfile"}),
+}
+
+
+def _proxy_arg_value(stem: str, origin: str) -> str:
+    if stem not in _PROXY_HOST_PORT:
+        return origin
+    from urllib.parse import urlparse
+
+    parsed = urlparse(origin)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 80
+    return f"{host}:{port}"
+
+
+def _tokens_have_flag(tokens: list[str], names: frozenset[str]) -> bool:
+    for token in tokens:
+        key = str(token).split("=", 1)[0]
+        if key in names:
+            return True
+    return False
+
+
+def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Pin HexStrike LAN scanners to this PC's on-link RFC1918 NIC.
+
+    nmap uses ``-S``/``-e``. ProjectDiscovery nuclei/httpx/naabu use ``-source-ip``
+    / ``-interface``. masscan uses ``--source-ip``/``-e``. curl uses ``--interface``.
+    wget/wget2/axel use ``--bind-address``. rustscan forwards nmap ``-S``/``-e`` after ``--``.
+    arp-scan uses ``--arpspa``/``-I``; arping ``-s``/``-I``; fping ``-S``/``-I``.
+    iperf/iperf3 use ``-B``. mtr uses ``-a``. nmblookup uses ``-B``/``-i``.
+    tcpdump/tshark/dumpcap use ``-i``. hping3 uses ``-I``. When the Windows NIC
+    name has a space, HexStrike ``additional_args.split()`` cannot round-trip
+    ``-i``/``-I``/``-e``/``-interface``; operator/MCP host-execute argv for
+    capture, hping3, arp-scan, arping, fping, nmblookup, nuclei, httpx, naabu,
+    masscan, and rustscan when the binary is on PATH (else the suite keeps
+    source-IP flags).
+    snmpwalk has no bind flag; LAN operator/MCP calls host-execute with
+    ``SNMPCONFPATH`` ``clientaddr``.
+    smbclient/smbget/rpcclient/smbtree use ``--option=client addr=`` as one argv
+    token (HexStrike ``additional_args.split()`` cannot round-trip the space);
+    operator/MCP host-execute when the binary is on PATH.
+    hydra has no source-bind CLI; LAN operator/MCP host-execute with ``HYDRA_PROXY``
+    CONNECT through the loopback LAN proxy.
+    gobuster/ffuf/dirsearch/feroxbuster/sqlmap/nikto/katana/whatweb/wpscan/wafw00f/
+    wfuzz/arjun/gau/dalfox/trivy/grype/ncrack have no source-bind CLI; they get a loopback LAN proxy
+    flag. Public internet targets are left unchanged. Spaced Windows NIC names
+    omit ``-interface``/``-e``/``-I``/``-i`` (HexStrike ``additional_args.split()``).
+    """
+    bound = dict(payload or {})
+    stem = hexstrike_lan_tool_id(tool)
+    if stem == "nmap" or looks_like_nmap_tool(tool):
+        target = nmap_target_from_payload(bound)
+        if not lan_scan_bind(target)[1]:
+            return bound
+        existing = str(bound.get("additional_args") or "").strip() or "-T3"
+        tokens = existing.split()
+        if "-S" in tokens:
+            bound["additional_args"] = existing
+            return bound
+        bound["additional_args"] = nmap_lan_additional_args(target, base=existing)
+        return bound
+
+    target = lan_bind_target(bound)
+    if stem == "nmblookup" and not lan_bind_nic(target)[1]:
+        host = (target or "").strip()
+        if not host or host == "*":
+            target = preferred_lan_bind_target()
+        else:
+            try:
+                ipaddress.ip_address(host)
+            except ValueError:
+                if "." not in host:
+                    target = preferred_lan_bind_target()
+    if stem in _CAPTURE_STEMS and not lan_bind_nic(target)[1]:
+        maybe = ipv4_or_lan_host_from_tokens(
+            str(bound.get(_hexstrike_args_key(bound)) or "").split()
+        )
+        if maybe:
+            target = maybe
+    iface, source = lan_bind_nic(target)
+    if not source:
+        return bound
+    key = _hexstrike_args_key(bound)
+    existing = str(bound.get(key) or "").strip()
+    tokens = existing.split()
+    flags: list[str] = []
+    if stem in _PD_SOURCE_TOOLS:
+        if "-source-ip" in tokens:
+            return bound
+        flags.extend(["-source-ip", source])
+        if hexstrike_nmap_can_bind_interface(iface) and "-interface" not in tokens:
+            flags.extend(["-interface", iface])
+    elif stem == "masscan":
+        if "--source-ip" in tokens:
+            return bound
+        flags.extend(["--source-ip", source])
+        if hexstrike_nmap_can_bind_interface(iface) and "-e" not in tokens:
+            flags.extend(["-e", iface])
+    elif stem == "curl":
+        if "--interface" in tokens or "--local-addr" in tokens:
+            return bound
+        flags.extend(
+            ["--interface", iface if hexstrike_nmap_can_bind_interface(iface) else source]
+        )
+    elif stem in {"wget", "wget2", "axel"}:
+        if _tokens_have_flag(tokens, frozenset({"--bind-address", "--bindaddress"})):
+            return bound
+        flags.append(f"--bind-address={source}")
+    elif stem in {"aria2c", "aria2"}:
+        if _tokens_have_flag(tokens, frozenset({"--interface", "--all-proxy", "--http-proxy", "--ftp-proxy"})):
+            return bound
+        flags.append(f"--interface={source}")
+    elif stem == "rustscan":
+        if "-S" in tokens:
+            return bound
+        extra: list[str] = []
+        if source:
+            extra.extend(["-S", source])
+        if hexstrike_nmap_can_bind_interface(iface) and "-e" not in tokens:
+            extra.extend(["-e", iface])
+        if extra:
+            flags.extend(["--", *extra] if "--" not in tokens else extra)
+    elif stem == "arp_scan":
+        if _tokens_have_flag(tokens, frozenset({"-I", "--interface", "--arpspa", "--localip"})):
+            return bound
+        flags.extend(["--arpspa", source])
+        if hexstrike_nmap_can_bind_interface(iface) and "-I" not in tokens:
+            flags.extend(["-I", iface])
+    elif stem == "arping":
+        if _tokens_have_flag(tokens, frozenset({"-I", "-i", "-s"})):
+            return bound
+        flags.extend(["-s", source])
+        if hexstrike_nmap_can_bind_interface(iface) and "-I" not in tokens:
+            flags.extend(["-I", iface])
+    elif stem == "fping":
+        if _tokens_have_flag(tokens, frozenset({"-I", "-S"})):
+            return bound
+        flags.extend(["-S", source])
+        if hexstrike_nmap_can_bind_interface(iface) and "-I" not in tokens:
+            flags.extend(["-I", iface])
+    elif stem in {"iperf", "iperf3"}:
+        if _tokens_have_flag(tokens, frozenset({"-B", "--bind"})):
+            return bound
+        flags.extend(["-B", source])
+    elif stem == "mtr":
+        if _tokens_have_flag(tokens, frozenset({"-a", "--address"})):
+            return bound
+        flags.extend(["-a", source])
+    elif stem == "nmblookup":
+        if _tokens_have_flag(tokens, frozenset({"-i", "-B", "--broadcast"})):
+            return bound
+        _iface, _source, broadcast = lan_nic_detail(target)
+        if broadcast:
+            flags.extend(["-B", broadcast])
+        if hexstrike_nmap_can_bind_interface(iface) and "-i" not in tokens:
+            flags.extend(["-i", iface])
+        if not flags:
+            return bound
+    elif stem in _CAPTURE_STEMS:
+        if _tokens_have_flag(tokens, frozenset({"-i", "--interface"})):
+            return bound
+        if not hexstrike_nmap_can_bind_interface(iface):
+            return bound
+        flags.extend(["-i", iface])
+    elif stem in _HPING_STEMS:
+        if _tokens_have_flag(tokens, frozenset({"-I", "--interface"})):
+            return bound
+        if not hexstrike_nmap_can_bind_interface(iface):
+            return bound
+        flags.extend(["-I", iface])
+    elif stem in _HTTP_PROXY_FLAG:
+        skip = _HTTP_PROXY_SKIP.get(stem, frozenset({"--proxy", "-x"}))
+        if _tokens_have_flag(tokens, skip):
+            return bound
+        from .lan_http_proxy import ensure_lan_http_proxy
+
+        origin = ensure_lan_http_proxy()
+        flags.extend([_HTTP_PROXY_FLAG[stem], _proxy_arg_value(stem, origin)])
+    else:
+        return bound
+    bound[key] = " ".join([*tokens, *flags]).strip()
+    return bound
+
+
+_NMAP_FLAG = re.compile(r"^--?[A-Za-z0-9][A-Za-z0-9_-]*$")
+_NMAP_UNSAFE = re.compile(r"[;&|`$<>\n]")
+
+
+def _nmap_flag_tokens(raw: str) -> list[str]:
+    text = str(raw or "").strip()
+    if not text:
+        return []
+    parts = shlex.split(text, posix=True)
+    if any(_NMAP_UNSAFE.search(part) for part in parts):
+        raise ValueError("nmap arguments contain unsafe shell characters")
+    return parts
+
+
+def _strip_nmap_bind_tokens(parts: list[str]) -> list[str]:
+    out: list[str] = []
+    index = 0
+    while index < len(parts):
+        if parts[index] in {"-S", "-e"} and index + 1 < len(parts):
+            index += 2
+            continue
+        out.append(parts[index])
+        index += 1
+    return out
+
+
+def _strip_iface_tokens(parts: list[str], stem: str = "") -> list[str]:
+    skip = _IFACE_STRIP_FLAGS.get(stem, frozenset({"-i", "--interface", "-I"}))
+    out: list[str] = []
+    index = 0
+    while index < len(parts):
+        token = str(parts[index])
+        key = token.split("=", 1)[0]
+        if key in skip:
+            if "=" in token:
+                index += 1
+                continue
+            index += 2
+            continue
+        out.append(parts[index])
+        index += 1
+    return out
+
+
+def _iface_host_binary(stem: str) -> str | None:
+    name = _IFACE_HOST_BINARY.get(stem, stem)
+    found = shutil.which(name) or shutil.which(f"{name}.exe")
+    if found:
+        return found
+    folders: list[Path] = []
+    try:
+        from .hexstrike import resolve_install
+
+        root = resolve_install()
+    except Exception:
+        root = None
+    if root is not None:
+        folders.extend(
+            [
+                root / "hexstrike-env" / "Scripts",
+                root / "hexstrike-env" / "bin",
+                root / ".venv" / "Scripts",
+                root / ".venv" / "bin",
+                root,
+            ]
+        )
+    folders.append(Path.home() / "go" / "bin")
+    for folder in folders:
+        for candidate in (folder / name, folder / f"{name}.exe"):
+            try:
+                if candidate.is_file():
+                    return str(candidate)
+            except OSError:
+                continue
+    return None
+
+
+def should_host_exec_iface(tool: str, target: str) -> bool:
+    """Host argv when HexStrike would split a spaced NIC, and the binary is runnable."""
+    if not lan_uses_host_iface_argv(target):
+        return False
+    stem = hexstrike_lan_tool_id(tool)
+    if stem not in _IFACE_HOST_STEMS:
+        return False
+    if stem in _SCAN_HOST_STEMS and not _iface_host_binary(stem):
+        return False
+    return True
+
+
+def should_host_exec_nmap_scan_fallback(tool: str, target: str) -> bool:
+    """Host nmap when nuclei/httpx/naabu/masscan/rustscan is missing on a spaced NIC."""
+    if not lan_uses_host_iface_argv(target):
+        return False
+    stem = hexstrike_lan_tool_id(tool)
+    if stem not in _SCAN_HOST_STEMS:
+        return False
+    if _iface_host_binary(stem):
+        return False
+    return bool(shutil.which("nmap") or shutil.which("nmap.exe"))
+
+
+def should_fail_closed_scan_host(tool: str, target: str) -> bool:
+    """Spaced NIC scan when neither the scanner nor nmap can host-bind (suite would leak VPN)."""
+    if not lan_uses_host_iface_argv(target):
+        return False
+    stem = hexstrike_lan_tool_id(tool)
+    if stem not in _SCAN_HOST_STEMS:
+        return False
+    if _iface_host_binary(stem):
+        return False
+    return not (shutil.which("nmap") or shutil.which("nmap.exe"))
+
+
+def scan_host_unavailable_error(tool: str) -> str:
+    stem = hexstrike_lan_tool_id(tool) or "scanner"
+    return (
+        f"{stem} is not on PATH and nmap is not on PATH. "
+        "HexStrike cannot bind this Windows NIC name through additional_args.split(). "
+        "Install nmap or the scanner to scan the private LAN."
+    )
+
+
+def nmap_scan_fallback_payload(payload: dict[str, Any] | None, target: str) -> dict[str, Any]:
+    """nmap argv for a LAN URL/host without forwarding nuclei template flags."""
+    row = payload if isinstance(payload, dict) else {}
+    host = bindable_lan_host(target) or (target or "").strip()
+    ports = str(row.get("ports") or "").strip()
+    for key in ("url", "uri", "endpoint", "target", "host", "ip", "address"):
+        text = str(row.get(key) or "").strip()
+        if "://" not in text:
+            continue
+        parsed = urlparse(text)
+        if parsed.hostname:
+            host = parsed.hostname
+        if parsed.port and not ports:
+            ports = str(parsed.port)
+        break
+    out: dict[str, Any] = {"target": host, "scan_type": "-sV", "additional_args": ""}
+    if ports:
+        out["ports"] = ports
+    return out
+
+
+def _iface_host_bind_flags(stem: str, target: str, iface: str, source: str) -> list[str]:
+    if stem in _PD_SOURCE_TOOLS:
+        return ["-source-ip", source, "-interface", iface]
+    if stem == "masscan":
+        return ["--source-ip", source, "-e", iface]
+    if stem == "rustscan":
+        return ["-S", source, "-e", iface]
+    if stem == "arp_scan":
+        return ["--arpspa", source, "-I", iface]
+    if stem == "arping":
+        return ["-s", source, "-I", iface]
+    if stem == "fping":
+        return ["-S", source, "-I", iface]
+    if stem == "nmblookup":
+        _iface, _source, broadcast = lan_nic_detail(target)
+        flags: list[str] = []
+        if broadcast:
+            flags.extend(["-B", broadcast])
+        flags.extend(["-i", iface])
+        return flags
+    if stem in _HPING_STEMS:
+        return ["-I", iface]
+    return ["-i", iface]
+
+
+def _iface_cli_target(payload: dict[str, Any] | None, stem: str) -> str:
+    row = payload if isinstance(payload, dict) else {}
+    if stem in _PD_SOURCE_TOOLS:
+        for key in ("url", "uri", "endpoint", "target", "host", "ip", "address"):
+            text = str(row.get(key) or "").strip()
+            if text:
+                return text
+    return _iface_lan_target(row)
+
+
+async def _host_nmap_lan_scan(payload: dict[str, Any]) -> dict[str, Any]:
+    """Host nmap argv for a private LAN target, including spaced Windows NIC names."""
+    cleaned = _require_private_lan_target(nmap_target_from_payload(payload) or str(payload.get("target") or ""))
+    binary = shutil.which("nmap")
+    if not binary:
+        raise RuntimeError(
+            "HexStrike cannot bind this Windows NIC name through additional_args.split(), "
+            "and nmap is not on PATH. Install nmap to scan the private LAN."
+        )
+    scan_tokens = _nmap_flag_tokens(str(payload.get("scan_type") or "-sn"))
+    if scan_tokens and not all(_NMAP_FLAG.fullmatch(token) for token in scan_tokens):
+        raise ValueError("nmap scan_type must be nmap flags")
+    extra = _strip_nmap_bind_tokens(_nmap_flag_tokens(str(payload.get("additional_args") or "")))
+    argv = [binary, *scan_tokens, *extra, *nmap_lan_bind_args(cleaned)]
+    ports = str(payload.get("ports") or "").strip()
+    if ports:
+        if _NMAP_UNSAFE.search(ports) or not re.fullmatch(r"[0-9,\-T:]+", ports):
+            raise ValueError("nmap ports are invalid")
+        argv.extend(["-p", ports])
+    argv.extend(["--", cleaned])
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
+    except TimeoutError as exc:
+        proc.kill()
+        await proc.wait()
+        raise RuntimeError("host nmap LAN scan timed out") from exc
+    text = (stdout or b"").decode("utf-8", errors="replace")
+    err = (stderr or b"").decode("utf-8", errors="replace")
+    if proc.returncode not in {0, 1}:
+        raise RuntimeError((err or text or "nmap failed").strip()[:400])
+    return {
+        "source": "host-nmap",
+        "target": cleaned,
+        "hosts": parse_nmap_ping_hosts(text),
+        "stdout": text[:4000],
+    }
+
+
+async def execute_operator_nmap(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Operator ``api/tools/nmap``: bind the home LAN NIC; host argv when HexStrike would split ``-e``."""
+    bound = bind_hexstrike_nmap_payload(payload)
+    target = nmap_target_from_payload(bound)
+    if lan_inventory_uses_host_nmap(target):
+        return await _host_nmap_lan_scan({**bound, "target": target})
+    return await HEXSTRIKE.post_operator("api/tools/nmap", bound)
+
+
+def snmp_host_argv(tool: str, payload: dict[str, Any] | None) -> list[str]:
+    """Host snmpwalk argv for an on-link RFC1918 peer (HexStrike cannot set SNMPCONFPATH)."""
+    from ..tools.lan_snmp import SNMP_TOOL_STEMS
+
+    row = payload if isinstance(payload, dict) else {}
+    stem = hexstrike_lan_tool_id(tool)
+    if stem not in SNMP_TOOL_STEMS:
+        stem = "snmpwalk"
+    binary = shutil.which(stem) or shutil.which(f"{stem}.exe")
+    if not binary:
+        raise RuntimeError(
+            f"{stem} is not on PATH. Install net-snmp so HexStrike LAN SNMP can bind the home NIC."
+        )
+    target = lan_bind_target(row) or nmap_target_from_payload(row)
+    if not lan_bind_nic(target)[1]:
+        raise ValueError("snmp LAN target is required")
+    extra = _nmap_flag_tokens(str(row.get("additional_args") or row.get("extra_args") or row.get("args") or ""))
+    community = str(row.get("community") or "").strip()
+    if community:
+        if not re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", community):
+            raise ValueError("snmp community is invalid")
+        if "-c" not in extra:
+            extra = [*extra, "-c", community]
+    oid = str(row.get("oid") or row.get("object") or "").strip()
+    if oid and not re.fullmatch(r"[A-Za-z0-9._:-]+", oid):
+        raise ValueError("snmp oid is invalid")
+    argv = [binary, *extra]
+    if target not in extra:
+        argv.append(target)
+    if oid:
+        argv.append(oid)
+    return argv
+
+
+async def _host_snmp_lan(tool: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Host net-snmp of an on-link RFC1918 peer with ``clientaddr`` on the home NIC."""
+    from ..tools.lan_snmp import snmp_lan_child_env
+
+    argv = snmp_host_argv(tool, payload)
+    env = snmp_lan_child_env(argv)
+    target = lan_bind_target(payload) or nmap_target_from_payload(payload)
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
+    except TimeoutError as exc:
+        proc.kill()
+        await proc.wait()
+        raise RuntimeError("host snmp LAN walk timed out") from exc
+    text = (stdout or b"").decode("utf-8", errors="replace")
+    err = (stderr or b"").decode("utf-8", errors="replace")
+    if proc.returncode not in {0, 1}:
+        raise RuntimeError((err or text or "snmp failed").strip()[:400])
+    return {
+        "source": "host-snmp",
+        "target": target,
+        "stdout": text[:4000],
+        "stderr": err[:800],
+    }
+
+
+async def execute_operator_snmp(path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Operator snmpwalk of on-link RFC1918: host argv + SNMPCONFPATH, not the suite env."""
+    bound = dict(payload or {})
+    target = lan_bind_target(bound) or nmap_target_from_payload(bound)
+    if not lan_bind_nic(target)[1]:
+        from .hexstrike import normalize_upstream_path
+
+        return await HEXSTRIKE.post_operator(normalize_upstream_path(path), bound)
+    return await _host_snmp_lan(path, bound)
+
+
+def _smb_host_binary(stem: str) -> str | None:
+    name = stem if stem in _SMB_TOOL_STEMS else "smbclient"
+    return shutil.which(name) or shutil.which(f"{name}.exe")
+
+
+def _smb_payload_host(payload: dict[str, Any] | None) -> str:
+    row = payload if isinstance(payload, dict) else {}
+    target = lan_bind_target(row) or nmap_target_from_payload(row)
+    if target:
+        return target
+    for key in ("share", "url"):
+        raw = str(row.get(key) or "").strip()
+        if not raw:
+            continue
+        if raw.startswith("//"):
+            return raw[2:].split("/", 1)[0].split("\\", 1)[0]
+        if raw.startswith("\\\\"):
+            return raw[2:].split("\\", 1)[0].split("/", 1)[0]
+        return bindable_lan_host(raw) or raw
+    return ""
+
+
+def smb_host_argv(tool: str, payload: dict[str, Any] | None) -> list[str]:
+    """Host smbclient argv with ``client addr`` as one token (HexStrike would split it)."""
+    row = payload if isinstance(payload, dict) else {}
+    stem = hexstrike_lan_tool_id(tool)
+    if stem not in _SMB_TOOL_STEMS:
+        stem = "smbclient"
+    binary = _smb_host_binary(stem)
+    if not binary:
+        raise RuntimeError(
+            f"{stem} is not on PATH. Install Samba so HexStrike LAN SMB can bind the home NIC."
+        )
+    target = _smb_payload_host(row)
+    if stem == "smbtree" and not lan_bind_nic(target)[1]:
+        target = preferred_lan_bind_target()
+    _iface, source = lan_bind_nic(target)
+    if not source:
+        raise ValueError("smb LAN target is required")
+    extra = _strip_iface_tokens(
+        _nmap_flag_tokens(str(row.get("additional_args") or row.get("extra_args") or row.get("args") or "")),
+        stem=stem,
+    )
+    blob = " ".join(extra)
+    display = ""
+    for key in ("url", "share", "target", "host", "ip", "address"):
+        text = str(row.get(key) or "").strip()
+        if text:
+            display = text
+            break
+    if not display:
+        display = target
+    if display and display not in blob and stem != "smbtree":
+        inserted = False
+        for flag in ("-L", "--list"):
+            if flag in extra:
+                idx = extra.index(flag)
+                nxt = extra[idx + 1] if idx + 1 < len(extra) else ""
+                if not nxt or str(nxt).startswith("-"):
+                    extra = extra[: idx + 1] + [display] + extra[idx + 1 :]
+                    inserted = True
+                break
+        if not inserted:
+            extra = [*extra, display]
+    return [binary, f"--option=client addr={source}", *extra]
+
+
+async def _host_smb_lan(tool: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Host Samba of an on-link RFC1918 NAS with ``client addr`` on the home NIC."""
+    argv = smb_host_argv(tool, payload)
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
+    except TimeoutError as exc:
+        proc.kill()
+        await proc.wait()
+        raise RuntimeError("host smb LAN call timed out") from exc
+    text = (stdout or b"").decode("utf-8", errors="replace")
+    err = (stderr or b"").decode("utf-8", errors="replace")
+    if proc.returncode not in {0, 1}:
+        raise RuntimeError((err or text or "smb failed").strip()[:400])
+    return {
+        "source": "host-smb",
+        "target": _smb_payload_host(payload),
+        "stdout": text[:4000],
+        "stderr": err[:800],
+    }
+
+
+async def execute_operator_smb(path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Operator smbclient of on-link RFC1918: host argv so ``client addr`` stays one token.
+
+    When Samba is missing, ``impacket-smbclient`` / ``smbmap`` / ``nxc`` run with
+    sitecustomize instead of the HexStrike suite (which would follow the VPN).
+    """
+    bound = dict(payload or {})
+    stem = hexstrike_lan_tool_id(path)
+    target = _smb_payload_host(bound)
+    if stem == "smbtree" and not lan_bind_nic(target)[1]:
+        target = preferred_lan_bind_target()
+        bound = {**bound, "target": target}
+    from .hexstrike import normalize_upstream_path
+
+    cleaned = path
+    try:
+        cleaned = normalize_upstream_path(path)
+    except ValueError:
+        cleaned = f"api/tools/{stem}"
+    if not str(cleaned).startswith("api/tools/"):
+        cleaned = f"api/tools/{stem}"
+    if not lan_bind_nic(target)[1]:
+        return await HEXSTRIKE.post_operator(cleaned, bound)
+    if _smb_host_binary(stem):
+        return await _host_smb_lan(path, bound)
+    fallback = _smb_lan_python_fallback_stem()
+    if fallback:
+        return await _host_smb_python_lan(fallback, bound)
+    raise RuntimeError(
+        f"{stem} is not on PATH (and no smbmap/netexec/impacket-smbclient fallback). "
+        "Install Samba or a Python SMB client so HexStrike LAN SMB can bind the home NIC."
+    )
+
+
+def _hydra_host_binary() -> str | None:
+    return (
+        shutil.which("hydra")
+        or shutil.which("hydra.exe")
+        or shutil.which("thc-hydra")
+        or shutil.which("thc-hydra.exe")
+    )
+
+
+def hydra_host_argv(tool: str, payload: dict[str, Any] | None) -> list[str]:
+    """Host hydra argv for an on-link RFC1918 peer (HexStrike cannot set HYDRA_PROXY)."""
+    row = payload if isinstance(payload, dict) else {}
+    binary = _hydra_host_binary()
+    if not binary:
+        raise RuntimeError(
+            "hydra is not on PATH. Install THC-Hydra so HexStrike LAN hydra can bind the home NIC."
+        )
+    target = lan_bind_target(row) or nmap_target_from_payload(row)
+    if not lan_bind_nic(target)[1]:
+        raise ValueError("hydra LAN target is required")
+    extra = _nmap_flag_tokens(
+        str(row.get("additional_args") or row.get("extra_args") or row.get("args") or "")
+    )
+    blob = " ".join(extra)
+    display = ""
+    for key in ("url", "target", "host", "ip", "address"):
+        text = str(row.get(key) or "").strip()
+        if text:
+            display = text
+            break
+    if not display:
+        display = target
+    argv = [binary, *extra]
+    if display and display not in extra and display not in blob:
+        argv.append(display)
+    service = str(row.get("service") or row.get("module") or "").strip()
+    if service and _HYDRA_SERVICE.fullmatch(service) and service not in extra:
+        argv.append(service)
+    return argv
+
+
+async def _host_hydra_lan(tool: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Host hydra of an on-link RFC1918 peer with HYDRA_PROXY on the LAN CONNECT proxy."""
+    from ..tools.owner_paths import hydra_lan_child_env
+
+    argv = hydra_host_argv(tool, payload)
+    env = hydra_lan_child_env()
+    target = lan_bind_target(payload) or nmap_target_from_payload(payload)
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
+    except TimeoutError as exc:
+        proc.kill()
+        await proc.wait()
+        raise RuntimeError("host hydra LAN probe timed out") from exc
+    text = (stdout or b"").decode("utf-8", errors="replace")
+    err = (stderr or b"").decode("utf-8", errors="replace")
+    if proc.returncode not in {0, 1}:
+        raise RuntimeError((err or text or "hydra failed").strip()[:400])
+    return {
+        "source": "host-hydra",
+        "target": target,
+        "stdout": text[:4000],
+        "stderr": err[:800],
+    }
+
+
+async def execute_operator_hydra(path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Operator hydra of on-link RFC1918: host argv + HYDRA_PROXY, not the suite env."""
+    bound = dict(payload or {})
+    target = lan_bind_target(bound) or nmap_target_from_payload(bound)
+    from .hexstrike import normalize_upstream_path
+
+    cleaned = path
+    try:
+        cleaned = normalize_upstream_path(path)
+    except ValueError:
+        cleaned = "api/tools/hydra"
+    if not str(cleaned).startswith("api/tools/"):
+        cleaned = "api/tools/hydra"
+    if not lan_bind_nic(target)[1]:
+        return await HEXSTRIKE.post_operator(cleaned, bound)
+    if not _hydra_host_binary():
+        raise RuntimeError(
+            "hydra is not on PATH. Install THC-Hydra so HexStrike LAN hydra can bind the home NIC."
+        )
+    return await _host_hydra_lan(path, bound)
+
+
+def _ldap_host_binary(stem: str) -> str | None:
+    name = str(stem or "ldapsearch").replace("_", "-")
+    return shutil.which(name) or shutil.which(f"{name}.exe")
+
+
+def _ldap_payload_host_port(payload: dict[str, Any] | None) -> tuple[str, int]:
+    """Host/port for OpenLDAP clients: ``-H ldap(s)://``, ``-h``/``-p``, or payload target."""
+    row = payload if isinstance(payload, dict) else {}
+    extra = _nmap_flag_tokens(
+        str(row.get("additional_args") or row.get("extra_args") or row.get("args") or "")
+    )
+    host = ""
+    port = 389
+    have_uri = False
+    index = 0
+    while index < len(extra):
+        tok = str(extra[index])
+        if tok == "-H" and index + 1 < len(extra):
+            raw = str(extra[index + 1] or "").strip()
+            lowered = raw.lower()
+            parsed = urlparse(raw)
+            have_uri = True
+            if parsed.hostname and not lowered.startswith("ldapi:"):
+                host = parsed.hostname
+                if parsed.port:
+                    port = int(parsed.port)
+                elif lowered.startswith("ldaps:"):
+                    port = 636
+            index += 2
+            continue
+        if tok == "-h" and index + 1 < len(extra):
+            if not host:
+                host = str(extra[index + 1] or "").strip()
+            index += 2
+            continue
+        if tok == "-p" and index + 1 < len(extra):
+            text = str(extra[index + 1] or "").strip()
+            if text.isdigit():
+                port = int(text)
+            index += 2
+            continue
+        index += 1
+    if not host:
+        host = lan_bind_target(row) or nmap_target_from_payload(row)
+    if not have_uri:
+        for key in ("url", "uri", "endpoint"):
+            text = str(row.get(key) or "").strip()
+            lowered = text.lower()
+            if not lowered.startswith(("ldap://", "ldaps://")):
+                continue
+            parsed = urlparse(text)
+            if parsed.hostname:
+                host = host or parsed.hostname
+                if parsed.port:
+                    port = int(parsed.port)
+                elif lowered.startswith("ldaps:") and port == 389:
+                    port = 636
+            break
+    return host, port
+
+
+def ldap_host_argv(tool: str, payload: dict[str, Any] | None) -> list[str]:
+    """Host ldapsearch argv via the loopback TCP helper (no OpenLDAP source-bind flag)."""
+    from ..tools.lan_tcp_bind import wrap_argv
+
+    row = payload if isinstance(payload, dict) else {}
+    stem = hexstrike_lan_tool_id(tool)
+    if stem not in _LDAP_TOOL_STEMS:
+        stem = "ldapsearch"
+    binary = _ldap_host_binary(stem)
+    if not binary:
+        raise RuntimeError(
+            f"{stem} is not on PATH. Install OpenLDAP clients so HexStrike LAN LDAP can bind the home NIC."
+        )
+    host, port = _ldap_payload_host_port(row)
+    _iface, source = lan_bind_nic(host)
+    if not source:
+        raise ValueError("ldap LAN target is required")
+    extra = _nmap_flag_tokens(
+        str(row.get("additional_args") or row.get("extra_args") or row.get("args") or "")
+    )
+    blob = " ".join(extra)
+    display = ""
+    for key in ("url", "uri", "target", "host", "ip", "address"):
+        text = str(row.get(key) or "").strip()
+        if text:
+            display = text
+            break
+    if not display:
+        display = host
+    child = [binary, *extra]
+    if display and display not in extra and display not in blob:
+        if "-h" not in extra and "-H" not in extra:
+            if str(display).lower().startswith(("ldap://", "ldaps://")):
+                child.extend(["-H", display])
+            else:
+                child.extend(["-h", bindable_lan_host(display) or host])
+    return wrap_argv("ldap", source, host, port, child)
+
+
+async def _host_ldap_lan(tool: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Host ldapsearch of on-link RFC1918 with bind(SOURCE) via the loopback helper."""
+    from ..tools.owner_paths import direct_child_env
+
+    argv = ldap_host_argv(tool, payload)
+    env = direct_child_env()
+    target = lan_bind_target(payload) or nmap_target_from_payload(payload)
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
+    except TimeoutError as exc:
+        proc.kill()
+        await proc.wait()
+        raise RuntimeError("host LDAP LAN probe timed out") from exc
+    text = (stdout or b"").decode("utf-8", errors="replace")
+    err = (stderr or b"").decode("utf-8", errors="replace")
+    if proc.returncode not in {0, 1}:
+        raise RuntimeError((err or text or "ldapsearch failed").strip()[:400])
+    return {
+        "source": "host-ldap",
+        "target": target,
+        "stdout": text[:4000],
+        "stderr": err[:800],
+    }
+
+
+async def execute_operator_ldap(path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Operator ldapsearch of on-link RFC1918: host argv + bind helper, not the suite VPN."""
+    bound = dict(payload or {})
+    stem = hexstrike_lan_tool_id(path) or "ldapsearch"
+    if stem not in _LDAP_TOOL_STEMS:
+        stem = "ldapsearch"
+    target = lan_bind_target(bound) or nmap_target_from_payload(bound)
+    from .hexstrike import normalize_upstream_path
+
+    cleaned = path
+    try:
+        cleaned = normalize_upstream_path(path)
+    except ValueError:
+        cleaned = f"api/tools/{stem}"
+    if not str(cleaned).startswith("api/tools/"):
+        cleaned = f"api/tools/{stem}"
+    if not lan_bind_nic(target)[1]:
+        return await HEXSTRIKE.post_operator(cleaned, bound)
+    if not _ldap_host_binary(stem):
+        raise RuntimeError(
+            f"{stem} is not on PATH. Install OpenLDAP clients so HexStrike LAN LDAP can bind the home NIC."
+        )
+    return await _host_ldap_lan(path, bound)
+
+
+def _smb_python_binary(stem: str) -> str | None:
+    name = _SMB_PYTHON_BINARY.get(stem, stem)
+    return shutil.which(name) or shutil.which(f"{name}.exe")
+
+
+def _smb_lan_python_fallback_stem() -> str | None:
+    """When Samba smbclient is missing, bind LAN via sitecustomize Python SMB tools."""
+    for stem in _SMB_PYTHON_FALLBACK_STEMS:
+        if _smb_python_binary(stem):
+            return stem
+    return None
+
+
+def smb_python_host_argv(tool: str, payload: dict[str, Any] | None) -> list[str]:
+    """Host smbmap/netexec argv so sitecustomize can bind LAN sockets."""
+    row = payload if isinstance(payload, dict) else {}
+    stem = hexstrike_lan_tool_id(tool)
+    if stem not in _SMB_PYTHON_STEMS:
+        stem = "smbmap"
+    binary = _smb_python_binary(stem)
+    if not binary:
+        raise RuntimeError(
+            f"{stem} is not on PATH. Install it so HexStrike LAN SMB Python tools can bind the home NIC."
+        )
+    target = lan_bind_target(row) or nmap_target_from_payload(row)
+    if not lan_bind_nic(target)[1]:
+        raise ValueError("smb python LAN target is required")
+    extra = _nmap_flag_tokens(
+        str(row.get("additional_args") or row.get("extra_args") or row.get("args") or "")
+    )
+    blob = " ".join(extra)
+    display = ""
+    for key in ("url", "share", "target", "host", "ip", "address"):
+        text = str(row.get(key) or "").strip()
+        if text:
+            display = text
+            break
+    if not display:
+        display = target
+    argv = [binary, *extra]
+    if display and display not in extra and display not in blob:
+        if stem == "smbmap":
+            argv.extend(["-H", display])
+        elif stem in {"enum4linux", "enum4linux_ng"}:
+            argv.extend(["-t", display])
+        elif stem in {"netexec", "nxc", "crackmapexec", "cme"}:
+            proto = str(row.get("service") or row.get("protocol") or row.get("module") or "smb").strip() or "smb"
+            if extra and extra[0] in {"smb", "winrm", "ldap", "ftp", "rdp", "vnc", "ssh", "wmi"}:
+                argv.insert(2, display)
+            else:
+                argv.extend([proto, display])
+        else:
+            argv.append(display)
+    return argv
+
+
+async def _host_smb_python_lan(tool: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Host smbmap/netexec of on-link RFC1918 with sitecustomize (no HTTP_PROXY)."""
+    from ..tools.owner_paths import direct_child_env, with_lan_socket_pythonpath
+
+    argv = smb_python_host_argv(tool, payload)
+    env = with_lan_socket_pythonpath(direct_child_env())
+    target = lan_bind_target(payload) or nmap_target_from_payload(payload)
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
+    except TimeoutError as exc:
+        proc.kill()
+        await proc.wait()
+        raise RuntimeError("host LAN SMB python tool timed out") from exc
+    text = (stdout or b"").decode("utf-8", errors="replace")
+    err = (stderr or b"").decode("utf-8", errors="replace")
+    if proc.returncode not in {0, 1}:
+        raise RuntimeError((err or text or "smb python tool failed").strip()[:400])
+    return {
+        "source": "host-smb-python",
+        "target": target,
+        "stdout": text[:4000],
+        "stderr": err[:800],
+    }
+
+
+async def execute_operator_smb_python(path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Operator smbmap/netexec of on-link RFC1918: host argv + sitecustomize, not leftover VPN HTTP_PROXY."""
+    bound = dict(payload or {})
+    stem = hexstrike_lan_tool_id(path)
+    target = lan_bind_target(bound) or nmap_target_from_payload(bound)
+    from .hexstrike import normalize_upstream_path
+
+    cleaned = path
+    try:
+        cleaned = normalize_upstream_path(path)
+    except ValueError:
+        cleaned = f"api/tools/{stem}"
+    if not str(cleaned).startswith("api/tools/"):
+        cleaned = f"api/tools/{stem}"
+    if not lan_bind_nic(target)[1]:
+        return await HEXSTRIKE.post_operator(cleaned, bound)
+    if _smb_python_binary(stem):
+        return await _host_smb_python_lan(path, bound)
+    fallback = _smb_lan_python_fallback_stem()
+    if fallback:
+        return await _host_smb_python_lan(fallback, bound)
+    raise RuntimeError(
+        f"{stem} is not on PATH (and no smbmap/netexec/impacket-smbclient fallback). "
+        "Install a Python SMB client so HexStrike LAN SMB can bind the home NIC."
+    )
+
+
+def _iface_lan_target(payload: dict[str, Any] | None) -> str:
+    row = payload if isinstance(payload, dict) else {}
+    target = lan_bind_target(row) or nmap_target_from_payload(row)
+    if lan_bind_nic(target)[1]:
+        return target
+    extra = str(row.get(_hexstrike_args_key(row)) or "")
+    return ipv4_or_lan_host_from_tokens(extra.split())
+
+
+def iface_host_argv(tool: str, payload: dict[str, Any] | None) -> list[str]:
+    """Host LAN argv that can pass a spaced Windows NIC name as one token."""
+    row = payload if isinstance(payload, dict) else {}
+    stem = hexstrike_lan_tool_id(tool)
+    if stem not in _IFACE_HOST_STEMS:
+        stem = "tcpdump"
+    binary = _iface_host_binary(stem)
+    if not binary:
+        display = _IFACE_HOST_BINARY.get(stem, stem)
+        raise RuntimeError(
+            f"{display} is not on PATH. Install it so HexStrike can bind a Windows NIC name "
+            "that additional_args.split() would break."
+        )
+    target = _iface_lan_target(row)
+    iface, source = lan_bind_nic(target)
+    if not iface or not source:
+        raise ValueError("LAN capture/hping target is required")
+    extra = _strip_iface_tokens(
+        _nmap_flag_tokens(str(row.get("additional_args") or row.get("extra_args") or row.get("args") or "")),
+        stem=stem,
+    )
+    bind = _iface_host_bind_flags(stem, target, iface, source)
+    display_target = _iface_cli_target(row, stem)
+    blob = " ".join(extra)
+    if stem == "rustscan":
+        argv = [binary, *extra]
+        if "--" not in extra:
+            argv.append("--")
+        argv.extend(bind)
+        if display_target and display_target not in blob and "-a" not in extra:
+            argv[1:1] = ["-a", display_target]
+        return argv
+    argv = [binary, *bind, *extra]
+    if display_target and display_target not in blob:
+        if stem in _CAPTURE_STEMS:
+            argv.extend(["net" if "/" in display_target else "host", display_target])
+        elif stem in _PD_SOURCE_TOOLS:
+            flag = "-host" if stem == "naabu" else "-u"
+            if flag not in extra and "-target" not in extra:
+                argv.extend([flag, display_target])
+        else:
+            argv.append(display_target)
+    return argv
+
+
+async def _host_iface_lan(tool: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Host argv for LAN iface tools when HexStrike would split a spaced NIC name."""
+    argv = iface_host_argv(tool, payload)
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
+    except TimeoutError as exc:
+        proc.kill()
+        await proc.wait()
+        raise RuntimeError("host LAN capture timed out") from exc
+    text = (stdout or b"").decode("utf-8", errors="replace")
+    err = (stderr or b"").decode("utf-8", errors="replace")
+    if proc.returncode not in {0, 1}:
+        raise RuntimeError((err or text or "capture failed").strip()[:400])
+    return {
+        "source": "host-iface",
+        "target": _iface_lan_target(payload),
+        "stdout": text[:4000],
+        "stderr": err[:800],
+    }
+
+
+async def execute_operator_iface_tool(path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Operator iface tools: host argv when HexStrike would split ``-i``/``-I``/``-e``.
+
+    When nuclei/httpx/naabu/masscan/rustscan is missing, host nmap still binds a
+    spaced Windows NIC name instead of posting to the suite (VPN). When both the
+    scanner and nmap are missing, fail closed — HexStrike ``additional_args.split()``
+    cannot round-trip the NIC name.
+    """
+    bound = bind_hexstrike_lan_payload(path, payload)
+    target = _iface_lan_target(bound)
+    if should_host_exec_iface(path, target):
+        return await _host_iface_lan(path, bound)
+    if should_host_exec_nmap_scan_fallback(path, target):
+        return await _host_nmap_lan_scan(nmap_scan_fallback_payload(bound, target))
+    if should_fail_closed_scan_host(path, target):
+        raise RuntimeError(scan_host_unavailable_error(path))
+    from .hexstrike import normalize_upstream_path
+
+    cleaned = path
+    try:
+        cleaned = normalize_upstream_path(path)
+    except ValueError:
+        cleaned = f"api/tools/{hexstrike_lan_tool_id(path)}"
+    if not str(cleaned).startswith("api/tools/"):
+        cleaned = f"api/tools/{hexstrike_lan_tool_id(path)}"
+    return await HEXSTRIKE.post_operator(cleaned, bound)
+
+
+def ensure_default_lan_scope() -> dict[str, Any]:
+    existing = next(
+        (
+            row
+            for row in list_scopes()
+            if row.get("id") == DEFAULT_LAN_SCOPE_ID and row.get("enabled", True)
+        ),
+        None,
+    )
+    cidrs = preferred_lan_cidrs()
+    if existing and existing.get("kind") in {"private_host", "private_cidr"}:
+        value = str(existing.get("value") or "")
+        kind = str(existing.get("kind") or "")
+        try:
+            normalize_scope(kind, value)
+        except ValueError:
+            existing = None
+        else:
+            if kind == "private_cidr" and (not cidrs or value != cidrs[0]):
+                existing = None
+            elif existing is not None:
+                _upsert_additional_lan_scopes(cidrs[1:])
+                return existing
+    if not cidrs:
+        raise ValueError("No RFC1918 interface found; register a private LAN scope first")
+    row = upsert_scope(
+        DEFAULT_LAN_SCOPE_ID,
+        kind="private_cidr",
+        value=cidrs[0],
+        label="This PC's LAN",
+        attested_owned=True,
+    )
+    _upsert_additional_lan_scopes(cidrs[1:])
+    return row
+
+
+def resolve_lan_inventory_scope(scope_id: str) -> str:
+    ident = (scope_id or "").strip()
+    if not ident or ident in {"default", "local"}:
+        return str(ensure_default_lan_scope()["id"])
+    try:
+        get_scope(ident)
+        return ident
+    except KeyError:
+        if ident == DEFAULT_LAN_SCOPE_ID:
+            return str(ensure_default_lan_scope()["id"])
+        raise
+
+
 def list_jobs() -> list[dict[str, Any]]:
     with _LOCK:
         return _read(_JOB_FILE, "jobs")[-100:]
@@ -239,9 +1880,22 @@ def _save_job(job: dict[str, Any]) -> None:
 def _payload(capability: DefensiveCapability, scope: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
     value = str(scope["value"])
     if capability.id == "lan_inventory":
-        return {"target": value, "scan_type": "-sn", "ports": "", "additional_args": "-T3", "use_recovery": False}
+        return {
+            "target": value,
+            "scan_type": "-sn",
+            "ports": "",
+            "additional_args": nmap_lan_additional_args(value),
+            "use_recovery": False,
+        }
     if capability.id == "container_scan":
-        return {"target": value, "scan_type": "fs" if scope.get("kind") == "local_path" else "image", "output_format": "json"}
+        payload = {
+            "target": value,
+            "scan_type": "fs" if scope.get("kind") == "local_path" else "image",
+            "output_format": "json",
+        }
+        if payload["scan_type"] == "image":
+            return bind_hexstrike_lan_payload("trivy", payload)
+        return payload
     if capability.id == "iac_scan":
         return {"directory": value, "framework": "all", "output_format": "json"}
     if capability.id == "host_baseline":
@@ -255,11 +1909,14 @@ def _payload(capability: DefensiveCapability, scope: dict[str, Any], options: di
 
 
 async def _lookup_cve(cve_id: str) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
-        response = await client.get(
-            "https://services.nvd.nist.gov/rest/json/cves/2.0",
-            params={"cveId": cve_id},
-        )
+    from ..policy.network_http import gated_get
+
+    response = await gated_get(
+        "https://services.nvd.nist.gov/rest/json/cves/2.0",
+        tool="web_fetch",
+        timeout=30.0,
+        params={"cveId": cve_id},
+    )
     if response.status_code >= 400:
         raise RuntimeError(f"NVD returned HTTP {response.status_code}")
     body = response.json()
@@ -270,12 +1927,161 @@ async def _lookup_cve(cve_id: str) -> dict[str, Any]:
     return {"source": "NVD", "cve": cve}
 
 
+def parse_nmap_ping_hosts(text: str) -> list[dict[str, str]]:
+    hosts: list[dict[str, str]] = []
+    for line in (text or "").splitlines():
+        if not line.startswith("Nmap scan report for "):
+            continue
+        rest = line[len("Nmap scan report for ") :].strip()
+        hostname = ""
+        address = rest
+        if rest.endswith(")") and " (" in rest:
+            hostname, ip_part = rest.rsplit(" (", 1)
+            address = ip_part.rstrip(")")
+        hosts.append({"address": address, "hostname": hostname})
+    return hosts
+
+
+def _require_private_lan_target(target: str) -> str:
+    """Host nmap and suite nmap may only ping RFC1918 / loopback / link-local."""
+    cleaned = (target or "").strip()
+    if not cleaned:
+        raise ValueError("LAN inventory target is required")
+    if "/" in cleaned:
+        return _private_network(cleaned, host=False)
+    return _private_network(cleaned, host=True)
+
+
+async def _host_nmap_ping_scan(target: str) -> dict[str, Any]:
+    cleaned = _require_private_lan_target(target)
+    binary = shutil.which("nmap")
+    if not binary:
+        raise RuntimeError(
+            "HexStrike is not running and nmap is not on PATH. "
+            "Install HexStrike or nmap to inventory the private LAN."
+        )
+    proc = await asyncio.create_subprocess_exec(
+        binary,
+        "-sn",
+        "-T3",
+        "--max-retries",
+        "1",
+        *nmap_lan_bind_args(cleaned),
+        "--",
+        cleaned,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+    except TimeoutError as exc:
+        proc.kill()
+        await proc.wait()
+        raise RuntimeError("host nmap ping scan timed out") from exc
+    text = (stdout or b"").decode("utf-8", errors="replace")
+    err = (stderr or b"").decode("utf-8", errors="replace")
+    if proc.returncode not in {0, 1}:
+        raise RuntimeError((err or text or "nmap failed").strip()[:400])
+    return {
+        "source": "host-nmap",
+        "target": cleaned,
+        "hosts": parse_nmap_ping_hosts(text),
+        "stdout": text[:4000],
+    }
+
+
+def lan_inventory_targets(scope: dict[str, Any], payload: dict[str, Any] | None = None) -> list[str]:
+    """Default `lan` inventory covers every live RFC1918 NIC CIDR, home subnet first."""
+    primary = str((scope or {}).get("value") or (payload or {}).get("target") or "").strip()
+    extras: list[str] = []
+    if str((scope or {}).get("id") or "") == DEFAULT_LAN_SCOPE_ID:
+        extras = preferred_lan_cidrs()
+    ordered: list[str] = []
+    for item in [primary, *extras]:
+        if item and item not in ordered:
+            ordered.append(item)
+    return ordered
+
+
+def _merge_lan_inventory_results(results: list[dict[str, Any]], targets: list[str]) -> dict[str, Any]:
+    hosts: list[dict[str, str]] = []
+    seen: set[str] = set()
+    stdout_parts: list[str] = []
+    source = ""
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        source = str(item.get("source") or source)
+        stdout_parts.append(str(item.get("stdout") or "")[:4000])
+        for host in item.get("hosts") or []:
+            if not isinstance(host, dict):
+                continue
+            address = str(host.get("address") or "")
+            if not address or address in seen:
+                continue
+            seen.add(address)
+            hosts.append({"address": address, "hostname": str(host.get("hostname") or "")})
+    merged: dict[str, Any] = dict(results[0]) if len(results) == 1 and isinstance(results[0], dict) else {}
+    merged.update(
+        {
+            "source": source or merged.get("source") or "host-nmap",
+            "target": targets[0] if len(targets) == 1 else ",".join(targets),
+            "targets": targets,
+            "hosts": hosts if hosts or len(results) > 1 else list(merged.get("hosts") or hosts),
+            "stdout": "\n".join(part for part in stdout_parts if part)[:4000] or merged.get("stdout") or "",
+        }
+    )
+    return merged
+
+
+async def _run_lan_inventory(scope: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    targets = lan_inventory_targets(scope, payload)
+    if not targets:
+        raise ValueError("LAN inventory target is required")
+    snapshot = await HEXSTRIKE.status(enrich=False)
+    if not snapshot.running:
+        snapshot = await HEXSTRIKE.ensure_started()
+    results: list[dict[str, Any]] = []
+    last_error: Exception | None = None
+    for target in targets:
+        item_payload = {
+            **payload,
+            "target": target,
+            "additional_args": nmap_lan_additional_args(target),
+        }
+        try:
+            if snapshot.running and not lan_inventory_uses_host_nmap(target):
+                results.append(await HEXSTRIKE.post_defensive("api/tools/nmap", item_payload))
+            else:
+                results.append(await _host_nmap_ping_scan(target))
+        except Exception as exc:
+            last_error = exc
+    if not results:
+        if last_error is None:
+            raise RuntimeError("LAN inventory failed")
+        if snapshot.running:
+            raise last_error
+        suite_err = (snapshot.last_error or "HexStrike is not running").strip()
+        raise RuntimeError(f"{suite_err} Host nmap fallback: {last_error}") from last_error
+    return _merge_lan_inventory_results(results, targets)
+
+
 async def execute_defensive(action: str, scope_id: str, options: dict[str, Any] | None = None) -> dict[str, Any]:
     capability = CAPABILITY_BY_ID.get((action or "").strip())
     if capability is None:
         audit_hexstrike("defensive_action_denied", capability=action, reason="unknown_action")
         raise ValueError("unknown defensive action")
+    if capability.id == "lan_inventory":
+        scope_id = resolve_lan_inventory_scope(scope_id)
     scope = get_scope(scope_id)
+    try:
+        scope = {
+            **scope,
+            "value": normalize_scope(str(scope.get("kind") or ""), str(scope.get("value") or "")),
+        }
+    except ValueError as exc:
+        audit_hexstrike("defensive_action_denied", capability=action, scope_id=scope_id, reason="scope_not_private")
+        raise PermissionError(str(exc)) from exc
     if scope.get("kind") not in capability.scope_kinds:
         audit_hexstrike("defensive_action_denied", capability=action, scope_id=scope_id, reason="scope_kind")
         raise PermissionError("scope kind is not valid for this defensive action")
@@ -287,6 +2093,9 @@ async def execute_defensive(action: str, scope_id: str, options: dict[str, Any] 
     scope_kind = str(scope.get("kind") or "")
     scope_value = str(scope.get("value") or "")
     if scope_kind != "local_infrastructure" and scope_value:
+        # Scopes written before RFC-0197 have no registry row; attested LAN
+        # inventory must still run for the owner.
+        _mirror_scope_to_target_registry(scope)
         previous_tr = tr.data_dir
         previous_audit = security_audit_mod.data_dir
         tr.data_dir = data_dir
@@ -326,6 +2135,8 @@ async def execute_defensive(action: str, scope_id: str, options: dict[str, Any] 
     try:
         if capability.id == "threat_intel_lookup":
             result = await _lookup_cve(str(payload["cve_id"]))
+        elif capability.id == "lan_inventory":
+            result = await _run_lan_inventory(scope, payload)
         else:
             result = await HEXSTRIKE.post_defensive(capability.upstream_path, payload)
         if isinstance(result, dict):

@@ -1,3 +1,5 @@
+import httpx
+
 from app.help.assistant import answer_help, help_status, reset_help_conversations, retrieve_local_docs
 from app.help.topics import get_topic, list_topics
 
@@ -57,3 +59,54 @@ async def test_help_chat_uses_web_when_local_empty(monkeypatch):
     assert result["used_web"] is True
     assert result["web"][0]["url"] == "https://example.test/help"
     assert "Public note" in result["text"]
+
+
+async def test_help_web_search_honors_internet_deny(tmp_path, monkeypatch):
+    from app.help.web_fallback import search_public_web
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    seen = {"n": 0}
+
+    def _count(request: httpx.Request) -> httpx.Response:
+        seen["n"] += 1
+        return httpx.Response(200, text='<a class="result__a" href="https://evil.example">Nope</a>')
+
+    class Client(httpx.AsyncClient):
+        def __init__(self, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(_count)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr("app.policy.network_http.httpx.AsyncClient", Client)
+    hits = await search_public_web("obscure-unrelated-query-xyz")
+    assert hits == []
+    assert seen["n"] == 0
+
+
+async def test_help_page_hop_does_not_follow_denied_wan(tmp_path, monkeypatch):
+    from app.help.web_fallback import fetch_public_page
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    apply_grant("network.local", "always")
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.host or "")
+        if (request.url.host or "").startswith("192.168."):
+            return httpx.Response(302, headers={"location": "https://evil.example/docs"})
+        return httpx.Response(200, text="<html>leaked secret</html>")
+
+    class Client(httpx.AsyncClient):
+        def __init__(self, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr("app.policy.network_http.httpx.AsyncClient", Client)
+    body = await fetch_public_page("http://192.168.1.10/docs")
+    assert body == ""
+    assert "evil.example" not in seen

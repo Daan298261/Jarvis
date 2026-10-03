@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..config import data_dir
+from ..config import data_dir, resolved_data_sidecar_dir
 from .schema import AgentRepoMeta, ContextRepoVersion, MutationRecord, SCHEMA_VERSION
 
 _lock = threading.RLock()
@@ -16,7 +16,12 @@ HISTORY_FILE = "history.json"
 
 
 def context_repos_root() -> Path:
-    path = data_dir() / "context-repos"
+    path = resolved_data_sidecar_dir(
+        "context-repos",
+        local=data_dir() / "context-repos",
+        markers=("meta.json",),
+        need_bytes=1024**3,
+    )
     path.mkdir(parents=True, exist_ok=True)
     return path
 

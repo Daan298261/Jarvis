@@ -16,10 +16,9 @@ from ..config import repo_root
 from ..voice_profiles.catalog import reload_catalog, voice_packs_dir
 from ..voice_profiles.schema import VoiceProfile
 from .engines import (
-    KOKORO_HF_REPO,
-    KOKORO_MODEL_DIR,
     CHATTERBOX_HF_REPO,
     CHATTERBOX_MODEL_FILES,
+    KOKORO_HF_REPO,
     chatterbox_python_ready,
     is_chatterbox_available,
     kokoro_python_ready,
@@ -29,6 +28,7 @@ from .kokoro_adapter import (
     KOKORO_PACKAGE_VERSION,
     SOUNDFILE_PACKAGE_VERSION,
     reset_kokoro_runtime_state,
+    resolved_kokoro_model_dir,
     verify_kokoro_runtime,
 )
 
@@ -121,6 +121,9 @@ def ensure_kokoro_python(*, force: bool = False) -> None:
     """Install Kokoro into this Jarvis interpreter. End users never run pip themselves."""
     if not force and kokoro_python_ready():
         return
+    from ..policy.network_http import require_http_url_allowed
+
+    require_http_url_allowed("https://pypi.org/simple/", tool="web_fetch")
     logger.info("Installing Kokoro TTS packages into %s", sys.executable)
     command = [
         sys.executable,
@@ -152,6 +155,9 @@ def ensure_chatterbox_python(*, force: bool = False) -> None:
     """Install the optional expressive engine into the Jarvis interpreter."""
     if not force and chatterbox_python_ready():
         return
+    from ..policy.network_http import require_http_url_allowed
+
+    require_http_url_allowed("https://pypi.org/simple/", tool="web_fetch")
     logger.info("Installing Chatterbox TTS into %s", sys.executable)
     command = [
         sys.executable,
@@ -179,32 +185,52 @@ def ensure_chatterbox_python(*, force: bool = False) -> None:
 
 def ensure_chatterbox_weights(*, force: bool = False) -> None:
     """Prefetch exactly the files used by ChatterboxTTS.from_pretrained."""
+    from ..inference.lmstudio_catalog import apply_huggingface_home
+
+    hub = str(apply_huggingface_home() / "hub")
     for filename in CHATTERBOX_MODEL_FILES:
         if not force:
             try:
-                hf_hub_download(repo_id=CHATTERBOX_HF_REPO, filename=filename, local_files_only=True)
+                hf_hub_download(
+                    repo_id=CHATTERBOX_HF_REPO,
+                    filename=filename,
+                    local_files_only=True,
+                    cache_dir=hub,
+                )
                 continue
             except Exception:
                 pass
         try:
-            hf_hub_download(repo_id=CHATTERBOX_HF_REPO, filename=filename)
+            from ..policy.network_http import require_http_url_allowed
+
+            require_http_url_allowed(f"https://huggingface.co/{CHATTERBOX_HF_REPO}", tool="web_fetch")
+            hf_hub_download(repo_id=CHATTERBOX_HF_REPO, filename=filename, cache_dir=hub)
+        except PermissionError:
+            raise
         except Exception as exc:
             raise RuntimeError(CHATTERBOX_RUNTIME_ERROR) from exc
 
 
 def ensure_kokoro_weights(*, force: bool = False) -> Path:
-    KOKORO_MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    if not force and kokoro_weights_ready(KOKORO_MODEL_DIR):
-        return KOKORO_MODEL_DIR
-    logger.info("Downloading Kokoro-82M weights to %s", KOKORO_MODEL_DIR)
+    dest = resolved_kokoro_model_dir()
+    dest.mkdir(parents=True, exist_ok=True)
+    if not force and kokoro_weights_ready(dest):
+        return dest
+    from ..inference.lmstudio_catalog import apply_huggingface_home
+    from ..policy.network_http import require_http_url_allowed
+
+    hub = str(apply_huggingface_home() / "hub")
+    require_http_url_allowed(f"https://huggingface.co/{KOKORO_HF_REPO}", tool="web_fetch")
+    logger.info("Downloading Kokoro-82M weights to %s", dest)
     snapshot_download(
         repo_id=KOKORO_HF_REPO,
-        local_dir=str(KOKORO_MODEL_DIR),
+        local_dir=str(dest),
         local_dir_use_symlinks=False,
+        cache_dir=hub,
     )
-    marker = KOKORO_MODEL_DIR / ".jarvis_staged_ok"
+    marker = dest / ".jarvis_staged_ok"
     marker.write_text("ok\n", encoding="utf-8")
-    return KOKORO_MODEL_DIR
+    return dest
 
 
 def ensure_kokoro_runtime(*, force: bool = False) -> Path:

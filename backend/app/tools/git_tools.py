@@ -14,7 +14,9 @@ from ..agent.worktrees import (
     list_worktrees,
     worktree_status,
 )
+from ..config import live_workspace_roots_from_context
 from .base import RiskLevel, Tool, ToolResult
+from .owner_paths import git_child_env, resolve_owner_file_path, workspace_cwd
 from .safety import resolve_allowed_path
 
 
@@ -22,12 +24,30 @@ _CHECKPOINT_RE = re.compile(r"^jarvis-checkpoint-[0-9]{8}T[0-9]{6}Z$")
 _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 
 
+def git_repo_name(url: str) -> str:
+    """Folder name for a clone destination from a remote URL or local path."""
+    text = str(url or "").strip().rstrip("/\\")
+    text = text.split("?")[0].split("#")[0]
+    name = Path(text).name or "repo"
+    if name.lower().endswith(".git"):
+        name = name[:-4]
+    name = Path(name).name.strip() or "repo"
+    if name in {".", ".."}:
+        name = "repo"
+    return name
+
+
 class GitTool(Tool):
     name = "git"
     description = (
-        "Inspect and checkpoint git repositories. Actions: status, diff, branch, log, search, "
-        "checkpoint, list_checkpoints, restore. checkpoint creates a recoverable backup branch "
-        "named jarvis-checkpoint-* without resetting the working tree."
+        "Inspect, clone, and checkpoint git repositories. Actions: clone, fetch, pull, status, "
+        "diff, branch, log, search, checkpoint, list_checkpoints, restore. clone copies a remote "
+        "or local repo into an allowed folder (including extra drives). Omit path to clone into "
+        "Documents/<repo>. A folder path (USB/`D:`) gets <repo> appended. fetch/pull update an "
+        "existing repo and honor internet/LAN deny. Omit path for status/fetch/pull to use Documents. "
+        "worktree_add checks out an isolated tree; destination may be USB/`D:` (omit to use Jarvis worktrees). "
+        "checkpoint creates a recoverable backup "
+        "branch named jarvis-checkpoint-* without resetting the working tree."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -36,6 +56,9 @@ class GitTool(Tool):
             "action": {
                 "type": "string",
                 "enum": [
+                    "clone",
+                    "fetch",
+                    "pull",
                     "status",
                     "diff",
                     "branch",
@@ -51,7 +74,15 @@ class GitTool(Tool):
                     "commit",
                 ],
             },
-            "path": {"type": "string"},
+            "path": {
+                "type": "string",
+                "description": "Repo working tree, or clone destination. Omit clone/status to use Documents. A folder path is allowed.",
+            },
+            "destination": {
+                "type": "string",
+                "description": "worktree_add: new tree folder (USB/`D:` allowed). Omit to use Jarvis worktrees.",
+            },
+            "url": {"type": "string", "description": "clone: https URL or local repo path"},
             "query": {"type": "string"},
             "ref": {"type": "string"},
             "message": {"type": "string"},
@@ -63,17 +94,79 @@ class GitTool(Tool):
     def __init__(self, context_getter=None) -> None:
         self.context_getter = context_getter or (lambda: {})
 
+    def _allowed(self) -> list[str]:
+        return live_workspace_roots_from_context(self.context_getter() if callable(self.context_getter) else {})
+
     def _cwd(self, path: str | None) -> str:
-        allowed = list((self.context_getter() or {}).get("allowed_directories") or [])
-        if path:
-            return str(resolve_allowed_path(path, allowed))
-        return str(Path.cwd())
+        allowed = self._allowed()
+        text = str(path or "").strip()
+        if text:
+            return str(resolve_allowed_path(text, allowed))
+        if not allowed:
+            return str(Path.cwd())
+        return workspace_cwd(None, allowed) or str(Path.cwd())
+
+    def _worktree_dest(self, raw: str | None) -> str | None:
+        text = str(raw or "").strip()
+        if not text:
+            return None
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        return str(
+            resolve_owner_file_path(
+                text,
+                suggested_name=f"jarvis-worktree-{stamp}",
+                allowed=self._allowed(),
+                fallback_dirs=("Documents", "Desktop", "Downloads"),
+            )
+        )
+
+    def _network_denied(self, kwargs: dict[str, Any]) -> str | None:
+        from ..policy.computer_permissions import tool_permission_error
+
+        return tool_permission_error("git", kwargs)
+
+    async def _clone(self, kwargs: dict[str, Any]) -> ToolResult:
+        from ..policy.computer_permissions import looks_remote_git_source
+
+        url = str(kwargs.get("url") or kwargs.get("query") or "").strip()
+        dest_raw = str(kwargs.get("path") or "").strip()
+        if not url:
+            return ToolResult(False, "", error="url is required for clone")
+        allowed = self._allowed()
+        dest = resolve_owner_file_path(
+            dest_raw or None,
+            suggested_name=git_repo_name(url),
+            allowed=allowed,
+            fallback_dirs=("Documents", "Desktop", "Downloads"),
+        )
+        source = url
+        if looks_remote_git_source(url):
+            denied = self._network_denied({**kwargs, "action": "clone", "url": url})
+            if denied:
+                return ToolResult(False, "", error=denied)
+            if url.lower().startswith(("http://", "https://")):
+                from ..policy.network_http import require_http_url_allowed
+
+                require_http_url_allowed(url, tool="git")
+        else:
+            local = url[7:] if url.lower().startswith("file://") else url
+            source = str(resolve_allowed_path(local, allowed))
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        cloned = await self._git(["clone", "--", source, str(dest)], str(dest.parent))
+        if cloned.success:
+            cloned = ToolResult(
+                True,
+                f"Cloned {source} into {dest}",
+                data={"source": source, "path": str(dest)},
+            )
+        return cloned
 
     async def _git(self, args: list[str], cwd: str) -> ToolResult:
         proc = await asyncio.create_subprocess_exec(
             "git",
             *args,
             cwd=cwd,
+            env=git_child_env(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -86,7 +179,17 @@ class GitTool(Tool):
     async def execute(self, **kwargs: Any) -> ToolResult:
         action = kwargs.get("action")
         try:
+            if action == "clone":
+                return await self._clone(kwargs)
+            if action in {"fetch", "pull"}:
+                denied = self._network_denied({**kwargs, "action": action})
+                if denied:
+                    return ToolResult(False, "", error=denied)
             cwd = self._cwd(kwargs.get("path"))
+            if action == "fetch":
+                return await self._git(["fetch"], cwd)
+            if action == "pull":
+                return await self._git(["pull", "--ff-only"], cwd)
             if action == "status":
                 return await self._git(["status", "--porcelain=v1", "-b"], cwd)
             if action == "diff":
@@ -110,13 +213,15 @@ class GitTool(Tool):
             if action == "restore":
                 return await self._restore(cwd, kwargs.get("ref") or "")
             if action == "worktree_add":
-                spec = create_worktree(cwd, kwargs.get("path"))
+                spec = create_worktree(cwd, self._worktree_dest(kwargs.get("destination")))
                 return ToolResult(True, f"Created worktree {spec.id}", data=spec.__dict__)
             if action == "worktree_list":
                 trees = list_worktrees()
                 return ToolResult(True, "\n".join(item.get("id", "") for item in trees), data={"worktrees": trees})
             if action == "worktree_status":
-                status = worktree_status(kwargs.get("path") or cwd)
+                raw_status = str(kwargs.get("destination") or kwargs.get("path") or "").strip() or cwd
+                status_path = str(resolve_allowed_path(raw_status, self._allowed())) if self._allowed() else raw_status
+                status = worktree_status(status_path)
                 return ToolResult(True, str(status), data=status)
             if action == "worktree_remove":
                 spec = discard_worktree(kwargs.get("worktree_id") or "")

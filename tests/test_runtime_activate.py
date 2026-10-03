@@ -273,6 +273,41 @@ async def test_activate_runtime_profile_does_not_force_reload_by_default(jarvis_
 
 
 @pytest.mark.asyncio
+async def test_activate_runtime_profile_passes_owner_gguf_path(jarvis_env, monkeypatch, tmp_path):
+    monkeypatch.setattr("app.inference.runtime_profiles.data_dir", lambda: jarvis_env["tmp"])
+    monkeypatch.setattr("app.config.data_dir", lambda: jarvis_env["tmp"])
+
+    gguf = tmp_path / "USB" / "Models" / "owner-usb-Q4_K_M.gguf"
+    gguf.parent.mkdir(parents=True)
+    gguf.write_bytes(b"gguf")
+    profile = create_runtime_profile(
+        name="usb-owner-gguf",
+        label=gguf.name,
+        model=gguf.stem,
+        provider="local-llama",
+        endpoint="127.0.0.1:8088",
+        is_local=True,
+        gguf_path=str(gguf),
+    )
+    seen = {}
+
+    async def fake_apply_settings(_runtime):
+        return None
+
+    async def fake_load(*_args, **kwargs):
+        seen["gguf_path"] = kwargs.get("gguf_path")
+        return type("State", (), {"loaded": True})()
+
+    monkeypatch.setattr("app.inference.hotswap.apply_runtime_profile_to_settings", fake_apply_settings)
+    monkeypatch.setattr("app.inference.hotswap.MANAGER.load", fake_load)
+
+    from app.inference.hotswap import activate_runtime_profile
+
+    await activate_runtime_profile(profile)
+    assert seen["gguf_path"] == str(gguf)
+
+
+@pytest.mark.asyncio
 async def test_local_llama_slot_clears_mismatched_lmstudio_remote_model(jarvis_env, monkeypatch):
     settings = jarvis_env["settings"]
     settings.inference.backend = "lmstudio"

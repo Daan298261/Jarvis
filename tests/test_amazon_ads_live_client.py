@@ -395,6 +395,34 @@ def test_live_empty_report_raises_without_inventing_data(monkeypatch):
     client.close()
 
 
+def test_live_client_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+
+    class Boom:
+        def post(self, *_args, **_kwargs):
+            raise AssertionError("must not POST Amazon when internet is denied")
+
+        def request(self, *_args, **_kwargs):
+            raise AssertionError("must not call Amazon when internet is denied")
+
+        def get(self, *_args, **_kwargs):
+            raise AssertionError("must not GET Amazon when internet is denied")
+
+        def close(self):
+            return None
+
+    client = LiveAmazonAdsClient(client_id="id", client_secret="secret", http_client=Boom())
+    with pytest.raises(AmazonAdsError):
+        client.exchange_code(code="x", redirect_uri="https://example.test/cb")
+    with pytest.raises(AmazonAdsError):
+        client.fetch_profiles(access_token="token")
+    client.close()
+
+
 def test_health_includes_client_mode(client, service):
     resp = client.get("/api/amazon-ads/health/test-profile")
     assert resp.status_code == 200

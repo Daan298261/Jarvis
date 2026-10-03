@@ -14,14 +14,14 @@ from ..agent.agent_benchmark import (
     record_case_result,
     empty_metrics,
 )
-from ..config import data_dir, load_settings, save_settings
+from ..config import load_settings, save_settings
+from ..inference.live_agent_suite import agent_suite_root, live_suite_status, start_live_suite
 from ..inference.benchmarks import list_benchmarks, record_benchmark_sample, task_outcome_stats
 from ..inference.backends import probe_remote_server
 from ..inference.hardware_gate import hardware_purchase_gate
 from ..inference.harness import load_last_report, run_harness
 from ..inference.manager import MANAGER
 from ..inference.tool_capability import capability_status, probe_tool_capability
-from ..inference.live_agent_suite import live_suite_status, start_live_suite
 from ..inference.profiles import available_profiles, declared_profiles, resolve_profile
 from ..runtime_install import component_status_payload, start_component_install
 from ..persona.owner_chat import rebind_owner_conversations_after_hotswap
@@ -186,7 +186,7 @@ async def run_agent_suite_case(body: AgentSuiteRunBody | None = None):
         case = get_case(body.case_id or "json-update")
     except KeyError:
         raise HTTPException(404, "Unknown agent-suite case")
-    workspace = data_dir() / "agent-suite" / case.id
+    workspace = agent_suite_root() / case.id
     ctx = prepare_case(case, workspace)
     prompt = format_prompt(case, ctx)
     if body.simulate_success:

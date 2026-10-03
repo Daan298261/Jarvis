@@ -125,14 +125,18 @@ class TransportPolicyTest {
         assertTrue(TransportPolicy.mayRaceOrigins("GET", "/connection", listOf(wan, lan), listOf("100.64.1.8")))
     }
 
-    @Test fun mDnsNameIsLanWhenWifiRfc1918IsPresent() {
+    @Test fun mDnsNameIsNotHomeOnForeignRfc1918Wifi() {
         val mdns = "https://jarvis.local:4781"
         val wan = "https://home.example.test:4781"
-        val home = TransportPolicy.dialOrder(wan, listOf(mdns, wan), listOf("10.2.0.5"))
-        assertEquals(mdns, home[0])
-        val away = TransportPolicy.dialOrder(mdns, listOf(mdns, wan), listOf("100.64.1.8"))
-        assertEquals(wan, away[0])
-        assertEquals(mdns, away.last())
+        val lan = "https://10.2.0.2:4781"
+        val home = TransportPolicy.dialOrder(wan, listOf(mdns, wan, lan), listOf("10.2.0.5"))
+        assertEquals(lan, home[0])
+        val guest = TransportPolicy.dialOrder(mdns, listOf(mdns, wan), listOf("192.168.2.40"))
+        assertEquals(wan, guest[0])
+        assertEquals(mdns, guest.last())
+        val homeNameOnly = TransportPolicy.dialOrder(wan, listOf(mdns, wan), listOf("10.2.0.5"))
+        assertEquals(wan, homeNameOnly[0])
+        assertEquals(mdns, homeNameOnly.last())
     }
 
     @Test fun lanMatchUsesInterfacePrefixNotHardcodedSlash24() {
@@ -156,5 +160,56 @@ class TransportPolicyTest {
         assertEquals(2, TransportPolicy.reachabilityRank("https://jarvis.local:4781"))
         assertEquals(2, TransportPolicy.reachabilityRank("https://nas.lan:4781"))
         assertEquals(0, TransportPolicy.reachabilityRank("https://home.example.test:4781"))
+    }
+
+    @Test fun connectionRefreshKeepsLanWhenServerListsWanFirst() {
+        val lan = "https://10.2.0.2:4781"
+        val wan = "https://203.0.113.4:4781"
+        val dns = "https://home.example.test:4781"
+        val merged = TransportPolicy.mergeConnectionEndpoints(listOf(lan), listOf(dns, wan))
+        assertEquals(dns, merged[0])
+        assertEquals(wan, merged[1])
+        assertEquals(lan, merged.last())
+        val unchanged = TransportPolicy.mergeConnectionEndpoints(listOf(lan, wan), emptyList())
+        assertEquals(lan, unchanged.last())
+        assertTrue(wan in unchanged)
+        val crowded = (1..8).map { "https://relay$it.example.test:4781" }
+        val kept = TransportPolicy.mergeConnectionEndpoints(listOf(lan), crowded)
+        assertEquals(8, kept.size)
+        assertEquals(lan, kept.last())
+    }
+
+    @Test fun connectionRefreshReplacesStaleLanWhenServerListsLiveLan() {
+        val stale = "https://192.168.1.12:4781"
+        val live = "https://192.168.1.40:4781"
+        val wan = "https://203.0.113.4:4781"
+        val mdns = "https://jarvis.local:4781"
+        val merged = TransportPolicy.mergeConnectionEndpoints(listOf(stale), listOf(wan, live))
+        assertEquals(listOf(wan, live), merged)
+        assertFalse(stale in merged)
+        val locals = listOf("192.168.1.50")
+        val order = TransportPolicy.dialOrder(null, merged, locals)
+        assertEquals(live, order[0])
+        assertFalse(TransportPolicy.mayRaceOrigins("GET", "/connection", order, locals))
+        val droppedName = TransportPolicy.mergeConnectionEndpoints(listOf(stale, mdns), listOf(wan, live))
+        assertEquals(listOf(wan, live), droppedName)
+        val keptName = TransportPolicy.mergeConnectionEndpoints(listOf(stale, mdns), listOf(wan, live, mdns))
+        assertTrue(live in keptName)
+        assertTrue(mdns in keptName)
+        assertTrue(wan in keptName)
+        assertFalse(stale in keptName)
+    }
+
+    @Test fun absorbMatchingLanBeaconReplacesStaleLanAndKeepsWan() {
+        val pin = "a".repeat(64)
+        val stale = "https://192.168.1.12:4781"
+        val live = "https://192.168.1.40:4781"
+        val wan = "https://203.0.113.4:4781"
+        val absorbed = TransportPolicy.absorbMatchingLanOrigin(listOf(stale, wan), pin, live, pin)
+        assertEquals(listOf(wan, live), absorbed)
+        assertNull(TransportPolicy.absorbMatchingLanOrigin(listOf(stale, wan), pin, live, "b".repeat(64)))
+        assertNull(TransportPolicy.absorbMatchingLanOrigin(listOf(stale), "short", live, "short"))
+        val cellular = TransportPolicy.absorbMatchingLanOrigin(listOf(wan), pin, live, pin)
+        assertEquals(listOf(wan, live), cellular)
     }
 }
