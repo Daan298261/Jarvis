@@ -5,6 +5,7 @@ from app.tools.terminal import (
     _python_args,
     default_shell,
     lan_bound_http_argv,
+    lan_bound_scan_argv,
     lan_bound_ssh_argv,
     python_direct_argv,
 )
@@ -355,3 +356,66 @@ def test_lan_ssh_binds_home_nic_not_vpn(monkeypatch):
     powershell = _command_args("ssh taco@192.168.1.50", "powershell")
     assert powershell[0] == "/usr/bin/ssh"
     assert "BindAddress=192.168.1.12" in powershell
+
+
+def test_lan_scan_binds_home_nic_not_vpn(monkeypatch):
+    import socket
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"nmap", "ping", "traceroute", "masscan", "nping"} else None,
+    )
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        if host in {"nas.local", "router.lan"}:
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.40", 0))]
+        raise socket.gaierror("no")
+
+    monkeypatch.setattr("app.mobile.wan_forward.socket.getaddrinfo", fake_getaddrinfo)
+    nmap = lan_bound_scan_argv("nmap -sn 192.168.1.0/24")
+    assert nmap is not None
+    assert nmap[0] == "/usr/bin/nmap"
+    assert nmap[1:5] == ["-S", "192.168.1.12", "-e", "eth0"]
+    assert nmap[-1] == "192.168.1.0/24"
+    ported = lan_bound_scan_argv("nmap -p 80 192.168.1.50")
+    assert ported is not None
+    assert ported[1:5] == ["-S", "192.168.1.12", "-e", "eth0"]
+    assert ported[-1] == "192.168.1.50"
+    ping = lan_bound_scan_argv("ping -c 1 192.168.1.1")
+    assert ping is not None
+    assert ping[1:3] == ["-I", "192.168.1.12"]
+    assert ping[-1] == "192.168.1.1"
+    mdns = lan_bound_scan_argv("ping nas.local")
+    assert mdns is not None
+    assert mdns[1:3] == ["-I", "192.168.1.12"]
+    trace = lan_bound_scan_argv("traceroute 192.168.1.1")
+    assert trace is not None
+    assert trace[1:3] == ["-s", "192.168.1.12"]
+    masscan = lan_bound_scan_argv("masscan 192.168.1.0/24 -p80")
+    assert masscan is not None
+    assert masscan[1:5] == ["--source-ip", "192.168.1.12", "-e", "eth0"]
+    vpn = lan_bound_scan_argv("nmap 10.8.0.2")
+    assert vpn is not None
+    assert vpn[1:5] == ["-S", "10.8.0.2", "-e", "wg0"]
+    assert lan_bound_scan_argv("nmap 8.8.8.8") is None
+    assert lan_bound_scan_argv("ping 1.1.1.1") is None
+    assert lan_bound_scan_argv("nmap -S 192.168.1.12 192.168.1.50") is None
+    assert lan_bound_scan_argv("ping -I eth0 192.168.1.1") is None
+    assert lan_bound_scan_argv("nmap 192.168.1.1 | cat") is None
+    bash = _command_args("nmap -sn 192.168.1.0/24", "bash")
+    assert bash[0] == "/usr/bin/nmap"
+    assert bash[1:5] == ["-S", "192.168.1.12", "-e", "eth0"]
+
+
+def test_lan_ping_windows_uses_source_flag(monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setattr("app.tools.terminal.platform.system", lambda: "Windows")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"ping", "ping.exe"} else None,
+    )
+    ping = lan_bound_scan_argv("ping -n 1 192.168.1.50")
+    assert ping is not None
+    assert ping[1:3] == ["-S", "192.168.1.12"]
+    assert lan_bound_scan_argv("ping -S 192.168.1.12 192.168.1.50") is None

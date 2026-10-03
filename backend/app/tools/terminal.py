@@ -232,6 +232,97 @@ def lan_bound_ssh_argv(command: str) -> list[str] | None:
     return bound
 
 
+_SCAN_NAMES = frozenset({"nmap", "nping", "ping", "traceroute", "masscan"})
+_IPV4_OR_CIDR = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}(?:/\d{1,2})?(?::\d+)?$")
+
+
+def _scan_target_from_argv(parts: list[str]) -> str:
+    for item in parts[1:]:
+        text = str(item or "").strip().strip("'\"")
+        if not text or text.startswith("-"):
+            continue
+        host = text.split("%", 1)[0]
+        if _IPV4_OR_CIDR.fullmatch(host):
+            return host.split(":", 1)[0]
+        lowered = host.lower().rstrip(".")
+        if lowered.endswith((".local", ".lan", ".home.arpa")):
+            return host.split(":", 1)[0] if host.count(":") == 1 and host.rsplit(":", 1)[-1].isdigit() else host
+    return ""
+
+
+def _scan_already_bound(name: str, parts: list[str]) -> bool:
+    flags = {str(part).split("=", 1)[0] for part in parts[1:] if str(part).startswith("-")}
+    if name in {"nmap", "nping"}:
+        return bool(flags & {"-S", "-e"})
+    if name == "ping":
+        if platform.system() == "Windows":
+            return any(flag.lower() == "-s" for flag in flags)
+        return "-I" in flags
+    if name == "traceroute":
+        return "-s" in flags
+    if name == "masscan":
+        return bool(flags & {"--source-ip", "-e", "-S"})
+    return True
+
+
+def _scan_bind_flags(name: str, target: str) -> list[str] | None:
+    from ..security.hexstrike_defensive import lan_bind_nic
+
+    iface, source = lan_bind_nic(target)
+    if not source:
+        return None
+    if name in {"nmap", "nping"}:
+        flags = ["-S", source]
+        if iface:
+            flags.extend(["-e", iface])
+        return flags
+    if name == "ping":
+        if platform.system() == "Windows":
+            return ["-S", source]
+        return ["-I", source]
+    if name == "traceroute":
+        return ["-s", source]
+    if name == "masscan":
+        flags = ["--source-ip", source]
+        if iface:
+            flags.extend(["-e", iface])
+        return flags
+    return None
+
+
+def lan_bound_scan_argv(command: str) -> list[str] | None:
+    """nmap/ping/traceroute/masscan of on-link RFC1918, sourced from that NIC.
+
+    HexStrike nmap already pins ``-S``/``-e``. The same probes via the terminal
+    tool still follow the OS default route, so a VPN steals the hop to the LAN.
+    Skip pipes and explicit source-bind flags. Public targets are unchanged.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts:
+        return None
+    name = Path(parts[0]).name.lower()
+    if name.endswith(".exe"):
+        name = name[:-4]
+    if name not in _SCAN_NAMES:
+        return None
+    if _scan_already_bound(name, parts):
+        return None
+    target = _scan_target_from_argv(parts)
+    flags = _scan_bind_flags(name, target)
+    if not flags:
+        return None
+    exe = shutil.which(name) or shutil.which(f"{name}.exe")
+    if not exe:
+        return None
+    return [exe, *flags, *parts[1:]]
+
+
 def adapt_shell(command: str, shell: str) -> str:
     """Run cmd.exe idioms with cmd so PowerShell does not parse switches as parameters."""
     chosen = (shell or default_shell()).strip().lower()
@@ -313,7 +404,7 @@ def _child_env(args: list[str]) -> dict[str, str]:
 
 
 def _command_args(command: str, shell: str) -> list[str] | ToolResult:
-    bound = lan_bound_http_argv(command) or lan_bound_ssh_argv(command)
+    bound = lan_bound_http_argv(command) or lan_bound_ssh_argv(command) or lan_bound_scan_argv(command)
     if bound:
         return bound
     py = python_direct_argv(command)
