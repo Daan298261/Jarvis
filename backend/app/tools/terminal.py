@@ -1601,6 +1601,7 @@ _LAN_HTTP_TOOL_STEMS = frozenset(
         "ffplay",
         "mpv",
         "vlc",
+        "cvlc",
         "gobuster",
         "ffuf",
         "dirsearch",

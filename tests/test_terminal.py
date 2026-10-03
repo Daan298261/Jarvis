@@ -1378,6 +1378,7 @@ def test_terminal_git_and_pip_use_lan_http_proxy_not_vpn(monkeypatch):
             "ffplay",
             "mpv",
             "vlc",
+            "cvlc",
         }
         else None,
     )
@@ -1467,6 +1468,11 @@ def test_terminal_git_and_pip_use_lan_http_proxy_not_vpn(monkeypatch):
     assert vlc is not None
     assert vlc[0] == "/usr/bin/vlc"
     assert _child_env(vlc)["http_proxy"] == _child_env(vlc)["HTTP_PROXY"]
+    cvlc = container_direct_argv("cvlc http://192.168.1.50:8096/video")
+    assert cvlc is not None
+    assert cvlc[0] == "/usr/bin/cvlc"
+    assert _child_env(cvlc)["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert "10.8.0.1" not in _child_env(cvlc)["HTTP_PROXY"]
 
 
 def test_terminal_hydra_uses_lan_connect_proxy_not_vpn(monkeypatch):
