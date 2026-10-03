@@ -725,12 +725,6 @@ Test-NvidiaDriver
 Write-Step "Checking Python"
 $pythonExe = Ensure-Python
 
-Write-Step "Checking Node.js"
-Ensure-Node
-
-Write-Step "Gmail and WhatsApp connectors"
-Ensure-McpConnectors
-
 Write-Step "Python environment and packages"
 $venvPython = Ensure-Venv -PythonExe $pythonExe
 Ensure-PipPackages -VenvPython $venvPython
@@ -739,7 +733,22 @@ Ensure-LayaPythonPackage -VenvPython $venvPython
 Ensure-Playwright -VenvPython $venvPython
 
 Write-Step "Web portal"
+if (-not (Test-Path (Join-Path $Root "frontend\dist\index.html"))) {
+    Ensure-Node
+}
 Ensure-FrontendBuild
+
+# Connectors are optional integrations. Their npm failure must not prevent the
+# already packaged portal and backend from launching after an upgrade.
+try {
+    Write-Step "Checking Node.js"
+    Ensure-Node
+    Write-Step "Gmail and WhatsApp connectors"
+    Ensure-McpConnectors
+} catch {
+    Write-BootstrapLog "Gmail and WhatsApp connectors pending: $($_.Exception.Message)"
+    Write-Warning "Gmail and WhatsApp connectors could not be prepared. Jarvis can start; retry connector setup later."
+}
 
 Write-Step "llama.cpp inference server"
 Ensure-LlamaCpp
