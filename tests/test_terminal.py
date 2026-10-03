@@ -1384,6 +1384,12 @@ def test_lan_docker_build_skopeo_loads_from_before_build(tmp_path, monkeypatch):
     assert override is not None
     assert "192.168.1.50:5000/other:1" in override
     assert "192.168.1.50:5000/base:latest" not in override
+    (ctx / "Dockerfile").write_text("ARG BASE\nFROM ${BASE}\nCOPY . .\n", encoding="utf-8")
+    monkeypatch.setenv("BASE", "192.168.1.50:5000/from-env:1")
+    from_env = lan_bound_docker_build_argv(f"docker build --build-arg BASE {ctx}")
+    assert from_env is not None
+    assert "192.168.1.50:5000/from-env:1" in from_env
+    assert lan_bound_docker_build_argv(f"docker build {ctx}") is None
 
 
 def test_lan_docker_buildx_skopeo_loads_from_before_build(tmp_path, monkeypatch):
@@ -1536,6 +1542,38 @@ def test_lan_docker_bake_skopeo_loads_from_and_push(tmp_path, monkeypatch):
     assert set_tags is not None
     assert "--push-after" in set_tags
     assert "192.168.1.50:5000/app:set" in set_tags
+    (ctx / "Dockerfile").write_text("ARG BASE\nFROM ${BASE}\nCOPY . .\n", encoding="utf-8")
+    hcl.write_text(
+        'target "app" {\n'
+        '  context = "./app"\n'
+        '  dockerfile = "Dockerfile"\n'
+        "  args = {\n"
+        '    BASE = "192.168.1.50:5000/from-bake:1"\n'
+        "  }\n"
+        '  tags = ["192.168.1.50:5000/app:latest"]\n'
+        "}\n",
+        encoding="utf-8",
+    )
+    from_hcl = lan_bound_docker_bake_argv(f"docker buildx bake -f {hcl}")
+    assert from_hcl is not None
+    assert "192.168.1.50:5000/from-bake:1" in from_hcl
+    json_bake.write_text(
+        '{"target":{"app":{"context":"./app","dockerfile":"Dockerfile",'
+        '"args":{"BASE":"192.168.1.50:5000/from-json:1"},'
+        '"tags":["192.168.1.50:5000/app:v1"]}}}',
+        encoding="utf-8",
+    )
+    from_json = lan_bound_docker_bake_argv(f"docker buildx bake -f {json_bake}", cwd=str(tmp_path))
+    assert from_json is not None
+    assert "192.168.1.50:5000/from-json:1" in from_json
+    set_args = lan_bound_docker_bake_argv(
+        f"docker buildx bake -f {hcl} --set app.args.BASE=192.168.1.50:5000/from-set:1",
+        cwd=str(tmp_path),
+    )
+    assert set_args is not None
+    assert "192.168.1.50:5000/from-set:1" in set_args
+    assert "192.168.1.50:5000/from-bake:1" not in set_args
+    assert lan_bound_docker_bake_argv(f"docker buildx bake -f {hcl} --set app.args.BASE=alpine:3.20") is None
 
 
 def test_compose_service_dockerfiles_resolves_context(tmp_path):
@@ -1697,6 +1735,52 @@ def test_lan_compose_build_skopeo_loads_from_before_build(tmp_path, monkeypatch)
     assert "192.168.1.50:5000/base:latest" not in alpine_push
     assert lan_bound_compose_build_argv(f"docker compose -f {stack} build --push web") is None
     assert lan_bound_compose_build_argv(f"docker compose -f {stack} build") is None
+    (app / "Dockerfile").write_text("ARG BASE\nFROM ${BASE}\nCOPY . .\n", encoding="utf-8")
+    stack.write_text(
+        "services:\n"
+        "  app:\n"
+        "    build:\n"
+        "      context: ./app\n"
+        "      args:\n"
+        "        BASE: 192.168.1.50:5000/from-compose:1\n"
+        "  listed:\n"
+        "    build:\n"
+        "      context: ./app\n"
+        "      args:\n"
+        "        - BASE=192.168.1.50:5000/from-list:1\n",
+        encoding="utf-8",
+    )
+    from_compose = lan_bound_compose_build_argv(f"docker compose -f {stack} build app")
+    assert from_compose is not None
+    assert "192.168.1.50:5000/from-compose:1" in from_compose
+    from_list = lan_bound_compose_build_argv(f"docker compose -f {stack} build listed")
+    assert from_list is not None
+    assert "192.168.1.50:5000/from-list:1" in from_list
+    from_cli = lan_bound_compose_build_argv(
+        f"docker compose -f {stack} build --build-arg BASE=192.168.1.50:5000/from-cli:2 app"
+    )
+    assert from_cli is not None
+    assert "192.168.1.50:5000/from-cli:2" in from_cli
+    assert "192.168.1.50:5000/from-compose:1" not in from_cli
+    assert lan_bound_compose_build_argv(
+        f"docker compose -f {stack} build --build-arg BASE=alpine:3.20 app"
+    ) is None
+    stack.write_text(
+        "services:\n"
+        "  app:\n"
+        "    build:\n"
+        "      context: ./app\n"
+        "      args:\n"
+        "        - BASE\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("BASE", "192.168.1.50:5000/from-env:1")
+    from_env = lan_bound_compose_build_argv(f"docker compose -f {stack} build app")
+    assert from_env is not None
+    assert "192.168.1.50:5000/from-env:1" in from_env
+    cli_env = lan_bound_compose_build_argv(f"docker compose -f {stack} build --build-arg BASE app")
+    assert cli_env is not None
+    assert "192.168.1.50:5000/from-env:1" in cli_env
 
 
 def test_lan_compose_up_skopeo_loads_images_and_from(tmp_path, monkeypatch):
@@ -1773,6 +1857,20 @@ def test_lan_compose_up_skopeo_loads_images_and_from(tmp_path, monkeypatch):
     assert created is not None
     assert "192.168.1.50:5000/redis:7" in created
     assert "create" in created[created.index("--") + 1 :]
+    (app / "Dockerfile").write_text("ARG BASE\nFROM ${BASE}\nCOPY . .\n", encoding="utf-8")
+    stack.write_text(
+        "services:\n"
+        "  app:\n"
+        "    build:\n"
+        "      context: ./app\n"
+        "      args:\n"
+        "        BASE: 192.168.1.50:5000/from-up:1\n",
+        encoding="utf-8",
+    )
+    rebuilt_args = lan_bound_compose_up_argv(f"docker compose -f {stack} up --build app")
+    assert rebuilt_args is not None
+    assert "192.168.1.50:5000/from-up:1" in rebuilt_args
+    assert lan_bound_compose_up_argv(f"docker compose -f {stack} up app") is None
 
 
 def test_lan_compose_run_skopeo_loads_image_and_from(tmp_path, monkeypatch):

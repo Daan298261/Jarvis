@@ -1419,6 +1419,59 @@ def compose_service_dockerfiles(path: Path) -> dict[str, Path]:
     return files
 
 
+def _parse_build_arg_mapping(raw: object, env: dict[str, str] | None = None) -> dict[str, str]:
+    values = dict(env if env is not None else os.environ)
+    out: dict[str, str] = {}
+    items: list[tuple[str, str]] = []
+    if isinstance(raw, dict):
+        items = [(str(key).strip(), str(val if val is not None else "").strip()) for key, val in raw.items()]
+    elif isinstance(raw, list):
+        for item in raw:
+            text = str(item or "").strip()
+            if "=" not in text:
+                key = text.strip()
+                if key and "$" not in key and key in values:
+                    items.append((key, str(values[key])))
+                continue
+            key, _, val = text.partition("=")
+            items.append((key.strip(), val.strip()))
+    for name, text in items:
+        if not name or "$" in name:
+            continue
+        expanded = expand_image_vars(text, values) if "$" in text else text
+        if expanded is None:
+            continue
+        out[name] = expanded.strip().strip("'\"")
+        values[name] = out[name]
+    return out
+
+
+def compose_service_build_args(path: Path) -> dict[str, dict[str, str]]:
+    """Map compose service name → ``build.args`` used as Dockerfile ARG values."""
+    try:
+        import yaml
+    except ImportError:
+        return {}
+    try:
+        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError):
+        return {}
+    services = payload.get("services") if isinstance(payload, dict) else None
+    if not isinstance(services, dict):
+        return {}
+    result: dict[str, dict[str, str]] = {}
+    for name, spec in services.items():
+        if not isinstance(spec, dict):
+            continue
+        build = spec.get("build")
+        if not isinstance(build, dict):
+            continue
+        args = _parse_build_arg_mapping(build.get("args"))
+        if args:
+            result[str(name)] = args
+    return result
+
+
 def compose_service_depends(path: Path) -> dict[str, list[str]]:
     """Map compose service name → depends_on names. Skip interpolations."""
     try:
@@ -1926,9 +1979,12 @@ def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[s
         return None
     dockerfiles: dict[str, Path] = {}
     images: dict[str, str] = {}
+    file_args: dict[str, dict[str, str]] = {}
     for path in paths:
         dockerfiles.update(compose_service_dockerfiles(path))
         images.update(compose_service_images(path))
+        for name, args in compose_service_build_args(path).items():
+            file_args.setdefault(name, {}).update(args)
     if not dockerfiles:
         return None
     if services and not with_deps:
@@ -1937,10 +1993,12 @@ def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[s
             return None
     else:
         chosen = dict(dockerfiles)
+    cli_args = _docker_build_args(parts)
     lan: list[str] = []
     seen: set[str] = set()
-    for dockerfile in chosen.values():
-        for image in dockerfile_from_images(dockerfile):
+    for name, dockerfile in chosen.items():
+        merged = {**file_args.get(name, {}), **cli_args}
+        for image in dockerfile_from_images(dockerfile, merged):
             if image in seen:
                 continue
             if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
@@ -2144,11 +2202,14 @@ def _compose_lan_copy_images(
 ) -> list[str]:
     images: dict[str, str] = {}
     dockerfiles: dict[str, Path] = {}
+    file_args: dict[str, dict[str, str]] = {}
     deps: dict[str, list[str]] = {}
     for path in paths:
         images.update(compose_service_images(path))
         if do_build:
             dockerfiles.update(compose_service_dockerfiles(path))
+            for name, args in compose_service_build_args(path).items():
+                file_args.setdefault(name, {}).update(args)
         for name, kids in compose_service_depends(path).items():
             deps.setdefault(name, [])
             for kid in kids:
@@ -2170,8 +2231,8 @@ def _compose_lan_copy_images(
             continue
         seen.add(image)
         lan.append(image)
-    for dockerfile in dockerfiles.values():
-        for image in dockerfile_from_images(dockerfile):
+    for name, dockerfile in dockerfiles.items():
+        for image in dockerfile_from_images(dockerfile, file_args.get(name)):
             if image in seen:
                 continue
             if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
@@ -2534,6 +2595,9 @@ def _docker_build_args(parts: list[str]) -> dict[str, str]:
         else:
             continue
         if "=" not in raw:
+            key = raw.strip()
+            if key and key in os.environ:
+                args[key] = os.environ[key]
             continue
         key, _, value = raw.partition("=")
         key = key.strip()
@@ -2737,10 +2801,48 @@ _BAKE_VALUE_FLAGS = frozenset(
         "--attest",
     }
 )
-_HCL_TARGET = re.compile(r"target\s+\"[^\"]+\"\s*\{([^{}]*)\}", re.I)
 _HCL_DOCKERFILE = re.compile(r"dockerfile\s*=\s*\"([^\"]+)\"", re.I)
 _HCL_CONTEXT = re.compile(r"context\s*=\s*\"([^\"]+)\"", re.I)
 _HCL_TAGS = re.compile(r"tags\s*=\s*\[([^\]]*)\]", re.I)
+_HCL_ARG_ITEM = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\"([^\"]*)\"")
+_HCL_TARGET_OPEN = re.compile(r"target\s+\"[^\"]+\"\s*\{", re.I)
+
+
+def _hcl_target_blocks(text: str) -> list[str]:
+    blocks: list[str] = []
+    for match in _HCL_TARGET_OPEN.finditer(text):
+        start = match.end()
+        depth = 1
+        index = start
+        while index < len(text) and depth:
+            char = text[index]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+            index += 1
+        if depth == 0:
+            blocks.append(text[start : index - 1])
+    return blocks
+
+
+def _hcl_args(block: str) -> dict[str, str]:
+    match = re.search(r"args\s*=\s*\{", block, re.I)
+    if not match:
+        return {}
+    start = match.end()
+    depth = 1
+    index = start
+    while index < len(block) and depth:
+        char = block[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+        index += 1
+    if depth != 0:
+        return {}
+    return {item.group(1): item.group(2) for item in _HCL_ARG_ITEM.finditer(block[start : index - 1])}
 
 
 def _bake_resolve_dockerfile(file_dir: Path, cwd: Path, context: str, dockerfile: str) -> Path | None:
@@ -2761,14 +2863,15 @@ def _bake_resolve_dockerfile(file_dir: Path, cwd: Path, context: str, dockerfile
     return None
 
 
-def bake_file_dockerfiles_and_tags(path: Path, cwd: Path) -> tuple[list[Path], list[str]]:
-    """Dockerfile paths and image tags declared in a bake JSON/HCL or compose file."""
+def bake_file_dockerfiles_and_tags(path: Path, cwd: Path) -> tuple[list[tuple[Path, dict[str, str]]], list[str]]:
+    """Dockerfile paths (with bake/compose ARG maps) and image tags in a bake file."""
     suffix = path.suffix.lower()
-    dockerfiles: list[Path] = []
+    dockerfiles: list[tuple[Path, dict[str, str]]] = []
     tags: list[str] = []
     if suffix in {".yaml", ".yml"}:
         files = compose_service_dockerfiles(path)
-        dockerfiles.extend(files.values())
+        args = compose_service_build_args(path)
+        dockerfiles.extend((df, dict(args.get(name, {}))) for name, df in files.items())
         tags.extend(compose_service_images(path).values())
         return dockerfiles, tags
     try:
@@ -2795,12 +2898,12 @@ def bake_file_dockerfiles_and_tags(path: Path, cwd: Path) -> tuple[list[Path], l
             dockerfile = str(spec.get("dockerfile") or "").strip()
             resolved = _bake_resolve_dockerfile(file_dir, cwd, context, dockerfile)
             if resolved:
-                dockerfiles.append(resolved)
+                dockerfiles.append((resolved, _parse_build_arg_mapping(spec.get("args"))))
             raw_tags = spec.get("tags")
             if isinstance(raw_tags, list):
                 tags.extend(str(item).strip() for item in raw_tags if str(item).strip() and "$" not in str(item))
         return dockerfiles, tags
-    for block in _HCL_TARGET.findall(text):
+    for block in _hcl_target_blocks(text):
         if "dockerfile-inline" in block:
             continue
         context_match = _HCL_CONTEXT.search(block)
@@ -2809,7 +2912,7 @@ def bake_file_dockerfiles_and_tags(path: Path, cwd: Path) -> tuple[list[Path], l
         dockerfile = df_match.group(1).strip() if df_match else ""
         resolved = _bake_resolve_dockerfile(file_dir, cwd, context, dockerfile)
         if resolved:
-            dockerfiles.append(resolved)
+            dockerfiles.append((resolved, _hcl_args(block)))
         tags_match = _HCL_TAGS.search(block)
         if tags_match:
             tags.extend(
@@ -2835,7 +2938,26 @@ def _bake_set_tags(value: str) -> list[str]:
     ]
 
 
-def _docker_bake_spec(parts: list[str], cwd: str | None) -> tuple[list[Path], bool, bool, list[str]] | None:
+def _bake_set_args(value: str) -> dict[str, str]:
+    """Parse ``--set app.args.BASE=image`` / ``*.args.BASE=image`` overrides."""
+    text = str(value or "").strip().strip("'\"")
+    if not text or "$" in text:
+        return {}
+    key_path, sep, rhs = text.partition("=")
+    if not sep or not rhs.strip() or "$" in rhs:
+        return {}
+    lowered = key_path.lower()
+    if ".args." not in lowered and not lowered.startswith("args."):
+        return {}
+    name = key_path.rsplit(".", 1)[-1].strip()
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name or ""):
+        return {}
+    return {name: rhs.strip().strip("'\"")}
+
+
+def _docker_bake_spec(
+    parts: list[str], cwd: str | None
+) -> tuple[list[Path], bool, bool, list[str], dict[str, str]] | None:
     if not parts or _tool_basename(parts[0]) != "docker":
         return None
     rest = parts[1:]
@@ -2845,6 +2967,7 @@ def _docker_bake_spec(parts: list[str], cwd: str | None) -> tuple[list[Path], bo
         return None
     files: list[str] = []
     extra_tags: list[str] = []
+    extra_args: dict[str, str] = {}
     quiet = False
     wants_push = False
     index = 1
@@ -2873,12 +2996,16 @@ def _docker_bake_spec(parts: list[str], cwd: str | None) -> tuple[list[Path], bo
             index += 1
             continue
         if text.startswith("--set="):
-            extra_tags.extend(_bake_set_tags(text.split("=", 1)[1]))
+            raw = text.split("=", 1)[1]
+            extra_tags.extend(_bake_set_tags(raw))
+            extra_args.update(_bake_set_args(raw))
             continue
         if text == "--set":
             if index >= len(rest):
                 return None
-            extra_tags.extend(_bake_set_tags(str(rest[index] or "").strip().strip("'\"")))
+            raw = str(rest[index] or "").strip().strip("'\"")
+            extra_tags.extend(_bake_set_tags(raw))
+            extra_args.update(_bake_set_args(raw))
             index += 1
             continue
         if text.startswith("--") and "=" in text:
@@ -2905,7 +3032,7 @@ def _docker_bake_spec(parts: list[str], cwd: str | None) -> tuple[list[Path], bo
     for path in paths:
         if not path.is_file():
             return None
-    return paths, quiet, wants_push, extra_tags
+    return paths, quiet, wants_push, extra_tags, extra_args
 
 
 def _docker_bake_for_local_load(parts: list[str], *, drop_push: bool) -> list[str]:
@@ -2952,26 +3079,27 @@ def lan_bound_docker_bake_argv(command: str, cwd: str | None = None) -> list[str
     spec = _docker_bake_spec(parts, cwd)
     if spec is None:
         return None
-    paths, quiet, wants_push, extra_tags = spec
+    paths, quiet, wants_push, extra_tags, extra_args = spec
     root = Path(cwd or os.getcwd())
-    dockerfiles: list[Path] = []
+    dockerfiles: list[tuple[Path, dict[str, str]]] = []
     tags: list[str] = []
     seen_df: set[str] = set()
     for path in paths:
         files, found_tags = bake_file_dockerfiles_and_tags(path, root)
-        for df in files:
+        for df, args in files:
             key = str(df)
             if key in seen_df:
                 continue
             seen_df.add(key)
-            dockerfiles.append(df)
+            dockerfiles.append((df, args))
         tags.extend(found_tags)
     if extra_tags:
         tags = list(extra_tags)
     lan: list[str] = []
     seen: set[str] = set()
-    for dockerfile in dockerfiles:
-        for image in dockerfile_from_images(dockerfile):
+    for dockerfile, args in dockerfiles:
+        merged = {**args, **extra_args}
+        for image in dockerfile_from_images(dockerfile, merged):
             if image in seen:
                 continue
             if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
