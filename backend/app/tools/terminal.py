@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 import psutil
 
@@ -1292,13 +1292,123 @@ def _gio_smb_unc(url: str) -> str:
     return f"//{host}/{share}"
 
 
+def _gio_runtime_gvfs() -> Path:
+    env = str(os.environ.get("XDG_RUNTIME_DIR") or "").strip()
+    if env:
+        return Path(env) / "gvfs"
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()
+        return Path(base) / "jarvis-gvfs" / "gvfs"
+    try:
+        uid = os.getuid()
+    except AttributeError:
+        uid = 0
+    return Path(f"/run/user/{uid}") / "gvfs"
+
+
+def _gio_gvfs_volume_name(url: str) -> str:
+    """Directory name dest-less ``gio mount`` uses under ``$XDG_RUNTIME_DIR/gvfs``."""
+    parsed = urlparse(str(url or "").strip())
+    scheme = (parsed.scheme or "").lower()
+    host = (parsed.hostname or "").strip()
+    if not host:
+        return ""
+    path = unquote(parsed.path or "") or "/"
+    if not path.startswith("/"):
+        path = f"/{path}"
+    user = unquote(parsed.username) if parsed.username else ""
+    bits: list[str]
+    if scheme in _GIO_SMB_SCHEMES:
+        share = path.strip("/").split("/", 1)[0]
+        if not share:
+            return ""
+        bits = [f"smb-share:server={host}", f"share={share}"]
+        if user:
+            bits.append(f"user={user}")
+        return ",".join(bits)
+    if scheme in {"dav", "http", "davs", "https"}:
+        ssl = "true" if scheme in {"davs", "https"} else "false"
+        bits = [f"dav:host={host}", f"ssl={ssl}"]
+        if parsed.port:
+            bits.append(f"port={parsed.port}")
+        if user:
+            bits.append(f"user={user}")
+        bits.append(f"prefix={quote(path, safe='')}")
+        return ",".join(bits)
+    if scheme in {"ftp", "ftps"}:
+        bits = [f"ftp:host={host}", f"ssl={'true' if scheme == 'ftps' else 'false'}"]
+        if parsed.port:
+            bits.append(f"port={parsed.port}")
+        if user:
+            bits.append(f"user={user}")
+        if path and path != "/":
+            bits.append(f"prefix={quote(path, safe='')}")
+        return ",".join(bits)
+    return ""
+
+
+def _gio_default_mount_dest(url: str) -> str:
+    name = _gio_gvfs_volume_name(url)
+    if not name:
+        return ""
+    if os.name == "nt":
+        name = name.replace(":", "_")
+    dest = _gio_runtime_gvfs() / name
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return ""
+    return str(dest)
+
+
+def _gio_mount_bound_argv(url: str, dest: str) -> list[str] | None:
+    scheme = (urlparse(url).scheme or "").lower()
+    if scheme in {"ftp", "ftps"}:
+        host = (urlparse(url).hostname or "").strip()
+        if not _lan_bind_ip_for_host(host):
+            return None
+        exe = shutil.which("curlftpfs") or shutil.which("curlftpfs.exe")
+        if not exe:
+            return None
+        return [exe, url, dest]
+    if scheme in _GIO_HTTP_SCHEMES:
+        host = (urlparse(url).hostname or "").strip()
+        if not _lan_bind_ip_for_host(host):
+            return None
+        exe = (
+            shutil.which("mount.davfs")
+            or shutil.which("mount.davfs2")
+            or shutil.which("mount")
+            or shutil.which("mount.exe")
+        )
+        if not exe:
+            return None
+        if _tool_basename(exe) in {"mount.davfs", "mount.davfs2"}:
+            return [exe, _gio_http_url(url), dest]
+        return [exe, "-t", "davfs", _gio_http_url(url), dest]
+    if scheme in _GIO_SMB_SCHEMES:
+        unc = _gio_smb_unc(url)
+        bind = _lan_bind_for_http_target(url)
+        if not unc or not bind:
+            return None
+        exe = shutil.which("mount.cifs") or shutil.which("mount") or shutil.which("mount.exe")
+        if not exe:
+            return None
+        if _tool_basename(exe) == "mount.cifs":
+            return _cifs_with_srcaddr([exe, unc, dest], bind)
+        return _cifs_with_srcaddr([exe, "-t", "cifs", unc, dest], bind)
+    return None
+
+
 def lan_bound_gio_argv(command: str) -> list[str] | None:
     """gio/gvfs of an on-link RFC1918 NAS, sourced from that NIC.
 
     gvfsd does not inherit HTTP_PROXY from the ``gio`` client. Rewrite
     ``cat``/``copy`` of dav/http/ftp to curl ``--interface``, smb copy to
-    ``smbget --option=client addr=``, and ``mount DEST`` to mount.davfs /
-    mount.cifs ``srcaddr``. Skip pipes, flags, dest-less mounts, and public hosts.
+    ``smbget --option=client addr=``, and ``mount`` (including dest-less
+    ``gio mount URL``, which lands under ``$XDG_RUNTIME_DIR/gvfs``) to
+    mount.davfs, curlftpfs, or mount.cifs ``srcaddr``. Skip pipes, flags,
+    and public hosts.
     """
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
@@ -1348,37 +1458,12 @@ def lan_bound_gio_argv(command: str) -> list[str] | None:
                 return None
             return [exe, f"--option=client addr={bind}", "-o", dest, src]
         return None
-    if action == "mount" and len(rest) == 2:
+    if action == "mount" and 1 <= len(rest) <= 2:
         url = str(rest[0]).strip().strip("'\"")
-        dest = str(rest[1]).strip().strip("'\"")
-        scheme = (urlparse(url).scheme or "").lower()
-        if scheme in _GIO_HTTP_SCHEMES:
-            host = (urlparse(url).hostname or "").strip()
-            if not _lan_bind_ip_for_host(host):
-                return None
-            exe = (
-                shutil.which("mount.davfs")
-                or shutil.which("mount.davfs2")
-                or shutil.which("mount")
-                or shutil.which("mount.exe")
-            )
-            if not exe:
-                return None
-            if _tool_basename(exe) in {"mount.davfs", "mount.davfs2"}:
-                return [exe, _gio_http_url(url), dest]
-            return [exe, "-t", "davfs", _gio_http_url(url), dest]
-        if scheme in _GIO_SMB_SCHEMES:
-            unc = _gio_smb_unc(url)
-            bind = _lan_bind_for_http_target(url)
-            if not unc or not bind:
-                return None
-            exe = shutil.which("mount.cifs") or shutil.which("mount") or shutil.which("mount.exe")
-            if not exe:
-                return None
-            if _tool_basename(exe) == "mount.cifs":
-                return _cifs_with_srcaddr([exe, unc, dest], bind)
-            return _cifs_with_srcaddr([exe, "-t", "cifs", unc, dest], bind)
-        return None
+        dest = str(rest[1]).strip().strip("'\"") if len(rest) == 2 else _gio_default_mount_dest(url)
+        if not dest:
+            return None
+        return _gio_mount_bound_argv(url, dest)
     return None
 
 

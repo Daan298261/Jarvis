@@ -708,9 +708,12 @@ def test_lan_davfs_and_curlftpfs_use_lan_http_proxy_not_vpn(monkeypatch):
     assert _child_env(bash)["HTTPS_PROXY"] == _child_env(bash)["HTTP_PROXY"]
 
 
-def test_lan_gio_rewrites_to_curl_smbget_and_mount(monkeypatch):
+def test_lan_gio_rewrites_to_curl_smbget_and_mount(tmp_path, monkeypatch):
+    from pathlib import Path
+
     monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
     monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
     monkeypatch.setattr(
         "app.tools.terminal.shutil.which",
         lambda name: f"/usr/bin/{name}"
@@ -729,6 +732,8 @@ def test_lan_gio_rewrites_to_curl_smbget_and_mount(monkeypatch):
             "mount.exe",
             "mount.davfs",
             "mount.cifs",
+            "curlftpfs",
+            "curlftpfs.exe",
         }
         else None,
     )
@@ -773,7 +778,32 @@ def test_lan_gio_rewrites_to_curl_smbget_and_mount(monkeypatch):
         "srcaddr=192.168.1.12" in str(part) for part in smb_mount
     )
     assert lan_bound_gio_argv("gio cat dav://8.8.8.8/readme.md") is None
-    assert lan_bound_gio_argv("gio mount dav://192.168.1.50/webdav") is None
+    destless = lan_bound_gio_argv("gio mount dav://192.168.1.50/webdav")
+    assert destless is not None
+    assert destless[0] == "/usr/bin/mount.davfs"
+    assert destless[1] == "http://192.168.1.50/webdav"
+    dest_dir = Path(destless[2])
+    assert dest_dir.parent == tmp_path / "gvfs"
+    assert dest_dir.name.startswith("dav:host=192.168.1.50")
+    assert dest_dir.is_dir()
+    assert _child_env(destless)["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    destless_smb = lan_bound_gio_argv("gio mount smb://192.168.1.50/media")
+    assert destless_smb is not None
+    assert destless_smb[0] == "/usr/bin/mount.cifs"
+    assert "//192.168.1.50/media" in destless_smb
+    assert any("srcaddr=192.168.1.12" in str(part) for part in destless_smb)
+    assert Path(destless_smb[-1]).parent == tmp_path / "gvfs"
+    gvfs_mount = lan_bound_gio_argv("gvfs-mount ftp://192.168.1.40/share")
+    assert gvfs_mount is not None
+    assert gvfs_mount[0] == "/usr/bin/curlftpfs"
+    assert gvfs_mount[1] == "ftp://192.168.1.40/share"
+    ftp_dest = Path(gvfs_mount[2])
+    assert ftp_dest.parent == tmp_path / "gvfs"
+    assert ftp_dest.name.startswith("ftp:host=192.168.1.40")
+    assert _child_env(gvfs_mount)["ftp_proxy"] == _child_env(gvfs_mount)["HTTP_PROXY"]
+    bash_mount = _command_args("gio mount dav://192.168.1.50/webdav", "bash")
+    assert bash_mount[0] == "/usr/bin/mount.davfs"
+    assert lan_bound_gio_argv("gio mount dav://8.8.8.8/webdav") is None
     assert lan_bound_gio_argv("gio cat dav://192.168.1.50/webdav/readme.md | cat") is None
     bash = _command_args("gio cat dav://192.168.1.50/webdav/readme.md", "bash")
     assert bash[0] == "/usr/bin/curl"
