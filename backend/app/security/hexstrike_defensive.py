@@ -488,7 +488,7 @@ def looks_like_snmp_tool(name: str) -> bool:
 
 
 def looks_like_iface_host_tool(name: str) -> bool:
-    """tcpdump/hping3/arp-scan/arping/fping/nmblookup: iface flags cannot round-trip a spaced NIC."""
+    """LAN scanners whose iface flags cannot round-trip a spaced Windows NIC name."""
     return hexstrike_lan_tool_id(name) in _IFACE_HOST_STEMS
 
 
@@ -612,13 +612,19 @@ _PROXY_HOST_PORT = frozenset({"whatweb", "wfuzz"})
 _CAPTURE_STEMS = frozenset({"tcpdump", "tshark", "dumpcap"})
 _HPING_STEMS = frozenset({"hping", "hping3"})
 _ARP_HOST_STEMS = frozenset({"arp_scan", "arping", "fping", "nmblookup"})
-_IFACE_HOST_STEMS = _CAPTURE_STEMS | _HPING_STEMS | _ARP_HOST_STEMS
+_SCAN_HOST_STEMS = _PD_SOURCE_TOOLS | frozenset({"masscan", "rustscan"})
+_IFACE_HOST_STEMS = _CAPTURE_STEMS | _HPING_STEMS | _ARP_HOST_STEMS | _SCAN_HOST_STEMS
 _IFACE_HOST_BINARY = {"arp_scan": "arp-scan"}
 _IFACE_STRIP_FLAGS = {
     "arp_scan": frozenset({"-i", "--interface", "-I", "--arpspa", "--localip"}),
     "arping": frozenset({"-i", "--interface", "-I", "-s"}),
     "fping": frozenset({"-i", "--interface", "-I", "-S"}),
     "nmblookup": frozenset({"-i", "--interface", "-I", "-B", "--broadcast"}),
+    "nuclei": frozenset({"-source-ip", "-interface", "--interface"}),
+    "httpx": frozenset({"-source-ip", "-interface", "--interface"}),
+    "naabu": frozenset({"-source-ip", "-interface", "--interface"}),
+    "masscan": frozenset({"--source-ip", "-e", "-S", "--adapter-ip"}),
+    "rustscan": frozenset({"-S", "-e", "-interface", "--interface"}),
 }
 
 
@@ -651,8 +657,10 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
     iperf/iperf3 use ``-B``. mtr uses ``-a``. nmblookup uses ``-B``/``-i``.
     tcpdump/tshark/dumpcap use ``-i``. hping3 uses ``-I``. When the Windows NIC
     name has a space, HexStrike ``additional_args.split()`` cannot round-trip
-    ``-i``/``-I``; operator/MCP host-executes argv for capture, hping3, arp-scan,
-    arping, fping, and nmblookup.
+    ``-i``/``-I``/``-e``/``-interface``; operator/MCP host-execute argv for
+    capture, hping3, arp-scan, arping, fping, nmblookup, nuclei, httpx, naabu,
+    masscan, and rustscan when the binary is on PATH (else the suite keeps
+    source-IP flags).
     snmpwalk has no bind flag; LAN operator/MCP calls host-execute with
     ``SNMPCONFPATH`` ``clientaddr``.
     gobuster/ffuf/dirsearch/feroxbuster/sqlmap/nikto/katana/whatweb/wpscan/wafw00f/
@@ -838,10 +846,56 @@ def _strip_iface_tokens(parts: list[str], stem: str = "") -> list[str]:
 
 def _iface_host_binary(stem: str) -> str | None:
     name = _IFACE_HOST_BINARY.get(stem, stem)
-    return shutil.which(name) or shutil.which(f"{name}.exe")
+    found = shutil.which(name) or shutil.which(f"{name}.exe")
+    if found:
+        return found
+    folders: list[Path] = []
+    try:
+        from .hexstrike import resolve_install
+
+        root = resolve_install()
+    except Exception:
+        root = None
+    if root is not None:
+        folders.extend(
+            [
+                root / "hexstrike-env" / "Scripts",
+                root / "hexstrike-env" / "bin",
+                root / ".venv" / "Scripts",
+                root / ".venv" / "bin",
+                root,
+            ]
+        )
+    folders.append(Path.home() / "go" / "bin")
+    for folder in folders:
+        for candidate in (folder / name, folder / f"{name}.exe"):
+            try:
+                if candidate.is_file():
+                    return str(candidate)
+            except OSError:
+                continue
+    return None
+
+
+def should_host_exec_iface(tool: str, target: str) -> bool:
+    """Host argv when HexStrike would split a spaced NIC, and the binary is runnable."""
+    if not lan_uses_host_iface_argv(target):
+        return False
+    stem = hexstrike_lan_tool_id(tool)
+    if stem not in _IFACE_HOST_STEMS:
+        return False
+    if stem in _SCAN_HOST_STEMS and not _iface_host_binary(stem):
+        return False
+    return True
 
 
 def _iface_host_bind_flags(stem: str, target: str, iface: str, source: str) -> list[str]:
+    if stem in _PD_SOURCE_TOOLS:
+        return ["-source-ip", source, "-interface", iface]
+    if stem == "masscan":
+        return ["--source-ip", source, "-e", iface]
+    if stem == "rustscan":
+        return ["-S", source, "-e", iface]
     if stem == "arp_scan":
         return ["--arpspa", source, "-I", iface]
     if stem == "arping":
@@ -858,6 +912,16 @@ def _iface_host_bind_flags(stem: str, target: str, iface: str, source: str) -> l
     if stem in _HPING_STEMS:
         return ["-I", iface]
     return ["-i", iface]
+
+
+def _iface_cli_target(payload: dict[str, Any] | None, stem: str) -> str:
+    row = payload if isinstance(payload, dict) else {}
+    if stem in _PD_SOURCE_TOOLS:
+        for key in ("url", "uri", "endpoint", "target", "host", "ip", "address"):
+            text = str(row.get(key) or "").strip()
+            if text:
+                return text
+    return _iface_lan_target(row)
 
 
 async def _host_nmap_lan_scan(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1018,13 +1082,27 @@ def iface_host_argv(tool: str, payload: dict[str, Any] | None) -> list[str]:
         _nmap_flag_tokens(str(row.get("additional_args") or row.get("extra_args") or row.get("args") or "")),
         stem=stem,
     )
-    argv = [binary, *_iface_host_bind_flags(stem, target, iface, source), *extra]
+    bind = _iface_host_bind_flags(stem, target, iface, source)
+    display_target = _iface_cli_target(row, stem)
     blob = " ".join(extra)
-    if target and target not in blob:
+    if stem == "rustscan":
+        argv = [binary, *extra]
+        if "--" not in extra:
+            argv.append("--")
+        argv.extend(bind)
+        if display_target and display_target not in blob and "-a" not in extra:
+            argv[1:1] = ["-a", display_target]
+        return argv
+    argv = [binary, *bind, *extra]
+    if display_target and display_target not in blob:
         if stem in _CAPTURE_STEMS:
-            argv.extend(["net" if "/" in target else "host", target])
+            argv.extend(["net" if "/" in display_target else "host", display_target])
+        elif stem in _PD_SOURCE_TOOLS:
+            flag = "-host" if stem == "naabu" else "-u"
+            if flag not in extra and "-target" not in extra:
+                argv.extend([flag, display_target])
         else:
-            argv.append(target)
+            argv.append(display_target)
     return argv
 
 
@@ -1055,10 +1133,10 @@ async def _host_iface_lan(tool: str, payload: dict[str, Any] | None) -> dict[str
 
 
 async def execute_operator_iface_tool(path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
-    """Operator iface tools: host argv when HexStrike would split ``-i``/``-I``."""
+    """Operator iface tools: host argv when HexStrike would split ``-i``/``-I``/``-e``."""
     bound = bind_hexstrike_lan_payload(path, payload)
     target = _iface_lan_target(bound)
-    if lan_uses_host_iface_argv(target):
+    if should_host_exec_iface(path, target):
         return await _host_iface_lan(path, bound)
     from .hexstrike import normalize_upstream_path
 

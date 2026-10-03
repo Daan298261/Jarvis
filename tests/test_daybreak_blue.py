@@ -830,6 +830,11 @@ def test_looks_like_nmap_tool_matches_hexstrike_mcp_ids():
     assert looks_like_iface_host_tool("arping")
     assert looks_like_iface_host_tool("api/tools/fping")
     assert looks_like_iface_host_tool("mcp_hexstrike_ai_nmblookup")
+    assert looks_like_iface_host_tool("http:nuclei")
+    assert looks_like_iface_host_tool("mcp_hexstrike_ai_httpx")
+    assert looks_like_iface_host_tool("api/tools/naabu")
+    assert looks_like_iface_host_tool("masscan")
+    assert looks_like_iface_host_tool("rustscan")
     assert not looks_like_iface_host_tool("nmap")
 
 
@@ -1310,6 +1315,176 @@ async def test_mcp_arp_scan_uses_host_argv_when_windows_nic_name_has_space(monke
         assert argv[0] == "/usr/bin/arp-scan"
         assert argv[argv.index("-I") + 1] == "Ethernet 2"
         assert argv[-1] == "192.168.50.0/24"
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_operator_nuclei_hosts_spaced_windows_nic(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_iface_tool, iface_host_argv
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.security.hexstrike.resolve_install", lambda explicit="": None)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: f"/usr/bin/{name}"
+        if str(name).lower() in {"nuclei", "httpx", "naabu", "masscan", "rustscan"}
+        else None,
+    )
+    nuclei = iface_host_argv(
+        "http:nuclei",
+        {
+            "url": "http://192.168.50.12:8080/login",
+            "additional_args": "-t http/ -source-ip 192.168.50.8",
+        },
+    )
+    assert nuclei[0] == "/usr/bin/nuclei"
+    assert nuclei[1:5] == ["-source-ip", "192.168.50.8", "-interface", "Ethernet 2"]
+    assert "-t" in nuclei and "http/" in nuclei
+    assert nuclei[-2:] == ["-u", "http://192.168.50.12:8080/login"]
+    httpx = iface_host_argv("mcp_hexstrike_ai_httpx", {"target": "192.168.50.0/24"})
+    assert httpx[0] == "/usr/bin/httpx"
+    assert httpx[1:5] == ["-source-ip", "192.168.50.8", "-interface", "Ethernet 2"]
+    assert httpx[-2:] == ["-u", "192.168.50.0/24"]
+    naabu = iface_host_argv("api/tools/naabu", {"host": "192.168.50.12", "extra_args": "-p 80"})
+    assert naabu[0] == "/usr/bin/naabu"
+    assert naabu[1:5] == ["-source-ip", "192.168.50.8", "-interface", "Ethernet 2"]
+    assert "-p" in naabu and "80" in naabu
+    assert naabu[-2:] == ["-host", "192.168.50.12"]
+    masscan = iface_host_argv("masscan", {"target": "192.168.50.0/24", "additional_args": "-p 80"})
+    assert masscan[0] == "/usr/bin/masscan"
+    assert masscan[1:5] == ["--source-ip", "192.168.50.8", "-e", "Ethernet 2"]
+    assert masscan[-1] == "192.168.50.0/24"
+    rust = iface_host_argv(
+        "rustscan",
+        {"target": "192.168.50.0/24", "additional_args": "-a 192.168.50.0/24 -- -S 192.168.50.8"},
+    )
+    assert rust[0] == "/usr/bin/rustscan"
+    assert rust[1:3] == ["-a", "192.168.50.0/24"]
+    assert "--" in rust
+    assert rust[rust.index("-S") + 1] == "192.168.50.8"
+    assert rust[rust.index("-e") + 1] == "Ethernet 2"
+
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"[http] http://192.168.50.12:8080/login\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    hosted = await execute_operator_iface_tool(
+        "api/tools/nuclei",
+        {"url": "http://192.168.50.12:8080/login", "additional_args": "-t http/"},
+    )
+    assert posted == []
+    assert hosted["source"] == "host-iface"
+    argv = seen[0]
+    assert argv[0] == "/usr/bin/nuclei"
+    assert argv[argv.index("-interface") + 1] == "Ethernet 2"
+    assert argv[-2:] == ("-u", "http://192.168.50.12:8080/login")
+    simple = await execute_operator_iface_tool(
+        "api/tools/nuclei",
+        {"url": "http://192.168.1.40:8080/", "additional_args": "-t http/"},
+    )
+    assert simple == {"ok": True}
+    assert posted[0][0] == "api/tools/nuclei"
+    assert "-source-ip 192.168.1.12 -interface eth0" in posted[0][1]["additional_args"]
+
+
+@pytest.mark.asyncio
+async def test_operator_nuclei_falls_back_to_suite_when_not_on_path(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_iface_tool
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.security.hexstrike.resolve_install", lambda explicit="": None)
+    monkeypatch.setattr("app.security.hexstrike_defensive.shutil.which", lambda *args, **kwargs: None)
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    result = await execute_operator_iface_tool(
+        "api/tools/nuclei",
+        {"url": "http://192.168.50.12:8080/login", "additional_args": "-t http/"},
+    )
+    assert result == {"ok": True}
+    assert posted[0][0] == "api/tools/nuclei"
+    assert "-source-ip 192.168.50.8" in posted[0][1]["additional_args"]
+    assert "Ethernet" not in posted[0][1]["additional_args"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_nuclei_uses_host_argv_when_windows_nic_name_has_space(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN nuclei must not go through HexStrike MCP when -interface would split")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_nuclei"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "nuclei"},
+        "remote_name": "nuclei",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.security.hexstrike.resolve_install", lambda explicit="": None)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/nuclei" if str(name).lower() == "nuclei" else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"[http] http://192.168.50.12/\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_nuclei",
+            {"url": "http://192.168.50.12/", "additional_args": "-t http/"},
+        )
+        assert result.success, result.error
+        assert result.data["source"] == "host-iface"
+        argv = seen[0]
+        assert argv[0] == "/usr/bin/nuclei"
+        assert argv[argv.index("-interface") + 1] == "Ethernet 2"
+        assert argv[-2:] == ("-u", "http://192.168.50.12/")
     finally:
         MCP.reset_for_tests()
 
