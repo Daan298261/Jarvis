@@ -1557,6 +1557,159 @@ def test_lan_docker_buildx_push_skopeo_uploads_tag(tmp_path, monkeypatch):
     assert "type=registry" not in follow
 
 
+def test_lan_docker_cache_to_skopeo_uploads_inline(tmp_path, monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"skopeo", "skopeo.exe", "docker", "docker.exe"} else None,
+    )
+    ctx = tmp_path / "app"
+    ctx.mkdir()
+    (ctx / "Dockerfile").write_text("FROM alpine:3.20\nCOPY . .\n", encoding="utf-8")
+    exported = lan_bound_docker_build_argv(
+        f"docker buildx build --cache-to type=registry,ref=192.168.1.50:5000/app:cache {ctx}"
+    )
+    assert exported is not None
+    assert exported[1].endswith("lan_skopeo_load.py")
+    assert "--push-after" in exported
+    assert "192.168.1.50:5000/app:cache" in exported
+    follow = exported[exported.index("--") + 1 :]
+    assert "--load" in follow
+    assert "--cache-to" in follow
+    assert "type=inline" in follow
+    assert "-t" in follow
+    assert "192.168.1.50:5000/app:cache" in follow
+    joined = " ".join(follow)
+    assert "type=registry" not in joined
+    equals = lan_bound_docker_build_argv(
+        f"docker build --cache-to=type=registry,ref=192.168.1.50:5000/app:eq,mode=max {ctx}"
+    )
+    assert equals is not None
+    assert "192.168.1.50:5000/app:eq" in equals
+    follow = equals[equals.index("--") + 1 :]
+    assert "type=inline" in follow
+    assert "type=registry" not in " ".join(follow)
+    mixed = lan_bound_docker_build_argv(
+        "docker buildx build --push "
+        "-t 192.168.1.50:5000/app:latest "
+        "--cache-to type=registry,ref=192.168.1.50:5000/app:cache "
+        "--cache-to type=local,dest=/tmp/jarvis-cache "
+        f"{ctx}"
+    )
+    assert mixed is not None
+    after = mixed.index("--push-after")
+    dests = mixed[after + 1 : mixed.index("--")]
+    assert "192.168.1.50:5000/app:latest" in dests
+    assert "192.168.1.50:5000/app:cache" in dests
+    follow = mixed[mixed.index("--") + 1 :]
+    assert "--push" not in follow
+    assert "--load" in follow
+    assert "type=inline" in follow
+    assert "type=local,dest=/tmp/jarvis-cache" in follow
+    assert "type=registry" not in " ".join(follow)
+    assert lan_bound_docker_build_argv(
+        f"docker buildx build --cache-to type=registry,ref=docker.io/library/app:cache {ctx}"
+    ) is None
+    assert lan_bound_docker_build_argv(
+        f"docker build --cache-to type=local,dest=/tmp/cache {ctx}"
+    ) is None
+
+
+def test_lan_compose_and_bake_cache_to_skopeo_uploads(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"skopeo", "skopeo.exe", "docker", "docker.exe"} else None,
+    )
+
+    def fake_mkdtemp(prefix=""):
+        root = tmp_path / f"{prefix or 'jarvis-lan-add-'}cache"
+        root.mkdir(exist_ok=True)
+        return str(root)
+
+    monkeypatch.setattr("app.tools.terminal.tempfile.mkdtemp", fake_mkdtemp)
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "Dockerfile").write_text("FROM alpine:3.20\nCOPY . .\n", encoding="utf-8")
+    stack = tmp_path / "compose.yaml"
+    stack.write_text(
+        "services:\n"
+        "  app:\n"
+        "    build:\n"
+        "      context: ./app\n"
+        "      cache_to:\n"
+        "        - type=registry,ref=192.168.1.50:5000/app:cache\n",
+        encoding="utf-8",
+    )
+    built = lan_bound_compose_build_argv(f"docker compose -f {stack} build")
+    assert built is not None
+    assert "--push-after" in built
+    assert "192.168.1.50:5000/app:cache" in built
+    follow = built[built.index("--") + 1 :]
+    overlays = [
+        follow[i + 1]
+        for i, item in enumerate(follow)
+        if item in {"-f", "--file"} and i + 1 < len(follow) and "compose.jarvis-lan.yaml" in follow[i + 1]
+    ]
+    assert overlays
+    overlay = Path(overlays[0]).read_text(encoding="utf-8")
+    assert "cache_to: !override" in overlay
+    assert "type=inline" in overlay
+    assert "192.168.1.50:5000/app:cache" in overlay
+    cli = lan_bound_compose_build_argv(
+        f"docker compose -f {stack} build --cache-to type=registry,ref=192.168.1.50:5000/app:cli"
+    )
+    assert cli is not None
+    assert "192.168.1.50:5000/app:cli" in cli
+    follow = cli[cli.index("--") + 1 :]
+    assert "type=inline" in follow
+    assert "type=registry" not in " ".join(follow)
+    up = lan_bound_compose_up_argv(f"docker compose -f {stack} up --build")
+    assert up is not None
+    assert "--push-after" in up
+    assert "192.168.1.50:5000/app:cache" in up
+    ran = lan_bound_compose_run_argv(f"docker compose -f {stack} run --build app")
+    assert ran is not None
+    assert "--push-after" in ran
+    hcl = tmp_path / "docker-bake.hcl"
+    hcl.write_text(
+        "target \"app\" {\n"
+        "  context = \"./app\"\n"
+        "  dockerfile = \"Dockerfile\"\n"
+        "  tags = [\"docker.io/library/app:1\"]\n"
+        "  cache-to = [\"type=registry,ref=192.168.1.50:5000/from-bake-cache:1\"]\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    baked = lan_bound_docker_bake_argv(f"docker buildx bake -f {hcl}")
+    assert baked is not None
+    assert "--push-after" in baked
+    assert "192.168.1.50:5000/from-bake-cache:1" in baked
+    follow = baked[baked.index("--") + 1 :]
+    assert "--load" in follow
+    assert "--set" in follow
+    assert "app.cache-to=type=inline" in follow
+    assert any(
+        item.startswith("app.tags=") and "192.168.1.50:5000/from-bake-cache:1" in item for item in follow
+    )
+    payload = tmp_path / "bake.json"
+    payload.write_text(
+        '{"target":{"web":{"context":"./app","dockerfile":"Dockerfile",'
+        '"cache-to":[{"type":"registry","ref":"192.168.1.50:5000/from-json-cache:1"}]}}}',
+        encoding="utf-8",
+    )
+    json_bake = lan_bound_docker_bake_argv(f"docker buildx bake -f {payload}")
+    assert json_bake is not None
+    assert "192.168.1.50:5000/from-json-cache:1" in json_bake
+    follow = json_bake[json_bake.index("--") + 1 :]
+    assert "web.cache-to=type=inline" in follow
+    assert any(item.startswith("web.tags=") and "from-json-cache:1" in item for item in follow)
+
+
 def test_lan_skopeo_load_fetches_add_http_before_follow(tmp_path, monkeypatch):
     from pathlib import Path
     from app.tools.lan_skopeo_load import main

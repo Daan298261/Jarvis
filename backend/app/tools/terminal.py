@@ -1591,7 +1591,7 @@ _CACHE_SKIP_TYPES = frozenset({"local", "gha", "s3", "azblob", "inline", "gcs", 
 
 
 def _image_from_cache_source(raw: str, env: dict[str, str] | None = None) -> str | None:
-    """Image ref in ``--cache-from`` / compose ``cache_from`` / bake cache-from."""
+    """Image ref in ``--cache-from`` / ``--cache-to`` / compose / bake cache fields."""
     text = str(raw or "").strip().strip("'\"")
     if not text:
         return None
@@ -1658,6 +1658,19 @@ def compose_service_cache_images(path: Path) -> dict[str, list[str]]:
         if not isinstance(build, dict):
             continue
         images = _parse_cache_images(build.get("cache_from"))
+        if images:
+            result[str(name)] = images
+    return result
+
+
+def compose_service_cache_to_images(path: Path) -> dict[str, list[str]]:
+    """Map compose service name → ``build.cache_to`` registry image refs."""
+    result: dict[str, list[str]] = {}
+    for name, spec in _compose_services(path).items():
+        build = spec.get("build")
+        if not isinstance(build, dict):
+            continue
+        images = _parse_cache_images(build.get("cache_to"))
         if images:
             result[str(name)] = images
     return result
@@ -2200,6 +2213,7 @@ def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[s
     images: dict[str, str] = {}
     file_args: dict[str, dict[str, str]] = {}
     file_contexts: dict[str, list[str]] = {}
+    file_cache_to: dict[str, list[str]] = {}
     for path in paths:
         dockerfiles.update(compose_service_dockerfiles(path))
         images.update(compose_service_images(path))
@@ -2215,6 +2229,11 @@ def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[s
             for image in extras:
                 if image not in file_contexts[name]:
                     file_contexts[name].append(image)
+        for name, extras in compose_service_cache_to_images(path).items():
+            file_cache_to.setdefault(name, [])
+            for image in extras:
+                if image not in file_cache_to[name]:
+                    file_cache_to[name].append(image)
     if not dockerfiles:
         return None
     if services and not with_deps:
@@ -2263,8 +2282,17 @@ def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[s
             continue
         seen_tags.add(image)
         lan_tags.append(image)
-    add_plan = _compose_materialize_lan_add(chosen, file_args, cli_args)
-    if not lan and not (wants_push and lan_tags) and add_plan is None:
+    lan_cache_map: dict[str, list[str]] = {}
+    cli_cache_to = _docker_build_cache_to_images(parts)
+    for name in chosen:
+        refs = list(file_cache_to.get(name, []))
+        refs.extend(cli_cache_to)
+        tagged = _lan_tagged_refs(refs)
+        if tagged:
+            lan_cache_map[name] = tagged
+    lan_cache_to = _lan_tagged_refs([img for extras in lan_cache_map.values() for img in extras])
+    add_plan = _compose_materialize_lan_add(chosen, file_args, cli_args, cache_to=lan_cache_map)
+    if not lan and not (wants_push and lan_tags) and add_plan is None and not lan_cache_to:
         return None
     follow = _compose_follow_argv(parts)
     if not follow:
@@ -2277,11 +2305,13 @@ def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[s
     if add_plan is not None:
         overlay, fetches, cleanup = add_plan
         follow = _compose_insert_override(follow, overlay)
+    if lan_cache_to:
+        follow = _docker_build_rewrite_lan_cache_to(follow, lan_cache_to, add_tags=False)
     then: list[str] | None = None
     push_after: list[str] | None = None
     if wants_push and lan_tags:
         follow = _compose_build_without_push(follow)
-        push_after = lan_tags
+        push_after = list(lan_tags)
         if public:
             stem = _tool_basename(parts[0])
             then = [follow[0]]
@@ -2293,6 +2323,8 @@ def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[s
             if quiet:
                 then.append("--quiet")
             then.extend(public)
+    if lan_cache_to:
+        push_after = list(dict.fromkeys([*(push_after or []), *lan_cache_to]))
     return _skopeo_follow_or_cleanup(
         lan,
         quiet=quiet,
@@ -2562,8 +2594,14 @@ def lan_bound_compose_up_argv(command: str, cwd: str | None = None) -> list[str]
     if add_plan is not None:
         overlay, fetches, cleanup = add_plan
         follow = _compose_insert_override(follow, overlay)
+    lan_cache_to = _compose_lan_cache_to(paths, services or None) if do_build else []
     return _skopeo_follow_or_cleanup(
-        lan, quiet=quiet, follow=follow, fetches=fetches, cleanup=cleanup
+        lan,
+        quiet=quiet,
+        follow=follow,
+        fetches=fetches,
+        cleanup=cleanup,
+        push_after=lan_cache_to or None,
     )
 
 
@@ -2756,8 +2794,14 @@ def lan_bound_compose_run_argv(command: str, cwd: str | None = None) -> list[str
     if add_plan is not None:
         overlay, fetches, cleanup = add_plan
         follow = _compose_insert_override(follow, overlay)
+    lan_cache_to = _compose_lan_cache_to(paths, [service]) if do_build else []
     return _skopeo_follow_or_cleanup(
-        lan, quiet=quiet, follow=follow, fetches=fetches, cleanup=cleanup
+        lan,
+        quiet=quiet,
+        follow=follow,
+        fetches=fetches,
+        cleanup=cleanup,
+        push_after=lan_cache_to or None,
     )
 
 
@@ -3060,23 +3104,57 @@ def _materialize_lan_add(
 
 
 def _dump_compose_overlay(services: dict[str, dict]) -> str:
-    payload = {"services": services}
-    try:
-        import yaml
+    prepared: dict[str, dict] = {}
+    has_cache = False
+    for name, spec in services.items():
+        build = dict(spec.get("build") or {})
+        cache_tags = [str(item) for item in (build.pop("lan_cache_to", None) or []) if item]
+        if cache_tags:
+            has_cache = True
+        prepared[name] = {"build": build, "cache_tags": cache_tags}
+    if not has_cache:
+        payload = {"services": {name: {"build": spec["build"]} for name, spec in prepared.items()}}
+        try:
+            import yaml
 
-        return yaml.safe_dump(payload, sort_keys=False)
-    except ImportError:
-        return json.dumps(payload, indent=2)
+            return yaml.safe_dump(payload, sort_keys=False)
+        except ImportError:
+            return json.dumps(payload, indent=2)
+    lines = ["services:"]
+    for name, spec in prepared.items():
+        key = name if re.fullmatch(r"[A-Za-z0-9._-]+", name or "") else json.dumps(name)
+        lines.append(f"  {key}:")
+        lines.append("    build:")
+        build = spec["build"]
+        dockerfile = build.get("dockerfile")
+        if dockerfile:
+            lines.append(f"      dockerfile: {json.dumps(str(dockerfile))}")
+        extra = build.get("additional_contexts") or {}
+        if extra:
+            lines.append("      additional_contexts:")
+            for ctx, directory in extra.items():
+                ck = str(ctx)
+                ck = ck if re.fullmatch(r"[A-Za-z0-9._-]+", ck) else json.dumps(ck)
+                lines.append(f"        {ck}: {json.dumps(str(directory))}")
+        if spec["cache_tags"]:
+            lines.append("      cache_to: !override")
+            lines.append("        - type=inline")
+            lines.append("      tags:")
+            for tag in spec["cache_tags"]:
+                lines.append(f"        - {json.dumps(str(tag))}")
+    return "\n".join(lines) + "\n"
 
 
 def _compose_materialize_lan_add(
     chosen: dict[str, Path],
     file_args: dict[str, dict[str, str]],
     cli_args: dict[str, str],
+    cache_to: dict[str, list[str]] | None = None,
 ) -> tuple[str, list[tuple[str, str]], str] | None:
     """Compose overlay whose services use rewritten ADD Dockerfiles + extra contexts."""
     if not chosen:
         return None
+    cache_to = cache_to or {}
     root = Path(tempfile.mkdtemp(prefix="jarvis-lan-add-"))
     fetches: list[tuple[str, str]] = []
     services: dict[str, dict] = {}
@@ -3088,13 +3166,18 @@ def _compose_materialize_lan_add(
             root=root,
             leaf=leaf,
         )
-        if spec is None:
+        lan_to = _lan_tagged_refs(cache_to.get(name, []))
+        if spec is None and not lan_to:
             continue
-        df, more, contexts, _cleanup = spec
-        fetches.extend(more)
-        build: dict[str, object] = {"dockerfile": str(df)}
-        if contexts:
-            build["additional_contexts"] = {ctx: directory for ctx, directory in contexts}
+        build: dict[str, object] = {}
+        if spec is not None:
+            df, more, contexts, _cleanup = spec
+            fetches.extend(more)
+            build["dockerfile"] = str(df)
+            if contexts:
+                build["additional_contexts"] = {ctx: directory for ctx, directory in contexts}
+        if lan_to:
+            build["lan_cache_to"] = lan_to
         services[name] = {"build": build}
     if not services:
         shutil.rmtree(root, ignore_errors=True)
@@ -3102,6 +3185,21 @@ def _compose_materialize_lan_add(
     overlay = root / "compose.jarvis-lan.yaml"
     overlay.write_text(_dump_compose_overlay(services), encoding="utf-8")
     return str(overlay), fetches, str(root)
+
+
+def _compose_lan_cache_to(paths: list[Path], names: list[str] | None) -> list[str]:
+    images: list[str] = []
+    seen: set[str] = set()
+    for path in paths:
+        mapping = compose_service_cache_to_images(path)
+        wanted = names if names else list(mapping)
+        for name in wanted:
+            for image in mapping.get(name, []):
+                if image in seen:
+                    continue
+                seen.add(image)
+                images.append(image)
+    return _lan_tagged_refs(images)
 
 
 def _compose_lan_add_for_build(
@@ -3115,10 +3213,16 @@ def _compose_lan_add_for_build(
     dockerfiles: dict[str, Path] = {}
     file_args: dict[str, dict[str, str]] = {}
     deps: dict[str, list[str]] = {}
+    cache_to: dict[str, list[str]] = {}
     for path in paths:
         dockerfiles.update(compose_service_dockerfiles(path))
         for name, args in compose_service_build_args(path).items():
             file_args.setdefault(name, {}).update(args)
+        for name, extras in compose_service_cache_to_images(path).items():
+            cache_to.setdefault(name, [])
+            for image in extras:
+                if image not in cache_to[name]:
+                    cache_to[name].append(image)
         for name, kids in compose_service_depends(path).items():
             deps.setdefault(name, [])
             for kid in kids:
@@ -3130,9 +3234,10 @@ def _compose_lan_add_for_build(
     build_wanted = list(build_services) if build_services is not None else wanted
     if build_wanted:
         chosen = {name: dockerfiles[name] for name in build_wanted if name in dockerfiles}
+        cache_to = {name: cache_to[name] for name in chosen if name in cache_to}
     else:
         chosen = dict(dockerfiles)
-    return _compose_materialize_lan_add(chosen, file_args, cli_args or {})
+    return _compose_materialize_lan_add(chosen, file_args, cli_args or {}, cache_to=cache_to)
 
 
 def _compose_insert_override(parts: list[str], overlay: str) -> list[str]:
@@ -3319,19 +3424,29 @@ def _docker_build_context_images(parts: list[str]) -> list[str]:
 
 def _docker_build_cache_images(parts: list[str]) -> list[str]:
     """Image refs from ``--cache-from IMAGE`` / ``type=registry,ref=IMAGE``."""
+    return _docker_build_cache_flag_images(parts, "--cache-from")
+
+
+def _docker_build_cache_to_images(parts: list[str]) -> list[str]:
+    """Image refs from ``--cache-to type=registry,ref=IMAGE``."""
+    return _docker_build_cache_flag_images(parts, "--cache-to")
+
+
+def _docker_build_cache_flag_images(parts: list[str], flag: str) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
     index = 0
+    equals = f"{flag}="
     while index < len(parts):
         text = str(parts[index] or "").strip()
         index += 1
         raw = ""
-        if text in {"--cache-from"}:
+        if text == flag:
             if index >= len(parts):
                 break
             raw = str(parts[index] or "").strip().strip("'\"")
             index += 1
-        elif text.startswith("--cache-from="):
+        elif text.startswith(equals):
             raw = text.split("=", 1)[1].strip().strip("'\"")
         else:
             continue
@@ -3341,6 +3456,88 @@ def _docker_build_cache_images(parts: list[str]) -> list[str]:
         seen.add(image)
         out.append(image)
     return out
+
+
+def _lan_tagged_refs(images: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for image in images:
+        if not image or not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
+            continue
+        tagged = _docker_image_with_tag(image)
+        if tagged in seen:
+            continue
+        seen.add(tagged)
+        out.append(tagged)
+    return out
+
+
+def _docker_build_rewrite_lan_cache_to(
+    parts: list[str], lan_refs: list[str], *, add_tags: bool = True
+) -> list[str]:
+    """Drop LAN ``--cache-to type=registry``, add ``type=inline`` and ``-t`` cache tags."""
+    wanted = {_docker_image_with_tag(item) for item in lan_refs if item}
+    if not wanted:
+        return parts
+    out: list[str] = []
+    index = 0
+    dropped = False
+    has_inline = False
+    while index < len(parts):
+        text = str(parts[index])
+        index += 1
+        raw: str | None = None
+        joined = False
+        if text == "--cache-to":
+            if index >= len(parts):
+                break
+            raw = str(parts[index] or "")
+            index += 1
+        elif text.startswith("--cache-to="):
+            raw = text.split("=", 1)[1]
+            joined = True
+        if raw is None:
+            out.append(text)
+            continue
+        stripped = raw.strip().strip("'\"")
+        lowered = stripped.lower()
+        image = _image_from_cache_source(stripped)
+        if "type=inline" in lowered.replace(" ", ""):
+            has_inline = True
+            if joined:
+                out.append(text)
+            else:
+                out.extend(["--cache-to", raw])
+            continue
+        if image and _docker_image_with_tag(image) in wanted:
+            dropped = True
+            continue
+        if joined:
+            out.append(text)
+        else:
+            out.extend(["--cache-to", raw])
+    extra_tags = (
+        [item for item in lan_refs if item not in set(_docker_build_tags(out))] if add_tags else []
+    )
+    if not dropped and not extra_tags:
+        return out
+    rebuilt: list[str] = []
+    placed = False
+    for item in out:
+        rebuilt.append(item)
+        if placed or item != "build":
+            continue
+        placed = True
+        if dropped and not has_inline:
+            rebuilt.extend(["--cache-to", "type=inline"])
+        for tag in extra_tags:
+            rebuilt.extend(["-t", tag])
+    if not placed:
+        if dropped and not has_inline:
+            rebuilt.extend(["--cache-to", "type=inline"])
+        for tag in extra_tags:
+            rebuilt.extend(["-t", tag])
+    return rebuilt
 
 
 def _docker_build_wants_push(parts: list[str]) -> bool:
@@ -3492,23 +3689,26 @@ def lan_bound_docker_build_from_parts(parts: list[str], cwd: str | None = None) 
         for tag in tags
         if _lan_bind_ip_for_host(docker_registry_host_from_image(tag))
     ]
+    lan_cache_to = _lan_tagged_refs(_docker_build_cache_to_images(parts))
     wants_push = _docker_build_wants_push(parts)
     docker = shutil.which("docker") or shutil.which("docker.exe")
     if not docker:
         return None
     add_spec = _materialize_lan_add(dockerfile, _docker_build_args(parts))
-    if not lan and not (wants_push and lan_tags) and add_spec is None:
+    if not lan and not (wants_push and lan_tags) and add_spec is None and not lan_cache_to:
         return None
     follow_src = [docker, *parts[1:]]
     buildx = any(_tool_basename(item) == "buildx" for item in parts[1:3])
     fetches: list[tuple[str, str]] = []
     cleanup = ""
-    if wants_push and lan_tags:
+    if lan_cache_to or (wants_push and lan_tags):
         follow = _docker_build_for_local_load(follow_src, buildx=buildx)
-        push_after = lan_tags
+        push_after = list(dict.fromkeys([*lan_tags, *lan_cache_to]))
     else:
         follow = _docker_build_without_pull(follow_src)
         push_after = None
+    if lan_cache_to:
+        follow = _docker_build_rewrite_lan_cache_to(follow, lan_cache_to)
     if add_spec is not None:
         rewritten, fetches, contexts, cleanup = add_spec
         follow = _docker_build_with_add_contexts(follow, str(rewritten), contexts)
@@ -3536,9 +3736,10 @@ def lan_bound_docker_build_argv(command: str, cwd: str | None = None) -> list[st
     loopback proxy, then ``docker build --pull=false`` / ``docker buildx build --pull=false``
     uses the local daemon copies. ``ADD http(s)|ftp(s)://`` of an on-link RFC1918
     URL is prefetched into ``--build-context`` and rewritten to ``COPY --from=``.
-    ``--push`` of a LAN tag becomes ``--load`` plus skopeo upload. Skip pipes,
-    stdin context, interpolations, and missing skopeo when a LAN image copy is
-    required.
+    ``--push`` of a LAN tag becomes ``--load`` plus skopeo upload. ``--cache-to
+    type=registry,ref=LAN`` becomes ``type=inline`` plus ``-t`` of that ref and
+    skopeo upload. Skip pipes, stdin context, interpolations, and missing skopeo
+    when a LAN image copy is required.
     """
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
@@ -3650,10 +3851,10 @@ def _bake_resolve_dockerfile(file_dir: Path, cwd: Path, context: str, dockerfile
 
 def bake_file_dockerfiles_and_tags(
     path: Path, cwd: Path
-) -> tuple[list[tuple[str, Path, dict[str, str]]], list[str], list[str]]:
-    """Named Dockerfile paths (with bake/compose ARG maps), tags, and named-context images."""
+) -> tuple[list[tuple[str, Path, dict[str, str], list[str], list[str]]], list[str], list[str]]:
+    """Named Dockerfiles (args, tags, cache-to refs), all tags, and named-context images."""
     suffix = path.suffix.lower()
-    dockerfiles: list[tuple[str, Path, dict[str, str]]] = []
+    dockerfiles: list[tuple[str, Path, dict[str, str], list[str], list[str]]] = []
     tags: list[str] = []
     extra: list[str] = []
     seen_extra: set[str] = set()
@@ -3668,8 +3869,14 @@ def bake_file_dockerfiles_and_tags(
     if suffix in {".yaml", ".yml"}:
         files = compose_service_dockerfiles(path)
         args = compose_service_build_args(path)
-        dockerfiles.extend((str(name), df, dict(args.get(name, {}))) for name, df in files.items())
-        tags.extend(compose_service_images(path).values())
+        images = compose_service_images(path)
+        cache_to = compose_service_cache_to_images(path)
+        for name, df in files.items():
+            tgt_tags = [images[name]] if name in images else []
+            dockerfiles.append(
+                (str(name), df, dict(args.get(name, {})), tgt_tags, list(cache_to.get(name, [])))
+            )
+        tags.extend(images.values())
         for extras in compose_service_context_images(path).values():
             _add_extra(extras)
         for extras in compose_service_cache_images(path).values():
@@ -3698,11 +3905,20 @@ def bake_file_dockerfiles_and_tags(
             context = str(spec.get("context") or ".").strip()
             dockerfile = str(spec.get("dockerfile") or "").strip()
             resolved = _bake_resolve_dockerfile(file_dir, cwd, context, dockerfile)
-            if resolved:
-                dockerfiles.append((str(name), resolved, _parse_build_arg_mapping(spec.get("args"))))
+            tgt_tags: list[str] = []
             raw_tags = spec.get("tags")
             if isinstance(raw_tags, list):
-                tags.extend(str(item).strip() for item in raw_tags if str(item).strip() and "$" not in str(item))
+                tgt_tags = [
+                    str(item).strip()
+                    for item in raw_tags
+                    if str(item).strip() and "$" not in str(item)
+                ]
+                tags.extend(tgt_tags)
+            tgt_cache = _parse_cache_images(spec.get("cache-to") or spec.get("cache_to"))
+            if resolved:
+                dockerfiles.append(
+                    (str(name), resolved, _parse_build_arg_mapping(spec.get("args")), tgt_tags, tgt_cache)
+                )
             _add_extra(_parse_named_context_images(spec.get("contexts")))
             _add_extra(_parse_cache_images(spec.get("cache-from") or spec.get("cache_from")))
         return dockerfiles, tags, extra
@@ -3714,15 +3930,18 @@ def bake_file_dockerfiles_and_tags(
         context = context_match.group(1).strip() if context_match else "."
         dockerfile = df_match.group(1).strip() if df_match else ""
         resolved = _bake_resolve_dockerfile(file_dir, cwd, context, dockerfile)
-        if resolved:
-            dockerfiles.append((name, resolved, _hcl_args(block)))
+        tgt_tags: list[str] = []
         tags_match = _HCL_TAGS.search(block)
         if tags_match:
-            tags.extend(
+            tgt_tags = [
                 item.strip().strip("'\"")
                 for item in tags_match.group(1).split(",")
                 if item.strip().strip("'\"") and "$" not in item
-            )
+            ]
+            tags.extend(tgt_tags)
+        tgt_cache = _parse_cache_images(_hcl_quoted_list(block, "cache-to"))
+        if resolved:
+            dockerfiles.append((name, resolved, _hcl_args(block), tgt_tags, tgt_cache))
         _add_extra(_parse_named_context_images(_hcl_named_map(block, "contexts")))
         _add_extra(_parse_cache_images(_hcl_quoted_list(block, "cache-from")))
     return dockerfiles, tags, extra
@@ -3738,7 +3957,7 @@ def _bake_materialize_lan_add(
     fetches: list[tuple[str, str]] = []
     sets: list[str] = []
     cached: dict[str, tuple[Path, list[tuple[str, str]]] | None] = {}
-    for index, (name, dockerfile, args) in enumerate(named):
+    for index, (name, dockerfile, args, *_rest) in enumerate(named):
         key = str(dockerfile)
         if key not in cached:
             leaf = re.sub(r"[^A-Za-z0-9._-]+", "_", name) or f"tgt{index}"
@@ -3946,17 +4165,17 @@ def lan_bound_docker_bake_argv(command: str, cwd: str | None = None) -> list[str
         return None
     paths, quiet, wants_push, extra_tags, extra_args, extra_contexts = spec
     root = Path(cwd or os.getcwd())
-    named: list[tuple[str, Path, dict[str, str]]] = []
+    named: list[tuple[str, Path, dict[str, str], list[str], list[str]]] = []
     tags: list[str] = []
     extra_images: list[str] = []
     seen_names: set[str] = set()
     for path in paths:
         files, found_tags, found_contexts = bake_file_dockerfiles_and_tags(path, root)
-        for name, df, args in files:
+        for name, df, args, tgt_tags, tgt_cache in files:
             if name in seen_names:
                 continue
             seen_names.add(name)
-            named.append((name, df, args))
+            named.append((name, df, args, tgt_tags, tgt_cache))
         tags.extend(found_tags)
         extra_images.extend(found_contexts)
     if extra_tags:
@@ -3964,7 +4183,7 @@ def lan_bound_docker_bake_argv(command: str, cwd: str | None = None) -> list[str
     lan: list[str] = []
     seen: set[str] = set()
     seen_df: set[str] = set()
-    for _name, dockerfile, args in named:
+    for _name, dockerfile, args, *_rest in named:
         key = str(dockerfile)
         if key in seen_df:
             continue
@@ -3989,27 +4208,48 @@ def lan_bound_docker_bake_argv(command: str, cwd: str | None = None) -> list[str
         for tag in tags
         if _lan_bind_ip_for_host(docker_registry_host_from_image(tag))
     ]
+    cache_sets: list[str] = []
+    lan_cache_to: list[str] = []
+    for name, _df, _args, tgt_tags, tgt_cache in named:
+        lan_to = _lan_tagged_refs(tgt_cache)
+        if not lan_to or not re.fullmatch(r"[A-Za-z0-9._-]+", name or ""):
+            continue
+        cache_sets.append(f"{name}.cache-to=type=inline")
+        tag_src = list(extra_tags) if extra_tags else list(tgt_tags)
+        merged = list(dict.fromkeys([*tag_src, *lan_to]))
+        if merged:
+            cache_sets.append(f"{name}.tags=" + ",".join(merged))
+        for item in lan_to:
+            if item not in lan_cache_to:
+                lan_cache_to.append(item)
     add_plan = _bake_materialize_lan_add(named, extra_args)
-    if not lan and not (wants_push and lan_tags) and add_plan is None:
+    if not lan and not (wants_push and lan_tags) and add_plan is None and not lan_cache_to:
         return None
     follow = _compose_follow_argv(parts)
     if not follow:
         if add_plan is not None:
             shutil.rmtree(add_plan[2], ignore_errors=True)
         return None
-    follow = _docker_bake_for_local_load(follow, drop_push=bool(wants_push and lan_tags))
+    follow = _docker_bake_for_local_load(
+        follow, drop_push=bool((wants_push and lan_tags) or lan_cache_to)
+    )
     fetches: list[tuple[str, str]] = []
     cleanup = ""
     if add_plan is not None:
         sets, fetches, cleanup = add_plan
         follow = _bake_insert_sets(follow, sets)
+    if cache_sets:
+        follow = _bake_insert_sets(follow, cache_sets)
+    push_after: list[str] | None = list(lan_tags) if wants_push and lan_tags else None
+    if lan_cache_to:
+        push_after = list(dict.fromkeys([*(push_after or []), *lan_cache_to]))
     return _skopeo_follow_or_cleanup(
         lan,
         quiet=quiet,
         follow=follow,
         fetches=fetches,
         cleanup=cleanup,
-        push_after=lan_tags if wants_push and lan_tags else None,
+        push_after=push_after,
     )
 
 
