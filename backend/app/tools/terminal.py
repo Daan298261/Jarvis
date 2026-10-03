@@ -2452,6 +2452,10 @@ _DOCKERFILE_FROM = re.compile(
     r"^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+\S+)?\s*$",
     re.I,
 )
+_DOCKERFILE_COPY_FROM = re.compile(
+    r"^\s*(?:COPY|ADD)\b(?:\s+\S+)*?\s--from=(\S+)",
+    re.I,
+)
 _DOCKER_BUILD_VALUE_FLAGS = frozenset(
     {
         "-f",
@@ -2494,7 +2498,7 @@ _DOCKER_BUILD_VALUE_FLAGS = frozenset(
 
 
 def dockerfile_from_images(path: Path, build_args: dict[str, str] | None = None) -> list[str]:
-    """Image refs in Dockerfile ``FROM`` lines, resolving ARG defaults.
+    """Image refs in Dockerfile ``FROM`` / ``COPY --from=`` lines, resolving ARG defaults.
 
     Skip scratch and interpolations that still have no value after ARG /
     ``${VAR:-default}`` / ``--build-arg`` substitution.
@@ -2518,7 +2522,7 @@ def dockerfile_from_images(path: Path, build_args: dict[str, str] | None = None)
                 continue
             declared[name] = default.strip().strip("'\"")
             continue
-        match = _DOCKERFILE_FROM.match(line)
+        match = _DOCKERFILE_FROM.match(line) or _DOCKERFILE_COPY_FROM.search(line)
         if not match:
             continue
         image = expand_image_vars(match.group(1).strip().strip("'\""), declared)

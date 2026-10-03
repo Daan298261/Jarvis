@@ -1302,6 +1302,30 @@ def test_dockerfile_from_images_skips_scratch_and_args(tmp_path):
         "nas.local/org/runtime",
         "alpine:3.20",
     ]
+    copied = tmp_path / "Copy.Dockerfile"
+    copied.write_text(
+        "FROM alpine:3.20\n"
+        "COPY --from=192.168.1.50:5000/assets:1 /data /data\n"
+        "COPY --chown=0:0 --from=nas.local/org/tools:2 /bin /opt/bin\n"
+        "ADD --from=${ASSETS:-192.168.1.50:5000/extra:3} /x /x\n"
+        "COPY --from=runtime /out /out\n"
+        "COPY . /\n",
+        encoding="utf-8",
+    )
+    assert dockerfile_from_images(copied) == [
+        "alpine:3.20",
+        "192.168.1.50:5000/assets:1",
+        "nas.local/org/tools:2",
+        "192.168.1.50:5000/extra:3",
+        "runtime",
+    ]
+    assert dockerfile_from_images(copied, {"ASSETS": "192.168.1.50:5000/custom:9"}) == [
+        "alpine:3.20",
+        "192.168.1.50:5000/assets:1",
+        "nas.local/org/tools:2",
+        "192.168.1.50:5000/custom:9",
+        "runtime",
+    ]
     arged = tmp_path / "Arg.Dockerfile"
     arged.write_text(
         "ARG BASE=192.168.1.50:5000/base:latest\n"
@@ -1390,6 +1414,15 @@ def test_lan_docker_build_skopeo_loads_from_before_build(tmp_path, monkeypatch):
     assert from_env is not None
     assert "192.168.1.50:5000/from-env:1" in from_env
     assert lan_bound_docker_build_argv(f"docker build {ctx}") is None
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\nCOPY --from=192.168.1.50:5000/assets:1 /data /data\n",
+        encoding="utf-8",
+    )
+    copied = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert copied is not None
+    assert "192.168.1.50:5000/assets:1" in copied
+    follow = copied[copied.index("--") + 1 :]
+    assert "--pull=false" in follow
 
 
 def test_lan_docker_buildx_skopeo_loads_from_before_build(tmp_path, monkeypatch):
