@@ -12,6 +12,8 @@ import {
   type PersonaAppearance,
 } from "./namedPersonas"
 import { SpecialistShapeMark } from "./SpecialistShapeMark"
+import { PersonaSetupGuide } from "./PersonaSetupGuide"
+import { offerPersonaSetup } from "./personaSetup"
 import "./named-persona.css"
 
 const SYSTEM_VOICE = "windows_natural_en_v1"
@@ -25,6 +27,7 @@ export function NamedPersonaControls() {
   const [voiceCatalog, setVoiceCatalog] = useState<VoiceProfileCatalog | null>(null)
   const active = state?.active
   const appearance = active?.appearance
+  const currentPersonaId = (pendingId || active?.id || "anzu") as (typeof ROSTER_IDS)[number]
   const options = state?.personas?.length
     ? state.personas
     : ROSTER_IDS.map((id) => ({
@@ -53,6 +56,7 @@ export function NamedPersonaControls() {
     setProgress("")
     try {
       await activateNamedPersona(id, { onProgress: setProgress })
+      if (ROSTER_IDS.includes(id as (typeof ROSTER_IDS)[number])) offerPersonaSetup(id as (typeof ROSTER_IDS)[number])
       void loadVoiceProfileCatalog().then(setVoiceCatalog).catch(() => undefined)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update the named persona.")
@@ -106,6 +110,13 @@ export function NamedPersonaControls() {
           ))}
         </select>
       </label>
+      {ROSTER_IDS.includes(currentPersonaId) && (
+        <PersonaSetupGuide
+          key={currentPersonaId}
+          personaId={currentPersonaId}
+          personaLabel={active?.id === currentPersonaId ? active.label : PERSONA_LABELS[currentPersonaId]}
+        />
+      )}
       <div className="named-persona-roster" role="group" aria-label="Named persona avatars">
         {options.map((persona) => {
           const selected = persona.id === (pendingId || active?.id || "anzu")
