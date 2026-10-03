@@ -1351,8 +1351,7 @@ def expand_image_vars(text: str, args: dict[str, str] | None = None) -> str | No
     return out.strip().strip("'\"")
 
 
-def compose_service_images(path: Path) -> dict[str, str]:
-    """Map compose service name → image ref. Skip build-only services and unresolved interpolations."""
+def _load_compose(path: Path) -> dict:
     try:
         import yaml
     except ImportError:
@@ -1361,13 +1360,112 @@ def compose_service_images(path: Path) -> dict[str, str]:
         payload = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, yaml.YAMLError):
         return {}
-    services = payload.get("services") if isinstance(payload, dict) else None
+    return payload if isinstance(payload, dict) else {}
+
+
+def _compose_include_paths(path: Path) -> list[Path]:
+    """Compose files listed in ``include:`` (string, mapping, or list). Skip interpolations."""
+    raw = _load_compose(path).get("include")
+    items: list[object] = []
+    if isinstance(raw, list):
+        items = list(raw)
+    elif raw not in (None, ""):
+        items = [raw]
+    out: list[Path] = []
+    seen: set[str] = set()
+    for item in items:
+        rel = ""
+        if isinstance(item, str):
+            rel = item.strip()
+        elif isinstance(item, dict):
+            rel = str(item.get("path") or "").strip()
+        if "$" in rel:
+            rel = expand_image_vars(rel, dict(os.environ)) or ""
+        if not rel:
+            continue
+        candidate = Path(rel)
+        if not candidate.is_absolute():
+            candidate = path.parent / candidate
+        key = str(candidate)
+        if key in seen or not candidate.is_file():
+            continue
+        seen.add(key)
+        out.append(candidate)
+    return out
+
+
+def _compose_raw_services(path: Path) -> dict[str, dict]:
+    services = _load_compose(path).get("services")
     if not isinstance(services, dict):
         return {}
+    return {str(name): spec for name, spec in services.items() if isinstance(spec, dict)}
+
+
+def _absolutize_compose_build(spec: dict, origin: Path) -> dict:
+    """Resolve ``build`` paths against the file that declared them (extends.file)."""
+    build = spec.get("build")
+    origin_dir = origin.parent
+    if isinstance(build, str):
+        text = build.strip()
+        if text and "$" not in text and "://" not in text and not Path(text).is_absolute():
+            return {**spec, "build": str(origin_dir / text)}
+        return spec
+    if isinstance(build, dict):
+        extra = dict(build)
+        ctx = str(extra.get("context") or ".").strip()
+        if ctx and "$" not in ctx and "://" not in ctx and not Path(ctx).is_absolute():
+            extra["context"] = str(origin_dir / ctx)
+        return {**spec, "build": extra}
+    return spec
+
+
+def _compose_merged_service(path: Path, spec: dict, seen: set[str] | None = None) -> dict:
+    """Merge ``extends`` (same file or ``file:``) then local keys. Local build dict keys win."""
+    watching = set() if seen is None else seen
+    ext = spec.get("extends")
+    local = {key: val for key, val in spec.items() if key != "extends"}
+    if not ext:
+        return _absolutize_compose_build(local, path)
+    file_rel = ""
+    svc = ""
+    if isinstance(ext, str):
+        svc = ext.strip()
+    elif isinstance(ext, dict):
+        file_rel = str(ext.get("file") or "").strip()
+        svc = str(ext.get("service") or "").strip()
+        if "$" in file_rel:
+            file_rel = expand_image_vars(file_rel, dict(os.environ)) or ""
+    if not svc or "$" in svc:
+        return _absolutize_compose_build(local, path)
+    other = path if not file_rel else Path(file_rel)
+    if file_rel and not other.is_absolute():
+        other = path.parent / file_rel
+    key = f"{other}:{svc}"
+    if key in watching:
+        return _absolutize_compose_build(local, path)
+    watching.add(key)
+    parent_spec = _compose_raw_services(other).get(svc)
+    if not isinstance(parent_spec, dict):
+        return _absolutize_compose_build(local, path)
+    parent = _compose_merged_service(other, parent_spec, watching)
+    child = _absolutize_compose_build(local, path)
+    merged = {**parent, **child}
+    if isinstance(parent.get("build"), dict) and isinstance(child.get("build"), dict):
+        merged["build"] = {**parent["build"], **child["build"]}
+    return merged
+
+
+def _compose_services(path: Path) -> dict[str, dict]:
+    return {
+        name: _compose_merged_service(path, spec)
+        for name, spec in _compose_raw_services(path).items()
+    }
+
+
+def compose_service_images(path: Path) -> dict[str, str]:
+    """Map compose service name → image ref. Skip build-only services and unresolved interpolations."""
     images: dict[str, str] = {}
-    for name, spec in services.items():
-        if not isinstance(spec, dict):
-            continue
+    for name, spec in _compose_services(path).items():
         image = str(spec.get("image") or "").strip()
         image = expand_image_vars(image, dict(os.environ)) or ""
         if not image:
@@ -1378,22 +1476,9 @@ def compose_service_images(path: Path) -> dict[str, str]:
 
 def compose_service_dockerfiles(path: Path) -> dict[str, Path]:
     """Map compose service name → Dockerfile. Skip interpolations, inline, and git contexts."""
-    try:
-        import yaml
-    except ImportError:
-        return {}
-    try:
-        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, yaml.YAMLError):
-        return {}
-    services = payload.get("services") if isinstance(payload, dict) else None
-    if not isinstance(services, dict):
-        return {}
     compose_dir = path.parent
     files: dict[str, Path] = {}
-    for name, spec in services.items():
-        if not isinstance(spec, dict):
-            continue
+    for name, spec in _compose_services(path).items():
         build = spec.get("build")
         context = ""
         dockerfile = ""
@@ -1488,21 +1573,8 @@ def _parse_named_context_images(raw: object, env: dict[str, str] | None = None) 
 
 def compose_service_context_images(path: Path) -> dict[str, list[str]]:
     """Map compose service name → ``build.additional_contexts`` image refs."""
-    try:
-        import yaml
-    except ImportError:
-        return {}
-    try:
-        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, yaml.YAMLError):
-        return {}
-    services = payload.get("services") if isinstance(payload, dict) else None
-    if not isinstance(services, dict):
-        return {}
     result: dict[str, list[str]] = {}
-    for name, spec in services.items():
-        if not isinstance(spec, dict):
-            continue
+    for name, spec in _compose_services(path).items():
         build = spec.get("build")
         if not isinstance(build, dict):
             continue
@@ -1577,21 +1649,8 @@ def _parse_cache_images(raw: object, env: dict[str, str] | None = None) -> list[
 
 def compose_service_cache_images(path: Path) -> dict[str, list[str]]:
     """Map compose service name → ``build.cache_from`` image refs."""
-    try:
-        import yaml
-    except ImportError:
-        return {}
-    try:
-        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, yaml.YAMLError):
-        return {}
-    services = payload.get("services") if isinstance(payload, dict) else None
-    if not isinstance(services, dict):
-        return {}
     result: dict[str, list[str]] = {}
-    for name, spec in services.items():
-        if not isinstance(spec, dict):
-            continue
+    for name, spec in _compose_services(path).items():
         build = spec.get("build")
         if not isinstance(build, dict):
             continue
@@ -1603,21 +1662,8 @@ def compose_service_cache_images(path: Path) -> dict[str, list[str]]:
 
 def compose_service_build_args(path: Path) -> dict[str, dict[str, str]]:
     """Map compose service name → ``build.args`` used as Dockerfile ARG values."""
-    try:
-        import yaml
-    except ImportError:
-        return {}
-    try:
-        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, yaml.YAMLError):
-        return {}
-    services = payload.get("services") if isinstance(payload, dict) else None
-    if not isinstance(services, dict):
-        return {}
     result: dict[str, dict[str, str]] = {}
-    for name, spec in services.items():
-        if not isinstance(spec, dict):
-            continue
+    for name, spec in _compose_services(path).items():
         build = spec.get("build")
         if not isinstance(build, dict):
             continue
@@ -1629,21 +1675,8 @@ def compose_service_build_args(path: Path) -> dict[str, dict[str, str]]:
 
 def compose_service_depends(path: Path) -> dict[str, list[str]]:
     """Map compose service name → depends_on names. Skip interpolations."""
-    try:
-        import yaml
-    except ImportError:
-        return {}
-    try:
-        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, yaml.YAMLError):
-        return {}
-    services = payload.get("services") if isinstance(payload, dict) else None
-    if not isinstance(services, dict):
-        return {}
     deps: dict[str, list[str]] = {}
-    for name, spec in services.items():
-        if not isinstance(spec, dict):
-            continue
+    for name, spec in _compose_services(path).items():
         raw = spec.get("depends_on")
         names: list[str] = []
         if isinstance(raw, list):
@@ -1697,7 +1730,21 @@ def _resolved_compose_paths(files: list[str], cwd: str | None) -> list[Path] | N
     for path in paths:
         if not path.is_file():
             return None
-    return paths
+    expanded: list[Path] = []
+    seen: set[str] = set()
+
+    def walk(item: Path) -> None:
+        key = str(item)
+        if key in seen:
+            return
+        seen.add(key)
+        for child in _compose_include_paths(item):
+            walk(child)
+        expanded.append(item)
+
+    for path in paths:
+        walk(path)
+    return expanded
 
 
 def _compose_pull_spec(parts: list[str]) -> tuple[list[str], list[str], bool] | None:

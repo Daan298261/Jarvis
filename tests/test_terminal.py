@@ -1737,6 +1737,34 @@ def test_compose_service_dockerfiles_resolves_context(tmp_path):
     assert "web" not in files
     assert "inline" not in files
     assert "interp" not in files
+    shared = tmp_path / "lib"
+    shared.mkdir()
+    base = shared / "base"
+    base.mkdir()
+    (base / "Dockerfile").write_text("FROM 192.168.1.50:5000/base:latest\n", encoding="utf-8")
+    common = shared / "common.yaml"
+    common.write_text(
+        "services:\n"
+        "  origin:\n"
+        "    build: ./base\n"
+        "    image: 192.168.1.50:5000/from-extends:1\n",
+        encoding="utf-8",
+    )
+    stack.write_text(
+        "services:\n"
+        "  app:\n"
+        "    extends:\n"
+        "      file: ./lib/common.yaml\n"
+        "      service: origin\n"
+        "  local:\n"
+        "    extends: app\n",
+        encoding="utf-8",
+    )
+    extended = compose_service_dockerfiles(stack)
+    assert extended["app"] == base / "Dockerfile"
+    assert extended["local"] == base / "Dockerfile"
+    assert compose_service_images(stack)["app"] == "192.168.1.50:5000/from-extends:1"
+    assert compose_service_images(stack)["local"] == "192.168.1.50:5000/from-extends:1"
 
 
 def test_compose_service_depends_maps_list_and_mapping(tmp_path):
@@ -2083,6 +2111,45 @@ def test_lan_compose_up_skopeo_loads_images_and_from(tmp_path, monkeypatch):
     assert rebuilt_cache is not None
     assert "192.168.1.50:5000/from-up-cache:1" in rebuilt_cache
     assert lan_bound_compose_up_argv(f"docker compose -f {stack} up app") is None
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    (lib / "cache.yaml").write_text(
+        "services:\n"
+        "  cache:\n"
+        "    image: 192.168.1.50:5000/from-include:1\n",
+        encoding="utf-8",
+    )
+    stack.write_text(
+        "include:\n"
+        "  - path: ./lib/cache.yaml\n"
+        "services:\n"
+        "  web:\n"
+        "    image: nginx:alpine\n",
+        encoding="utf-8",
+    )
+    included = lan_bound_compose_up_argv(f"docker compose -f {stack} up -d")
+    assert included is not None
+    assert "192.168.1.50:5000/from-include:1" in included
+    (lib / "common.yaml").write_text(
+        "services:\n"
+        "  origin:\n"
+        "    image: 192.168.1.50:5000/from-extends-up:1\n",
+        encoding="utf-8",
+    )
+    stack.write_text(
+        "services:\n"
+        "  cache:\n"
+        "    extends:\n"
+        "      file: ./lib/common.yaml\n"
+        "      service: origin\n"
+        "  web:\n"
+        "    image: nginx:alpine\n",
+        encoding="utf-8",
+    )
+    extended = lan_bound_compose_up_argv(f"docker compose -f {stack} up cache")
+    assert extended is not None
+    assert "192.168.1.50:5000/from-extends-up:1" in extended
+    assert lan_bound_compose_up_argv(f"docker compose -f {stack} up web") is None
 
 
 def test_lan_compose_run_skopeo_loads_image_and_from(tmp_path, monkeypatch):
