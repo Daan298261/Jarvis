@@ -196,10 +196,18 @@ class DockerTool(Tool):
             return ToolResult(False, "", error="Docker is not installed on this machine")
         if not argv:
             return ToolResult(False, "", error=f"Unknown action {action}")
+        run_argv = ["docker", *argv]
+        env = direct_child_env()
+        if str(action or "") == "build":
+            from .terminal import _child_env, lan_bound_docker_build_from_parts
+
+            rewritten = lan_bound_docker_build_from_parts(run_argv, cwd=str(payload.get("path") or "."))
+            if rewritten:
+                run_argv = rewritten
+                env = _child_env(rewritten)
         proc = await asyncio.create_subprocess_exec(
-            "docker",
-            *argv,
-            env=direct_child_env(),
+            *run_argv,
+            env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

@@ -1299,6 +1299,180 @@ def lan_bound_compose_pull_argv(command: str, cwd: str | None = None) -> list[st
     return skopeo_copy_lan_images_argv(lan, quiet=quiet, follow=follow)
 
 
+_DOCKERFILE_FROM = re.compile(
+    r"^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+\S+)?\s*$",
+    re.I,
+)
+_DOCKER_BUILD_VALUE_FLAGS = frozenset(
+    {
+        "-f",
+        "--file",
+        "-t",
+        "--tag",
+        "--target",
+        "--build-arg",
+        "--platform",
+        "-m",
+        "--memory",
+        "--network",
+        "--label",
+        "--add-host",
+        "--iidfile",
+        "--cache-from",
+        "--cache-to",
+        "--secret",
+        "--ssh",
+        "--build-context",
+        "--progress",
+        "--output",
+        "-o",
+        "--shm-size",
+        "--ulimit",
+        "--cgroup-parent",
+        "--metadata-file",
+        "--cpu-shares",
+        "--cpuset-cpus",
+        "--isolation",
+        "--security-opt",
+    }
+)
+
+
+def dockerfile_from_images(path: Path) -> list[str]:
+    """Image refs in Dockerfile ``FROM`` lines, skipping scratch and interpolations."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    images: list[str] = []
+    seen: set[str] = set()
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0]
+        match = _DOCKERFILE_FROM.match(line)
+        if not match:
+            continue
+        image = match.group(1).strip().strip("'\"")
+        if not image or image.lower() == "scratch" or "$" in image:
+            continue
+        if image in seen:
+            continue
+        seen.add(image)
+        images.append(image)
+    return images
+
+
+def _docker_build_without_pull(parts: list[str]) -> list[str]:
+    out: list[str] = []
+    inserted = False
+    for item in parts:
+        text = str(item)
+        if text in {"--pull", "--pull=true"} or text.startswith("--pull="):
+            continue
+        out.append(text)
+        if not inserted and text == "build":
+            out.append("--pull=false")
+            inserted = True
+    if not inserted:
+        return parts
+    return out
+
+
+def _docker_build_spec(parts: list[str], cwd: str | None) -> tuple[Path, bool] | None:
+    if not parts or _tool_basename(parts[0]) != "docker":
+        return None
+    rest = parts[1:]
+    if rest and _tool_basename(rest[0]) == "image":
+        rest = rest[1:]
+    if not rest or rest[0] != "build":
+        return None
+    if len(rest) > 1 and rest[1] == "x":
+        return None
+    dockerfile = ""
+    context = ""
+    quiet = False
+    index = 1
+    while index < len(rest):
+        text = str(rest[index] or "").strip().strip("'\"")
+        index += 1
+        if not text:
+            continue
+        if text in _DOCKER_PULL_QUIET:
+            quiet = True
+            continue
+        if text.startswith("--file="):
+            dockerfile = text.split("=", 1)[1].strip()
+            continue
+        if text in {"-f", "--file"}:
+            if index >= len(rest):
+                return None
+            dockerfile = str(rest[index] or "").strip().strip("'\"")
+            index += 1
+            continue
+        if text.startswith("--") and "=" in text:
+            continue
+        if text in _DOCKER_BUILD_VALUE_FLAGS:
+            if index >= len(rest):
+                return None
+            index += 1
+            continue
+        if text.startswith("-"):
+            continue
+        if context:
+            return None
+        context = text
+    if not context or context == "-" or "://" in context:
+        return None
+    root = Path(cwd or os.getcwd())
+    ctx = Path(context)
+    if not ctx.is_absolute():
+        ctx = root / ctx
+    if dockerfile:
+        df = Path(dockerfile)
+        if not df.is_absolute():
+            df = root / df
+    else:
+        df = ctx / "Dockerfile"
+    if not df.is_file():
+        return None
+    return df, quiet
+
+
+def lan_bound_docker_build_from_parts(parts: list[str], cwd: str | None = None) -> list[str] | None:
+    spec = _docker_build_spec(parts, cwd)
+    if spec is None:
+        return None
+    dockerfile, quiet = spec
+    lan = [
+        image
+        for image in dockerfile_from_images(dockerfile)
+        if _lan_bind_ip_for_host(docker_registry_host_from_image(image))
+    ]
+    if not lan:
+        return None
+    docker = shutil.which("docker") or shutil.which("docker.exe")
+    if not docker:
+        return None
+    follow = _docker_build_without_pull([docker, *parts[1:]])
+    return skopeo_copy_lan_images_argv(lan, quiet=quiet, follow=follow)
+
+
+def lan_bound_docker_build_argv(command: str, cwd: str | None = None) -> list[str] | None:
+    """``docker build`` of a Dockerfile whose ``FROM`` is an on-link RFC1918 registry.
+
+    Dockerd cannot source-bind. Skopeo loads LAN bases through the loopback proxy,
+    then ``docker build --pull=false`` uses the local daemon copies. Skip pipes,
+    stdin context, buildx, interpolations, and missing skopeo.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    return lan_bound_docker_build_from_parts(parts, cwd=cwd)
+
+
 def container_direct_argv(command: str) -> list[str] | None:
     """Run registry/package-manager CLIs as argv so LAN HTTP_PROXY reaches a NAS."""
     return _direct_stem_argv(command, _LAN_HTTP_TOOL_STEMS)
@@ -1432,6 +1606,7 @@ def _command_args(command: str, shell: str, cwd: str | None = None) -> list[str]
         or lan_bound_smb_argv(command)
         or lan_bound_docker_pull_argv(command)
         or lan_bound_compose_pull_argv(command, cwd=cwd)
+        or lan_bound_docker_build_argv(command, cwd=cwd)
     )
     if bound:
         return bound

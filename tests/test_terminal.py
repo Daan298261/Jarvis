@@ -7,11 +7,13 @@ from app.tools.terminal import (
     cifs_host_from_token,
     default_shell,
     container_direct_argv,
+    dockerfile_from_images,
     docker_registry_host_from_image,
     git_direct_argv,
     lan_bound_cifs_argv,
     lan_bound_compose_pull_argv,
     lan_bound_dns_argv,
+    lan_bound_docker_build_argv,
     lan_bound_docker_pull_argv,
     lan_bound_http_argv,
     lan_bound_netcat_argv,
@@ -976,3 +978,70 @@ def test_lan_skopeo_load_runs_copies_then_follow(monkeypatch):
     assert seen[0][:2] == ["/usr/bin/skopeo", "copy"]
     assert seen[0][-1] == "docker-daemon:192.168.1.50:5000/app:latest"
     assert seen[1] == ["/usr/bin/docker", "compose", "pull", "web"]
+
+
+def test_dockerfile_from_images_skips_scratch_and_args(tmp_path):
+    df = tmp_path / "Dockerfile"
+    df.write_text(
+        "FROM 192.168.1.50:5000/base:latest\n"
+        "FROM --platform=linux/amd64 nas.local/org/runtime AS runtime\n"
+        "# FROM ignored\n"
+        "FROM scratch\n"
+        "FROM ${BASE}\n"
+        "FROM alpine:3.20\n",
+        encoding="utf-8",
+    )
+    assert dockerfile_from_images(df) == [
+        "192.168.1.50:5000/base:latest",
+        "nas.local/org/runtime",
+        "alpine:3.20",
+    ]
+
+
+def test_lan_docker_build_skopeo_loads_from_before_build(tmp_path, monkeypatch):
+    import socket
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"skopeo", "skopeo.exe", "docker", "docker.exe"} else None,
+    )
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        if host == "nas.local":
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.40", 0))]
+        raise socket.gaierror("no")
+
+    monkeypatch.setattr("app.mobile.wan_forward.socket.getaddrinfo", fake_getaddrinfo)
+    ctx = tmp_path / "app"
+    ctx.mkdir()
+    (ctx / "Dockerfile").write_text("FROM 192.168.1.50:5000/base:latest\nCOPY . .\n", encoding="utf-8")
+    built = lan_bound_docker_build_argv(f"docker build -t mine {ctx}")
+    assert built is not None
+    assert built[1].endswith("lan_skopeo_load.py")
+    assert "192.168.1.50:5000/base:latest" in built
+    assert "--" in built
+    follow = built[built.index("--") + 1 :]
+    assert follow[0] == "/usr/bin/docker"
+    assert "build" in follow
+    assert "--pull=false" in follow
+    assert str(ctx) in follow
+    alt = tmp_path / "Dockerfile.lan"
+    alt.write_text("FROM nas.local:5000/app\n", encoding="utf-8")
+    custom = lan_bound_docker_build_argv(f"docker build -f {alt} -t x {ctx}", cwd=str(tmp_path))
+    assert custom is not None
+    assert "nas.local:5000/app:latest" in custom
+    (ctx / "Dockerfile").write_text("FROM alpine:3.20\n", encoding="utf-8")
+    assert lan_bound_docker_build_argv(f"docker build {ctx}") is None
+    (ctx / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+    assert lan_bound_docker_build_argv(f"docker build {ctx}") is None
+    (ctx / "Dockerfile").write_text("FROM 192.168.1.50:5000/base\n", encoding="utf-8")
+    bash = _command_args(f"docker build --pull {ctx}", "bash", cwd=str(tmp_path))
+    assert bash[1].endswith("lan_skopeo_load.py")
+    follow = bash[bash.index("--") + 1 :]
+    assert "--pull=false" in follow
+    assert "--pull" not in follow
+    env = _child_env(bash)
+    assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert "10.8.0.1" not in env["HTTP_PROXY"]
