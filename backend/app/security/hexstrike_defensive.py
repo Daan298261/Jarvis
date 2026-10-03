@@ -981,6 +981,39 @@ def should_host_exec_iface(tool: str, target: str) -> bool:
     return True
 
 
+def should_host_exec_nmap_scan_fallback(tool: str, target: str) -> bool:
+    """Host nmap when nuclei/httpx/naabu/masscan/rustscan is missing on a spaced NIC."""
+    if not lan_uses_host_iface_argv(target):
+        return False
+    stem = hexstrike_lan_tool_id(tool)
+    if stem not in _SCAN_HOST_STEMS:
+        return False
+    if _iface_host_binary(stem):
+        return False
+    return bool(shutil.which("nmap") or shutil.which("nmap.exe"))
+
+
+def nmap_scan_fallback_payload(payload: dict[str, Any] | None, target: str) -> dict[str, Any]:
+    """nmap argv for a LAN URL/host without forwarding nuclei template flags."""
+    row = payload if isinstance(payload, dict) else {}
+    host = bindable_lan_host(target) or (target or "").strip()
+    ports = str(row.get("ports") or "").strip()
+    for key in ("url", "uri", "endpoint", "target", "host", "ip", "address"):
+        text = str(row.get(key) or "").strip()
+        if "://" not in text:
+            continue
+        parsed = urlparse(text)
+        if parsed.hostname:
+            host = parsed.hostname
+        if parsed.port and not ports:
+            ports = str(parsed.port)
+        break
+    out: dict[str, Any] = {"target": host, "scan_type": "-sV", "additional_args": ""}
+    if ports:
+        out["ports"] = ports
+    return out
+
+
 def _iface_host_bind_flags(stem: str, target: str, iface: str, source: str) -> list[str]:
     if stem in _PD_SOURCE_TOOLS:
         return ["-source-ip", source, "-interface", iface]
@@ -1545,11 +1578,17 @@ async def _host_iface_lan(tool: str, payload: dict[str, Any] | None) -> dict[str
 
 
 async def execute_operator_iface_tool(path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
-    """Operator iface tools: host argv when HexStrike would split ``-i``/``-I``/``-e``."""
+    """Operator iface tools: host argv when HexStrike would split ``-i``/``-I``/``-e``.
+
+    When nuclei/httpx/naabu/masscan/rustscan is missing, host nmap still binds a
+    spaced Windows NIC name instead of posting to the suite (VPN).
+    """
     bound = bind_hexstrike_lan_payload(path, payload)
     target = _iface_lan_target(bound)
     if should_host_exec_iface(path, target):
         return await _host_iface_lan(path, bound)
+    if should_host_exec_nmap_scan_fallback(path, target):
+        return await _host_nmap_lan_scan(nmap_scan_fallback_payload(bound, target))
     from .hexstrike import normalize_upstream_path
 
     cleaned = path

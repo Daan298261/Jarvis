@@ -379,6 +379,8 @@ class MCPRuntime:
             _hydra_host_binary,
             _iface_lan_target,
             should_host_exec_iface,
+            should_host_exec_nmap_scan_fallback,
+            nmap_scan_fallback_payload,
         )
 
         args = bind_hexstrike_lan_payload(str(tool_key or name), args)
@@ -421,6 +423,9 @@ class MCPRuntime:
             target = _iface_lan_target(args)
             if should_host_exec_iface(str(tool_key or name), target):
                 data = await _host_iface_lan(str(tool_key or name), args)
+                return ToolResult(True, str(data.get("stdout") or data), data=data)
+            if should_host_exec_nmap_scan_fallback(str(tool_key or name), target):
+                data = await _host_nmap_lan_scan(nmap_scan_fallback_payload(args, target))
                 return ToolResult(True, str(data.get("stdout") or data), data=data)
         server_id = self._server_id(server)
         last_error = ""

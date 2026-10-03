@@ -1493,6 +1493,60 @@ async def test_operator_nuclei_falls_back_to_suite_when_not_on_path(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_operator_nuclei_uses_nmap_when_nuclei_missing(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_iface_tool
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.security.hexstrike.resolve_install", lambda explicit="": None)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/nmap"
+        if str(name).lower() in {"nmap", "nmap.exe"}
+        else None,
+    )
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"Nmap scan report for 192.168.50.12\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    hosted = await execute_operator_iface_tool(
+        "api/tools/nuclei",
+        {"url": "http://192.168.50.12:8080/login", "additional_args": "-t http/"},
+    )
+    assert posted == []
+    assert hosted["source"] == "host-nmap"
+    argv = seen[0]
+    assert argv[0] == "/usr/bin/nmap"
+    assert "-sV" in argv
+    assert argv[argv.index("-S") + 1] == "192.168.50.8"
+    assert argv[argv.index("-e") + 1] == "Ethernet 2"
+    assert argv[argv.index("-p") + 1] == "8080"
+    assert argv[-1] == "192.168.50.12"
+    assert "-t" not in argv
+
+
+@pytest.mark.asyncio
 async def test_mcp_nuclei_uses_host_argv_when_windows_nic_name_has_space(monkeypatch):
     from app.tools.mcp_runtime import MCP
 
@@ -1543,6 +1597,64 @@ async def test_mcp_nuclei_uses_host_argv_when_windows_nic_name_has_space(monkeyp
         assert argv[0] == "/usr/bin/nuclei"
         assert argv[argv.index("-interface") + 1] == "Ethernet 2"
         assert argv[-2:] == ("-u", "http://192.168.50.12/")
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_mcp_nuclei_uses_nmap_when_nuclei_missing(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN nuclei must not go through HexStrike MCP when nmap can bind the NIC")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_nuclei"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "nuclei"},
+        "remote_name": "nuclei",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.security.hexstrike.resolve_install", lambda explicit="": None)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/nmap"
+        if str(name).lower() in {"nmap", "nmap.exe"}
+        else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"Nmap scan report for 192.168.50.12\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_nuclei",
+            {"url": "http://192.168.50.12:8080/login", "additional_args": "-t http/"},
+        )
+        assert result.success, result.error
+        assert result.data["source"] == "host-nmap"
+        argv = seen[0]
+        assert argv[0] == "/usr/bin/nmap"
+        assert argv[argv.index("-e") + 1] == "Ethernet 2"
+        assert argv[argv.index("-p") + 1] == "8080"
+        assert argv[-1] == "192.168.50.12"
     finally:
         MCP.reset_for_tests()
 

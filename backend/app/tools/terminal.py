@@ -1027,6 +1027,71 @@ def lan_bound_socat_argv(command: str) -> list[str] | None:
     return [exe, *rewritten]
 
 
+def _telnet_host_port(parts: list[str]) -> tuple[str, int]:
+    host = ""
+    port = 23
+    found_host = False
+    index = 1
+    skip_value = False
+    while index < len(parts):
+        tok = str(parts[index] or "").strip().strip("'\"")
+        index += 1
+        if skip_value:
+            skip_value = False
+            continue
+        if tok.startswith("-"):
+            if tok in {"-l", "-e", "-b"} and index < len(parts) and not str(parts[index]).startswith("-"):
+                skip_value = True
+            continue
+        if not found_host:
+            if "://" in tok:
+                parsed = urlparse(tok)
+                host = (parsed.hostname or "").strip()
+                if parsed.port:
+                    port = int(parsed.port)
+            else:
+                host = tok.split("%", 1)[0]
+                if host.count(":") == 1 and host.rsplit(":", 1)[-1].isdigit():
+                    host, port_s = host.rsplit(":", 1)
+                    port = int(port_s)
+            found_host = True
+            continue
+        if tok.isdigit():
+            port = int(tok)
+        break
+    return host, port
+
+
+def lan_bound_telnet_argv(command: str) -> list[str] | None:
+    """telnet of an on-link RFC1918 host, sourced from that NIC.
+
+    inetutils/Windows telnet follow the OS default route. socat ``,bind=`` or
+    nc ``-s`` pins the home NIC so a VPN cannot steal router/NAS admin ports.
+    Skip pipes and public hosts.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts or _tool_basename(parts[0]) != "telnet":
+        return None
+    host, port = _telnet_host_port(parts)
+    bind = _lan_bind_ip_for_host(host)
+    if not bind or port < 1 or port > 65535:
+        return None
+    socat = shutil.which("socat") or shutil.which("socat.exe")
+    if socat:
+        return [socat, "-", f"TCP:{host}:{port},bind={bind}"]
+    for name in ("nc", "ncat", "netcat"):
+        exe = shutil.which(name) or shutil.which(f"{name}.exe")
+        if exe:
+            return [exe, "-s", bind, host, str(port)]
+    return None
+
+
 def _ncrack_target_from_argv(parts: list[str]) -> str:
     target = _scan_target_from_argv(parts)
     if target:
@@ -5888,6 +5953,7 @@ def _command_args(command: str, shell: str, cwd: str | None = None) -> list[str]
         or lan_bound_lftp_argv(command)
         or lan_bound_openssl_argv(command)
         or lan_bound_socat_argv(command)
+        or lan_bound_telnet_argv(command)
         or lan_bound_netcat_argv(command)
         or lan_bound_ncrack_argv(command)
         or lan_bound_dns_argv(command)

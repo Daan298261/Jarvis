@@ -40,6 +40,7 @@ from app.tools.terminal import (
     lan_bound_ncrack_argv,
     lan_bound_openssl_argv,
     lan_bound_socat_argv,
+    lan_bound_telnet_argv,
     lan_bound_nfs_argv,
     lan_bound_rclone_argv,
     lan_bound_rsync_argv,
@@ -970,6 +971,37 @@ def test_lan_openssl_and_socat_bind_home_nic_not_vpn(monkeypatch):
     assert lan_bound_socat_argv("socat TCP-LISTEN:2222,fork TCP:8.8.8.8:22") is None
     bash_socat = _command_args("socat - UDP:192.168.1.50:53", "bash")
     assert bash_socat[-1] == "UDP:192.168.1.50:53,bind=192.168.1.12"
+
+
+def test_lan_telnet_binds_home_nic_not_vpn(monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}"
+        if name in {"socat", "socat.exe", "nc", "nc.exe", "ncat", "netcat"}
+        else None,
+    )
+    session = lan_bound_telnet_argv("telnet 192.168.1.1")
+    assert session is not None
+    assert session[0] == "/usr/bin/socat"
+    assert session[1:] == ["-", "TCP:192.168.1.1:23,bind=192.168.1.12"]
+    alt = lan_bound_telnet_argv("telnet 192.168.1.50 8080")
+    assert alt is not None
+    assert alt[-1] == "TCP:192.168.1.50:8080,bind=192.168.1.12"
+    assert lan_bound_telnet_argv("telnet example.com") is None
+    assert lan_bound_telnet_argv("telnet 8.8.8.8 23") is None
+    assert lan_bound_telnet_argv("telnet 192.168.1.1 | cat") is None
+    bash = _command_args("telnet 192.168.1.1 23", "bash")
+    assert bash[0] == "/usr/bin/socat"
+    assert bash[-1] == "TCP:192.168.1.1:23,bind=192.168.1.12"
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"nc", "nc.exe"} else None,
+    )
+    via_nc = lan_bound_telnet_argv("telnet 192.168.1.1 2323")
+    assert via_nc is not None
+    assert via_nc[0] == "/usr/bin/nc"
+    assert via_nc[1:] == ["-s", "192.168.1.12", "192.168.1.1", "2323"]
 
 
 def test_lan_ffmpeg_rtsp_binds_home_nic_not_vpn(monkeypatch):
