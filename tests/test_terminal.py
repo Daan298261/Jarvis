@@ -1953,6 +1953,46 @@ def test_lan_run_wget_curl_and_hcl_heredoc(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     assert lan_bound_docker_build_argv(f"docker build {ctx}") is None
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        'RUN sh -c "wget -O /x http://192.168.1.50:8000/x"\n',
+        encoding="utf-8",
+    )
+    sh_c = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert sh_c is not None
+    follow = sh_c[sh_c.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 x /x" in text
+    assert "wget" not in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        'RUN ["sh", "-c", "apk add curl && wget -O /x http://192.168.1.50:8000/x && chmod 755 /x"]\n',
+        encoding="utf-8",
+    )
+    sh_c_json = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert sh_c_json is not None
+    follow = sh_c_json[sh_c_json.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "RUN apk add curl" in text
+    assert "COPY --from=jarvisadd0 x /x" in text
+    assert "RUN chmod 755 /x" in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        'RUN bash -lc "curl -fsSL http://192.168.1.50:8000/install.sh | sh"\n',
+        encoding="utf-8",
+    )
+    bash_lc = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert bash_lc is not None
+    follow = bash_lc[bash_lc.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 install.sh" in text
+    assert "RUN sh /tmp/jarvisadd0-install.sh" in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        'RUN sh -c "curl -fsSL https://example.com/install.sh | sh"\n',
+        encoding="utf-8",
+    )
+    assert lan_bound_docker_build_argv(f"docker build {ctx}") is None
     monkeypatch.setattr(
         "app.tools.terminal.shutil.which",
         lambda name: f"/usr/bin/{name}"

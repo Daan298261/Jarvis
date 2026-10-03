@@ -3061,7 +3061,8 @@ def rewrite_dockerfile_lan_add(
     path: Path, build_args: dict[str, str] | None = None
 ) -> tuple[str, list[tuple[str, str, str]]]:
     """Rewrite LAN ``ADD http(s)|ftp(s)://`` and ``RUN wget`` / ``RUN curl``
-    (including ``&&`` / ``;`` chains) of those URLs into ``COPY --from=jarvisaddN``.
+    (including ``&&`` / ``;`` chains and ``sh -c`` / ``bash -lc``) of those URLs
+    into ``COPY --from=jarvisaddN``.
 
     Returns rewritten text and ``(url, context, filename)`` fetches. Unchanged
     text and an empty list when there is no on-link RFC1918 fetch.
@@ -3163,6 +3164,9 @@ def _run_shell_argv(body: str) -> list[str] | None:
         return None
     out: list[str] = []
     for tok in tokens:
+        if any(ch.isspace() for ch in tok):
+            out.append(tok)
+            continue
         out.extend(part for part in _GLUED_SHELL_OP.split(tok) if part)
     return out
 
@@ -3239,16 +3243,46 @@ def _run_fetch_copy_lines(
     return [f"{indent}COPY --from={context} {filename} {copy_dest}"]
 
 
+def _unwrap_run_shell_c(argv: list[str]) -> list[str] | None:
+    """Return tokens of ``sh -c SCRIPT`` / ``bash -lc SCRIPT`` when that is the whole argv."""
+    if len(argv) < 3:
+        return None
+    stem = _tool_basename(argv[0]).lower().removesuffix(".exe")
+    if stem not in _RUN_PIPE_SHELLS:
+        return None
+    c_at: int | None = None
+    for index, tok in enumerate(argv[1:], 1):
+        if tok == "-c":
+            c_at = index
+            break
+        if (
+            index == 1
+            and tok.startswith("-")
+            and not tok.startswith("--")
+            and "c" in tok[1:]
+            and all(ch in {"c", "i", "l", "s"} for ch in tok[1:])
+        ):
+            c_at = index
+            break
+        if tok.startswith("-") and not tok.startswith("--"):
+            continue
+        return None
+    if c_at is None or c_at + 2 != len(argv):
+        return None
+    return _run_shell_argv(argv[c_at + 1])
+
+
 def _rewrite_lan_run_fetch(
     line: str, declared: dict[str, str], fetches: list[tuple[str, str, str]]
 ) -> list[str] | None:
-    """Replace LAN ``RUN wget`` / ``RUN curl`` (including ``&&`` / ``;`` chains) with ``COPY --from=``."""
+    """Replace LAN ``RUN wget`` / ``RUN curl`` (including ``&&`` / ``;`` chains and ``sh -c``) with ``COPY --from=``."""
     match = _RUN_LINE.match(str(line or ""))
     if match is None:
         return None
     indent = re.match(r"^(\s*)", str(line or "")).group(1)
     run_flags = match.group(2) or ""
     body = match.group(3).strip()
+    argv: list[str]
     if body.startswith("["):
         try:
             loaded = json.loads(body)
@@ -3256,10 +3290,15 @@ def _rewrite_lan_run_fetch(
             return None
         if not isinstance(loaded, list) or not all(isinstance(item, str) for item in loaded):
             return None
-        return _run_fetch_copy_lines(list(loaded), declared, fetches, indent)
-    argv = _run_shell_argv(body)
-    if argv is None:
-        return None
+        argv = list(loaded)
+    else:
+        parsed = _run_shell_argv(body)
+        if parsed is None:
+            return None
+        argv = parsed
+    unwrapped = _unwrap_run_shell_c(argv)
+    if unwrapped is not None:
+        argv = unwrapped
     split = _split_run_chain(argv)
     if split is None:
         return None
