@@ -31,6 +31,7 @@ from app.tools.terminal import (
     lan_bound_docker_pull_argv,
     lan_bound_docker_push_argv,
     lan_bound_ffmpeg_argv,
+    lan_bound_gio_argv,
     lan_bound_http_argv,
     lan_bound_lftp_argv,
     lan_bound_netcat_argv,
@@ -703,6 +704,78 @@ def test_lan_davfs_and_curlftpfs_use_lan_http_proxy_not_vpn(monkeypatch):
     bash = _command_args("mount -t davfs http://192.168.1.50/webdav /mnt/nas", "bash")
     assert bash[0] == "/usr/sbin/mount"
     assert _child_env(bash)["HTTPS_PROXY"] == _child_env(bash)["HTTP_PROXY"]
+
+
+def test_lan_gio_rewrites_to_curl_smbget_and_mount(monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}"
+        if name
+        in {
+            "gio",
+            "gio.exe",
+            "gvfs-cat",
+            "gvfs-copy",
+            "gvfs-mount",
+            "curl",
+            "curl.exe",
+            "smbget",
+            "smbget.exe",
+            "mount",
+            "mount.exe",
+            "mount.davfs",
+            "mount.cifs",
+        }
+        else None,
+    )
+    cat = lan_bound_gio_argv("gio cat dav://192.168.1.50/webdav/readme.md")
+    assert cat is not None
+    assert cat[0] == "/usr/bin/curl"
+    assert cat[1:3] == ["--interface", "192.168.1.12"]
+    assert cat[-1] == "http://192.168.1.50/webdav/readme.md"
+    copied = lan_bound_gio_argv(
+        "gio copy http://192.168.1.50:8096/Items/abc/Download /tmp/clip.mp4"
+    )
+    assert copied is not None
+    assert copied[1:3] == ["--interface", "192.168.1.12"]
+    assert "-o" in copied and "/tmp/clip.mp4" in copied
+    uploaded = lan_bound_gio_argv(
+        "gio copy /tmp/clip.mp4 davs://192.168.1.50/webdav/clip.mp4"
+    )
+    assert uploaded is not None
+    assert "-T" in uploaded and "/tmp/clip.mp4" in uploaded
+    assert uploaded[-1] == "https://192.168.1.50/webdav/clip.mp4"
+    gvfs = lan_bound_gio_argv("gvfs-cat ftp://192.168.1.40/media/clip.mp4")
+    assert gvfs is not None
+    assert gvfs[0] == "/usr/bin/curl"
+    assert gvfs[-1] == "ftp://192.168.1.40/media/clip.mp4"
+    smb = lan_bound_gio_argv("gio copy smb://192.168.1.50/media/clip.mp4 /tmp/clip.mp4")
+    assert smb is not None
+    assert smb[0] == "/usr/bin/smbget"
+    assert smb[1] == "--option=client addr=192.168.1.12"
+    assert smb[2:4] == ["-o", "/tmp/clip.mp4"]
+    assert smb[-1] == "smb://192.168.1.50/media/clip.mp4"
+    dav_mount = lan_bound_gio_argv("gio mount dav://192.168.1.50/webdav /mnt/nas")
+    assert dav_mount is not None
+    assert dav_mount[0] == "/usr/bin/mount.davfs"
+    assert dav_mount[1:] == ["http://192.168.1.50/webdav", "/mnt/nas"]
+    assert _child_env(dav_mount)["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert "10.8.0.1" not in _child_env(dav_mount)["HTTP_PROXY"]
+    smb_mount = lan_bound_gio_argv("gio mount smb://192.168.1.50/media /mnt/nas")
+    assert smb_mount is not None
+    assert smb_mount[0] == "/usr/bin/mount.cifs"
+    assert "//192.168.1.50/media" in smb_mount
+    assert smb_mount[1:3] == ["-o", "srcaddr=192.168.1.12"] or any(
+        "srcaddr=192.168.1.12" in str(part) for part in smb_mount
+    )
+    assert lan_bound_gio_argv("gio cat dav://8.8.8.8/readme.md") is None
+    assert lan_bound_gio_argv("gio mount dav://192.168.1.50/webdav") is None
+    assert lan_bound_gio_argv("gio cat dav://192.168.1.50/webdav/readme.md | cat") is None
+    bash = _command_args("gio cat dav://192.168.1.50/webdav/readme.md", "bash")
+    assert bash[0] == "/usr/bin/curl"
+    assert bash[1:3] == ["--interface", "192.168.1.12"]
 
 
 def test_rclone_host_from_token():

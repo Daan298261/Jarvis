@@ -1194,6 +1194,126 @@ def lan_bound_curlftpfs_argv(command: str) -> list[str] | None:
     return [exe, *parts[1:]]
 
 
+_GIO_NAMES = frozenset({"gio", "gvfs-cat", "gvfs-copy", "gvfs-mount"})
+_GVFS_ACTION = {
+    "gvfs-cat": "cat",
+    "gvfs-copy": "copy",
+    "gvfs-mount": "mount",
+}
+_GIO_HTTP_SCHEMES = frozenset({"http", "https", "dav", "davs", "ftp", "ftps"})
+_GIO_SMB_SCHEMES = frozenset({"smb", "cifs"})
+
+
+def _gio_http_url(url: str) -> str:
+    text = str(url or "").strip()
+    lowered = text.lower()
+    if lowered.startswith("dav://"):
+        return "http://" + text[6:]
+    if lowered.startswith("davs://"):
+        return "https://" + text[7:]
+    return text
+
+
+def _gio_smb_unc(url: str) -> str:
+    parsed = urlparse(str(url or "").strip())
+    host = (parsed.hostname or "").strip()
+    path = unquote(parsed.path or "").replace("\\", "/").strip("/")
+    share = path.split("/", 1)[0]
+    if not host or not share:
+        return ""
+    return f"//{host}/{share}"
+
+
+def lan_bound_gio_argv(command: str) -> list[str] | None:
+    """gio/gvfs of an on-link RFC1918 NAS, sourced from that NIC.
+
+    gvfsd does not inherit HTTP_PROXY from the ``gio`` client. Rewrite
+    ``cat``/``copy`` of dav/http/ftp to curl ``--interface``, smb copy to
+    ``smbget --option=client addr=``, and ``mount DEST`` to mount.davfs /
+    mount.cifs ``srcaddr``. Skip pipes, flags, dest-less mounts, and public hosts.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts:
+        return None
+    name = _tool_basename(parts[0])
+    if name not in _GIO_NAMES:
+        return None
+    if name == "gio":
+        if len(parts) < 3:
+            return None
+        action = str(parts[1] or "").strip().lower()
+        rest = parts[2:]
+    else:
+        action = _GVFS_ACTION[name]
+        rest = parts[1:]
+    if action not in {"cat", "copy", "mount"}:
+        return None
+    if any(str(item).startswith("-") for item in rest):
+        return None
+    if action == "cat" and len(rest) == 1:
+        url = str(rest[0]).strip().strip("'\"")
+        scheme = (urlparse(url).scheme or "").lower()
+        if scheme in _GIO_HTTP_SCHEMES:
+            return _curl_lan_argv(_gio_http_url(url))
+        return None
+    if action == "copy" and len(rest) == 2:
+        src = str(rest[0]).strip().strip("'\"")
+        dest = str(rest[1]).strip().strip("'\"")
+        src_scheme = (urlparse(src).scheme or "").lower()
+        dest_scheme = (urlparse(dest).scheme or "").lower()
+        if src_scheme in _GIO_HTTP_SCHEMES and dest_scheme not in _GIO_HTTP_SCHEMES | _GIO_SMB_SCHEMES:
+            return _curl_lan_argv(_gio_http_url(src), outfile=dest)
+        if dest_scheme in _GIO_HTTP_SCHEMES and src_scheme not in _GIO_HTTP_SCHEMES | _GIO_SMB_SCHEMES:
+            return _curl_lan_argv(_gio_http_url(dest), upload=src)
+        if src_scheme in _GIO_SMB_SCHEMES and dest_scheme not in _GIO_HTTP_SCHEMES | _GIO_SMB_SCHEMES:
+            bind = _lan_bind_for_http_target(src)
+            if not bind:
+                return None
+            exe = shutil.which("smbget") or shutil.which("smbget.exe")
+            if not exe:
+                return None
+            return [exe, f"--option=client addr={bind}", "-o", dest, src]
+        return None
+    if action == "mount" and len(rest) == 2:
+        url = str(rest[0]).strip().strip("'\"")
+        dest = str(rest[1]).strip().strip("'\"")
+        scheme = (urlparse(url).scheme or "").lower()
+        if scheme in _GIO_HTTP_SCHEMES:
+            host = (urlparse(url).hostname or "").strip()
+            if not _lan_bind_ip_for_host(host):
+                return None
+            exe = (
+                shutil.which("mount.davfs")
+                or shutil.which("mount.davfs2")
+                or shutil.which("mount")
+                or shutil.which("mount.exe")
+            )
+            if not exe:
+                return None
+            if _tool_basename(exe) in {"mount.davfs", "mount.davfs2"}:
+                return [exe, _gio_http_url(url), dest]
+            return [exe, "-t", "davfs", _gio_http_url(url), dest]
+        if scheme in _GIO_SMB_SCHEMES:
+            unc = _gio_smb_unc(url)
+            bind = _lan_bind_for_http_target(url)
+            if not unc or not bind:
+                return None
+            exe = shutil.which("mount.cifs") or shutil.which("mount") or shutil.which("mount.exe")
+            if not exe:
+                return None
+            if _tool_basename(exe) == "mount.cifs":
+                return _cifs_with_srcaddr([exe, unc, dest], bind)
+            return _cifs_with_srcaddr([exe, "-t", "cifs", unc, dest], bind)
+        return None
+    return None
+
+
 _SMB_NAMES = frozenset({"smbclient", "smbget", "rpcclient", "smbtree"})
 
 
@@ -5328,6 +5448,7 @@ def _command_args(command: str, shell: str, cwd: str | None = None) -> list[str]
         or lan_bound_nfs_argv(command)
         or lan_bound_davfs_argv(command)
         or lan_bound_curlftpfs_argv(command)
+        or lan_bound_gio_argv(command)
         or lan_bound_smb_argv(command)
         or lan_bound_docker_pull_argv(command)
         or lan_bound_docker_push_argv(command)
