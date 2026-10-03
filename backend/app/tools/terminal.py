@@ -1507,6 +1507,19 @@ def compose_service_dockerfiles(path: Path) -> dict[str, Path]:
     return files
 
 
+def compose_service_inline_dockerfiles(path: Path) -> dict[str, str]:
+    """Map compose service name → ``build.dockerfile_inline`` text."""
+    result: dict[str, str] = {}
+    for name, spec in _compose_services(path).items():
+        build = spec.get("build")
+        if not isinstance(build, dict):
+            continue
+        text = str(build.get("dockerfile_inline") or "")
+        if text.strip():
+            result[str(name)] = text
+    return result
+
+
 def _parse_build_arg_mapping(raw: object, env: dict[str, str] | None = None) -> dict[str, str]:
     values = dict(env if env is not None else os.environ)
     out: dict[str, str] = {}
@@ -2214,8 +2227,10 @@ def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[s
     file_args: dict[str, dict[str, str]] = {}
     file_contexts: dict[str, list[str]] = {}
     file_cache_to: dict[str, list[str]] = {}
+    inlines: dict[str, str] = {}
     for path in paths:
         dockerfiles.update(compose_service_dockerfiles(path))
+        inlines.update(compose_service_inline_dockerfiles(path))
         images.update(compose_service_images(path))
         for name, args in compose_service_build_args(path).items():
             file_args.setdefault(name, {}).update(args)
@@ -2234,20 +2249,38 @@ def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[s
             for image in extras:
                 if image not in file_cache_to[name]:
                     file_cache_to[name].append(image)
-    if not dockerfiles:
+    if not dockerfiles and not inlines:
         return None
     if services and not with_deps:
         chosen = {name: dockerfiles[name] for name in services if name in dockerfiles}
-        if not chosen:
+        chosen_inline = {name: inlines[name] for name in services if name in inlines}
+        if not chosen and not chosen_inline:
             return None
     else:
         chosen = dict(dockerfiles)
+        chosen_inline = dict(inlines)
     cli_args = _docker_build_args(parts)
     lan: list[str] = []
     seen: set[str] = set()
     for name, dockerfile in chosen.items():
         merged = {**file_args.get(name, {}), **cli_args}
         for image in dockerfile_from_images(dockerfile, merged):
+            if image in seen:
+                continue
+            if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
+                continue
+            seen.add(image)
+            lan.append(image)
+        for image in file_contexts.get(name, ()):
+            if image in seen:
+                continue
+            if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
+                continue
+            seen.add(image)
+            lan.append(image)
+    for name, text in chosen_inline.items():
+        merged = {**file_args.get(name, {}), **cli_args}
+        for image in dockerfile_images_from_text(text, merged):
             if image in seen:
                 continue
             if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
@@ -2271,7 +2304,7 @@ def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[s
     lan_tags: list[str] = []
     seen_tags: set[str] = set()
     public: list[str] = []
-    for name in chosen:
+    for name in (*chosen, *chosen_inline):
         image = images.get(name) or ""
         if not image:
             continue
@@ -2284,14 +2317,16 @@ def lan_bound_compose_build_argv(command: str, cwd: str | None = None) -> list[s
         lan_tags.append(image)
     lan_cache_map: dict[str, list[str]] = {}
     cli_cache_to = _docker_build_cache_to_images(parts)
-    for name in chosen:
+    for name in (*chosen, *chosen_inline):
         refs = list(file_cache_to.get(name, []))
         refs.extend(cli_cache_to)
         tagged = _lan_tagged_refs(refs)
         if tagged:
             lan_cache_map[name] = tagged
     lan_cache_to = _lan_tagged_refs([img for extras in lan_cache_map.values() for img in extras])
-    add_plan = _compose_materialize_lan_add(chosen, file_args, cli_args, cache_to=lan_cache_map)
+    add_plan = _compose_materialize_lan_add(
+        chosen, file_args, cli_args, cache_to=lan_cache_map, inlines=chosen_inline
+    )
     if not lan and not (wants_push and lan_tags) and add_plan is None and not lan_cache_to:
         return None
     follow = _compose_follow_argv(parts)
@@ -2496,10 +2531,12 @@ def _compose_lan_copy_images(
     file_args: dict[str, dict[str, str]] = {}
     file_contexts: dict[str, list[str]] = {}
     deps: dict[str, list[str]] = {}
+    inlines: dict[str, str] = {}
     for path in paths:
         images.update(compose_service_images(path))
         if do_build:
             dockerfiles.update(compose_service_dockerfiles(path))
+            inlines.update(compose_service_inline_dockerfiles(path))
             for name, args in compose_service_build_args(path).items():
                 file_args.setdefault(name, {}).update(args)
             for name, extras in compose_service_context_images(path).items():
@@ -2524,6 +2561,7 @@ def _compose_lan_copy_images(
         images = {name: images[name] for name in wanted if name in images}
         build_wanted = list(build_services) if build_services is not None else wanted
         dockerfiles = {name: dockerfiles[name] for name in build_wanted if name in dockerfiles}
+        inlines = {name: inlines[name] for name in build_wanted if name in inlines}
         file_contexts = {name: file_contexts[name] for name in build_wanted if name in file_contexts}
     lan: list[str] = []
     seen: set[str] = set()
@@ -2536,6 +2574,14 @@ def _compose_lan_copy_images(
         lan.append(image)
     for name, dockerfile in dockerfiles.items():
         for image in dockerfile_from_images(dockerfile, file_args.get(name)):
+            if image in seen:
+                continue
+            if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
+                continue
+            seen.add(image)
+            lan.append(image)
+    for name, text in inlines.items():
+        for image in dockerfile_images_from_text(text, file_args.get(name)):
             if image in seen:
                 continue
             if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
@@ -2866,10 +2912,15 @@ def dockerfile_from_images(path: Path, build_args: dict[str, str] | None = None)
         text = path.read_text(encoding="utf-8")
     except OSError:
         return []
+    return dockerfile_images_from_text(text, build_args)
+
+
+def dockerfile_images_from_text(text: str, build_args: dict[str, str] | None = None) -> list[str]:
+    """Same as ``dockerfile_from_images`` for already-loaded Dockerfile text."""
     declared = dict(build_args or {})
     images: list[str] = []
     seen: set[str] = set()
-    for raw in text.splitlines():
+    for raw in str(text or "").splitlines():
         line = raw.split("#", 1)[0]
         arg_match = _ARG_DECL.match(line)
         if arg_match:
@@ -3018,6 +3069,12 @@ def rewrite_dockerfile_lan_add(
         original = path.read_text(encoding="utf-8")
     except OSError:
         return "", []
+    return rewrite_dockerfile_lan_add_text(original, build_args)
+
+
+def rewrite_dockerfile_lan_add_text(
+    original: str, build_args: dict[str, str] | None = None
+) -> tuple[str, list[tuple[str, str, str]]]:
     declared = dict(build_args or {})
     fetches: list[tuple[str, str, str]] = []
     out: list[str] = []
@@ -3071,13 +3128,19 @@ def rewrite_dockerfile_lan_add(
 
 
 def _materialize_lan_add(
-    dockerfile: Path,
+    dockerfile: Path | None,
     build_args: dict[str, str] | None = None,
     *,
     root: Path | None = None,
     leaf: str = "",
+    source_text: str = "",
 ) -> tuple[Path, list[tuple[str, str]], list[tuple[str, str]], str] | None:
-    rewritten, plan = rewrite_dockerfile_lan_add(dockerfile, build_args)
+    if source_text:
+        rewritten, plan = rewrite_dockerfile_lan_add_text(source_text, build_args)
+    elif dockerfile is not None:
+        rewritten, plan = rewrite_dockerfile_lan_add(dockerfile, build_args)
+    else:
+        return None
     if not plan:
         return None
     created = False
@@ -3105,14 +3168,19 @@ def _materialize_lan_add(
 
 def _dump_compose_overlay(services: dict[str, dict]) -> str:
     prepared: dict[str, dict] = {}
-    has_cache = False
+    hand_roll = False
     for name, spec in services.items():
         build = dict(spec.get("build") or {})
         cache_tags = [str(item) for item in (build.pop("lan_cache_to", None) or []) if item]
-        if cache_tags:
-            has_cache = True
-        prepared[name] = {"build": build, "cache_tags": cache_tags}
-    if not has_cache:
+        reset_inline = bool(build.pop("reset_dockerfile_inline", False))
+        if cache_tags or reset_inline:
+            hand_roll = True
+        prepared[name] = {
+            "build": build,
+            "cache_tags": cache_tags,
+            "reset_inline": reset_inline,
+        }
+    if not hand_roll:
         payload = {"services": {name: {"build": spec["build"]} for name, spec in prepared.items()}}
         try:
             import yaml
@@ -3126,6 +3194,8 @@ def _dump_compose_overlay(services: dict[str, dict]) -> str:
         lines.append(f"  {key}:")
         lines.append("    build:")
         build = spec["build"]
+        if spec["reset_inline"]:
+            lines.append("      dockerfile_inline: !reset")
         dockerfile = build.get("dockerfile")
         if dockerfile:
             lines.append(f"      dockerfile: {json.dumps(str(dockerfile))}")
@@ -3150,21 +3220,26 @@ def _compose_materialize_lan_add(
     file_args: dict[str, dict[str, str]],
     cli_args: dict[str, str],
     cache_to: dict[str, list[str]] | None = None,
+    inlines: dict[str, str] | None = None,
 ) -> tuple[str, list[tuple[str, str]], str] | None:
     """Compose overlay whose services use rewritten ADD Dockerfiles + extra contexts."""
-    if not chosen:
+    inlines = inlines or {}
+    if not chosen and not inlines:
         return None
     cache_to = cache_to or {}
     root = Path(tempfile.mkdtemp(prefix="jarvis-lan-add-"))
     fetches: list[tuple[str, str]] = []
     services: dict[str, dict] = {}
-    for index, (name, dockerfile) in enumerate(chosen.items()):
+    names = list(dict.fromkeys([*chosen, *inlines]))
+    for index, name in enumerate(names):
         leaf = re.sub(r"[^A-Za-z0-9._-]+", "_", name) or f"svc{index}"
+        text = inlines.get(name, "")
         spec = _materialize_lan_add(
-            dockerfile,
+            chosen.get(name),
             {**file_args.get(name, {}), **cli_args},
             root=root,
             leaf=leaf,
+            source_text=text,
         )
         lan_to = _lan_tagged_refs(cache_to.get(name, []))
         if spec is None and not lan_to:
@@ -3176,6 +3251,8 @@ def _compose_materialize_lan_add(
             build["dockerfile"] = str(df)
             if contexts:
                 build["additional_contexts"] = {ctx: directory for ctx, directory in contexts}
+            if text:
+                build["reset_dockerfile_inline"] = True
         if lan_to:
             build["lan_cache_to"] = lan_to
         services[name] = {"build": build}
@@ -3214,8 +3291,10 @@ def _compose_lan_add_for_build(
     file_args: dict[str, dict[str, str]] = {}
     deps: dict[str, list[str]] = {}
     cache_to: dict[str, list[str]] = {}
+    inlines: dict[str, str] = {}
     for path in paths:
         dockerfiles.update(compose_service_dockerfiles(path))
+        inlines.update(compose_service_inline_dockerfiles(path))
         for name, args in compose_service_build_args(path).items():
             file_args.setdefault(name, {}).update(args)
         for name, extras in compose_service_cache_to_images(path).items():
@@ -3234,10 +3313,13 @@ def _compose_lan_add_for_build(
     build_wanted = list(build_services) if build_services is not None else wanted
     if build_wanted:
         chosen = {name: dockerfiles[name] for name in build_wanted if name in dockerfiles}
-        cache_to = {name: cache_to[name] for name in chosen if name in cache_to}
+        inlines = {name: inlines[name] for name in build_wanted if name in inlines}
+        cache_to = {name: cache_to[name] for name in build_wanted if name in cache_to}
     else:
         chosen = dict(dockerfiles)
-    return _compose_materialize_lan_add(chosen, file_args, cli_args or {}, cache_to=cache_to)
+    return _compose_materialize_lan_add(
+        chosen, file_args, cli_args or {}, cache_to=cache_to, inlines=inlines
+    )
 
 
 def _compose_insert_override(parts: list[str], overlay: str) -> list[str]:
@@ -3772,6 +3854,9 @@ _BAKE_VALUE_FLAGS = frozenset(
     }
 )
 _HCL_DOCKERFILE = re.compile(r"dockerfile\s*=\s*\"([^\"]+)\"", re.I)
+_HCL_DOCKERFILE_INLINE = re.compile(
+    r"dockerfile-inline\s*=\s*\"((?:\\.|[^\"])*)\"", re.I
+)
 _HCL_CONTEXT = re.compile(r"context\s*=\s*\"([^\"]+)\"", re.I)
 _HCL_TAGS = re.compile(r"tags\s*=\s*\[([^\]]*)\]", re.I)
 _HCL_ARG_ITEM = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\"([^\"]*)\"")
@@ -3851,12 +3936,13 @@ def _bake_resolve_dockerfile(file_dir: Path, cwd: Path, context: str, dockerfile
 
 def bake_file_dockerfiles_and_tags(
     path: Path, cwd: Path
-) -> tuple[list[tuple[str, Path, dict[str, str], list[str], list[str]]], list[str], list[str]]:
-    """Named Dockerfiles (args, tags, cache-to refs), all tags, and named-context images."""
+) -> tuple[list[tuple[str, Path, dict[str, str], list[str], list[str]]], list[str], list[str], dict[str, str]]:
+    """Named Dockerfiles (args, tags, cache-to refs), all tags, named-context images, inline texts."""
     suffix = path.suffix.lower()
     dockerfiles: list[tuple[str, Path, dict[str, str], list[str], list[str]]] = []
     tags: list[str] = []
     extra: list[str] = []
+    inlines: dict[str, str] = {}
     seen_extra: set[str] = set()
 
     def _add_extra(images: list[str]) -> None:
@@ -3876,16 +3962,22 @@ def bake_file_dockerfiles_and_tags(
             dockerfiles.append(
                 (str(name), df, dict(args.get(name, {})), tgt_tags, list(cache_to.get(name, [])))
             )
+        inlines.update(compose_service_inline_dockerfiles(path))
+        for name, text in inlines.items():
+            tgt_tags = [images[name]] if name in images else []
+            dockerfiles.append(
+                (str(name), Path(), dict(args.get(name, {})), tgt_tags, list(cache_to.get(name, [])))
+            )
         tags.extend(images.values())
         for extras in compose_service_context_images(path).values():
             _add_extra(extras)
         for extras in compose_service_cache_images(path).values():
             _add_extra(extras)
-        return dockerfiles, tags, extra
+        return dockerfiles, tags, extra, inlines
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
-        return [], [], []
+        return [], [], [], {}
     file_dir = path.parent
     if suffix == ".json":
         import json
@@ -3893,18 +3985,17 @@ def bake_file_dockerfiles_and_tags(
         try:
             payload = json.loads(text)
         except json.JSONDecodeError:
-            return [], [], []
+            return [], [], [], {}
         targets = payload.get("target") if isinstance(payload, dict) else None
         if not isinstance(targets, dict):
-            return [], [], []
+            return [], [], [], {}
         for name, spec in targets.items():
             if not isinstance(spec, dict):
                 continue
-            if spec.get("dockerfile-inline"):
-                continue
+            inline = str(spec.get("dockerfile-inline") or "").strip()
             context = str(spec.get("context") or ".").strip()
             dockerfile = str(spec.get("dockerfile") or "").strip()
-            resolved = _bake_resolve_dockerfile(file_dir, cwd, context, dockerfile)
+            resolved = None if inline else _bake_resolve_dockerfile(file_dir, cwd, context, dockerfile)
             tgt_tags: list[str] = []
             raw_tags = spec.get("tags")
             if isinstance(raw_tags, list):
@@ -3915,21 +4006,36 @@ def bake_file_dockerfiles_and_tags(
                 ]
                 tags.extend(tgt_tags)
             tgt_cache = _parse_cache_images(spec.get("cache-to") or spec.get("cache_to"))
-            if resolved:
+            if inline:
+                inlines[str(name)] = str(spec.get("dockerfile-inline") or "")
+                dockerfiles.append(
+                    (str(name), Path(), _parse_build_arg_mapping(spec.get("args")), tgt_tags, tgt_cache)
+                )
+            elif resolved:
                 dockerfiles.append(
                     (str(name), resolved, _parse_build_arg_mapping(spec.get("args")), tgt_tags, tgt_cache)
                 )
             _add_extra(_parse_named_context_images(spec.get("contexts")))
             _add_extra(_parse_cache_images(spec.get("cache-from") or spec.get("cache_from")))
-        return dockerfiles, tags, extra
+        return dockerfiles, tags, extra, inlines
     for name, block in _hcl_named_targets(text):
-        if "dockerfile-inline" in block:
+        inline_match = _HCL_DOCKERFILE_INLINE.search(block)
+        if "dockerfile-inline" in block and not inline_match:
             continue
+        inline = ""
+        if inline_match:
+            inline = (
+                inline_match.group(1)
+                .replace("\\\\", "\0")
+                .replace("\\n", "\n")
+                .replace('\\"', '"')
+                .replace("\0", "\\")
+            )
         context_match = _HCL_CONTEXT.search(block)
         df_match = _HCL_DOCKERFILE.search(block)
         context = context_match.group(1).strip() if context_match else "."
         dockerfile = df_match.group(1).strip() if df_match else ""
-        resolved = _bake_resolve_dockerfile(file_dir, cwd, context, dockerfile)
+        resolved = None if inline else _bake_resolve_dockerfile(file_dir, cwd, context, dockerfile)
         tgt_tags: list[str] = []
         tags_match = _HCL_TAGS.search(block)
         if tags_match:
@@ -3940,28 +4046,40 @@ def bake_file_dockerfiles_and_tags(
             ]
             tags.extend(tgt_tags)
         tgt_cache = _parse_cache_images(_hcl_quoted_list(block, "cache-to"))
-        if resolved:
+        if inline:
+            inlines[name] = inline
+            dockerfiles.append((name, Path(), _hcl_args(block), tgt_tags, tgt_cache))
+        elif resolved:
             dockerfiles.append((name, resolved, _hcl_args(block), tgt_tags, tgt_cache))
         _add_extra(_parse_named_context_images(_hcl_named_map(block, "contexts")))
         _add_extra(_parse_cache_images(_hcl_quoted_list(block, "cache-from")))
-    return dockerfiles, tags, extra
+    return dockerfiles, tags, extra, inlines
 
 
 def _bake_materialize_lan_add(
     named: list[tuple[str, Path, dict[str, str]]],
     extra_args: dict[str, str],
+    inlines: dict[str, str] | None = None,
 ) -> tuple[list[str], list[tuple[str, str]], str] | None:
     if not named:
         return None
+    inlines = inlines or {}
     root = Path(tempfile.mkdtemp(prefix="jarvis-lan-add-"))
     fetches: list[tuple[str, str]] = []
     sets: list[str] = []
     cached: dict[str, tuple[Path, list[tuple[str, str]]] | None] = {}
     for index, (name, dockerfile, args, *_rest) in enumerate(named):
-        key = str(dockerfile)
+        text = inlines.get(name, "")
+        key = f"inline:{name}" if text else str(dockerfile)
         if key not in cached:
             leaf = re.sub(r"[^A-Za-z0-9._-]+", "_", name) or f"tgt{index}"
-            spec = _materialize_lan_add(dockerfile, {**args, **extra_args}, root=root, leaf=leaf)
+            spec = _materialize_lan_add(
+                None if text else dockerfile,
+                {**args, **extra_args},
+                root=root,
+                leaf=leaf,
+                source_text=text,
+            )
             cached[key] = None if spec is None else (spec[0], spec[2])
             if spec is not None:
                 fetches.extend(spec[1])
@@ -3970,6 +4088,8 @@ def _bake_materialize_lan_add(
             continue
         df, contexts = hit
         sets.append(f"{name}.dockerfile={df}")
+        if text:
+            sets.append(f"{name}.dockerfile-inline=")
         for ctx, directory in contexts:
             sets.append(f"{name}.contexts.{ctx}={directory}")
     if not sets:
@@ -4168,9 +4288,10 @@ def lan_bound_docker_bake_argv(command: str, cwd: str | None = None) -> list[str
     named: list[tuple[str, Path, dict[str, str], list[str], list[str]]] = []
     tags: list[str] = []
     extra_images: list[str] = []
+    inlines: dict[str, str] = {}
     seen_names: set[str] = set()
     for path in paths:
-        files, found_tags, found_contexts = bake_file_dockerfiles_and_tags(path, root)
+        files, found_tags, found_contexts, found_inlines = bake_file_dockerfiles_and_tags(path, root)
         for name, df, args, tgt_tags, tgt_cache in files:
             if name in seen_names:
                 continue
@@ -4178,18 +4299,25 @@ def lan_bound_docker_bake_argv(command: str, cwd: str | None = None) -> list[str
             named.append((name, df, args, tgt_tags, tgt_cache))
         tags.extend(found_tags)
         extra_images.extend(found_contexts)
+        inlines.update(found_inlines)
     if extra_tags:
         tags = list(extra_tags)
     lan: list[str] = []
     seen: set[str] = set()
     seen_df: set[str] = set()
-    for _name, dockerfile, args, *_rest in named:
-        key = str(dockerfile)
+    for name, dockerfile, args, *_rest in named:
+        text = inlines.get(name, "")
+        key = f"inline:{name}" if text else str(dockerfile)
         if key in seen_df:
             continue
         seen_df.add(key)
         merged = {**args, **extra_args}
-        for image in dockerfile_from_images(dockerfile, merged):
+        images = (
+            dockerfile_images_from_text(text, merged)
+            if text
+            else dockerfile_from_images(dockerfile, merged)
+        )
+        for image in images:
             if image in seen:
                 continue
             if not _lan_bind_ip_for_host(docker_registry_host_from_image(image)):
@@ -4222,7 +4350,7 @@ def lan_bound_docker_bake_argv(command: str, cwd: str | None = None) -> list[str
         for item in lan_to:
             if item not in lan_cache_to:
                 lan_cache_to.append(item)
-    add_plan = _bake_materialize_lan_add(named, extra_args)
+    add_plan = _bake_materialize_lan_add(named, extra_args, inlines=inlines)
     if not lan and not (wants_push and lan_tags) and add_plan is None and not lan_cache_to:
         return None
     follow = _compose_follow_argv(parts)

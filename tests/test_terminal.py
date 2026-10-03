@@ -15,6 +15,7 @@ from app.tools.terminal import (
     compose_service_depends,
     compose_service_dockerfiles,
     compose_service_images,
+    compose_service_inline_dockerfiles,
     lan_bound_compose_build_argv,
     lan_bound_compose_pull_argv,
     lan_bound_compose_push_argv,
@@ -1708,6 +1709,105 @@ def test_lan_compose_and_bake_cache_to_skopeo_uploads(tmp_path, monkeypatch):
     follow = json_bake[json_bake.index("--") + 1 :]
     assert "web.cache-to=type=inline" in follow
     assert any(item.startswith("web.tags=") and "from-json-cache:1" in item for item in follow)
+
+
+def test_lan_compose_and_bake_inline_dockerfile(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+
+    def fake_mkdtemp(prefix=""):
+        root = tmp_path / f"{prefix or 'jarvis-lan-add-'}inline"
+        root.mkdir(exist_ok=True)
+        return str(root)
+
+    monkeypatch.setattr("app.tools.terminal.tempfile.mkdtemp", fake_mkdtemp)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}"
+        if name in {"skopeo", "skopeo.exe", "docker", "docker.exe"}
+        else None,
+    )
+    stack = tmp_path / "compose.yaml"
+    stack.write_text(
+        "services:\n"
+        "  app:\n"
+        "    build:\n"
+        "      dockerfile_inline: |\n"
+        "        FROM 192.168.1.50:5000/base:latest\n"
+        "        COPY . .\n",
+        encoding="utf-8",
+    )
+    assert compose_service_inline_dockerfiles(stack)["app"].startswith("FROM 192.168.1.50")
+    built = lan_bound_compose_build_argv(f"docker compose -f {stack} build")
+    assert built is not None
+    assert "192.168.1.50:5000/base:latest" in built
+    follow = built[built.index("--") + 1 :]
+    assert "build" in follow
+    add_stack = tmp_path / "add.yaml"
+    add_stack.write_text(
+        "services:\n"
+        "  pkg:\n"
+        "    build:\n"
+        "      dockerfile_inline: |\n"
+        "        FROM alpine:3.20\n"
+        "        ADD http://192.168.1.50:8000/pkg.tgz /opt/pkg.tgz\n",
+        encoding="utf-8",
+    )
+    added = lan_bound_compose_build_argv(f"docker compose -f {add_stack} build")
+    assert added is not None
+    assert "--fetch" in added
+    assert any(item.startswith("http://192.168.1.50:8000/pkg.tgz=") for item in added)
+    follow = added[added.index("--") + 1 :]
+    overlays = [
+        follow[i + 1]
+        for i, item in enumerate(follow)
+        if item in {"-f", "--file"} and i + 1 < len(follow) and "compose.jarvis-lan.yaml" in follow[i + 1]
+    ]
+    assert overlays
+    overlay = Path(overlays[0]).read_text(encoding="utf-8")
+    assert "dockerfile_inline: !reset" in overlay
+    import json
+
+    df_line = next(line for line in overlay.splitlines() if line.strip().startswith("dockerfile:"))
+    rewritten = Path(json.loads(df_line.split(":", 1)[1].strip()))
+    assert "COPY --from=jarvisadd0 pkg.tgz /opt/pkg.tgz" in rewritten.read_text(encoding="utf-8")
+    up = lan_bound_compose_up_argv(f"docker compose -f {stack} up --build")
+    assert up is not None
+    assert "192.168.1.50:5000/base:latest" in up
+    hub = tmp_path / "hub.yaml"
+    hub.write_text(
+        "services:\n"
+        "  web:\n"
+        "    build:\n"
+        "      dockerfile_inline: FROM scratch\n",
+        encoding="utf-8",
+    )
+    assert lan_bound_compose_build_argv(f"docker compose -f {hub} build") is None
+    payload = tmp_path / "bake.json"
+    payload.write_text(
+        '{"target":{"web":{"dockerfile-inline":'
+        '"FROM 192.168.1.50:5000/base:latest\\nADD http://192.168.1.50:8000/pkg.tgz /opt/pkg.tgz\\n"}}}',
+        encoding="utf-8",
+    )
+    baked = lan_bound_docker_bake_argv(f"docker buildx bake -f {payload}")
+    assert baked is not None
+    assert "192.168.1.50:5000/base:latest" in baked
+    assert "--fetch" in baked
+    follow = baked[baked.index("--") + 1 :]
+    assert "web.dockerfile-inline=" in follow
+    assert any(item.startswith("web.dockerfile=") for item in follow)
+    hcl = tmp_path / "docker-bake.hcl"
+    hcl.write_text(
+        'target "app" {\n'
+        '  dockerfile-inline = "FROM 192.168.1.50:5000/from-hcl:1\\nCOPY . .\\n"\n'
+        "}\n",
+        encoding="utf-8",
+    )
+    hcl_bake = lan_bound_docker_bake_argv(f"docker buildx bake -f {hcl}")
+    assert hcl_bake is not None
+    assert "192.168.1.50:5000/from-hcl:1" in hcl_bake
 
 
 def test_lan_skopeo_load_fetches_add_http_before_follow(tmp_path, monkeypatch):
