@@ -3728,10 +3728,10 @@ def rewrite_dockerfile_lan_add(
     path: Path, build_args: dict[str, str] | None = None
 ) -> tuple[str, list[tuple[str, str, str]]]:
     """Rewrite LAN ``ADD http(s)|ftp(s)://`` and ``RUN wget`` / ``wget2`` /
-    ``curl`` / ``aria2c`` / ``axel`` / ``RUN python -c urlretrieve|urlopen-write|urlopen``
+    ``curl`` / ``aria2c`` / ``axel`` / ``RUN python -c urlretrieve|urlopen-write|urlopen|requests.get|httpx.get``
     (including ``&&`` / ``;`` chains and ``sh -c`` / ``bash -lc``) of those
-    URLs into ``COPY --from=jarvisaddN``. Dest-less ``urlopen`` uses the URL
-    filename (same as dest-less ``urlretrieve``).
+    URLs into ``COPY --from=jarvisaddN``. Dest-less ``urlopen`` / ``requests.get``
+    / ``httpx.get`` uses the URL filename (same as dest-less ``urlretrieve``).
 
     Returns rewritten text and ``(url, context, filename)`` fetches. Unchanged
     text and an empty list when there is no on-link RFC1918 fetch.
@@ -3773,11 +3773,30 @@ _PATH_WRITE_BYTES = re.compile(
     (?:urllib\.request\.)?urlopen\(\s*(?P<q2>['"])(?P<url>.*?)(?P=q2)\s*\)\.read\(\s*\)\s*\)
     """
 )
-_PYTHON_OTHER_HTTP = re.compile(r"\b(?:requests\.|httpx\.|aiohttp)\b")
+_PYTHON_OTHER_HTTP = re.compile(r"\baiohttp\b")
 _PYTHON_URLOPEN = re.compile(r"\burlopen\s*\(")
 _URLOPEN_CALL = re.compile(
     r"""(?xs)
     \burlopen\(\s*(?P<q2>['"])(?P<url>.*?)(?P=q2)
+    """
+)
+_REQUESTS_GET = re.compile(
+    r"""(?xs)
+    \b(?:requests|httpx)\.get\(\s*(?P<q2>['"])(?P<url>.*?)(?P=q2)
+    """
+)
+_REQUESTS_WRITE = re.compile(
+    r"""(?xs)
+    open\(\s*(?P<q1>['"])(?P<dest>.*?)(?P=q1)\s*,\s*(?P<qm>['"])wb[+]?(?P=qm)\s*\)
+    \.write\(\s*(?:requests|httpx)\.get\(\s*(?P<q2>['"])(?P<url>.*?)(?P=q2)
+    (?:\s*,[^)]*)?\)\.(?:content|read\(\s*\))\s*\)
+    """
+)
+_REQUESTS_PATH_WRITE = re.compile(
+    r"""(?xs)
+    Path\(\s*(?P<q1>['"])(?P<dest>.*?)(?P=q1)\s*\)\.write_bytes\(\s*
+    (?:requests|httpx)\.get\(\s*(?P<q2>['"])(?P<url>.*?)(?P=q2)
+    (?:\s*,[^)]*)?\)\.(?:content|read\(\s*\))\s*\)
     """
 )
 _PYTHON_C_CLUSTER = re.compile(r"^-[bBdEIiOqsSuRvVW]*c$")
@@ -3835,7 +3854,9 @@ def _expand_lan_url_dest(
 def _python_urlretrieve_url_dest(
     argv: list[str], declared: dict[str, str]
 ) -> tuple[str, str] | None:
-    """Return ``(url, dest)`` for ``python -c`` LAN ``urlretrieve`` or ``urlopen``."""
+    """Return ``(url, dest)`` for ``python -c`` LAN ``urlretrieve``, ``urlopen``,
+    ``requests.get``, or ``httpx.get``. Skip ``aiohttp`` and mixed fetch APIs.
+    """
     script = _python_c_script(argv)
     if script is None:
         return None
@@ -3844,6 +3865,21 @@ def _python_urlretrieve_url_dest(
     retrieves = list(_URLRETRIEVE_CALL.finditer(script))
     writes = [*_URLOPEN_WRITE.finditer(script), *_PATH_WRITE_BYTES.finditer(script)]
     urlopens = list(_PYTHON_URLOPEN.finditer(script))
+    request_gets = list(_REQUESTS_GET.finditer(script))
+    request_writes = [*_REQUESTS_WRITE.finditer(script), *_REQUESTS_PATH_WRITE.finditer(script)]
+    if request_gets or request_writes:
+        if retrieves or writes or urlopens:
+            return None
+        if len(request_writes) == 1 and len(request_gets) == 1:
+            found = request_writes[0]
+            dest = (found.group("dest") or "").strip()
+            if not dest:
+                return None
+            return _expand_lan_url_dest(found.group("url"), dest, declared)
+        if len(request_gets) == 1 and not request_writes:
+            found = request_gets[0]
+            return _expand_lan_url_dest(found.group("url"), "", declared)
+        return None
     if len(retrieves) == 1 and not writes and not urlopens:
         found = retrieves[0]
         return _expand_lan_url_dest(found.group("url"), found.group("dest") or "", declared)
@@ -4084,8 +4120,8 @@ def _rewrite_lan_run_fetch(
     line: str, declared: dict[str, str], fetches: list[tuple[str, str, str]]
 ) -> list[str] | None:
     """Replace LAN ``RUN wget`` / ``wget2`` / ``curl`` / ``aria2c`` / ``axel`` /
-    ``python -c urlretrieve|urlopen-write|urlopen`` (including ``&&`` / ``;`` chains
-    and ``sh -c``) with ``COPY --from=``.
+    ``python -c urlretrieve|urlopen-write|urlopen|requests.get|httpx.get`` (including
+    ``&&`` / ``;`` chains and ``sh -c``) with ``COPY --from=``.
     """
     match = _RUN_LINE.match(str(line or ""))
     if match is None:

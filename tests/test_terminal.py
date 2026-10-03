@@ -2694,6 +2694,36 @@ def test_lan_run_python_urlretrieve(tmp_path, monkeypatch):
     follow = sh_c[sh_c.index("--") + 1 :]
     text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
     assert "COPY --from=jarvisadd0 x /x" in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN python -c \"import requests; open('/opt/x','wb').write("
+        "requests.get('http://192.168.1.50:8000/x').content)\"\n",
+        encoding="utf-8",
+    )
+    req = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert req is not None
+    follow = req[req.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 x /opt/x" in text
+    assert "requests.get" not in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN python -c \"import httpx; httpx.get('http://192.168.1.50:8000/x')\"\n",
+        encoding="utf-8",
+    )
+    hx = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert hx is not None
+    follow = hx[hx.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 x x" in text
+    assert "httpx" not in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN python -c \"import aiohttp; aiohttp.request('GET', "
+        "'http://192.168.1.50:8000/x')\"\n",
+        encoding="utf-8",
+    )
+    assert lan_bound_docker_build_argv(f"docker build {ctx}") is None
 
 
 def test_lan_run_wget2_aria2c(tmp_path, monkeypatch):
