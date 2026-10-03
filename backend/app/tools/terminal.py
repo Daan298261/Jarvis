@@ -860,6 +860,52 @@ def lan_bound_netcat_argv(command: str) -> list[str] | None:
     return [exe, "-s", bind, *parts[1:]]
 
 
+def _ncrack_target_from_argv(parts: list[str]) -> str:
+    target = _scan_target_from_argv(parts)
+    if target:
+        return target
+    for item in parts[1:]:
+        text = str(item or "").strip().strip("'\"")
+        if not text or text.startswith("-"):
+            continue
+        if "://" in text:
+            return (urlparse(text).hostname or "").strip()
+    return ""
+
+
+def lan_bound_ncrack_argv(command: str) -> list[str] | None:
+    """ncrack of an on-link RFC1918 host via the loopback LAN CONNECT proxy.
+
+    ncrack ignores HTTP_PROXY. ``--proxy`` tunnels SSH/FTP/HTTP so a VPN
+    default route cannot steal the hop. Skip pipes, existing ``--proxy``, and
+    public hosts.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts or _tool_basename(parts[0]) != "ncrack":
+        return None
+    flags = {str(part).split("=", 1)[0] for part in parts[1:] if str(part).startswith("-")}
+    if "--proxy" in flags:
+        return None
+    host = _ncrack_target_from_argv(parts)
+    if not _lan_bind_ip_for_host(host):
+        return None
+    exe = shutil.which("ncrack") or shutil.which("ncrack.exe")
+    if not exe:
+        return None
+    from ..security.lan_http_proxy import ensure_lan_http_proxy
+
+    origin = ensure_lan_http_proxy()
+    if not origin:
+        return None
+    return [exe, "--proxy", origin, *parts[1:]]
+
+
 _DNS_NAMES = frozenset({"dig", "drill"})
 
 
@@ -1470,6 +1516,20 @@ _LAN_HTTP_TOOL_STEMS = frozenset(
         "ffplay",
         "mpv",
         "vlc",
+        "gobuster",
+        "ffuf",
+        "dirsearch",
+        "feroxbuster",
+        "sqlmap",
+        "nikto",
+        "katana",
+        "whatweb",
+        "wpscan",
+        "wafw00f",
+        "wfuzz",
+        "arjun",
+        "gau",
+        "dalfox",
     }
 )
 _DOCKER_PULL_QUIET = frozenset({"-q", "--quiet"})
@@ -5471,6 +5531,7 @@ def _command_args(command: str, shell: str, cwd: str | None = None) -> list[str]
         or lan_bound_rclone_argv(command)
         or lan_bound_lftp_argv(command)
         or lan_bound_netcat_argv(command)
+        or lan_bound_ncrack_argv(command)
         or lan_bound_dns_argv(command)
         or lan_bound_snmp_argv(command)
         or lan_bound_cifs_argv(command)

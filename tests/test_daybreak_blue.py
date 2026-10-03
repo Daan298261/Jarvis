@@ -769,6 +769,18 @@ def test_bind_hexstrike_lan_payload_pins_nuclei_httpx_naabu(monkeypatch):
     assert whatweb["additional_args"].startswith("--proxy 127.0.0.1:")
     wpscan = bind_hexstrike_lan_payload("wpscan", {"url": "http://192.168.1.40/"})
     assert wpscan["additional_args"].startswith("--proxy http://127.0.0.1:")
+    ncrack = bind_hexstrike_lan_payload(
+        "http:ncrack",
+        {"target": "192.168.1.50", "additional_args": "-p 22 --user admin -P p.txt"},
+    )
+    assert ncrack["additional_args"].startswith("-p 22 --user admin -P p.txt --proxy http://127.0.0.1:")
+    public_ncrack = bind_hexstrike_lan_payload("ncrack", {"target": "8.8.8.8", "additional_args": "-p 22"})
+    assert public_ncrack["additional_args"] == "-p 22"
+    already_ncrack = bind_hexstrike_lan_payload(
+        "ncrack",
+        {"target": "192.168.1.50", "additional_args": "--proxy http://127.0.0.1:9 -p 22"},
+    )
+    assert already_ncrack["additional_args"] == "--proxy http://127.0.0.1:9 -p 22"
     public_katana = bind_hexstrike_lan_payload("katana", {"url": "https://example.com/"})
     assert public_katana.get("additional_args", "") == ""
     arp = bind_hexstrike_lan_payload("http:arp-scan", {"target": "192.168.1.0/24"})

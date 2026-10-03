@@ -36,6 +36,7 @@ from app.tools.terminal import (
     lan_bound_http_argv,
     lan_bound_lftp_argv,
     lan_bound_netcat_argv,
+    lan_bound_ncrack_argv,
     lan_bound_nfs_argv,
     lan_bound_rclone_argv,
     lan_bound_rsync_argv,
@@ -1454,6 +1455,51 @@ def test_terminal_hydra_uses_lan_connect_proxy_not_vpn(monkeypatch):
     assert bash[0] == "/usr/bin/hydra"
     assert _child_env(bash)["HYDRA_PROXY"].startswith("http://127.0.0.1:")
     assert hydra_direct_argv("hydra -l admin -P p.txt 192.168.1.50 ssh | cat") is None
+
+
+def test_terminal_gobuster_and_ncrack_use_lan_proxy_not_vpn(monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}"
+        if name
+        in {
+            "gobuster",
+            "gobuster.exe",
+            "ffuf",
+            "ffuf.exe",
+            "ncrack",
+            "ncrack.exe",
+        }
+        else None,
+    )
+    busted = container_direct_argv("gobuster dir -u http://192.168.1.50/ -w wordlist.txt")
+    assert busted is not None
+    assert busted[0] == "/usr/bin/gobuster"
+    env = _child_env(busted)
+    assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert "10.8.0.1" not in env["HTTP_PROXY"]
+    fuzzed = _command_args("ffuf -u http://192.168.1.40/FUZZ -w wordlist.txt", "bash")
+    assert fuzzed[0] == "/usr/bin/ffuf"
+    assert _child_env(fuzzed)["HTTPS_PROXY"] == _child_env(fuzzed)["HTTP_PROXY"]
+    cracked = lan_bound_ncrack_argv("ncrack -p 22 --user admin 192.168.1.50")
+    assert cracked is not None
+    assert cracked[0] == "/usr/bin/ncrack"
+    assert cracked[1] == "--proxy"
+    assert str(cracked[2]).startswith("http://127.0.0.1:")
+    assert "10.8.0.1" not in str(cracked[2])
+    assert cracked[-1] == "192.168.1.50"
+    ssh_url = lan_bound_ncrack_argv("ncrack ssh://192.168.1.40")
+    assert ssh_url is not None
+    assert ssh_url[1] == "--proxy"
+    assert lan_bound_ncrack_argv("ncrack -p 22 8.8.8.8") is None
+    assert lan_bound_ncrack_argv("ncrack --proxy http://127.0.0.1:9 192.168.1.50") is None
+    assert lan_bound_ncrack_argv("ncrack -p 22 192.168.1.50 | cat") is None
+    bash = _command_args("ncrack -p 22 192.168.1.50", "bash")
+    assert bash[0] == "/usr/bin/ncrack"
+    assert bash[1:3][0] == "--proxy"
+    assert str(bash[2]).startswith("http://127.0.0.1:")
 
 
 def test_lan_compose_pull_rewrites_to_skopeo(tmp_path, monkeypatch):

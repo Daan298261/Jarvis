@@ -642,6 +642,7 @@ _HTTP_PROXY_FLAG = {
     "dalfox": "--proxy",
     "trivy": "--proxy",
     "grype": "--proxy",
+    "ncrack": "--proxy",
 }
 _HTTP_PROXY_SKIP = {
     "gobuster": frozenset({"-p", "--proxy"}),
@@ -660,6 +661,7 @@ _HTTP_PROXY_SKIP = {
     "dalfox": frozenset({"--proxy"}),
     "trivy": frozenset({"--proxy"}),
     "grype": frozenset({"--proxy", "--http-proxy"}),
+    "ncrack": frozenset({"--proxy"}),
 }
 _PROXY_HOST_PORT = frozenset({"whatweb", "wfuzz"})
 _CAPTURE_STEMS = frozenset({"tcpdump", "tshark", "dumpcap"})
@@ -726,7 +728,7 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
     hydra has no source-bind CLI; LAN operator/MCP host-execute with ``HYDRA_PROXY``
     CONNECT through the loopback LAN proxy.
     gobuster/ffuf/dirsearch/feroxbuster/sqlmap/nikto/katana/whatweb/wpscan/wafw00f/
-    wfuzz/arjun/gau/dalfox/trivy/grype have no source-bind CLI; they get a loopback LAN proxy
+    wfuzz/arjun/gau/dalfox/trivy/grype/ncrack have no source-bind CLI; they get a loopback LAN proxy
     flag. Public internet targets are left unchanged. Spaced Windows NIC names
     omit ``-interface``/``-e``/``-I``/``-i`` (HexStrike ``additional_args.split()``).
     """
