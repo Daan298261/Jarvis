@@ -212,6 +212,18 @@ test("persona selection activates mythic mode on the shared morphable stage", as
   assert.equal(lifecycle.PERSONA_MORPH_SECONDS, 0.42)
 })
 
+test("the README muscular humanoid is additive and the production humanoid stays the default", async () => {
+  const settings = await readFile(new URL("./src/settings/AppearanceSettingsPane.tsx", import.meta.url), "utf8")
+  const humanoid = await readFile(new URL("./src/presence/renderers/HumanoidPresence.tsx", import.meta.url), "utf8")
+  assert.match(settings, /Humanoid HUD · built in/)
+  assert.match(settings, /Muscular humanoid · showcase/)
+  assert.match(settings, /avatarId: "jarvis_base"/)
+  assert.match(settings, /MUSCULAR_HUMANOID_AVATAR_ID/)
+  assert.match(humanoid, /CURRENT_HUMANOID_ARTWORK = "\/presence\/jarvis-original\/humanoid\.webp"/)
+  assert.match(humanoid, /MUSCULAR_HUMANOID_ARTWORK = "\/presence\/jarvis-original\/humanoid-muscular\.png"/)
+  assert.match(humanoid, /settings\.avatarId === MUSCULAR_HUMANOID_AVATAR_ID/)
+})
+
 test("camera-unavailable attract stays on the pointer and does not invent a face", () => {
   const denied = lifecycle.resolvePresenceAttract({
     attentionMode: "camera",
