@@ -487,6 +487,14 @@ def looks_like_snmp_tool(name: str) -> bool:
     return hexstrike_lan_tool_id(name) in SNMP_TOOL_STEMS
 
 
+_SMB_TOOL_STEMS = frozenset({"smbclient", "smbget", "rpcclient", "smbtree"})
+
+
+def looks_like_smb_tool(name: str) -> bool:
+    """HexStrike MCP/HTTP ids such as ``mcp_hexstrike_ai_smbclient`` or ``http:smbget``."""
+    return hexstrike_lan_tool_id(name) in _SMB_TOOL_STEMS
+
+
 def looks_like_iface_host_tool(name: str) -> bool:
     """LAN scanners whose iface flags cannot round-trip a spaced Windows NIC name."""
     return hexstrike_lan_tool_id(name) in _IFACE_HOST_STEMS
@@ -625,6 +633,10 @@ _IFACE_STRIP_FLAGS = {
     "naabu": frozenset({"-source-ip", "-interface", "--interface"}),
     "masscan": frozenset({"--source-ip", "-e", "-S", "--adapter-ip"}),
     "rustscan": frozenset({"-S", "-e", "-interface", "--interface"}),
+    "smbclient": frozenset({"--option", "-s", "--configfile"}),
+    "smbget": frozenset({"--option", "-s", "--configfile"}),
+    "rpcclient": frozenset({"--option", "-s", "--configfile"}),
+    "smbtree": frozenset({"--option", "-s", "--configfile"}),
 }
 
 
@@ -663,6 +675,9 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
     source-IP flags).
     snmpwalk has no bind flag; LAN operator/MCP calls host-execute with
     ``SNMPCONFPATH`` ``clientaddr``.
+    smbclient/smbget/rpcclient/smbtree use ``--option=client addr=`` as one argv
+    token (HexStrike ``additional_args.split()`` cannot round-trip the space);
+    operator/MCP host-execute when the binary is on PATH.
     gobuster/ffuf/dirsearch/feroxbuster/sqlmap/nikto/katana/whatweb/wpscan/wafw00f/
     wfuzz/arjun/gau/dalfox have no source-bind CLI; they get a loopback LAN proxy
     flag. Public internet targets are left unchanged. Spaced Windows NIC names
@@ -1050,6 +1065,121 @@ async def execute_operator_snmp(path: str, payload: dict[str, Any] | None) -> di
 
         return await HEXSTRIKE.post_operator(normalize_upstream_path(path), bound)
     return await _host_snmp_lan(path, bound)
+
+
+def _smb_host_binary(stem: str) -> str | None:
+    name = stem if stem in _SMB_TOOL_STEMS else "smbclient"
+    return shutil.which(name) or shutil.which(f"{name}.exe")
+
+
+def _smb_payload_host(payload: dict[str, Any] | None) -> str:
+    row = payload if isinstance(payload, dict) else {}
+    target = lan_bind_target(row) or nmap_target_from_payload(row)
+    if target:
+        return target
+    for key in ("share", "url"):
+        raw = str(row.get(key) or "").strip()
+        if not raw:
+            continue
+        if raw.startswith("//"):
+            return raw[2:].split("/", 1)[0].split("\\", 1)[0]
+        if raw.startswith("\\\\"):
+            return raw[2:].split("\\", 1)[0].split("/", 1)[0]
+        return bindable_lan_host(raw) or raw
+    return ""
+
+
+def smb_host_argv(tool: str, payload: dict[str, Any] | None) -> list[str]:
+    """Host smbclient argv with ``client addr`` as one token (HexStrike would split it)."""
+    row = payload if isinstance(payload, dict) else {}
+    stem = hexstrike_lan_tool_id(tool)
+    if stem not in _SMB_TOOL_STEMS:
+        stem = "smbclient"
+    binary = _smb_host_binary(stem)
+    if not binary:
+        raise RuntimeError(
+            f"{stem} is not on PATH. Install Samba so HexStrike LAN SMB can bind the home NIC."
+        )
+    target = _smb_payload_host(row)
+    if stem == "smbtree" and not lan_bind_nic(target)[1]:
+        target = preferred_lan_bind_target()
+    _iface, source = lan_bind_nic(target)
+    if not source:
+        raise ValueError("smb LAN target is required")
+    extra = _strip_iface_tokens(
+        _nmap_flag_tokens(str(row.get("additional_args") or row.get("extra_args") or row.get("args") or "")),
+        stem=stem,
+    )
+    blob = " ".join(extra)
+    display = ""
+    for key in ("url", "share", "target", "host", "ip", "address"):
+        text = str(row.get(key) or "").strip()
+        if text:
+            display = text
+            break
+    if not display:
+        display = target
+    if display and display not in blob and stem != "smbtree":
+        inserted = False
+        for flag in ("-L", "--list"):
+            if flag in extra:
+                idx = extra.index(flag)
+                nxt = extra[idx + 1] if idx + 1 < len(extra) else ""
+                if not nxt or str(nxt).startswith("-"):
+                    extra = extra[: idx + 1] + [display] + extra[idx + 1 :]
+                    inserted = True
+                break
+        if not inserted:
+            extra = [*extra, display]
+    return [binary, f"--option=client addr={source}", *extra]
+
+
+async def _host_smb_lan(tool: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Host Samba of an on-link RFC1918 NAS with ``client addr`` on the home NIC."""
+    argv = smb_host_argv(tool, payload)
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
+    except TimeoutError as exc:
+        proc.kill()
+        await proc.wait()
+        raise RuntimeError("host smb LAN call timed out") from exc
+    text = (stdout or b"").decode("utf-8", errors="replace")
+    err = (stderr or b"").decode("utf-8", errors="replace")
+    if proc.returncode not in {0, 1}:
+        raise RuntimeError((err or text or "smb failed").strip()[:400])
+    return {
+        "source": "host-smb",
+        "target": _smb_payload_host(payload),
+        "stdout": text[:4000],
+        "stderr": err[:800],
+    }
+
+
+async def execute_operator_smb(path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Operator smbclient of on-link RFC1918: host argv so ``client addr`` stays one token."""
+    bound = dict(payload or {})
+    stem = hexstrike_lan_tool_id(path)
+    target = _smb_payload_host(bound)
+    if stem == "smbtree" and not lan_bind_nic(target)[1]:
+        target = preferred_lan_bind_target()
+        bound = {**bound, "target": target}
+    from .hexstrike import normalize_upstream_path
+
+    cleaned = path
+    try:
+        cleaned = normalize_upstream_path(path)
+    except ValueError:
+        cleaned = f"api/tools/{stem}"
+    if not str(cleaned).startswith("api/tools/"):
+        cleaned = f"api/tools/{stem}"
+    if not lan_bind_nic(target)[1] or not _smb_host_binary(stem):
+        return await HEXSTRIKE.post_operator(cleaned, bound)
+    return await _host_smb_lan(path, bound)
 
 
 def _iface_lan_target(payload: dict[str, Any] | None) -> str:

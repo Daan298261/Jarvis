@@ -717,6 +717,85 @@ def lan_bound_cifs_argv(command: str) -> list[str] | None:
     return _cifs_with_srcaddr([exe, *parts[1:]], bind)
 
 
+_SMB_NAMES = frozenset({"smbclient", "smbget", "rpcclient", "smbtree"})
+
+
+def _smb_already_bound(parts: list[str]) -> bool:
+    for item in parts[1:]:
+        text = str(item or "")
+        lowered = text.lower()
+        if "client addr" in lowered or lowered.startswith("clientaddr"):
+            return True
+        key = text.split("=", 1)[0]
+        if key in {"-s", "--configfile"}:
+            return True
+    return False
+
+
+def _smb_host_from_argv(parts: list[str]) -> str:
+    from urllib.parse import urlparse
+
+    for index, item in enumerate(parts[1:], start=1):
+        host = cifs_host_from_token(str(item))
+        if host:
+            return host
+        text = str(item or "").strip().strip("'\"")
+        if not text:
+            continue
+        if text.lower().startswith("smb://"):
+            return (urlparse(text).hostname or "").strip()
+        if text in {"-L", "--list"} and index + 1 < len(parts):
+            nxt = str(parts[index + 1] or "").strip().strip("'\"")
+            return cifs_host_from_token(nxt) or nxt.split("/", 1)[0].lstrip("\\")
+        if text.startswith("-"):
+            continue
+        if _IPV4_OR_CIDR.fullmatch(text.split("%", 1)[0]):
+            return text.split("%", 1)[0].split(":", 1)[0]
+        lowered = text.lower().rstrip(".")
+        if lowered.endswith((".local", ".lan", ".home.arpa")):
+            return text.split(":", 1)[0] if text.count(":") == 1 and text.rsplit(":", 1)[-1].isdigit() else text
+    return ""
+
+
+def lan_bound_smb_argv(command: str) -> list[str] | None:
+    """smbclient of an on-link RFC1918 NAS, sourced from that NIC.
+
+    Windows native UNC cannot source-bind. Samba ``--option=client addr=`` pins
+    the home NIC so a VPN default route cannot steal SMB. Skip pipes, existing
+    ``client addr`` / ``-s``, and public hosts. ``smbtree`` with no host uses
+    the preferred home LAN.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    collapsed = text.lower().replace(" ", "")
+    if "client addr" in text.lower() or "clientaddr=" in collapsed:
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts:
+        return None
+    name = _tool_basename(parts[0])
+    if name not in _SMB_NAMES:
+        return None
+    if _smb_already_bound(parts):
+        return None
+    host = _smb_host_from_argv(parts)
+    if name == "smbtree" and not host:
+        from ..security.hexstrike_defensive import preferred_lan_bind_target
+
+        host = preferred_lan_bind_target()
+    bind = _lan_bind_ip_for_host(host)
+    if not bind:
+        return None
+    exe = shutil.which(name) or shutil.which(f"{name}.exe")
+    if not exe:
+        return None
+    return [exe, f"--option=client addr={bind}", *parts[1:]]
+
+
 def adapt_shell(command: str, shell: str) -> str:
     """Run cmd.exe idioms with cmd so PowerShell does not parse switches as parameters."""
     chosen = (shell or default_shell()).strip().lower()
@@ -811,6 +890,7 @@ def _command_args(command: str, shell: str) -> list[str] | ToolResult:
         or lan_bound_dns_argv(command)
         or lan_bound_snmp_argv(command)
         or lan_bound_cifs_argv(command)
+        or lan_bound_smb_argv(command)
     )
     if bound:
         return bound

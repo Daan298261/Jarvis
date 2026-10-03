@@ -357,13 +357,19 @@ class MCPRuntime:
             looks_like_nmap_tool,
             looks_like_snmp_tool,
             looks_like_iface_host_tool,
+            looks_like_smb_tool,
             lan_inventory_uses_host_nmap,
             nmap_target_from_payload,
             lan_bind_target,
             lan_bind_nic,
+            hexstrike_lan_tool_id,
+            preferred_lan_bind_target,
             _host_nmap_lan_scan,
             _host_snmp_lan,
             _host_iface_lan,
+            _host_smb_lan,
+            _smb_host_binary,
+            _smb_payload_host,
             _iface_lan_target,
             should_host_exec_iface,
         )
@@ -378,6 +384,15 @@ class MCPRuntime:
             target = lan_bind_target(args) or nmap_target_from_payload(args)
             if lan_bind_nic(target)[1]:
                 data = await _host_snmp_lan(str(tool_key or name), args)
+                return ToolResult(True, str(data.get("stdout") or data), data=data)
+        if looks_like_smb_tool(tool_key) or looks_like_smb_tool(str(name)):
+            target = _smb_payload_host(args)
+            ident = hexstrike_lan_tool_id(str(tool_key or name))
+            if ident == "smbtree" and not lan_bind_nic(target)[1]:
+                target = preferred_lan_bind_target()
+                args = {**args, "target": target}
+            if lan_bind_nic(target)[1] and _smb_host_binary(ident):
+                data = await _host_smb_lan(str(tool_key or name), args)
                 return ToolResult(True, str(data.get("stdout") or data), data=data)
         if looks_like_iface_host_tool(tool_key) or looks_like_iface_host_tool(str(name)):
             target = _iface_lan_target(args)

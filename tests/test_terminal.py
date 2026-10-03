@@ -12,6 +12,7 @@ from app.tools.terminal import (
     lan_bound_netcat_argv,
     lan_bound_rsync_argv,
     lan_bound_scan_argv,
+    lan_bound_smb_argv,
     lan_bound_snmp_argv,
     lan_bound_ssh_argv,
     python_direct_argv,
@@ -541,6 +542,45 @@ def test_lan_cifs_mount_binds_home_nic_not_vpn(monkeypatch):
     bash = _command_args("mount -t cifs //192.168.1.50/share /mnt/nas", "bash")
     assert bash[0] == "/usr/sbin/mount"
     assert bash[1:3] == ["-o", "srcaddr=192.168.1.12"]
+
+
+def test_lan_smbclient_binds_home_nic_not_vpn(monkeypatch):
+    import socket
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"smbclient", "smbget", "rpcclient", "smbtree"} else None,
+    )
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        if host == "nas.local":
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.40", 0))]
+        raise socket.gaierror("no")
+
+    monkeypatch.setattr("app.mobile.wan_forward.socket.getaddrinfo", fake_getaddrinfo)
+    listed = lan_bound_smb_argv("smbclient -L 192.168.1.50 -N")
+    assert listed is not None
+    assert listed[0] == "/usr/bin/smbclient"
+    assert listed[1] == "--option=client addr=192.168.1.12"
+    assert listed[2:] == ["-L", "192.168.1.50", "-N"]
+    share = lan_bound_smb_argv("smbclient //nas.local/media -N")
+    assert share is not None
+    assert share[1] == "--option=client addr=192.168.1.12"
+    assert share[-2:] == ["//nas.local/media", "-N"]
+    get = lan_bound_smb_argv("smbget smb://192.168.1.1/backup/file.bin")
+    assert get is not None
+    assert get[1] == "--option=client addr=192.168.1.12"
+    tree = lan_bound_smb_argv("smbtree -N")
+    assert tree is not None
+    assert tree[1] == "--option=client addr=192.168.1.12"
+    assert lan_bound_smb_argv("smbclient -L 8.8.8.8") is None
+    assert lan_bound_smb_argv("smbclient //192.168.1.50/share --option=client addr=10.8.0.2") is None
+    assert lan_bound_smb_argv("smbclient //192.168.1.50/share | cat") is None
+    bash = _command_args("smbclient -L 192.168.1.50 -N", "bash")
+    assert bash[0] == "/usr/bin/smbclient"
+    assert bash[1] == "--option=client addr=192.168.1.12"
 
 
 def test_lan_ping_windows_uses_source_flag(monkeypatch):
