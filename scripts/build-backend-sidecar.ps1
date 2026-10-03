@@ -73,6 +73,13 @@ if (-not (Test-Path $exe)) {
 # Copy into Tauri resources for bundling
 $tauriSidecar = Join-Path $Root "frontend\src-tauri\sidecars"
 New-Item -ItemType Directory -Force -Path $tauriSidecar | Out-Null
+$tauriSidecarTarget = Join-Path $tauriSidecar $name
+if (-not $tauriSidecarTarget.StartsWith($Root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Sidecar target is outside the repository: $tauriSidecarTarget"
+}
+if (Test-Path $tauriSidecarTarget) {
+    Remove-Item -LiteralPath $tauriSidecarTarget -Recurse -Force
+}
 Copy-Item -Recurse -Force (Join-Path $OutDir $name) (Join-Path $tauriSidecar $name)
 
 Write-Host "OK: $exe" -ForegroundColor Green
