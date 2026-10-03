@@ -11,6 +11,7 @@ from app.tools.terminal import (
     docker_registry_host_from_image,
     expand_image_vars,
     git_direct_argv,
+    hydra_direct_argv,
     lan_bound_cifs_argv,
     lan_bound_curlftpfs_argv,
     lan_bound_davfs_argv,
@@ -1412,6 +1413,29 @@ def test_terminal_git_and_pip_use_lan_http_proxy_not_vpn(monkeypatch):
     assert vlc is not None
     assert vlc[0] == "/usr/bin/vlc"
     assert _child_env(vlc)["http_proxy"] == _child_env(vlc)["HTTP_PROXY"]
+
+
+def test_terminal_hydra_uses_lan_connect_proxy_not_vpn(monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}"
+        if name in {"hydra", "hydra.exe", "thc-hydra", "thc-hydra.exe"}
+        else None,
+    )
+    probed = hydra_direct_argv("hydra -l admin -P rockyou.txt 192.168.1.50 ssh")
+    assert probed is not None
+    assert probed[0] == "/usr/bin/hydra"
+    assert probed[1:] == ["-l", "admin", "-P", "rockyou.txt", "192.168.1.50", "ssh"]
+    env = _child_env(probed)
+    assert env["HYDRA_PROXY"].startswith("http://127.0.0.1:")
+    assert env["HYDRA_PROXY_HTTP"] == env["HYDRA_PROXY"]
+    assert env["HTTP_PROXY"] == env["HYDRA_PROXY"]
+    assert "10.8.0.1" not in env["HYDRA_PROXY"]
+    bash = _command_args("hydra -l admin -P p.txt 192.168.1.40 ftp", "bash")
+    assert bash[0] == "/usr/bin/hydra"
+    assert _child_env(bash)["HYDRA_PROXY"].startswith("http://127.0.0.1:")
+    assert hydra_direct_argv("hydra -l admin -P p.txt 192.168.1.50 ssh | cat") is None
 
 
 def test_lan_compose_pull_rewrites_to_skopeo(tmp_path, monkeypatch):

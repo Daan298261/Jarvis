@@ -19,7 +19,14 @@ import psutil
 
 from ..config import live_workspace_roots_from_context
 from .base import RiskLevel, Tool, ToolResult
-from .owner_paths import direct_child_env, git_child_env, lan_http_child_env, python_child_env, workspace_cwd
+from .owner_paths import (
+    direct_child_env,
+    git_child_env,
+    hydra_lan_child_env,
+    lan_http_child_env,
+    python_child_env,
+    workspace_cwd,
+)
 from .safety import classify_command, is_protected_process
 
 
@@ -5324,6 +5331,11 @@ def git_direct_argv(command: str) -> list[str] | None:
     return _direct_stem_argv(command, frozenset({"git"}))
 
 
+def hydra_direct_argv(command: str) -> list[str] | None:
+    """Run hydra as argv so ``HYDRA_PROXY`` CONNECT-tunnels LAN services off the VPN."""
+    return _direct_stem_argv(command, frozenset({"hydra", "thc-hydra"}))
+
+
 def _direct_stem_argv(command: str, stems: frozenset[str]) -> list[str] | None:
     text = str(command or "").strip()
     if not text or _UNSAFE_SHELL.search(text):
@@ -5427,6 +5439,8 @@ def _child_env(args: list[str]) -> dict[str, str]:
     stem = _tool_basename(args[0]) if args else ""
     if stem == "git":
         return git_child_env()
+    if stem in {"hydra", "thc-hydra"}:
+        return hydra_lan_child_env()
     if stem in _LAN_HTTP_TOOL_STEMS or stem == "curlftpfs" or (args and _is_davfs_mount(args)):
         return lan_http_child_env()
     return direct_child_env()
@@ -5469,6 +5483,9 @@ def _command_args(command: str, shell: str, cwd: str | None = None) -> list[str]
     git = git_direct_argv(command)
     if git:
         return git
+    hydra = hydra_direct_argv(command)
+    if hydra:
+        return hydra
     container = container_direct_argv(command)
     if container:
         return container

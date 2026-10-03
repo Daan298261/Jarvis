@@ -864,6 +864,14 @@ def test_looks_like_nmap_tool_matches_hexstrike_mcp_ids():
     assert looks_like_smb_tool("api/tools/smbtree")
     assert not looks_like_smb_tool("nmap")
     assert not looks_like_smb_tool("nuclei")
+    from app.security.hexstrike_defensive import looks_like_hydra_tool
+
+    assert looks_like_hydra_tool("hydra")
+    assert looks_like_hydra_tool("http:hydra")
+    assert looks_like_hydra_tool("mcp_hexstrike_ai_hydra")
+    assert looks_like_hydra_tool("api/tools/thc-hydra")
+    assert not looks_like_hydra_tool("nmap")
+    assert not looks_like_hydra_tool("smbclient")
 
 
 def test_hexstrike_child_env_drops_proxy_so_lan_scans_are_not_stolen(monkeypatch):
@@ -1588,6 +1596,138 @@ async def test_operator_smbclient_falls_back_to_suite_when_not_on_path(monkeypat
     result = await execute_operator_smb("api/tools/smbclient", {"target": "192.168.1.50"})
     assert result == {"ok": True}
     assert posted[0][0] == "api/tools/smbclient"
+
+
+@pytest.mark.asyncio
+async def test_operator_hydra_hosts_lan_with_hydra_proxy(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_hydra, hydra_host_argv
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: f"/usr/bin/{name}"
+        if str(name).lower() in {"hydra", "thc-hydra"}
+        else None,
+    )
+    argv = hydra_host_argv(
+        "http:hydra",
+        {"target": "192.168.1.50", "service": "ssh", "additional_args": "-l admin -P p.txt"},
+    )
+    assert argv[0] == "/usr/bin/hydra"
+    assert argv[1:] == ["-l", "admin", "-P", "p.txt", "192.168.1.50", "ssh"]
+
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"[22][ssh] host: 192.168.1.50   login: admin   password: x\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append((args, kwargs.get("env") or {}))
+        return FakeProc()
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    hosted = await execute_operator_hydra(
+        "api/tools/hydra",
+        {"target": "192.168.1.50", "service": "ssh", "additional_args": "-l admin -P p.txt"},
+    )
+    assert posted == []
+    assert hosted["source"] == "host-hydra"
+    assert hosted["target"] == "192.168.1.50"
+    env = seen[0][1]
+    assert env["HYDRA_PROXY"].startswith("http://127.0.0.1:")
+    assert env["HYDRA_PROXY_HTTP"] == env["HYDRA_PROXY"]
+    assert "10.8.0.1" not in env["HYDRA_PROXY"]
+    public = await execute_operator_hydra("api/tools/hydra", {"target": "8.8.8.8", "service": "ssh"})
+    assert public == {"ok": True}
+    assert posted[0][0] == "api/tools/hydra"
+
+
+@pytest.mark.asyncio
+async def test_operator_hydra_falls_back_to_suite_when_not_on_path(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_hydra
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.security.hexstrike_defensive.shutil.which", lambda *args, **kwargs: None)
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    result = await execute_operator_hydra("api/tools/hydra", {"target": "192.168.1.50", "service": "ssh"})
+    assert result == {"ok": True}
+    assert posted[0][0] == "api/tools/hydra"
+
+
+@pytest.mark.asyncio
+async def test_mcp_hydra_uses_host_argv_for_lan(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN hydra must not go through HexStrike MCP; HYDRA_PROXY would be unset")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_hydra"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "hydra"},
+        "remote_name": "hydra",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/hydra" if str(name).lower() == "hydra" else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"login: admin\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append((args, kwargs.get("env") or {}))
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_hydra",
+            {"target": "192.168.1.50", "service": "http-get", "additional_args": "-l admin -P p.txt"},
+        )
+        assert result.success, result.error
+        assert result.data["source"] == "host-hydra"
+        assert seen[0][0][0] == "/usr/bin/hydra"
+        assert seen[0][0][-2:] == ("192.168.1.50", "http-get")
+        assert seen[0][1]["HYDRA_PROXY"].startswith("http://127.0.0.1:")
+    finally:
+        MCP.reset_for_tests()
 
 
 @pytest.mark.asyncio

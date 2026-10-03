@@ -502,6 +502,15 @@ def looks_like_smb_tool(name: str) -> bool:
     return hexstrike_lan_tool_id(name) in _SMB_TOOL_STEMS
 
 
+_HYDRA_TOOL_STEMS = frozenset({"hydra"})
+_HYDRA_SERVICE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
+
+
+def looks_like_hydra_tool(name: str) -> bool:
+    """HexStrike MCP/HTTP ids such as ``mcp_hexstrike_ai_hydra`` or ``http:thc-hydra``."""
+    return hexstrike_lan_tool_id(name) in _HYDRA_TOOL_STEMS
+
+
 def looks_like_iface_host_tool(name: str) -> bool:
     """LAN scanners whose iface flags cannot round-trip a spaced Windows NIC name."""
     return hexstrike_lan_tool_id(name) in _IFACE_HOST_STEMS
@@ -714,6 +723,8 @@ def bind_hexstrike_lan_payload(tool: str, payload: dict[str, Any] | None) -> dic
     smbclient/smbget/rpcclient/smbtree use ``--option=client addr=`` as one argv
     token (HexStrike ``additional_args.split()`` cannot round-trip the space);
     operator/MCP host-execute when the binary is on PATH.
+    hydra has no source-bind CLI; LAN operator/MCP host-execute with ``HYDRA_PROXY``
+    CONNECT through the loopback LAN proxy.
     gobuster/ffuf/dirsearch/feroxbuster/sqlmap/nikto/katana/whatweb/wpscan/wafw00f/
     wfuzz/arjun/gau/dalfox/trivy/grype have no source-bind CLI; they get a loopback LAN proxy
     flag. Public internet targets are left unchanged. Spaced Windows NIC names
@@ -1220,6 +1231,96 @@ async def execute_operator_smb(path: str, payload: dict[str, Any] | None) -> dic
     if not lan_bind_nic(target)[1] or not _smb_host_binary(stem):
         return await HEXSTRIKE.post_operator(cleaned, bound)
     return await _host_smb_lan(path, bound)
+
+
+def _hydra_host_binary() -> str | None:
+    return (
+        shutil.which("hydra")
+        or shutil.which("hydra.exe")
+        or shutil.which("thc-hydra")
+        or shutil.which("thc-hydra.exe")
+    )
+
+
+def hydra_host_argv(tool: str, payload: dict[str, Any] | None) -> list[str]:
+    """Host hydra argv for an on-link RFC1918 peer (HexStrike cannot set HYDRA_PROXY)."""
+    row = payload if isinstance(payload, dict) else {}
+    binary = _hydra_host_binary()
+    if not binary:
+        raise RuntimeError(
+            "hydra is not on PATH. Install THC-Hydra so HexStrike LAN hydra can bind the home NIC."
+        )
+    target = lan_bind_target(row) or nmap_target_from_payload(row)
+    if not lan_bind_nic(target)[1]:
+        raise ValueError("hydra LAN target is required")
+    extra = _nmap_flag_tokens(
+        str(row.get("additional_args") or row.get("extra_args") or row.get("args") or "")
+    )
+    blob = " ".join(extra)
+    display = ""
+    for key in ("url", "target", "host", "ip", "address"):
+        text = str(row.get(key) or "").strip()
+        if text:
+            display = text
+            break
+    if not display:
+        display = target
+    argv = [binary, *extra]
+    if display and display not in extra and display not in blob:
+        argv.append(display)
+    service = str(row.get("service") or row.get("module") or "").strip()
+    if service and _HYDRA_SERVICE.fullmatch(service) and service not in extra:
+        argv.append(service)
+    return argv
+
+
+async def _host_hydra_lan(tool: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Host hydra of an on-link RFC1918 peer with HYDRA_PROXY on the LAN CONNECT proxy."""
+    from ..tools.owner_paths import hydra_lan_child_env
+
+    argv = hydra_host_argv(tool, payload)
+    env = hydra_lan_child_env()
+    target = lan_bind_target(payload) or nmap_target_from_payload(payload)
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
+    except TimeoutError as exc:
+        proc.kill()
+        await proc.wait()
+        raise RuntimeError("host hydra LAN probe timed out") from exc
+    text = (stdout or b"").decode("utf-8", errors="replace")
+    err = (stderr or b"").decode("utf-8", errors="replace")
+    if proc.returncode not in {0, 1}:
+        raise RuntimeError((err or text or "hydra failed").strip()[:400])
+    return {
+        "source": "host-hydra",
+        "target": target,
+        "stdout": text[:4000],
+        "stderr": err[:800],
+    }
+
+
+async def execute_operator_hydra(path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Operator hydra of on-link RFC1918: host argv + HYDRA_PROXY, not the suite env."""
+    bound = dict(payload or {})
+    target = lan_bind_target(bound) or nmap_target_from_payload(bound)
+    from .hexstrike import normalize_upstream_path
+
+    cleaned = path
+    try:
+        cleaned = normalize_upstream_path(path)
+    except ValueError:
+        cleaned = "api/tools/hydra"
+    if not str(cleaned).startswith("api/tools/"):
+        cleaned = "api/tools/hydra"
+    if not lan_bind_nic(target)[1] or not _hydra_host_binary():
+        return await HEXSTRIKE.post_operator(cleaned, bound)
+    return await _host_hydra_lan(path, bound)
 
 
 def _iface_lan_target(payload: dict[str, Any] | None) -> str:

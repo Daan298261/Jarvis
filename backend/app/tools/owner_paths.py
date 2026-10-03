@@ -62,6 +62,20 @@ def lan_http_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
+def hydra_lan_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """THC-Hydra of LAN services: ``HYDRA_PROXY`` CONNECT-tunnels via the loopback proxy.
+
+    Hydra ignores HTTP_PROXY. ``HYDRA_PROXY`` / ``HYDRA_PROXY_HTTP`` wrap SSH/FTP/HTTP
+    through Jarvis's process-local proxy, which sources RFC1918 from the on-link NIC.
+    """
+    env = lan_http_child_env(base)
+    origin = env.get("HTTP_PROXY") or ""
+    if origin:
+        env["HYDRA_PROXY"] = origin
+        env["HYDRA_PROXY_HTTP"] = origin
+    return env
+
+
 def with_lan_socket_pythonpath(env: dict[str, str]) -> dict[str, str]:
     """Prepend sitecustomize so child Python RFC1918 sockets bind the home NIC.
 
