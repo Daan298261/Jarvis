@@ -3136,9 +3136,10 @@ def _copy_flags_from_add(flags: list[str]) -> list[str]:
 def rewrite_dockerfile_lan_add(
     path: Path, build_args: dict[str, str] | None = None
 ) -> tuple[str, list[tuple[str, str, str]]]:
-    """Rewrite LAN ``ADD http(s)|ftp(s)://`` and ``RUN wget`` / ``RUN curl`` /
-    ``RUN python -c urlretrieve`` (including ``&&`` / ``;`` chains and
-    ``sh -c`` / ``bash -lc``) of those URLs into ``COPY --from=jarvisaddN``.
+    """Rewrite LAN ``ADD http(s)|ftp(s)://`` and ``RUN wget`` / ``wget2`` /
+    ``curl`` / ``aria2c`` / ``RUN python -c urlretrieve|urlopen-write``
+    (including ``&&`` / ``;`` chains and ``sh -c`` / ``bash -lc``) of those
+    URLs into ``COPY --from=jarvisaddN``.
 
     Returns rewritten text and ``(url, context, filename)`` fetches. Unchanged
     text and an empty list when there is no on-link RFC1918 fetch.
@@ -3153,8 +3154,12 @@ def rewrite_dockerfile_lan_add(
 _RUN_LINE = re.compile(r"^(\s*RUN)((?:\s+--\S+)*)\s+(\S.*)$", re.I | re.S)
 _RUN_PIPE_SHELLS = frozenset({"sh", "bash", "ash", "dash"})
 _WGET_OUTPUT_FLAGS = frozenset({"-O", "--output-document"})
+_WGET_STEMS = frozenset({"wget", "wget2"})
 _CURL_OUTPUT_FLAGS = frozenset({"-o", "--output"})
 _CURL_REMOTE_FLAGS = frozenset({"-O", "--remote-name"})
+_ARIA_STEMS = frozenset({"aria2c", "aria2"})
+_ARIA_OUT_FLAGS = frozenset({"-o", "--out"})
+_ARIA_DIR_FLAGS = frozenset({"-d", "--dir"})
 _URLRETRIEVE_CALL = re.compile(
     r"""(?xs)
     \burlretrieve\(\s*
@@ -3163,9 +3168,20 @@ _URLRETRIEVE_CALL = re.compile(
     \s*\)
     """
 )
-_PYTHON_OTHER_HTTP = re.compile(
-    r"\b(?:urlopen|requests\.|httpx\.|aiohttp)\b"
+_URLOPEN_WRITE = re.compile(
+    r"""(?xs)
+    open\(\s*(?P<q1>['"])(?P<dest>.*?)(?P=q1)\s*,\s*(?P<qm>['"])wb[+]?(?P=qm)\s*\)
+    \.write\(\s*(?:urllib\.request\.)?urlopen\(\s*(?P<q2>['"])(?P<url>.*?)(?P=q2)\s*\)\.read\(\s*\)\s*\)
+    """
 )
+_PATH_WRITE_BYTES = re.compile(
+    r"""(?xs)
+    Path\(\s*(?P<q1>['"])(?P<dest>.*?)(?P=q1)\s*\)\.write_bytes\(\s*
+    (?:urllib\.request\.)?urlopen\(\s*(?P<q2>['"])(?P<url>.*?)(?P=q2)\s*\)\.read\(\s*\)\s*\)
+    """
+)
+_PYTHON_OTHER_HTTP = re.compile(r"\b(?:requests\.|httpx\.|aiohttp)\b")
+_PYTHON_URLOPEN = re.compile(r"\burlopen\s*\(")
 _PYTHON_C_CLUSTER = re.compile(r"^-[bBdEIiOqsSuRvVW]*c$")
 
 
@@ -3193,55 +3209,81 @@ def _python_c_script(argv: list[str]) -> str | None:
     return None
 
 
-def _python_urlretrieve_url_dest(
-    argv: list[str], declared: dict[str, str]
+def _posix_join_dest(directory: str, name: str) -> str:
+    left = str(directory or "").strip().rstrip("/")
+    right = str(name or "").strip().lstrip("/")
+    if not left:
+        return right
+    if not right:
+        return left
+    return f"{left}/{right}"
+
+
+def _expand_lan_url_dest(
+    url: str, dest: str, declared: dict[str, str]
 ) -> tuple[str, str] | None:
-    """Return ``(url, dest)`` for ``python -c urllib.request.urlretrieve(LAN, dest)``."""
-    script = _python_c_script(argv)
-    if script is None:
-        return None
-    matches = list(_URLRETRIEVE_CALL.finditer(script))
-    if len(matches) != 1:
-        return None
-    if _PYTHON_OTHER_HTTP.search(script):
-        return None
-    found = matches[0]
-    expanded = expand_image_vars(found.group("url").strip(), declared)
+    expanded = expand_image_vars(str(url or "").strip(), declared)
     if not expanded or not _is_http_add_url(expanded):
         return None
     if not _lan_bind_for_http_target(expanded):
         return None
-    dest = (found.group("dest") or "").strip()
-    if dest:
-        expanded_dest = expand_image_vars(dest, declared)
-        return expanded, expanded_dest or dest
+    text = str(dest or "").strip()
+    if text:
+        expanded_dest = expand_image_vars(text, declared)
+        return expanded, expanded_dest or text
     return expanded, _add_url_filename(expanded)
+
+
+def _python_urlretrieve_url_dest(
+    argv: list[str], declared: dict[str, str]
+) -> tuple[str, str] | None:
+    """Return ``(url, dest)`` for ``python -c`` LAN ``urlretrieve`` or ``urlopen`` write."""
+    script = _python_c_script(argv)
+    if script is None:
+        return None
+    if _PYTHON_OTHER_HTTP.search(script):
+        return None
+    retrieves = list(_URLRETRIEVE_CALL.finditer(script))
+    writes = [*_URLOPEN_WRITE.finditer(script), *_PATH_WRITE_BYTES.finditer(script)]
+    urlopens = list(_PYTHON_URLOPEN.finditer(script))
+    if len(retrieves) == 1 and not writes and not urlopens:
+        found = retrieves[0]
+        return _expand_lan_url_dest(found.group("url"), found.group("dest") or "", declared)
+    if len(writes) == 1 and not retrieves and len(urlopens) == 1:
+        found = writes[0]
+        dest = (found.group("dest") or "").strip()
+        if not dest:
+            return None
+        return _expand_lan_url_dest(found.group("url"), dest, declared)
+    return None
 
 
 def _run_fetch_url_dest(
     argv: list[str], declared: dict[str, str]
 ) -> tuple[str, str] | None:
-    """Return ``(url, dest)`` for a wget/curl/python-urlretrieve argv. dest ``-`` means stdout."""
+    """Return ``(url, dest)`` for wget/wget2/curl/aria2c/python LAN fetch argv.
+    dest ``-`` means stdout."""
     if not argv:
         return None
     if _python_interpreter_name(argv[0]):
         return _python_urlretrieve_url_dest(argv, declared)
     stem = _tool_basename(argv[0]).lower().removesuffix(".exe")
-    if stem not in {"wget", "curl"}:
+    if stem not in _WGET_STEMS | {"curl"} | _ARIA_STEMS:
         return None
     dest = ""
+    aria_dir = ""
     urls: list[str] = []
     index = 1
     while index < len(argv):
         tok = str(argv[index])
         index += 1
-        if stem == "wget" and tok in _WGET_OUTPUT_FLAGS:
+        if stem in _WGET_STEMS and tok in _WGET_OUTPUT_FLAGS:
             if index >= len(argv):
                 return None
             dest = str(argv[index])
             index += 1
             continue
-        if stem == "wget" and tok.startswith("--output-document="):
+        if stem in _WGET_STEMS and tok.startswith("--output-document="):
             dest = tok.split("=", 1)[1]
             continue
         if stem == "curl" and tok in _CURL_OUTPUT_FLAGS:
@@ -3255,9 +3297,27 @@ def _run_fetch_url_dest(
             continue
         if stem == "curl" and tok in _CURL_REMOTE_FLAGS:
             continue
+        if stem in _ARIA_STEMS and tok in _ARIA_OUT_FLAGS:
+            if index >= len(argv):
+                return None
+            dest = str(argv[index])
+            index += 1
+            continue
+        if stem in _ARIA_STEMS and tok.startswith("--out="):
+            dest = tok.split("=", 1)[1]
+            continue
+        if stem in _ARIA_STEMS and tok in _ARIA_DIR_FLAGS:
+            if index >= len(argv):
+                return None
+            aria_dir = str(argv[index])
+            index += 1
+            continue
+        if stem in _ARIA_STEMS and tok.startswith("--dir="):
+            aria_dir = tok.split("=", 1)[1]
+            continue
         if tok.startswith("-") and not tok.startswith("--") and len(tok) > 2:
             cluster = tok[1:]
-            if stem == "wget" and "O" in cluster:
+            if stem in _WGET_STEMS and "O" in cluster:
                 if cluster.endswith("O-") or tok.endswith("O-"):
                     dest = "-"
                     continue
@@ -3287,8 +3347,14 @@ def _run_fetch_url_dest(
     if dest == "-":
         return url, "-"
     if dest:
+        if aria_dir:
+            dest = _posix_join_dest(aria_dir, dest)
         expanded_dest = expand_image_vars(dest.strip("'\""), declared)
         return url, expanded_dest or dest
+    if aria_dir:
+        joined = _posix_join_dest(aria_dir, _add_url_filename(url))
+        expanded_dest = expand_image_vars(joined.strip("'\""), declared)
+        return url, expanded_dest or joined
     return url, _add_url_filename(url)
 
 
@@ -3414,8 +3480,9 @@ def _unwrap_run_shell_c(argv: list[str]) -> list[str] | None:
 def _rewrite_lan_run_fetch(
     line: str, declared: dict[str, str], fetches: list[tuple[str, str, str]]
 ) -> list[str] | None:
-    """Replace LAN ``RUN wget`` / ``RUN curl`` / ``RUN python -c urlretrieve``
-    (including ``&&`` / ``;`` chains and ``sh -c``) with ``COPY --from=``.
+    """Replace LAN ``RUN wget`` / ``wget2`` / ``curl`` / ``aria2c`` /
+    ``python -c urlretrieve|urlopen-write`` (including ``&&`` / ``;`` chains
+    and ``sh -c``) with ``COPY --from=``.
     """
     match = _RUN_LINE.match(str(line or ""))
     if match is None:

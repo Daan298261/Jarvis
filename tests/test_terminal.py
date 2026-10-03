@@ -2195,6 +2195,30 @@ def test_lan_run_python_urlretrieve(tmp_path, monkeypatch):
     assert lan_bound_docker_build_argv(f"docker build {ctx}") is None
     (ctx / "Dockerfile").write_text(
         "FROM alpine:3.20\n"
+        "RUN python -c \"import urllib.request; open('/opt/x','wb').write("
+        "urllib.request.urlopen('http://192.168.1.50:8000/x').read())\"\n",
+        encoding="utf-8",
+    )
+    opened = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert opened is not None
+    follow = opened[opened.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 x /opt/x" in text
+    assert "urlopen" not in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN python -c \"from pathlib import Path; from urllib.request import urlopen; "
+        "Path('/usr/local/bin/tool').write_bytes(urlopen("
+        "'http://192.168.1.50:8000/tool').read())\"\n",
+        encoding="utf-8",
+    )
+    path_write = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert path_write is not None
+    follow = path_write[path_write.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 tool /usr/local/bin/tool" in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
         'RUN sh -c "python -c \\"import urllib.request; '
         "urllib.request.urlretrieve('http://192.168.1.50:8000/x', '/x')\\\"\"\n",
         encoding="utf-8",
@@ -2204,6 +2228,82 @@ def test_lan_run_python_urlretrieve(tmp_path, monkeypatch):
     follow = sh_c[sh_c.index("--") + 1 :]
     text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
     assert "COPY --from=jarvisadd0 x /x" in text
+
+
+def test_lan_run_wget2_aria2c(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+
+    def fake_mkdtemp(prefix=""):
+        root = tmp_path / f"{prefix or 'jarvis-lan-add-'}w2"
+        root.mkdir(exist_ok=True)
+        return str(root)
+
+    monkeypatch.setattr("app.tools.terminal.tempfile.mkdtemp", fake_mkdtemp)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"docker", "docker.exe"} else None,
+    )
+    ctx = tmp_path / "app"
+    ctx.mkdir()
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN wget2 -q -O /opt/pkg.tgz http://192.168.1.50:8000/pkg.tgz\n",
+        encoding="utf-8",
+    )
+    wget2 = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert wget2 is not None
+    assert any(item.startswith("http://192.168.1.50:8000/pkg.tgz=") for item in wget2)
+    follow = wget2[wget2.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 pkg.tgz /opt/pkg.tgz" in text
+    assert "wget2" not in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN aria2c -x 16 -o pkg.tgz -d /opt http://192.168.1.50:8000/pkg.tgz\n",
+        encoding="utf-8",
+    )
+    aria = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert aria is not None
+    follow = aria[aria.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 pkg.tgz /opt/pkg.tgz" in text
+    assert "aria2c" not in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN aria2c --out=tool --dir=/usr/local/bin http://192.168.1.50:8000/tool\n",
+        encoding="utf-8",
+    )
+    equals = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert equals is not None
+    follow = equals[equals.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "COPY --from=jarvisadd0 tool /usr/local/bin/tool" in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\n"
+        "RUN apk add aria2 && aria2c -d /opt http://192.168.1.50:8000/x && chmod 755 /opt/x\n",
+        encoding="utf-8",
+    )
+    chained = lan_bound_docker_build_argv(f"docker build {ctx}")
+    assert chained is not None
+    follow = chained[chained.index("--") + 1 :]
+    text = Path(follow[follow.index("-f") + 1]).read_text(encoding="utf-8")
+    assert "RUN apk add aria2" in text
+    assert "COPY --from=jarvisadd0 x /opt/x" in text
+    assert "RUN chmod 755 /opt/x" in text
+    assert "aria2c" not in text
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\nRUN wget2 -O /x https://example.com/x\n",
+        encoding="utf-8",
+    )
+    assert lan_bound_docker_build_argv(f"docker build {ctx}") is None
+    (ctx / "Dockerfile").write_text(
+        "FROM alpine:3.20\nRUN aria2c -o /x https://example.com/x\n",
+        encoding="utf-8",
+    )
+    assert lan_bound_docker_build_argv(f"docker build {ctx}") is None
 
 
 def test_lan_skopeo_load_fetches_add_http_before_follow(tmp_path, monkeypatch):
