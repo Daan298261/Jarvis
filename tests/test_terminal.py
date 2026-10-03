@@ -11,9 +11,11 @@ from app.tools.terminal import (
     docker_registry_host_from_image,
     git_direct_argv,
     lan_bound_cifs_argv,
+    compose_service_depends,
     compose_service_dockerfiles,
     lan_bound_compose_build_argv,
     lan_bound_compose_pull_argv,
+    lan_bound_compose_run_argv,
     lan_bound_compose_up_argv,
     lan_bound_dns_argv,
     lan_bound_docker_build_argv,
@@ -1083,6 +1085,35 @@ def test_compose_service_dockerfiles_resolves_context(tmp_path):
     assert "interp" not in files
 
 
+def test_compose_service_depends_maps_list_and_mapping(tmp_path):
+    stack = tmp_path / "compose.yaml"
+    stack.write_text(
+        "services:\n"
+        "  app:\n"
+        "    image: nginx\n"
+        "    depends_on:\n"
+        "      - cache\n"
+        "      - db\n"
+        "  api:\n"
+        "    image: nginx\n"
+        "    depends_on:\n"
+        "      cache:\n"
+        "        condition: service_healthy\n"
+        "  skip:\n"
+        "    depends_on: ${DEPS}\n"
+        "  cache:\n"
+        "    image: redis\n"
+        "  db:\n"
+        "    image: postgres\n",
+        encoding="utf-8",
+    )
+    deps = compose_service_depends(stack)
+    assert deps["app"] == ["cache", "db"]
+    assert deps["api"] == ["cache"]
+    assert "skip" not in deps
+    assert "cache" not in deps
+
+
 def test_lan_compose_build_skopeo_loads_from_before_build(tmp_path, monkeypatch):
     monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
     monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
@@ -1207,3 +1238,79 @@ def test_lan_compose_up_skopeo_loads_images_and_from(tmp_path, monkeypatch):
     hub = tmp_path / "hub.yml"
     hub.write_text("services:\n  web:\n    image: nginx:alpine\n", encoding="utf-8")
     assert lan_bound_compose_up_argv(f"docker compose -f {hub} up -d") is None
+    deps_stack = tmp_path / "deps.yaml"
+    deps_stack.write_text(
+        "services:\n"
+        "  app:\n"
+        "    image: nginx:alpine\n"
+        "    depends_on:\n"
+        "      - cache\n"
+        "  cache:\n"
+        "    image: 192.168.1.50:5000/redis:7\n",
+        encoding="utf-8",
+    )
+    with_dep = lan_bound_compose_up_argv(f"docker compose -f {deps_stack} up app")
+    assert with_dep is not None
+    assert "192.168.1.50:5000/redis:7" in with_dep
+    assert lan_bound_compose_up_argv(f"docker compose -f {deps_stack} up --no-deps app") is None
+    created = lan_bound_compose_up_argv(f"docker compose -f {deps_stack} create cache")
+    assert created is not None
+    assert "192.168.1.50:5000/redis:7" in created
+    assert "create" in created[created.index("--") + 1 :]
+
+
+def test_lan_compose_run_skopeo_loads_image_and_from(tmp_path, monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"skopeo", "skopeo.exe", "docker", "docker.exe"} else None,
+    )
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "Dockerfile").write_text("FROM 192.168.1.50:5000/base:latest\nCOPY . .\n", encoding="utf-8")
+    stack = tmp_path / "compose.yaml"
+    stack.write_text(
+        "services:\n"
+        "  app:\n"
+        "    build: ./app\n"
+        "    image: 192.168.1.50:5000/app:latest\n"
+        "    depends_on:\n"
+        "      - cache\n"
+        "  web:\n"
+        "    image: nginx:alpine\n"
+        "  cache:\n"
+        "    image: 192.168.1.50:5000/redis:7\n",
+        encoding="utf-8",
+    )
+    ran = lan_bound_compose_run_argv(f"docker compose -f {stack} run --rm --pull always app sh")
+    assert ran is not None
+    assert ran[1].endswith("lan_skopeo_load.py")
+    assert "192.168.1.50:5000/app:latest" in ran
+    assert "192.168.1.50:5000/redis:7" in ran
+    assert "192.168.1.50:5000/base:latest" not in ran
+    follow = ran[ran.index("--") + 1 :]
+    assert follow[:2] == ["/usr/bin/docker", "compose"]
+    assert "run" in follow and "--rm" in follow
+    assert follow[-2:] == ["app", "sh"]
+    pull_at = follow.index("--pull")
+    assert follow[pull_at + 1] == "missing"
+    rebuilt = lan_bound_compose_run_argv(f"docker compose -f {stack} run --build -it app python -c print(1)")
+    assert rebuilt is not None
+    assert "192.168.1.50:5000/base:latest" in rebuilt
+    assert "192.168.1.50:5000/app:latest" in rebuilt
+    assert "192.168.1.50:5000/redis:7" in rebuilt
+    isolated = lan_bound_compose_run_argv(f"docker compose -f {stack} run --no-deps --build web")
+    assert isolated is None
+    with_cache = lan_bound_compose_run_argv(f"docker compose -f {stack} run --no-deps cache")
+    assert with_cache is not None
+    assert "192.168.1.50:5000/redis:7" in with_cache
+    assert "192.168.1.50:5000/app:latest" not in with_cache
+    assert lan_bound_compose_run_argv(f"docker compose -f {stack} run web") is None
+    assert lan_bound_compose_run_argv(f"docker compose -f {stack} run app | cat") is None
+    bash = _command_args(f"docker compose -f {stack} run --rm cache redis-cli ping", "bash", cwd=str(tmp_path))
+    assert bash[1].endswith("lan_skopeo_load.py")
+    assert "192.168.1.50:5000/redis:7" in bash
+    env = _child_env(bash)
+    assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert "10.8.0.1" not in env["HTTP_PROXY"]
