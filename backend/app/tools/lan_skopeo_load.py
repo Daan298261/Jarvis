@@ -1,7 +1,8 @@
 """Load docker images with skopeo so LAN registries bind the home NIC.
 
-Dockerd cannot source-bind. Terminal ``docker compose pull`` and ``docker build``
-of on-link RFC1918 images inherit the loopback LAN HTTP proxy via this helper.
+Dockerd cannot source-bind. Terminal ``docker compose pull``, ``docker compose build``,
+and ``docker build`` of on-link RFC1918 images inherit the loopback LAN HTTP proxy
+via this helper.
 """
 from __future__ import annotations
 

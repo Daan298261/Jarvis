@@ -11,6 +11,8 @@ from app.tools.terminal import (
     docker_registry_host_from_image,
     git_direct_argv,
     lan_bound_cifs_argv,
+    compose_service_dockerfiles,
+    lan_bound_compose_build_argv,
     lan_bound_compose_pull_argv,
     lan_bound_dns_argv,
     lan_bound_docker_build_argv,
@@ -1045,3 +1047,105 @@ def test_lan_docker_build_skopeo_loads_from_before_build(tmp_path, monkeypatch):
     env = _child_env(bash)
     assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
     assert "10.8.0.1" not in env["HTTP_PROXY"]
+
+
+def test_compose_service_dockerfiles_resolves_context(tmp_path):
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "Dockerfile").write_text("FROM alpine:3.20\n", encoding="utf-8")
+    alt = tmp_path / "svc"
+    alt.mkdir()
+    (alt / "Dockerfile.lan").write_text("FROM 192.168.1.50:5000/base\n", encoding="utf-8")
+    stack = tmp_path / "compose.yaml"
+    stack.write_text(
+        "services:\n"
+        "  app:\n"
+        "    build: ./app\n"
+        "  lan:\n"
+        "    build:\n"
+        "      context: ./svc\n"
+        "      dockerfile: Dockerfile.lan\n"
+        "  web:\n"
+        "    image: nginx:alpine\n"
+        "  inline:\n"
+        "    build:\n"
+        "      dockerfile_inline: FROM scratch\n"
+        "  interp:\n"
+        "    build: ${CTX}\n",
+        encoding="utf-8",
+    )
+    files = compose_service_dockerfiles(stack)
+    assert files["app"] == app / "Dockerfile"
+    assert files["lan"] == alt / "Dockerfile.lan"
+    assert "web" not in files
+    assert "inline" not in files
+    assert "interp" not in files
+
+
+def test_lan_compose_build_skopeo_loads_from_before_build(tmp_path, monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: (
+            f"/usr/bin/{name}"
+            if name in {"skopeo", "skopeo.exe", "docker", "docker.exe", "docker-compose", "docker-compose.exe"}
+            else None
+        ),
+    )
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "Dockerfile").write_text("FROM 192.168.1.50:5000/base:latest\nCOPY . .\n", encoding="utf-8")
+    web = tmp_path / "web"
+    web.mkdir()
+    (web / "Dockerfile").write_text("FROM alpine:3.20\n", encoding="utf-8")
+    stack = tmp_path / "compose.yaml"
+    stack.write_text(
+        "services:\n"
+        "  app:\n"
+        "    build: ./app\n"
+        "  web:\n"
+        "    build: ./web\n",
+        encoding="utf-8",
+    )
+    built = lan_bound_compose_build_argv(f"docker compose -f {stack} build --pull")
+    assert built is not None
+    assert built[1].endswith("lan_skopeo_load.py")
+    assert "192.168.1.50:5000/base:latest" in built
+    assert "--" in built
+    follow = built[built.index("--") + 1 :]
+    assert follow[:2] == ["/usr/bin/docker", "compose"]
+    assert "-f" in follow and str(stack) in follow
+    assert "build" in follow
+    assert "--pull" not in follow
+    assert "--pull=false" not in follow
+    only_app = lan_bound_compose_build_argv(f"docker compose -f {stack} build app")
+    assert only_app is not None
+    assert "192.168.1.50:5000/base:latest" in only_app
+    assert lan_bound_compose_build_argv(f"docker compose -f {stack} build web") is None
+    assert lan_bound_compose_build_argv(f"docker compose -f {stack} build | cat") is None
+    with_deps = lan_bound_compose_build_argv(f"docker compose -f {stack} build --with-dependencies web")
+    assert with_deps is not None
+    assert "192.168.1.50:5000/base:latest" in with_deps
+    cached = lan_bound_compose_build_argv(f"docker compose -f {stack} build --no-cache app")
+    assert cached is not None
+    follow = cached[cached.index("--") + 1 :]
+    assert "--no-cache" in follow
+    nest = tmp_path / "only-lan"
+    nest.mkdir()
+    (nest / "Dockerfile").write_text("FROM 192.168.1.50:5000/app:v1\n", encoding="utf-8")
+    (nest / "compose.yml").write_text("services:\n  app:\n    build: .\n", encoding="utf-8")
+    from_cwd = lan_bound_compose_build_argv("docker compose build", cwd=str(nest))
+    assert from_cwd is not None
+    assert "192.168.1.50:5000/app:v1" in from_cwd
+    hyphen = lan_bound_compose_build_argv(f"docker-compose -f {stack} build app")
+    assert hyphen is not None
+    assert hyphen[hyphen.index("--") + 1 :][0] == "/usr/bin/docker-compose"
+    bash = _command_args(f"docker compose -f {stack} build -q app", "bash", cwd=str(tmp_path))
+    assert bash[1].endswith("lan_skopeo_load.py")
+    assert "--quiet" in bash or "-q" in bash
+    env = _child_env(bash)
+    assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert "10.8.0.1" not in env["HTTP_PROXY"]
+    (app / "Dockerfile").write_text("FROM alpine:3.20\n", encoding="utf-8")
+    assert lan_bound_compose_build_argv(f"docker compose -f {stack} build") is None
