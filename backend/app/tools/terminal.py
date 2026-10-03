@@ -220,6 +220,115 @@ def lan_bound_http_argv(command: str) -> list[str] | None:
     return [exe, "--interface", bind, *rest]
 
 
+_FFMPEG_NAMES = frozenset({"ffmpeg", "ffprobe", "ffplay"})
+_FFMPEG_BIND_FLAGS = frozenset({"-bind_address", "-local_addr", "-localaddr", "-http_proxy"})
+_FFMPEG_RTSP_TCP_SCHEMES = frozenset({"rtsp", "rtsps", "rtmp", "rtmps"})
+_FFMPEG_RTSP_UDP_SCHEMES = frozenset({"rtp", "udp", "srtp", "srt"})
+_MEDIA_URL_PREFIXES = (
+    "http://",
+    "https://",
+    "rtsp://",
+    "rtsps://",
+    "rtmp://",
+    "rtmps://",
+    "rtp://",
+    "udp://",
+    "srtp://",
+    "srt://",
+    "mmsh://",
+    "mms://",
+    "ftp://",
+    "ftps://",
+)
+
+
+def _looks_media_url(token: str) -> bool:
+    text = str(token or "").strip().strip("'\"").lower()
+    return text.startswith(_MEDIA_URL_PREFIXES)
+
+
+def _ffmpeg_urls_from_argv(parts: list[str]) -> list[str]:
+    urls: list[str] = []
+    index = 1
+    while index < len(parts):
+        token = str(parts[index] or "").strip().strip("'\"")
+        if token in {"-i", "-uri"} and index + 1 < len(parts):
+            nxt = str(parts[index + 1] or "").strip().strip("'\"")
+            if _looks_media_url(nxt):
+                urls.append(nxt)
+            index += 2
+            continue
+        if _looks_media_url(token):
+            urls.append(token)
+        index += 1
+    return urls
+
+
+def lan_bound_ffmpeg_argv(command: str) -> list[str] | None:
+    """ffmpeg/ffprobe/ffplay/mpv of an on-link RFC1918 RTSP/RTMP/UDP camera, sourced from that NIC.
+
+    HTTP_PROXY does not cover RTSP. ``-local_addr`` (TCP) and ``-localaddr`` (UDP)
+    pin libavformat so a VPN default route cannot steal the camera. mpv forwards
+    the same via ``--stream-lavf-o``. HTTP/HTTPS NAS streams use the loopback LAN
+    proxy (``_LAN_HTTP_TOOL_STEMS``). Skip pipes, existing binds, and public hosts.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts:
+        return None
+    name = _tool_basename(parts[0])
+    if name not in _FFMPEG_NAMES and name != "mpv":
+        return None
+    flags = {str(part).split("=", 1)[0] for part in parts[1:] if str(part).startswith("-")}
+    if flags & _FFMPEG_BIND_FLAGS:
+        return None
+    if name == "mpv" and any(
+        str(part).startswith("--stream-lavf-o") or str(part).startswith("--demuxer-lavf-o")
+        for part in parts[1:]
+    ):
+        return None
+    urls = _ffmpeg_urls_from_argv(parts)
+    bind = ""
+    need_tcp = False
+    need_udp = False
+    for url in urls:
+        scheme = (urlparse(url).scheme or "").lower()
+        if scheme not in _FFMPEG_RTSP_TCP_SCHEMES and scheme not in _FFMPEG_RTSP_UDP_SCHEMES:
+            continue
+        found = _lan_bind_for_http_target(url)
+        if not found:
+            continue
+        bind = found
+        if scheme in _FFMPEG_RTSP_UDP_SCHEMES:
+            need_udp = True
+        else:
+            need_tcp = True
+    if not bind:
+        return None
+    exe = shutil.which(name) or shutil.which(f"{name}.exe")
+    if not exe:
+        return None
+    extra: list[str] = []
+    if name == "mpv":
+        lavf: list[str] = []
+        if need_tcp:
+            lavf.append(f"local_addr={bind}")
+        if need_udp:
+            lavf.append(f"localaddr={bind}")
+        extra.append("--stream-lavf-o=" + ",".join(lavf))
+    else:
+        if need_tcp:
+            extra.extend(["-local_addr", bind])
+        if need_udp:
+            extra.extend(["-localaddr", bind])
+    return [exe, *extra, *parts[1:]]
+
+
 def lan_bound_ssh_argv(command: str) -> list[str] | None:
     """OpenSSH / sshfs of an on-link RFC1918 host, sourced from that NIC.
 
@@ -1214,6 +1323,11 @@ _LAN_HTTP_TOOL_STEMS = frozenset(
         "youtube-dl",
         "gallery-dl",
         "you-get",
+        "ffmpeg",
+        "ffprobe",
+        "ffplay",
+        "mpv",
+        "vlc",
     }
 )
 _DOCKER_PULL_QUIET = frozenset({"-q", "--quiet"})
@@ -5081,7 +5195,7 @@ def lan_bound_docker_bake_argv(command: str, cwd: str | None = None) -> list[str
 
 
 def container_direct_argv(command: str) -> list[str] | None:
-    """Run registry/package-manager/S3/restic/azcopy/HTTPie CLIs as argv so LAN HTTP_PROXY reaches a NAS."""
+    """Run registry/package-manager/S3/restic/azcopy/HTTPie/ffmpeg/mpv CLIs as argv so LAN HTTP_PROXY reaches a NAS."""
     return _direct_stem_argv(command, _LAN_HTTP_TOOL_STEMS)
 
 
@@ -5201,6 +5315,7 @@ def _child_env(args: list[str]) -> dict[str, str]:
 def _command_args(command: str, shell: str, cwd: str | None = None) -> list[str] | ToolResult:
     bound = (
         lan_bound_http_argv(command)
+        or lan_bound_ffmpeg_argv(command)
         or lan_bound_ssh_argv(command)
         or lan_bound_scan_argv(command)
         or lan_bound_rsync_argv(command)

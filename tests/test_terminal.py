@@ -30,6 +30,7 @@ from app.tools.terminal import (
     lan_bound_docker_login_argv,
     lan_bound_docker_pull_argv,
     lan_bound_docker_push_argv,
+    lan_bound_ffmpeg_argv,
     lan_bound_http_argv,
     lan_bound_lftp_argv,
     lan_bound_netcat_argv,
@@ -790,6 +791,61 @@ def test_lan_lftp_binds_home_nic_not_vpn(monkeypatch):
     assert bash[1:3] == ["-e", "set net:socket-bind-ipv4 192.168.1.12"]
 
 
+def test_lan_ffmpeg_rtsp_binds_home_nic_not_vpn(monkeypatch):
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}"
+        if name in {
+            "ffmpeg",
+            "ffmpeg.exe",
+            "ffprobe",
+            "ffprobe.exe",
+            "ffplay",
+            "ffplay.exe",
+            "mpv",
+            "mpv.exe",
+        }
+        else None,
+    )
+    camera = lan_bound_ffmpeg_argv(
+        "ffmpeg -rtsp_transport tcp -i rtsp://192.168.1.20:554/Streaming/Channels/101 -c copy cam.mp4"
+    )
+    assert camera is not None
+    assert camera[0] == "/usr/bin/ffmpeg"
+    assert camera[1:3] == ["-local_addr", "192.168.1.12"]
+    assert "rtsp://192.168.1.20:554/Streaming/Channels/101" in camera
+    probe = lan_bound_ffmpeg_argv("ffprobe rtsp://192.168.1.20/stream")
+    assert probe is not None
+    assert probe[0] == "/usr/bin/ffprobe"
+    assert probe[1:3] == ["-local_addr", "192.168.1.12"]
+    play = lan_bound_ffmpeg_argv("ffplay rtsp://192.168.1.20/live")
+    assert play is not None
+    assert play[1:3] == ["-local_addr", "192.168.1.12"]
+    rtmp = lan_bound_ffmpeg_argv("ffmpeg -i rtmp://192.168.1.40/live/main out.mp4")
+    assert rtmp is not None
+    assert rtmp[1:3] == ["-local_addr", "192.168.1.12"]
+    udp = lan_bound_ffmpeg_argv("ffmpeg -i udp://192.168.1.50:1234 -c copy clip.ts")
+    assert udp is not None
+    assert udp[1:3] == ["-localaddr", "192.168.1.12"]
+    player = lan_bound_ffmpeg_argv("mpv rtsp://192.168.1.20/stream")
+    assert player is not None
+    assert player[0] == "/usr/bin/mpv"
+    assert player[1] == "--stream-lavf-o=local_addr=192.168.1.12"
+    assert lan_bound_ffmpeg_argv("ffmpeg -i http://192.168.1.50:8096/video.mp4") is None
+    assert lan_bound_ffmpeg_argv("ffmpeg -i rtsp://8.8.8.8/stream") is None
+    assert lan_bound_ffmpeg_argv(
+        "ffmpeg -local_addr 10.8.0.2 -i rtsp://192.168.1.20/stream"
+    ) is None
+    assert lan_bound_ffmpeg_argv("mpv --stream-lavf-o=local_addr=10.8.0.2 rtsp://192.168.1.20/s") is None
+    assert lan_bound_ffmpeg_argv("ffmpeg -i rtsp://192.168.1.20/stream | cat") is None
+    bash = _command_args("ffmpeg -i rtsp://192.168.1.20/stream -c copy cam.mp4", "bash")
+    assert bash[0] == "/usr/bin/ffmpeg"
+    assert bash[1:3] == ["-local_addr", "192.168.1.12"]
+    env = _child_env(bash)
+    assert env["HTTP_PROXY"].startswith("http://127.0.0.1:")
+
+
 def test_lan_smbclient_binds_home_nic_not_vpn(monkeypatch):
     import socket
 
@@ -1188,6 +1244,12 @@ def test_terminal_git_and_pip_use_lan_http_proxy_not_vpn(monkeypatch):
             "yt-dlp",
             "youtube-dl",
             "gallery-dl",
+            "you-get",
+            "ffmpeg",
+            "ffprobe",
+            "ffplay",
+            "mpv",
+            "vlc",
         }
         else None,
     )
@@ -1259,6 +1321,24 @@ def test_terminal_git_and_pip_use_lan_http_proxy_not_vpn(monkeypatch):
     gallery = _command_args("gallery-dl http://192.168.1.50:3000/album/1", "bash")
     assert gallery[0] == "/usr/bin/gallery-dl"
     assert _child_env(gallery)["ftp_proxy"] == _child_env(gallery)["HTTP_PROXY"]
+    ffmpeg = container_direct_argv(
+        "ffmpeg -i http://192.168.1.50:8096/Items/abc/Download -c copy clip.mp4"
+    )
+    assert ffmpeg is not None
+    assert ffmpeg[0] == "/usr/bin/ffmpeg"
+    assert _child_env(ffmpeg)["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    assert "10.8.0.1" not in _child_env(ffmpeg)["HTTP_PROXY"]
+    ffprobe = container_direct_argv("ffprobe http://192.168.1.50:8096/Items/abc/stream")
+    assert ffprobe is not None
+    assert ffprobe[0] == "/usr/bin/ffprobe"
+    assert _child_env(ffprobe)["HTTPS_PROXY"] == _child_env(ffprobe)["HTTP_PROXY"]
+    mpv = _command_args("mpv http://192.168.1.50:8096/Items/abc/stream.m3u8", "bash")
+    assert mpv[0] == "/usr/bin/mpv"
+    assert _child_env(mpv)["HTTP_PROXY"].startswith("http://127.0.0.1:")
+    vlc = container_direct_argv("vlc http://192.168.1.50:8096/video")
+    assert vlc is not None
+    assert vlc[0] == "/usr/bin/vlc"
+    assert _child_env(vlc)["http_proxy"] == _child_env(vlc)["HTTP_PROXY"]
 
 
 def test_lan_compose_pull_rewrites_to_skopeo(tmp_path, monkeypatch):
