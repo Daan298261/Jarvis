@@ -1092,6 +1092,120 @@ def lan_bound_telnet_argv(command: str) -> list[str] | None:
     return None
 
 
+def _cli_opt(parts: list[str], names: set[str]) -> str:
+    index = 1
+    while index < len(parts):
+        tok = str(parts[index] or "").strip().strip("'\"")
+        matched = False
+        for name in names:
+            if tok == name or (name.startswith("--") and tok.startswith(f"{name}=")):
+                matched = True
+                break
+        if not matched:
+            index += 1
+            continue
+        if tok.startswith("--") and "=" in tok:
+            return tok.split("=", 1)[1].strip().strip("'\"")
+        if index + 1 < len(parts):
+            return str(parts[index + 1] or "").strip().strip("'\"")
+        return ""
+    return ""
+
+
+def _cli_uri_host_port(raw: str, default_port: int) -> tuple[str, int]:
+    parsed = urlparse(str(raw or "").strip())
+    host = (parsed.hostname or "").strip()
+    port = int(parsed.port) if parsed.port else default_port
+    return host, port
+
+
+_MYSQL_NAMES = frozenset({"mysql", "mariadb"})
+_MQTT_NAMES = frozenset({"mosquitto_pub", "mosquitto_sub", "mosquitto_rr"})
+_TCP_HELPER_TOOLS = {
+    "redis-cli": ("redis", 6379, frozenset({"-h", "--host"}), frozenset({"-p", "--port"})),
+    "psql": ("psql", 5432, frozenset({"-h", "--host"}), frozenset({"-p", "--port"})),
+    "mongosh": ("mongosh", 27017, frozenset({"--host"}), frozenset({"--port"})),
+}
+
+
+def lan_bound_db_argv(command: str) -> list[str] | None:
+    """mysql/mosquitto/redis-cli/psql/mongosh of on-link RFC1918, sourced from that NIC.
+
+    mysql/mariadb ``--bind-address`` and mosquitto ``-A`` pin the home NIC.
+    redis-cli/psql/mongosh have no source-bind flag, so a loopback TCP helper
+    connects out with ``bind(SOURCE)``. Skip pipes, existing bind flags, and
+    public hosts.
+    """
+    text = str(command or "").strip()
+    if not text or _UNSAFE_SHELL.search(text):
+        return None
+    try:
+        parts = shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return None
+    if not parts:
+        return None
+    name = _tool_basename(parts[0])
+    flags = {str(part).split("=", 1)[0] for part in parts[1:] if str(part).startswith("-")}
+    if name in _MYSQL_NAMES:
+        if flags & {"--bind-address"}:
+            return None
+        host = _cli_opt(parts, {"-h", "--host"})
+        bind = _lan_bind_ip_for_host(host)
+        if not bind:
+            return None
+        exe = shutil.which(name) or shutil.which(f"{name}.exe")
+        if not exe:
+            return None
+        return [exe, "--bind-address", bind, *parts[1:]]
+    if name in _MQTT_NAMES:
+        if flags & {"-A"}:
+            return None
+        host = _cli_opt(parts, {"-h", "--host"})
+        bind = _lan_bind_ip_for_host(host)
+        if not bind:
+            return None
+        exe = shutil.which(name) or shutil.which(f"{name}.exe")
+        if not exe:
+            return None
+        return [exe, "-A", bind, *parts[1:]]
+    spec = _TCP_HELPER_TOOLS.get(name)
+    if spec is None:
+        return None
+    kind, default_port, host_flags, port_flags = spec
+    host = _cli_opt(parts, host_flags)
+    port_text = _cli_opt(parts, port_flags)
+    port = default_port
+    if port_text and str(port_text).isdigit():
+        port = int(port_text)
+    if name == "redis-cli":
+        uri = _cli_opt(parts, {"-u", "--uri", "--url"})
+        if uri and "://" in uri:
+            host, port = _cli_uri_host_port(uri, port)
+    elif name == "psql":
+        for item in parts[1:]:
+            tok = str(item or "").strip().strip("'\"")
+            if tok.lower().startswith(("postgres://", "postgresql://")):
+                host, port = _cli_uri_host_port(tok, port)
+                break
+    elif name == "mongosh":
+        for item in parts[1:]:
+            tok = str(item or "").strip().strip("'\"")
+            if tok.lower().startswith("mongodb://"):
+                host, port = _cli_uri_host_port(tok, 27017)
+                break
+    bind = _lan_bind_ip_for_host(host)
+    if not bind or port < 1 or port > 65535:
+        return None
+    exe = shutil.which(name) or shutil.which(f"{name}.exe")
+    if not exe:
+        return None
+    python = sys.executable or shutil.which("python3") or "python3"
+    helper = str(Path(__file__).resolve().parent / "lan_tcp_bind.py")
+    child = [exe, *parts[1:]]
+    return [python, helper, kind, bind, host, str(port), "--", *child]
+
+
 def _ncrack_target_from_argv(parts: list[str]) -> str:
     target = _scan_target_from_argv(parts)
     if target:
@@ -5954,6 +6068,7 @@ def _command_args(command: str, shell: str, cwd: str | None = None) -> list[str]
         or lan_bound_openssl_argv(command)
         or lan_bound_socat_argv(command)
         or lan_bound_telnet_argv(command)
+        or lan_bound_db_argv(command)
         or lan_bound_netcat_argv(command)
         or lan_bound_ncrack_argv(command)
         or lan_bound_dns_argv(command)

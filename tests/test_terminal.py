@@ -41,6 +41,7 @@ from app.tools.terminal import (
     lan_bound_openssl_argv,
     lan_bound_socat_argv,
     lan_bound_telnet_argv,
+    lan_bound_db_argv,
     lan_bound_nfs_argv,
     lan_bound_rclone_argv,
     lan_bound_rsync_argv,
@@ -1002,6 +1003,114 @@ def test_lan_telnet_binds_home_nic_not_vpn(monkeypatch):
     assert via_nc is not None
     assert via_nc[0] == "/usr/bin/nc"
     assert via_nc[1:] == ["-s", "192.168.1.12", "192.168.1.1", "2323"]
+
+
+def test_lan_db_clients_bind_home_nic_not_vpn(monkeypatch, tmp_path):
+    import socket
+    import threading
+    from app.tools.lan_tcp_bind import loopback_client_argv, main as tcp_bind_main
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_nics)
+    monkeypatch.setattr(
+        "app.tools.terminal.shutil.which",
+        lambda name: f"/usr/bin/{name}"
+        if name
+        in {
+            "mysql",
+            "mysql.exe",
+            "mariadb",
+            "mosquitto_sub",
+            "mosquitto_pub",
+            "redis-cli",
+            "psql",
+            "mongosh",
+        }
+        else None,
+    )
+    sql = lan_bound_db_argv("mysql -h 192.168.1.50 -u taco nas")
+    assert sql is not None
+    assert sql[0] == "/usr/bin/mysql"
+    assert sql[1:3] == ["--bind-address", "192.168.1.12"]
+    assert sql[-1] == "nas"
+    mqtt = lan_bound_db_argv("mosquitto_sub -h 192.168.1.40 -t home/#")
+    assert mqtt is not None
+    assert mqtt[0] == "/usr/bin/mosquitto_sub"
+    assert mqtt[1:3] == ["-A", "192.168.1.12"]
+    assert lan_bound_db_argv("mysql -h 8.8.8.8") is None
+    assert lan_bound_db_argv("mysql --bind-address=10.8.0.2 -h 192.168.1.50") is None
+    assert lan_bound_db_argv("mosquitto_sub -A 10.8.0.2 -h 192.168.1.40 -t x") is None
+    redis = lan_bound_db_argv("redis-cli -h 192.168.1.50 ping")
+    assert redis is not None
+    assert redis[1].endswith("lan_tcp_bind.py")
+    assert redis[2:6] == ["redis", "192.168.1.12", "192.168.1.50", "6379"]
+    assert redis[redis.index("--") + 1] == "/usr/bin/redis-cli"
+    uri = lan_bound_db_argv("redis-cli -u redis://192.168.1.40:6380/0 ping")
+    assert uri is not None
+    assert uri[2:6] == ["redis", "192.168.1.12", "192.168.1.40", "6380"]
+    bash = _command_args("psql -h 192.168.1.50 -U taco", "bash")
+    assert bash[1].endswith("lan_tcp_bind.py")
+    assert bash[2:6] == ["psql", "192.168.1.12", "192.168.1.50", "5432"]
+    rewritten = loopback_client_argv(
+        "redis",
+        ["/usr/bin/redis-cli", "-h", "192.168.1.50", "ping"],
+        "127.0.0.1",
+        6380,
+    )
+    assert rewritten[0] == "/usr/bin/redis-cli"
+    assert rewritten[rewritten.index("-h") + 1] == "127.0.0.1"
+    assert rewritten[rewritten.index("-p") + 1] == "6380"
+    assert "ping" in rewritten
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    peer_port = int(server.getsockname()[1])
+    seen: dict[str, bytes] = {}
+
+    def serve():
+        client, _addr = server.accept()
+        seen["data"] = client.recv(64)
+        client.sendall(b"+PONG\r\n")
+        client.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    client_py = tmp_path / "redis_stub.py"
+    client_py.write_text(
+        "#!/usr/bin/env python3\n"
+        "import socket, sys\n"
+        "host='127.0.0.1'\n"
+        "port=6379\n"
+        "args=sys.argv[1:]\n"
+        "i=0\n"
+        "while i < len(args):\n"
+        "    if args[i] in ('-h','--host') and i+1 < len(args):\n"
+        "        host=args[i+1]; i+=2; continue\n"
+        "    if args[i] in ('-p','--port') and i+1 < len(args):\n"
+        "        port=int(args[i+1]); i+=2; continue\n"
+        "    i+=1\n"
+        "s=socket.create_connection((host, port), timeout=3)\n"
+        "s.sendall(b'PING\\r\\n')\n"
+        "print(s.recv(64).decode(), end='')\n"
+        "s.close()\n",
+        encoding="utf-8",
+    )
+    client_py.chmod(0o755)
+    code = tcp_bind_main(
+        [
+            "redis",
+            "127.0.0.1",
+            "127.0.0.1",
+            str(peer_port),
+            "--",
+            str(client_py),
+            "-h",
+            "192.168.1.50",
+            "ping",
+        ]
+    )
+    assert code == 0
+    assert seen.get("data") == b"PING\r\n"
+    server.close()
 
 
 def test_lan_ffmpeg_rtsp_binds_home_nic_not_vpn(monkeypatch):
