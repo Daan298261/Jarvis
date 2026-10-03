@@ -53,12 +53,22 @@ test("portrait particles preserve colour and aspect, discard black, and cache de
 test("avatar decoding failures are retryable", async () => {
   const previousImage = globalThis.Image
   let decodes = 0
-  globalThis.Image = class { async decode() { decodes++; throw new Error("unavailable") } }
+  globalThis.Image = class {
+    set src(_value) { queueMicrotask(() => this.onerror?.()) }
+    async decode() { decodes++; throw new Error("unavailable") }
+  }
   try {
     await assert.rejects(portraits.preparePortraitCloud("missing-avatar", "retry_test"), /unavailable/)
     await assert.rejects(portraits.preparePortraitCloud("missing-avatar", "retry_test"), /unavailable/)
     assert.equal(decodes, 2)
   } finally { globalThis.Image = previousImage }
+})
+
+test("portrait loading has an onload fallback for Windows embedded browsers", async () => {
+  const source = await readFile(new URL("./src/presence/renderers/shapes/portraitCloud.ts", import.meta.url), "utf8")
+  assert.match(source, /image\.onload = ready/)
+  assert.match(source, /image\.decode\?\.\(\)\.then\(ready\)/)
+  assert.match(source, /Some WebView builds reject decode/)
 })
 
 function meanAxis(attribute, axis) {
@@ -124,6 +134,14 @@ test("idle keeps rest tightness and morphs into the selected figure when engaged
   assert.equal(system.morphValue(), rest)
   assert.notEqual(system.morphValue(), 0)
   system.dispose()
+})
+
+test("portrait-backed avatars retain authored colour in the idle silhouette", () => {
+  const color = [0.1, 0.7, 1, 1]
+  const [rest] = cloud.buildRestSilhouette([{
+    x: 1, y: 1, z: 0, size: 2, light: 1, gold: 0, flow: 0, color,
+  }])
+  assert.deepEqual(rest.color, color)
 })
 
 test("reduced motion snaps uMorph to a static readable rest pose", () => {
@@ -194,6 +212,15 @@ test("all named personas expose their own registered visual avatar", async () =>
   const controls = await readFile(new URL("./src/persona/NamedPersonaControls.tsx", import.meta.url), "utf8")
   assert.match(controls, /Named persona avatars/)
   assert.match(controls, /SpecialistShapeMark/)
+
+  const portraits = await readFile(new URL("./src/persona/personaPortraits.ts", import.meta.url), "utf8")
+  assert.match(portraits, /anzu\.png/)
+  assert.match(portraits, /nabu\.png/)
+  assert.doesNotMatch(portraits, /assets\/persona\/[^"']+\.webp/)
+  for (const id of personas.ROSTER_IDS) {
+    const bytes = await readFile(new URL(`./src/assets/persona/${id}.png`, import.meta.url))
+    assert.ok(bytes.length > 40_000, `${id} portrait should retain showcase detail`)
+  }
 })
 
 test("persona selection activates mythic mode on the shared morphable stage", async () => {
@@ -210,6 +237,25 @@ test("persona selection activates mythic mode on the shared morphable stage", as
   assert.doesNotMatch(host, /ParticleBustPresence/)
   assert.match(host, /key="morphable-presence"/)
   assert.equal(lifecycle.PERSONA_MORPH_SECONDS, 0.42)
+
+  const humanoid = await readFile(new URL("./src/presence/renderers/HumanoidPresence.tsx", import.meta.url), "utf8")
+  const stageCss = await readFile(new URL("./src/presence/renderers/presence-stage.css", import.meta.url), "utf8")
+  assert.match(humanoid, /jarvis-mythic-avatar-shell/)
+  assert.match(humanoid, /preparing \|\| prepareError/)
+  assert.match(stageCss, /position: absolute;/)
+  assert.match(stageCss, /overflow: hidden;/)
+})
+
+test("the README muscular humanoid is additive and the production humanoid stays the default", async () => {
+  const settings = await readFile(new URL("./src/settings/AppearanceSettingsPane.tsx", import.meta.url), "utf8")
+  const humanoid = await readFile(new URL("./src/presence/renderers/HumanoidPresence.tsx", import.meta.url), "utf8")
+  assert.match(settings, /Humanoid HUD · built in/)
+  assert.match(settings, /Muscular humanoid · showcase/)
+  assert.match(settings, /avatarId: "jarvis_base"/)
+  assert.match(settings, /MUSCULAR_HUMANOID_AVATAR_ID/)
+  assert.match(humanoid, /CURRENT_HUMANOID_ARTWORK = "\/presence\/jarvis-original\/humanoid\.webp"/)
+  assert.match(humanoid, /MUSCULAR_HUMANOID_ARTWORK = "\/presence\/jarvis-original\/humanoid-muscular\.png"/)
+  assert.match(humanoid, /settings\.avatarId === MUSCULAR_HUMANOID_AVATAR_ID/)
 })
 
 test("the README muscular humanoid is additive and the production humanoid stays the default", async () => {

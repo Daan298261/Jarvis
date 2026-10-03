@@ -5,11 +5,32 @@ import type { ParticleOrb } from "../particleTypes"
 const pending = new Map<string, Promise<string>>()
 let terrain: Promise<ParticleOrb[]> | undefined
 
+/** Windows embedded browsers can leave image.decode() pending indefinitely. */
+function loadPortraitImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    let settled = false
+    const ready = () => {
+      if (settled) return
+      settled = true
+      resolve(image)
+    }
+    image.onload = ready
+    image.onerror = () => {
+      if (settled) return
+      settled = true
+      reject(new Error(`Avatar artwork is unavailable: ${url}`))
+    }
+    image.src = url
+    image.decode?.().then(ready).catch(() => {
+      // Some WebView builds reject decode() even though onload succeeds.
+    })
+  })
+}
+
 function prepareTerrain(): Promise<ParticleOrb[]> {
   return terrain ??= (async () => {
-    const image = new Image()
-    image.src = "/presence/jarvis-original/backdrop.webp"
-    await image.decode()
+    const image = await loadPortraitImage("/presence/jarvis-original/backdrop.webp")
     const canvas = document.createElement("canvas")
     canvas.width = 768
     canvas.height = 432
@@ -38,9 +59,7 @@ export function preparePortraitCloud(url: string, persona: string): Promise<stri
   const cached = pending.get(key)
   if (cached) return cached
   const promise = (async () => {
-    const image = new Image()
-    image.src = url
-    await image.decode()
+    const image = await loadPortraitImage(url)
     const canvas = document.createElement("canvas")
     const resolution = persona === "humanoid" ? 512 : 256
     canvas.width = resolution

@@ -102,8 +102,20 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
       )}
       {prepareError && mythic && (
         <span className="jarvis-presence-fallback-note" role="status">
-          Avatar artwork unavailable · retaining particle silhouette
+          Particle sampling unavailable · showing the persona portrait
         </span>
+      )}
+      {mythic && (preparing || prepareError) && personaVisual?.portraitUrl && (
+        <div
+          className="jarvis-mythic-avatar-shell"
+          style={{
+            "--mythic-primary": personaVisual.orbColor || "#67dcff",
+            "--mythic-accent": personaVisual.accentColor || "#d4a017",
+          } as CSSProperties}
+          aria-hidden="true"
+        >
+          <img src={personaVisual.portraitUrl} alt="" />
+        </div>
       )}
       {galaxy ? (
         <p

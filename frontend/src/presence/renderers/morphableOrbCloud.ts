@@ -323,6 +323,9 @@ export function buildRestSilhouette(
       light: orb.light * (0.74 + restT * 0.2),
       flow: Math.min(0.72, orb.flow + loosen * (0.16 + crown * 0.2)),
       size: orb.size * (1 + loosen * (0.08 + crown * 0.1)),
+      // Portrait-backed personas must keep their authored cyan/gold identity at
+      // rest instead of collapsing to the generic persona palette.
+      color: orb.color,
     }
   }
   return out
