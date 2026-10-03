@@ -84,13 +84,11 @@ fn jarvis_root() -> PathBuf {
     // Installed layout: next to Jarvis.exe → ../  or portable: repo root when developing.
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            // Prefer sibling data/ marker or sidecars folder.
             let candidate = dir.to_path_buf();
-            if candidate.join("data").exists() || candidate.join("sidecars").exists() {
-                return candidate;
-            }
+            // In the Inno layout Jarvis.exe is in {app}/desktop and the
+            // sidecar is below desktop/sidecars. Use {app} for data and portal.
             if let Some(parent) = dir.parent() {
-                if parent.join("backend").exists() || parent.join("data").exists() {
+                if parent.join("backend").exists() && parent.join("frontend").exists() {
                     return parent.to_path_buf();
                 }
             }
@@ -182,8 +180,21 @@ fn read_api_bind_host(data_root: &Path) -> String {
 }
 
 fn backend_command(root: &Path) -> Option<(PathBuf, Vec<String>)> {
+    // The Inno bootstrap prepares a complete Python environment. Prefer it
+    // over the frozen fallback so optional integrations use their installed deps.
+    let prepared_python = root.join(".venv").join("Scripts").join("python.exe");
+    if prepared_python.exists() {
+        let bind_host = read_api_bind_host(&root.join("data"));
+        return Some((prepared_python, vec![
+            "-m".into(), "uvicorn".into(), "app.main:app".into(),
+            "--host".into(), bind_host, "--port".into(), "4780".into(),
+            "--app-dir".into(), root.join("backend").to_string_lossy().to_string(),
+        ]));
+    }
     // Prefer packaged sidecar next to the app / in resources.
     let candidates = [
+        root.join("desktop").join("sidecars").join("jarvis-backend").join("jarvis-backend.exe"),
+        root.join("sidecars").join("jarvis-backend").join("jarvis-backend.exe"),
         root.join("sidecars").join("jarvis-backend.exe"),
         root.join("sidecars").join("jarvis-backend"),
         root.join("jarvis-backend").join("jarvis-backend.exe"),

@@ -2,7 +2,7 @@
 ; Build on Windows with build-installer.ps1 (requires Inno Setup 6 + iscc on PATH).
 
 #define MyAppName "Jarvis"
-#define MyAppVersion "1.5.0"
+#define MyAppVersion "1.5.1"
 #define MyAppPublisher "Jarvis"
 #define MyAppURL "https://github.com/Daan298261/Jarvis"
 #define MyAppExe "powershell.exe"
@@ -61,7 +61,11 @@ Name: "dl_expert27b"; Description: "Qwen3.5-27B Expert weights (high VRAM/RAM re
 [Files]
 ; Copy application tree from repo root (two levels up from this .iss file).
 ; Exclude heavy or machine-local dirs — bootstrap recreates them on first run.
-Source: "..\..\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*,.git\**,.venv\*,.venv\**,.vendor\*,.vendor\**,.pytest_cache\*,.pytest_cache\**,tests\*,tests\**,__pycache__\*,__pycache__\**,*\__pycache__\*,*\__pycache__\**,node_modules\*,node_modules\**,frontend\node_modules\*,frontend\node_modules\**,frontend\dist\*,frontend\dist\**,mcp\node_modules\*,mcp\node_modules\**,models\*,models\**,runtime\*,runtime\**,data\*,data\**,logs\*,logs\**,release\*,release\**,Releases\*,Releases\**,_release_upload\*,_release_upload\**,installer-build*.log,android\.gradle\*,android\.gradle\**,android\app\build\*,android\app\build\**,.codex-remote-attachments\*,.codex-remote-attachments\**,installer\windows\payload\*,installer\windows\payload\**,installer\windows\dist\*,installer\windows\dist\**,tools\license_manager\*,tools\license_manager\**,backend\app\licensing\manager_app.py,JarvisLicenseManager.exe,*.jarvis-license,issuer.key,issuer.pub,issuer.sqlite,Jarvis\*,Jarvis\**,*\Jarvis\*,*\Jarvis\**"
+Source: "..\..\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*,.git\**,.venv\*,.venv\**,.vendor\*,.vendor\**,.pytest_cache\*,.pytest_cache\**,tests\*,tests\**,__pycache__\*,__pycache__\**,*\__pycache__\*,*\__pycache__\**,node_modules\*,node_modules\**,frontend\node_modules\*,frontend\node_modules\**,frontend\dist\*,frontend\dist\**,mcp\node_modules\*,mcp\node_modules\**,models\*,models\**,runtime\*,runtime\**,data\*,data\**,logs\*,logs\**,release\*,release\**,Releases\*,Releases\**,_release_upload\*,_release_upload\**,installer-build*.log,stage-desktop*.log,android\.gradle\*,android\.gradle\**,android\app\build\*,android\app\build\**,.codex-remote-attachments\*,.codex-remote-attachments\**,installer\windows\payload\*,installer\windows\payload\**,installer\windows\dist\*,installer\windows\dist\**,tools\license_manager\*,tools\license_manager\**,backend\app\licensing\manager_app.py,JarvisLicenseManager.exe,*.jarvis-license,issuer.key,issuer.pub,issuer.sqlite,Jarvis\*,Jarvis\**,*\Jarvis\*,*\Jarvis\**"
+; The broad runtime/dist exclusions above also match nested first-party packages.
+; Include these explicitly: 1.5.0 omitted app.runtime and kept a stale portal build.
+Source: "..\..\backend\app\runtime\*"; DestDir: "{app}\backend\app\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__\*,__pycache__\**,*\__pycache__\*,*\__pycache__\**"
+Source: "..\..\frontend\dist\*"; DestDir: "{app}\frontend\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Always ship bootstrap beside the installed tree (also under installer\windows in source).
 Source: "bootstrap.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversion
 Source: "force-stop-jarvis.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversion
@@ -309,6 +313,16 @@ begin
     Log('Failed to launch force-stop-jarvis.ps1');
     Result := False;
   end;
+  if not Result then
+  begin
+    { Jarvis may have been launched elevated while this per-user Setup is not.
+      Retry with UAC so upgrade, repair and uninstall can stop that backend. }
+    Log('Retrying Jarvis force-stop with administrator privileges.');
+    ResultCode := -1;
+    Result := ShellExec('runas', 'powershell.exe', Params, WorkDir, SW_HIDE,
+      ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+    Log('Elevated Jarvis force-stop finished with code ' + IntToStr(ResultCode));
+  end;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -364,7 +378,7 @@ begin
   begin
     MsgBox(
       'Jarvis is still running and could not be stopped. Close Jarvis and try again.' + #13#10 +
-      'See logs\installer-stop.log in your Jarvis folder for details.',
+      'See %TEMP%\Jarvis-installer-stop.log for details.',
       mbError, MB_OK);
     Result := False;
   end;
@@ -397,6 +411,14 @@ function GetUninstallForceStopParameters(Param: String): String;
 begin
   Result := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\installer\windows\force-stop-jarvis.ps1') +
     '" -InstallRoot "' + ExpandConstant('{app}') + '" -IncludeTray -MaxWaitSeconds 90';
+end;
+
+function InitializeUninstall: Boolean;
+begin
+  Result := ForceStopJarvisUnder(ExpandConstant('{app}'));
+  if not Result then
+    MsgBox('Jarvis could not be stopped, so uninstall was cancelled.' + #13#10 +
+      'See %TEMP%\Jarvis-installer-stop.log for the process and error.', mbError, MB_OK);
 end;
 
 procedure RecordOwnedPathsRegistry(const InstallDir, SetupExe: String);
@@ -670,7 +692,7 @@ begin
   if not StopJarvisProcessesForPrepare then
   begin
     Result := 'Jarvis is still running and could not be stopped. Close Jarvis and try again.' + #13#10 +
-      'See logs\installer-stop.log in your Jarvis folder for details.';
+      'See %TEMP%\Jarvis-installer-stop.log for details.';
     Exit;
   end;
 
