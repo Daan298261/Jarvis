@@ -19,6 +19,9 @@ param(
 
     [switch]$IncludeTray,
 
+    # Manager lifecycle controls must stop only the core; its tray stays alive.
+    [switch]$PreserveManager,
+
     [switch]$StartupCleanup,
 
     [switch]$CheckOnly,
@@ -236,6 +239,8 @@ function Invoke-ForceStopSingleRoot {
         $leaf = Get-ProcessNameLeaf $name
         $cmd = [string]$Proc.CommandLine
         $exePath = Get-ProcExecutablePath $Proc
+
+        if ($PreserveManager -and (($leaf -eq 'anzumanager') -or ($cmd -match 'app\.manager\.main:app'))) { return $false }
 
         if (Test-HaystackUnderRoot $exePath $RootNorm) { return $true }
         # A document opened from the install folder is not a Jarvis process.

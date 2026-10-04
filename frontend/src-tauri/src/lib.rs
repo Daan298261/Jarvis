@@ -24,6 +24,7 @@ use tauri_plugin_autostart::MacosLauncher;
 
 const HEALTH_URL: &str = "http://127.0.0.1:4780/api/health";
 const PORTAL_URL: &str = "http://127.0.0.1:4780/";
+const MANAGER_URL: &str = "http://127.0.0.1:4782/admin";
 const MAX_START_ATTEMPTS: u32 = 3;
 const HEALTH_TIMEOUT_SECS: u64 = 90;
 const RESTART_BACKOFF_MS: u64 = 1500;
@@ -77,6 +78,9 @@ static HTTP: Lazy<reqwest::blocking::Client> = Lazy::new(|| {
 
 static PORTAL_ATTACHED: AtomicBool = AtomicBool::new(false);
 
+fn manager_mode() -> bool { std::env::var("JARVIS_MANAGER").map(|v| v == "1").unwrap_or(false) }
+fn service_health_url() -> &'static str { if manager_mode() { "http://127.0.0.1:4782/api/manager/v1/status" } else { HEALTH_URL } }
+
 fn jarvis_root() -> PathBuf {
     if let Ok(p) = std::env::var("JARVIS_ROOT") {
         return PathBuf::from(p);
@@ -111,7 +115,7 @@ fn data_dir() -> PathBuf {
 }
 
 fn health_ok() -> bool {
-    match HTTP.get(HEALTH_URL).send() {
+    match HTTP.get(service_health_url()).send() {
         Ok(resp) => resp.status().is_success(),
         Err(_) => false,
     }
@@ -140,6 +144,7 @@ fn attach_portal(app: &AppHandle) {
 }
 
 fn portal_url() -> String {
+    if manager_mode() { return MANAGER_URL.to_string(); }
     let base = PORTAL_URL.trim_end_matches('/');
     if let Ok(path) = std::env::var("JARVIS_OPEN_PATH") {
         let trimmed = path.trim();
@@ -330,6 +335,7 @@ fn ensure_backend(state: &mut BackendState) {
 }
 
 fn stop_owned_backend(state: &mut BackendState) {
+    if manager_mode() { return; }
     if !state.owned {
         state.status = BackendLifecycleStatus::BackendStopped;
         return;
@@ -354,6 +360,13 @@ fn hide_main(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
     }
+}
+
+fn manager_control(action: &str) {
+    let _ = HTTP.post(format!("http://127.0.0.1:4782/api/manager/v1/control/{action}"))
+        .header("content-type", "application/json")
+        .body("{\"confirm\":true}")
+        .send();
 }
 
 #[tauri::command]
@@ -491,6 +504,12 @@ fn quit_jarvis(app: AppHandle, state: State<'_, AppState>) -> Result<(), String>
 }
 
 #[tauri::command]
+fn quit_manager(app: AppHandle) -> Result<(), String> {
+    app.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
 fn data_paths() -> Result<serde_json::Value, String> {
     let root = jarvis_root();
     Ok(serde_json::json!({
@@ -605,8 +624,12 @@ pub fn run() {
                 let state = app.state::<AppState>();
                 let mut guard = state.backend.lock().expect("backend lock");
                 load_shell_prefs(&mut guard);
-                ensure_backend(&mut guard);
-                let start_minimized = guard.start_minimized;
+                if manager_mode() {
+                    guard.status = if health_ok() { BackendLifecycleStatus::Ready } else { BackendLifecycleStatus::BackendFailed };
+                } else {
+                    ensure_backend(&mut guard);
+                }
+                let start_minimized = guard.start_minimized || (manager_mode() && std::env::var("JARVIS_MANAGER_MINIMIZED").map(|v| v == "1").unwrap_or(false));
                 drop(guard);
                 attach_portal(app.handle());
                 if start_minimized {
@@ -614,14 +637,15 @@ pub fn run() {
                 }
             }
 
-            let show_i = MenuItem::with_id(app, "show", "Show Jarvis", true, None::<&str>)?;
-            let hide_i = MenuItem::with_id(app, "hide", "Hide Jarvis", true, None::<&str>)?;
-            let start_i = MenuItem::with_id(app, "start_backend", "Start backend", true, None::<&str>)?;
-            let stop_i = MenuItem::with_id(app, "stop_backend", "Stop backend", true, None::<&str>)?;
+            let product = if manager_mode() { "ANZU Manager" } else { "ANZU" };
+            let show_i = MenuItem::with_id(app, "show", format!("Show {product}"), true, None::<&str>)?;
+            let hide_i = MenuItem::with_id(app, "hide", format!("Hide {product}"), true, None::<&str>)?;
+            let start_i = MenuItem::with_id(app, "start_backend", "Start ANZU", true, None::<&str>)?;
+            let stop_i = MenuItem::with_id(app, "stop_backend", "Stop ANZU", true, None::<&str>)?;
             let restart_i =
-                MenuItem::with_id(app, "restart_backend", "Restart backend", true, None::<&str>)?;
+                MenuItem::with_id(app, "restart_backend", "Restart ANZU", true, None::<&str>)?;
             let logs_i = MenuItem::with_id(app, "open_logs", "Open logs", true, None::<&str>)?;
-            let quit_i = MenuItem::with_id(app, "quit", "Quit Jarvis", true, None::<&str>)?;
+            let quit_i = MenuItem::with_id(app, "quit", if manager_mode() { "Quit Manager" } else { "Quit ANZU" }, true, None::<&str>)?;
             let menu = Menu::with_items(
                 app,
                 &[&show_i, &hide_i, &start_i, &stop_i, &restart_i, &logs_i, &quit_i],
@@ -629,22 +653,25 @@ pub fn run() {
 
             let _tray = TrayIconBuilder::new()
                 .menu(&menu)
-                .tooltip("Jarvis")
+                .tooltip(if manager_mode() { "ANZU Manager" } else { "ANZU" })
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => show_main(app),
                     "hide" => hide_main(app),
                     "start_backend" => {
+                        if manager_mode() { manager_control("start"); return; }
                         if let Ok(mut g) = app.state::<AppState>().backend.lock() {
                             g.restart_count = 0;
                             ensure_backend(&mut g);
                         }
                     }
                     "stop_backend" => {
+                        if manager_mode() { manager_control("stop"); return; }
                         if let Ok(mut g) = app.state::<AppState>().backend.lock() {
                             stop_owned_backend(&mut g);
                         }
                     }
                     "restart_backend" => {
+                        if manager_mode() { manager_control("restart"); return; }
                         if let Ok(mut g) = app.state::<AppState>().backend.lock() {
                             stop_owned_backend(&mut g);
                             thread::sleep(Duration::from_millis(400));
@@ -656,6 +683,7 @@ pub fn run() {
                         let _ = open::that(logs_dir());
                     }
                     "quit" => {
+                        if manager_mode() { app.exit(0); return; }
                         if let Ok(mut g) = app.state::<AppState>().backend.lock() {
                             stop_owned_backend(&mut g);
                         }
@@ -679,6 +707,7 @@ pub fn run() {
             let handle = app.handle().clone();
             thread::spawn(move || loop {
                 thread::sleep(Duration::from_secs(5));
+                if manager_mode() { continue; }
                 let state = handle.state::<AppState>();
                 let Ok(mut guard) = state.backend.lock() else {
                     continue;
@@ -753,6 +782,7 @@ pub fn run() {
             get_autostart,
             set_close_to_tray,
             quit_jarvis,
+            quit_manager,
             data_paths,
             obsidian_probe,
             obsidian_bound_vault_path,

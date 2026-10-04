@@ -127,6 +127,24 @@ def test_installer_offers_voice_model_checkboxes():
     assert "neural voice" in _read(README).lower()
 
 
+def test_anzu_local_alias_and_manager_are_packaged():
+    iss = _read(ISS)
+    hosts = INSTALLER_DIR / "manage-anzu-hosts.ps1"
+    manager = REPO_ROOT / "start-anzu-manager.ps1"
+    assert 'Name: "anzualias"' in iss
+    assert 'Name: "dl_expert27b"' in iss and 'Flags: unchecked' in iss.split('Name: "dl_expert27b"', 1)[1].splitlines()[0]
+    for selected in ("dl_voicestudio", "dl_pockettts", "dl_umi_brain"):
+        line = next(line for line in iss.splitlines() if f'Name: "{selected}"' in line)
+        assert "unchecked" not in line
+    text = _read(hosts)
+    assert "BEGIN ANZU LOCAL ALIAS" in text and "127.0.0.1 anzu" in text
+    assert manager.is_file()
+    assert "AnzuManager.exe" in iss
+    assert "start-anzu-manager.ps1" in iss
+    force_stop = _read(INSTALLER_DIR / "force-stop-jarvis.ps1")
+    assert "PreserveManager" in force_stop
+
+
 def test_installer_registers_elevated_logon_task():
     iss = _read(ISS)
     assert 'Name: "elevatedlogon"' in iss
