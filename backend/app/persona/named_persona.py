@@ -118,7 +118,7 @@ ROSTER: tuple[PersonaRow, ...] = (
         "umi",
         "Umi",
         "Main assistant — Opus-style reasoning, tools and Pocket TTS voice",
-        "memory_rings",
+        "opus_tide",
         "pocket_tts_alba_en_v1",
         "#7C3AED",
         "#A78BFA",

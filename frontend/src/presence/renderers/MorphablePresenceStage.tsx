@@ -329,7 +329,9 @@ export function MorphablePresenceStage({
       if (reduced) alertAge = 4
       else alertAge = Math.min(4, alertAge + delta)
       uniforms.uAlertAge.value = alertAge
-      uniforms.uBreath.value = reduced || phase !== "idle" ? 0 : Math.sin(animationTime * 1.15) * 0.009
+      uniforms.uBreath.value = reduced || phase !== "idle"
+        ? 0
+        : (0.5 + 0.5 * Math.sin(animationTime * 0.92)) * animation
       const listenTarget = phase === "listening" && !reduced ? 1 : 0
       uniforms.uListen.value += (listenTarget - uniforms.uListen.value) * Math.min(1, delta * 4)
       const shapeDef = resolvePresenceShape(system.currentShapeId)

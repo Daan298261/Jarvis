@@ -14,12 +14,19 @@ import {
 import { SpecialistShapeMark } from "./SpecialistShapeMark"
 import { PersonaSetupGuide } from "./PersonaSetupGuide"
 import { offerPersonaSetup } from "./personaSetup"
+import { updatePresentation, usePresentationSettings } from "../presence/presentationSettings"
+import {
+  MYTHIC_LIVE_B_AVATAR_ID,
+  MYTHIC_PORTRAIT_A_AVATAR_ID,
+  usesMythicLiveVariantB,
+} from "../presence/mythicPersonaVariant"
 import "./named-persona.css"
 
 const SYSTEM_VOICE = "windows_natural_en_v1"
 
 export function NamedPersonaControls() {
   const state = useNamedPersonas()
+  const presentation = usePresentationSettings()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const [progress, setProgress] = useState("")
@@ -117,6 +124,34 @@ export function NamedPersonaControls() {
           personaLabel={active?.id === currentPersonaId ? active.label : PERSONA_LABELS[currentPersonaId]}
         />
       )}
+      <div className="named-persona-render-variants" role="group" aria-label="Mythic avatar version">
+        <button
+          type="button"
+          className={!usesMythicLiveVariantB(presentation.avatarId) ? "active" : ""}
+          aria-pressed={!usesMythicLiveVariantB(presentation.avatarId)}
+          disabled={busy}
+          onClick={() => void run(() => updatePresentation({
+            shell: "hud",
+            requestedPresence: "particle_bust",
+            avatarId: MYTHIC_PORTRAIT_A_AVATAR_ID,
+          }))}
+        >
+          A · portrait cloud
+        </button>
+        <button
+          type="button"
+          className={usesMythicLiveVariantB(presentation.avatarId) ? "active" : ""}
+          aria-pressed={usesMythicLiveVariantB(presentation.avatarId)}
+          disabled={busy}
+          onClick={() => void run(() => updatePresentation({
+            shell: "hud",
+            requestedPresence: "particle_bust",
+            avatarId: MYTHIC_LIVE_B_AVATAR_ID,
+          }))}
+        >
+          B · live gaze
+        </button>
+      </div>
       <div className="named-persona-roster" role="group" aria-label="Named persona avatars">
         {options.map((persona) => {
           const selected = persona.id === (pendingId || active?.id || "anzu")

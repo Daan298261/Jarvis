@@ -326,7 +326,7 @@ function HudShellInner({
 
   return (
     <div className={`hud-app${skyOpen ? " hud-sky" : ""}${galaxyEffective ? " hud-galaxy" : ""}`}>
-      <HudStarfield mode={skyOpen ? "sky" : "cluster"} pulseKey={pulseKey} galaxy={galaxyEffective} />
+      {!isChat && <HudStarfield mode={skyOpen ? "sky" : "cluster"} pulseKey={pulseKey} galaxy={galaxyEffective} />}
       <HudTopChrome
         version={version}
         statusOnline={statusOnline}

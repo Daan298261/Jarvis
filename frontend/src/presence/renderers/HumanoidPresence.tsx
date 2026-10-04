@@ -4,6 +4,11 @@ import type { PersonaCloudVisual, PresencePhase, PresenceSnapshot, PresentationS
 import { readVoiceMeter } from "../../tts/voiceAnalyser"
 import { MorphablePresenceStage } from "./MorphablePresenceStage"
 import { preparePortraitCloud } from "./shapes/portraitCloud"
+import {
+  SETTINGS_CLOUD_SHAPE_ID,
+  mythicLiveVariantShapeId,
+  usesMythicLiveVariantB,
+} from "../mythicPersonaVariant"
 import "./humanoid-presence.css"
 
 // The default is the locked production humanoid. Keep its asset and fallback
@@ -29,6 +34,8 @@ function phaseLabel(phase: PresencePhase): string {
 export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }: HumanoidPresenceProps) {
   const galaxy = settings.requestedPresence === "galaxy"
   const mythic = settings.requestedPresence === "particle_bust"
+  const settingsCloud = shapeId === SETTINGS_CLOUD_SHAPE_ID
+  const liveVariantB = usesMythicLiveVariantB(settings.avatarId)
   const muscular = !mythic && settings.avatarId === MUSCULAR_HUMANOID_AVATAR_ID
   const portraitUrl = mythic && personaVisual?.portraitUrl
     ? personaVisual.portraitUrl
@@ -43,11 +50,12 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
   const artworkKey = `${portraitId}:${portraitUrl}`
   const [artwork, setArtwork] = useState<{ key: string; shapeId: string }>()
   const [failedArtworkKey, setFailedArtworkKey] = useState<string>()
-  const preparing = mythic && artwork?.key !== artworkKey && failedArtworkKey !== artworkKey
-  const prepareError = mythic && failedArtworkKey === artworkKey
+  const portraitBacked = !galaxy && !settingsCloud && (!mythic || !liveVariantB)
+  const preparing = portraitBacked && mythic && artwork?.key !== artworkKey && failedArtworkKey !== artworkKey
+  const prepareError = portraitBacked && mythic && failedArtworkKey === artworkKey
   useEffect(() => {
     let cancelled = false
-    if (galaxy) return () => { cancelled = true }
+    if (!portraitBacked) return () => { cancelled = true }
     preparePortraitCloud(portraitUrl, portraitId)
       .then(shapeId => {
         if (cancelled) return
@@ -60,7 +68,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
         console.warn("Presence artwork unavailable; retaining the current particle figure", error)
       })
     return () => { cancelled = true }
-  }, [artworkKey, galaxy, portraitId, portraitUrl])
+  }, [artworkKey, portraitBacked, portraitId, portraitUrl])
   const [meter, setMeter] = useState({ level: 0, attached: false })
 
   useEffect(() => {
@@ -88,7 +96,13 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
     <MorphablePresenceStage
       snapshot={snapshot}
       settings={settings}
-      shapeId={galaxy ? shapeId : artwork?.shapeId || shapeId || "humanoid_bust"}
+      shapeId={settingsCloud
+        ? SETTINGS_CLOUD_SHAPE_ID
+        : (mythic || galaxy) && liveVariantB
+          ? mythicLiveVariantShapeId(shapeId)
+          : galaxy
+            ? shapeId
+            : artwork?.shapeId || shapeId || "humanoid_bust"}
       personaVisual={personaVisual}
       className={`jarvis-presence jarvis-presence-stage jarvis-presence-humanoid${mythic ? " jarvis-presence-particle" : ""}${galaxy ? " galaxy" : ""}`}
       ariaLabel={`${mythic ? personaVisual?.personaLabel || "ANZU mythic" : muscular ? "ANZU muscular humanoid" : "ANZU particle"} presence is ${snapshot.phase === "executing" ? "working" : snapshot.phase}`}
@@ -105,7 +119,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
           Particle sampling unavailable · showing the persona portrait
         </span>
       )}
-      {mythic && (preparing || prepareError) && personaVisual?.portraitUrl && (
+      {mythic && prepareError && personaVisual?.portraitUrl && (
         <div
           className="jarvis-mythic-avatar-shell"
           style={{
@@ -143,7 +157,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
           <div className="jarvis-humanoid-label" aria-hidden="true">
             <span>{(mythic ? personaVisual?.personaLabel || "ANZU" : "ANZU").toUpperCase()}</span>
             <i />
-            <span>{mythic ? "MYTHIC PRESENCE" : muscular ? "MUSCULAR PRESENCE" : "NEURAL PRESENCE"}</span>
+            <span>{mythic ? liveVariantB ? "MYTHIC PRESENCE B · LIVE GAZE" : "MYTHIC PRESENCE A" : muscular ? "MUSCULAR PRESENCE" : "NEURAL PRESENCE"}</span>
           </div>
         </>
       )}
