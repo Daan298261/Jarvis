@@ -13,6 +13,7 @@ const quality = await import("./src/presence/presenceQuality.ts")
 const personas = await import("./src/persona/namedPersonas.ts")
 const THREE = await import("three")
 const portraits = await import("./src/presence/renderers/shapes/portraitCloud.ts")
+const variants = await import("./src/presence/mythicPersonaVariant.ts")
 
 test("portrait particles preserve colour and aspect, discard black, and cache decoding", async () => {
   const previousImage = globalThis.Image
@@ -203,10 +204,14 @@ test("all named personas expose their own registered visual avatar", async () =>
   const shapeIds = personas.ROSTER_IDS.map((id) => personas.PERSONA_VISUALS[id].shapeId)
   assert.equal(personas.ROSTER_IDS.length, 14)
   assert.equal(shapeIds.length, 14)
-  // Umi shares memory_rings with Nabu; every shapeId must still resolve.
-  assert.equal(new Set(shapeIds).size, 13)
+  assert.equal(new Set(shapeIds).size, 14, "Umi must not clone Nabu")
+  assert.equal(personas.PERSONA_VISUALS.umi.shapeId, "opus_tide")
   for (const shapeId of shapeIds) {
     assert.equal(shapes.resolvePresenceShape(shapeId).id, shapeId)
+    const variantId = variants.mythicLiveVariantShapeId(shapeId)
+    const variant = shapes.resolvePresenceShape(variantId)
+    assert.equal(variant.id, variantId)
+    assert.equal(variant.framing?.yaw, 0, `${variantId} faces the camera`)
   }
 
   const controls = await readFile(new URL("./src/persona/NamedPersonaControls.tsx", import.meta.url), "utf8")
@@ -230,7 +235,8 @@ test("persona selection activates mythic mode on the shared morphable stage", as
   const host = await readFile(new URL("./src/presence/PresenceHost.tsx", import.meta.url), "utf8")
   assert.match(home, /presentation\.requestedPresence === "humanoid"/)
   assert.match(home, /\? "humanoid_bust"/)
-  assert.match(settings, /Mythic persona · live/)
+  assert.match(settings, /Mythic persona A · portrait cloud/)
+  assert.match(settings, /Mythic persona B · live gaze/)
   assert.match(activation, /requestedPresence: "particle_bust"/)
   assert.match(activation, /Promise\.allSettled/)
   assert.match(host, /resolved\.effective === "particle_bust"/)
@@ -241,7 +247,8 @@ test("persona selection activates mythic mode on the shared morphable stage", as
   const humanoid = await readFile(new URL("./src/presence/renderers/HumanoidPresence.tsx", import.meta.url), "utf8")
   const stageCss = await readFile(new URL("./src/presence/renderers/presence-stage.css", import.meta.url), "utf8")
   assert.match(humanoid, /jarvis-mythic-avatar-shell/)
-  assert.match(humanoid, /preparing \|\| prepareError/)
+  assert.match(humanoid, /mythic && prepareError && personaVisual\?\.portraitUrl/)
+  assert.doesNotMatch(humanoid, /preparing \|\| prepareError/)
   assert.match(stageCss, /position: absolute;/)
   assert.match(stageCss, /overflow: hidden;/)
 })
@@ -363,12 +370,27 @@ test("shared dot appearance supports optional profiles and bounded shader contro
 
 test("shared motion cues breathe without attention and keep alerts reduced-motion safe", async () => {
   assert.match(cloud.particleVertexShader, /uBreath/)
+  assert.match(cloud.particleVertexShader, /restPulse/)
   assert.match(cloud.particleVertexShader, /uListen/)
   assert.match(cloud.particleFragmentShader, /alertRing/)
   const stage = await readFile(new URL("./src/presence/renderers/MorphablePresenceStage.tsx", import.meta.url), "utf8")
-  assert.match(stage, /phase !== "idle" \? 0 : Math\.sin/)
+  assert.match(stage, /0\.5 \+ 0\.5 \* Math\.sin\(animationTime \* 0\.92\)/)
   assert.match(stage, /if \(reduced\) alertAge = 4/)
   assert.match(stage, /meterNow\.attached && meterNow\.kind === "tts" && phase === "speaking"/)
+})
+
+test("opening HUD settings morphs the live cloud without a background starfield swap", async () => {
+  const home = await readFile(new URL("./src/hud/HudChatHome.tsx", import.meta.url), "utf8")
+  const shell = await readFile(new URL("./src/hud/HudShell.tsx", import.meta.url), "utf8")
+  const controls = await readFile(new URL("./src/presence/AppearancePresenceControls.tsx", import.meta.url), "utf8")
+  const hudCss = await readFile(new URL("./src/hud/hud-v2.css", import.meta.url), "utf8")
+  const humanoidCss = await readFile(new URL("./src/presence/renderers/humanoid-presence.css", import.meta.url), "utf8")
+  assert.match(home, /settingsPanelOpen \? SETTINGS_CLOUD_SHAPE_ID/)
+  assert.match(controls, /onOpenChange\?\.\(openMenu !== null\)/)
+  assert.equal(shapes.resolvePresenceShape(variants.SETTINGS_CLOUD_SHAPE_ID).id, "settings_cloud")
+  assert.match(shell, /!isChat && <HudStarfield/)
+  assert.match(hudCss, /inset: 0;/)
+  assert.doesNotMatch(humanoidCss, /jarvis-humanoid-hud-tl::before/)
 })
 
 test("auto presence quality adapts with sustained thresholds and fit bounds keep safe margins", () => {

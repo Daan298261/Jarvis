@@ -19,6 +19,7 @@ import { galaxyFigureShapeId, isGalaxyPresenceEffective } from "../presence/gala
 import { supportsHumanoidRuntime } from "../presence/renderers/humanoidRuntime"
 import { resolvePresenceShapeId } from "../presence/resolvePresenceShapeId"
 import type { PresencePhase } from "../presence/presenceTypes"
+import { SETTINGS_CLOUD_SHAPE_ID } from "../presence/mythicPersonaVariant"
 
 const MOOD_COPY: Record<OrbMood, { label: string; detail: string }> = {
   idle: { label: "Ready", detail: "Local intelligence standing by" },
@@ -72,6 +73,7 @@ export function HudChatHome() {
   const customPresence = useCustomPresence()
   const { hexSuiteExpanded, setHexSuiteExpanded } = useHudOverlay()
   const wasHexStrike = useRef(false)
+  const [settingsPanelOpen, setSettingsPanelOpen] = useState(false)
   const [moodState, setMoodState] = useState<{ recording: boolean; speaking: boolean; task: Task | null; backendUnavailable: boolean }>({
     recording: false,
     speaking: false,
@@ -128,13 +130,14 @@ export function HudChatHome() {
   const presenceSettings = hexStrikeActive
     ? { ...presentation, requestedPresence: "humanoid" as const }
     : presentation
-  const shapeId = galaxyFigureShapeId({
+  const personaStageShapeId = galaxyFigureShapeId({
     requestedPresence: presenceSettings.requestedPresence,
     resolvedShapeId,
     suiteActive: hexStrikeActive,
     customPresetActive: Boolean(customPresence.activeShapeId),
     personaId: activePersona?.id,
   })
+  const shapeId = settingsPanelOpen ? SETTINGS_CLOUD_SHAPE_ID : personaStageShapeId
   const galaxyEffective = isGalaxyPresenceEffective({
     requestedPresence: presentation.requestedPresence,
     suiteOverride: hexStrikeActive,
@@ -175,7 +178,7 @@ export function HudChatHome() {
     >
       <PinnedPersonaDock />
       <div className="jarvis-presence-controls-split">
-        <AppearancePresenceControls settings={presentation} />
+        <AppearancePresenceControls settings={presentation} onOpenChange={setSettingsPanelOpen} />
       </div>
       <section className="hud-orb-zone" aria-label="ANZU state">
         <PresenceHost

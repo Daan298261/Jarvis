@@ -4,6 +4,7 @@ export type PresenceModePreviewId =
   | "humanoid"
   | "muscular_humanoid"
   | "particle_bust"
+  | "mythic_live_b"
   | "galaxy"
   | "hexstrike"
 

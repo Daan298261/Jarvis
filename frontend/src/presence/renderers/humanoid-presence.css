@@ -61,19 +61,6 @@
   animation: mythic-avatar-arrive 340ms cubic-bezier(.2, .82, .25, 1) both;
 }
 
-.jarvis-mythic-avatar-shell::before {
-  content: "";
-  position: absolute;
-  width: min(58dvh, 46vw);
-  aspect-ratio: 1;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle, color-mix(in srgb, var(--mythic-primary) 28%, transparent), transparent 62%),
-    conic-gradient(from 180deg, transparent, color-mix(in srgb, var(--mythic-accent) 15%, transparent), transparent 28%);
-  filter: blur(18px);
-  opacity: 0.75;
-}
-
 .jarvis-mythic-avatar-shell img {
   position: relative;
   width: min(58dvh, 46vw);
@@ -113,17 +100,6 @@
   left: 4%;
   border-right: 0;
   border-bottom: 0;
-}
-
-.jarvis-humanoid-hud-tl::before {
-  content: "";
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  width: 18px;
-  height: 2px;
-  background: rgba(90, 210, 240, 0.35);
-  box-shadow: 0 6px 0 rgba(90, 210, 240, 0.18), 0 12px 0 rgba(90, 210, 240, 0.12);
 }
 
 .jarvis-humanoid-hud-bl {

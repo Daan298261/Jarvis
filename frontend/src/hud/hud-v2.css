@@ -879,12 +879,12 @@ html[data-session-mode] .hud-app {
 
   .hud-home:has(.jarvis-presence-stage) > .hud-orb-zone {
     position: absolute;
-    inset: 0 0 0 var(--hud-menu-track);
+    inset: 0;
     width: auto;
     height: 100%;
     min-height: 0;
     max-height: none;
-    grid-column: 2;
+    grid-column: 1 / -1;
     grid-row: 1;
   }
 

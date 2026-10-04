@@ -6,6 +6,7 @@ export function NeuralCloudPresence({
   snapshot,
   settings,
   size = 540,
+  shapeId,
   personaVisual,
 }: NeuralPresenceProps) {
   return (
@@ -13,7 +14,7 @@ export function NeuralCloudPresence({
     <HumanoidPresence
       snapshot={snapshot}
       settings={settings}
-      shapeId="humanoid_bust"
+      shapeId={shapeId || "humanoid_bust"}
       personaVisual={personaVisual}
       size={size}
     />

@@ -10,6 +10,28 @@
   gap: 8px;
 }
 
+.named-persona-render-variants {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.named-persona-render-variants button {
+  min-height: 34px;
+  border: 1px solid rgba(103, 220, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(7, 18, 27, 0.84);
+  color: rgba(220, 242, 249, 0.68);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.named-persona-render-variants button.active {
+  border-color: var(--anzu-persona, #67dcff);
+  color: #effcff;
+  background: color-mix(in srgb, var(--anzu-persona, #67dcff) 13%, rgba(7, 18, 27, 0.9));
+}
+
 .named-persona-card-wrap {
   display: flex;
   flex-direction: column;

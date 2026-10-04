@@ -15,6 +15,9 @@ import { eyeRadarShape } from "./eyeRadar"
 import { breathLeafShape } from "./breathLeaf"
 import { starSocialShape } from "./starSocial"
 import { forgeCoreShape } from "./forgeCore"
+import { opusTideShape } from "./opusTide"
+import { settingsCloudShape } from "./settingsCloud"
+import { createMythicBShape, MYTHIC_B_SPECS } from "./mythicVariants"
 
 export const DEFAULT_PRESENCE_SHAPE_ID: PresenceShapeId = "humanoid_bust"
 
@@ -36,6 +39,9 @@ export const PROTECTED_PRESENCE_SHAPE_IDS = new Set<string>([
   "breath_leaf",
   "star_social",
   "forge_core",
+  "opus_tide",
+  "settings_cloud",
+  ...Object.keys(MYTHIC_B_SPECS).map((id) => `${id}_b`),
 ])
 
 const registry = new Map<PresenceShapeId, PresenceShapeDefinition>()
@@ -150,3 +156,27 @@ registerPresenceShape(eyeRadarShape)
 registerPresenceShape(breathLeafShape)
 registerPresenceShape(starSocialShape)
 registerPresenceShape(forgeCoreShape)
+registerPresenceShape(opusTideShape)
+registerPresenceShape(settingsCloudShape)
+
+const mythicBases: PresenceShapeDefinition[] = [
+  stormbirdShape,
+  commandFacetShape,
+  memoryRingsShape,
+  codeCubeShape,
+  serpentOrbitShape,
+  twinShieldShape,
+  oceanSwellShape,
+  waveformLettersShape,
+  cometTrailShape,
+  eyeRadarShape,
+  breathLeafShape,
+  starSocialShape,
+  forgeCoreShape,
+  opusTideShape,
+]
+
+for (const base of mythicBases) {
+  const spec = MYTHIC_B_SPECS[base.id]
+  if (spec) registerPresenceShape(createMythicBShape(base, spec))
+}

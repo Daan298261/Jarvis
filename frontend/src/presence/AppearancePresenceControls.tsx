@@ -1,4 +1,4 @@
-import { Fragment, useState, type ReactNode } from "react"
+import { Fragment, useEffect, useState, type ReactNode } from "react"
 import { Link } from "react-router-dom"
 import { VoiceProfilePicker } from "../tts/VoiceProfilePicker"
 import { HudCybersecurityModule } from "../hud/HudCybersecurityModule"
@@ -9,6 +9,7 @@ import type { PresentationSettings } from "./presenceTypes"
 
 type AppearancePresenceControlsProps = {
   settings: PresentationSettings
+  onOpenChange?: (open: boolean) => void
 }
 
 type PresenceMenu = "persona" | "voice" | "appearance" | "cybersecurity"
@@ -55,8 +56,13 @@ function panelForMenu(id: PresenceMenu, settings: PresentationSettings): ReactNo
   )
 }
 
-export function AppearancePresenceControls({ settings }: AppearancePresenceControlsProps) {
+export function AppearancePresenceControls({ settings, onOpenChange }: AppearancePresenceControlsProps) {
   const [openMenu, setOpenMenu] = useState<PresenceMenu | null>(null)
+
+  useEffect(() => {
+    onOpenChange?.(openMenu !== null)
+    return () => onOpenChange?.(false)
+  }, [onOpenChange, openMenu])
 
   function toggle(menu: PresenceMenu) {
     setOpenMenu((current) => (current === menu ? null : menu))

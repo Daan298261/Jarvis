@@ -79,7 +79,7 @@ export const PERSONA_VISUALS: Record<NamedPersonaId, {
   eir: { shapeId: "breath_leaf", orbColor: "#6EE7B7", accentColor: "#FDA4AF" },
   maia: { shapeId: "star_social", orbColor: "#FB7185", accentColor: "#F472B6" },
   vulcan: { shapeId: "forge_core", orbColor: "#EA580C", accentColor: "#DC2626" },
-  umi: { shapeId: "memory_rings", orbColor: "#7C3AED", accentColor: "#A78BFA" },
+  umi: { shapeId: "opus_tide", orbColor: "#7C3AED", accentColor: "#A78BFA" },
 }
 
 export const PERSONA_LABELS: Record<string, string> = {
