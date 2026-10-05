@@ -771,8 +771,15 @@ html[data-session-mode] .hud-app {
   box-shadow: 0 0 6px color-mix(in srgb, var(--hud-cyan) 70%, transparent);
 }
 
+.hud-icon-btn:has(.hud-setup-dot) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
 .hud-icon-btn .hud-setup-dot {
-  margin-left: 6px;
+  margin-left: 0;
   vertical-align: middle;
 }
 
