@@ -56,11 +56,12 @@ async def jarvis_env(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _mcp_runtime_hygiene_after_test():
+async def _mcp_runtime_hygiene_after_test():
     yield
     try:
         from app.tools.mcp_runtime import MCP
 
+        await MCP.close_all()
         MCP.reset_for_tests()
     except Exception:
         pass
