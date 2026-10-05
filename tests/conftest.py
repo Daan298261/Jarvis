@@ -68,6 +68,12 @@ async def _mcp_runtime_hygiene_after_test():
 
 
 @pytest.fixture(autouse=True)
+def _clock_log_isolated(tmp_path, monkeypatch):
+    """Keep the daily UTC clock log off the repo data/ dir so suite order cannot leak."""
+    monkeypatch.setattr("app.licensing.clock_log.data_dir", lambda: tmp_path)
+
+
+@pytest.fixture(autouse=True)
 def _obsidian_vault_hygiene_after_test():
     yield
     try:

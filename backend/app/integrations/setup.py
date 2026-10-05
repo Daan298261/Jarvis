@@ -203,7 +203,17 @@ def ensure_mcp_preset(preset: str) -> None:
             "enabled": True,
         },
     }
-    wanted = specs[preset]
+    if preset == "rea":
+        from ..security.rea_mcp import build_rea_mcp_server
+
+        wanted = {
+            key: value
+            for key, value in build_rea_mcp_server()[0].items()
+            if key != "id"
+        }
+        wanted["enabled"] = True
+    else:
+        wanted = specs[preset]
     settings = load_settings()
     existing = next(
         (item for item in settings.mcp_servers if item.get("preset") == preset or item.get("name") == preset),
