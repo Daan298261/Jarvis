@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import hashlib
 import json
 import logging
@@ -1118,8 +1119,6 @@ class AgentRuntime:
             used += size
         prior = list(reversed(bounded))
 
-        briefing = await weather_system_message(user_text)
-
         from ..inference.answer_routing import prepare_answer_route
         from ..inference.model_escalation import schedule_orchestrator_restore
         from ..tts.speech_safe import speech_safe
@@ -1131,10 +1130,12 @@ class AgentRuntime:
                 stored_route = str(getattr(task_row, "response_route", "") or "")
         route_kind = resolve_route_kind(user_text, stored_route=stored_route)
 
+        # Front before weather HTTP — ack/first-audible must not wait on Open-Meteo.
+        weather_task = asyncio.create_task(weather_system_message(user_text))
+
         # Lean prompt for fast-path only — vault/Supermemory compose happens after miss.
+        # Briefing is injected after the front lane when the weather task completes.
         lean_messages: list[ChatMessage] = [ChatMessage(role="system", content=OWNER_CHAT_SYSTEM), *prior]
-        if briefing:
-            lean_messages.insert(1, ChatMessage(role="system", content=briefing))
         last = prior[-1] if prior else None
         if last is None or last.role != "user" or (last.content or "").strip() != user_text:
             lean_messages.append(ChatMessage(role="user", content=user_text))
@@ -1183,6 +1184,9 @@ class AgentRuntime:
         )
         if terminal.admitted:
             note_fastpath_decision(terminal, task_id=task_id)
+            weather_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await weather_task
             await BUS.publish(
                 task_id,
                 "fastpath",
@@ -1226,6 +1230,10 @@ class AgentRuntime:
                 metrics,
             )
             return
+
+        briefing = await weather_task
+        if briefing:
+            lean_messages.insert(1, ChatMessage(role="system", content=briefing))
 
         lookup = admit_lookup_fastpath(user_text, route_kind=route_kind, briefing=briefing)
         if lookup.admitted:
