@@ -9,6 +9,7 @@ export type PersonaAppearance = {
   orb_color: string
   accent_color: string
   glow: number
+  detail: number
   animation: number
   scale: number
   specialists_auto_speak: boolean
@@ -110,6 +111,8 @@ export function personaCardSentence(mainId: string, specialistIds: string[]): st
 
 let cache: NamedPersonaState | null = null
 let selectionRevision = 0
+let appearanceRevision = 0
+let appearanceSaveController: AbortController | null = null
 const listeners = new Set<(state: NamedPersonaState | null) => void>()
 
 function publish(state: NamedPersonaState | null) {
@@ -134,6 +137,7 @@ function fallbackPersona(id: NamedPersonaId): NamedPersona {
       orb_color: visual.orbColor,
       accent_color: visual.accentColor,
       glow: 0.82,
+      detail: 0.68,
       animation: 0.72,
       scale: 1,
       specialists_auto_speak: false,
@@ -215,11 +219,35 @@ export async function savePersonaAppearance(
   id: string,
   appearance: Partial<PersonaAppearance>,
 ): Promise<NamedPersonaState> {
+  const canonicalId = canonicalizePersonaId(id)
+  const cachedPersona = cache?.personas.find((persona) => persona.id === canonicalId)
+    ?? (cache?.active.id === canonicalId ? cache.active : null)
+  // Each request carries the complete latest appearance. When a fast slider
+  // move aborts the previous request, its optimistic value is already in the
+  // cache and is therefore folded into this last-write-wins save.
+  const mergedAppearance = cachedPersona
+    ? { ...cachedPersona.appearance, ...appearance }
+    : appearance
+  const revision = ++appearanceRevision
+  const selectionAtStart = selectionRevision
+  appearanceSaveController?.abort()
+  const controller = new AbortController()
+  appearanceSaveController = controller
+  if (cache) {
+    const personas = cache.personas.map((persona) => persona.id === canonicalId
+      ? { ...persona, appearance: { ...persona.appearance, ...mergedAppearance } }
+      : persona)
+    const active = cache.active.id === canonicalId
+      ? { ...cache.active, appearance: { ...cache.active.appearance, ...mergedAppearance } }
+      : cache.active
+    publish({ ...cache, active, personas })
+  }
   const state = await api<NamedPersonaState>("/api/named-personas", {
     method: "PUT",
-    body: JSON.stringify({ id, appearance, apply: false }),
+    body: JSON.stringify({ id: canonicalId, appearance: mergedAppearance, apply: false }),
+    signal: controller.signal,
   })
-  publish(state)
+  if (revision === appearanceRevision && selectionAtStart === selectionRevision) publish(state)
   return state
 }
 

@@ -100,7 +100,13 @@ export function NamedPersonaControls() {
       setError("Named personas keep a neural voice. Windows SAPI is not a persona voice.")
       return
     }
-    await run(() => savePersonaAppearance(active.id, partial))
+    setError("")
+    try {
+      await savePersonaAppearance(active.id, partial)
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return
+      setError(err instanceof Error ? err.message : "Could not save the persona appearance.")
+    }
   }
 
   return (
@@ -305,17 +311,32 @@ export function NamedPersonaControls() {
             />
           </label>
           <label>
-            Glow
+            Brightness
             <input
               type="range"
-              min={0}
+              min={0.35}
               max={1}
               step={0.05}
               disabled={busy}
               value={appearance.glow}
-              aria-label="Persona glow"
+              aria-label="Persona brightness"
               onChange={(event) => void patch({ glow: Number(event.target.value) })}
             />
+            <output>{Math.round(appearance.glow * 100)}%</output>
+          </label>
+          <label>
+            Particle detail
+            <input
+              type="range"
+              min={0.35}
+              max={1}
+              step={0.05}
+              disabled={busy}
+              value={appearance.detail ?? 0.68}
+              aria-label="Persona particle detail"
+              onChange={(event) => void patch({ detail: Number(event.target.value) })}
+            />
+            <output>{Math.round((appearance.detail ?? 0.68) * 100)}%</output>
           </label>
           <label>
             Animation

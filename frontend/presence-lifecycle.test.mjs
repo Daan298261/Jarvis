@@ -246,7 +246,7 @@ test("persona selection activates mythic mode on the shared morphable stage", as
   assert.match(host, /resolved\.effective === "particle_bust"/)
   assert.doesNotMatch(host, /ParticleBustPresence/)
   assert.match(host, /key="morphable-presence"/)
-  assert.equal(lifecycle.PERSONA_MORPH_SECONDS, 0.22)
+  assert.equal(lifecycle.PERSONA_MORPH_SECONDS, 0.09)
 
   const humanoid = await readFile(new URL("./src/presence/renderers/HumanoidPresence.tsx", import.meta.url), "utf8")
   const stageCss = await readFile(new URL("./src/presence/renderers/presence-stage.css", import.meta.url), "utf8")
@@ -408,6 +408,21 @@ test("mythic live variants use distinct named-being silhouettes", async () => {
   assert.match(variantsSource, /base\.id === "memory_rings"/)
 })
 
+test("every mythic A and B persona shares persistent detail and brightness controls", async () => {
+  const controls = await readFile(new URL("./src/persona/NamedPersonaControls.tsx", import.meta.url), "utf8")
+  const personas = await readFile(new URL("./src/persona/namedPersonas.ts", import.meta.url), "utf8")
+  const stage = await readFile(new URL("./src/presence/renderers/MorphablePresenceStage.tsx", import.meta.url), "utf8")
+  const cloud = await readFile(new URL("./src/presence/renderers/morphableOrbCloud.ts", import.meta.url), "utf8")
+  assert.match(controls, /A · portrait cloud/)
+  assert.match(controls, /B · live gaze/)
+  assert.match(controls, /Persona brightness/)
+  assert.match(controls, /Persona particle detail/)
+  assert.match(personas, /appearance: mergedAppearance/)
+  assert.match(stage, /personaDetail\(current\.personaVisual\?\.detail\)/)
+  assert.match(stage, /system\.currentShapeId\.endsWith\("_b"\)/)
+  assert.match(cloud, /Math\.round\(42000 \* maxDensity\)/)
+})
+
 test("auto presence quality adapts with sustained thresholds and fit bounds keep safe margins", () => {
   const controller = new quality.AutoPresenceQuality()
   for (let t = 0; t <= 5000; t += 100) controller.sample(t, 33)
@@ -502,13 +517,13 @@ test("yaw-frame fit offset cancels AABB center under Three.js T*R*S", () => {
 test("presence quality changes figure, field, and stars in place without resetting morph", () => {
   const system = cloud.createMorphablePresenceSystem(0.95, material(), "humanoid_bust", 1.15)
   const initial = system.setQuality(0.95)
-  assert.deepEqual(initial, { figure: 77900, field: 14250, galaxyStars: 22800 })
+  assert.deepEqual(initial, { figure: 39900, field: 14250, galaxyStars: 22800 })
   system.setLifecycleTarget(1, { duration: 1 })
   system.tick(0.25)
   const morph = system.morphValue()
   const low = system.setQuality(0.6)
   assert.ok(morph > 0 && morph < 1)
-  assert.deepEqual(low, { figure: 49200, field: 9000, galaxyStars: 14400 })
+  assert.deepEqual(low, { figure: 25200, field: 9000, galaxyStars: 14400 })
   assert.equal(system.morphValue(), morph)
   system.dispose()
 })

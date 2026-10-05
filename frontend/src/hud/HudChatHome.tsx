@@ -155,6 +155,7 @@ export function HudChatHome() {
           orbColor: customComposition.orb_color,
           accentColor: customComposition.accent_color,
           glow: activePersona?.appearance?.glow ?? 0.7,
+          detail: activePersona?.appearance?.detail ?? 0.68,
           animation: activePersona?.appearance?.animation ?? 0.7,
           scale: activePersona?.appearance?.scale ?? 1,
         }
@@ -165,6 +166,7 @@ export function HudChatHome() {
           orbColor: activePersona?.appearance?.orb_color || effectivePersonaVisual.orbColor,
           accentColor: activePersona?.appearance?.accent_color || effectivePersonaVisual.accentColor,
           glow: activePersona?.appearance?.glow ?? 0.82,
+          detail: activePersona?.appearance?.detail ?? 0.68,
           animation: activePersona?.appearance?.animation ?? 0.72,
           scale: activePersona?.appearance?.scale ?? 1,
         }

@@ -63,6 +63,12 @@ function phaseIsEngaged(phase: PresencePhase): boolean {
   return !isRestPresencePhase(phase)
 }
 
+function personaDetail(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? THREE.MathUtils.clamp(value, 0.35, 1)
+    : 1
+}
+
 /**
  * One canvas, one orb cloud, one `uMorph`. Phase drives rest tightness ↔ winning figure
  * for every avatar that mounts this stage. Galaxy only toggles the star layer.
@@ -164,11 +170,17 @@ export function MorphablePresenceStage({
       blending: THREE.AdditiveBlending,
     })
     const density = efficient ? 0.6 : settings.performancePreset === "cinematic" ? 1.15 : 0.95
+    const qualityCeiling = settings.performancePreset === "auto" ? 1.15 : density
+    const initialDensity = THREE.MathUtils.clamp(
+      density * personaDetail(personaVisual?.detail),
+      0.35,
+      qualityCeiling,
+    )
     const initialId = shapeId || presenceShapeIdForAvatar(settings.avatarId)
     const system = createMorphablePresenceSystem(
-      density, material, initialId, settings.performancePreset === "auto" ? 1.15 : density,
+      initialDensity, material, initialId, qualityCeiling,
     )
-    system.setQuality(density)
+    system.setQuality(initialDensity)
     const initialSamples = system.sampleCounts()
     stage.dataset.presenceSamples = `${initialSamples.figure}/${initialSamples.field}/${initialSamples.galaxyStars}`
     const bust = system.bust
@@ -206,7 +218,7 @@ export function MorphablePresenceStage({
     const autoQuality = new AutoPresenceQuality()
     let autoTier = autoQuality.current
     let lastFrameSample: number | undefined
-    let appliedDensity = density
+    let appliedDensity = initialDensity
     let averageFrameInterval = 16.67
 
     const fitCurrentShape = (aspect: number) => {
@@ -266,18 +278,23 @@ export function MorphablePresenceStage({
       frame = window.requestAnimationFrame(render)
       const current = stateRef.current
       const frameMs = lastFrameSample === undefined ? 16.67 : time - lastFrameSample
+      let baseDensity = density
+      let tierChanged = false
       if (current.settings.performancePreset === "auto") {
         const tier = autoQuality.sample(time, frameMs)
-        const targetDensity = PRESENCE_QUALITY_DENSITIES[tier]
-        const tierChanged = tier !== autoTier
+        baseDensity = PRESENCE_QUALITY_DENSITIES[tier]
+        tierChanged = tier !== autoTier
         autoTier = tier
-        if (targetDensity !== appliedDensity) {
-          const counts = system.setQuality(targetDensity)
-          appliedDensity = targetDensity
-          stage.dataset.presenceSamples = `${counts.figure}/${counts.field}/${counts.galaxyStars}`
-        }
-        if (tierChanged) resize()
       }
+      const detail = personaDetail(current.personaVisual?.detail)
+      const targetDensity = THREE.MathUtils.clamp(baseDensity * detail, 0.35, qualityCeiling)
+      if (Math.abs(targetDensity - appliedDensity) > 0.001) {
+        const counts = system.setQuality(targetDensity)
+        appliedDensity = targetDensity
+        stage.dataset.presenceSamples = `${counts.figure}/${counts.field}/${counts.galaxyStars}`
+      }
+      stage.dataset.presenceDetail = detail.toFixed(2)
+      if (tierChanged) resize()
       lastFrameSample = time
       const reduced = current.settings.reducedMotion === "reduce"
         || (current.settings.reducedMotion === "system" && motionQuery.matches)
@@ -335,7 +352,10 @@ export function MorphablePresenceStage({
       const listenTarget = phase === "listening" && !reduced ? 1 : 0
       uniforms.uListen.value += (listenTarget - uniforms.uListen.value) * Math.min(1, delta * 4)
       const shapeDef = resolvePresenceShape(system.currentShapeId)
-      const appearance = resolveDotAppearance(shapeDef.appearance, visual)
+      const liveBGlow = system.currentShapeId.endsWith("_b") && typeof visual?.glow === "number"
+        ? Math.min(1.05, visual.glow * 1.18)
+        : visual?.glow
+      const appearance = resolveDotAppearance(shapeDef.appearance, { ...visual, glow: liveBGlow })
       uniforms.uGlow.value = appearance.glow
       const personaScale = visual?.scale && visual.scale > 0 ? visual.scale : 1
       bust.scale.setScalar(framingScale * personaScale)
