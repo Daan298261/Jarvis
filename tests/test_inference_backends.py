@@ -203,13 +203,16 @@ def test_expert_profile_is_the_27b_escalation_alias():
 
 
 def test_llama_cpp_command_reflects_profile_and_settings():
+    from app.inference.ram_policy import effective_fit_target_mib
+
     profile = resolve_profile("balanced")
-    args = LlamaCppBackend(_settings(port=9099, fit=True, fit_target_mib=2048)).build_args(profile)
+    settings = _settings(port=9099, fit=True, fit_target_mib=2048)
+    args = LlamaCppBackend(settings).build_args(profile)
     assert "--ctx-size" in args
     assert args[args.index("--ctx-size") + 1] == str(profile.context_size)
     assert args[args.index("--port") + 1] == "9099"
     assert args[args.index("--reasoning") + 1] == "on"
-    assert args[args.index("--fit-target") + 1] == "2048"
+    assert args[args.index("--fit-target") + 1] == str(effective_fit_target_mib(settings))
     assert "--jinja" in args
     assert args[args.index("--alias") + 1] == "Qwen3.5-9B"
     assert "--mmproj" not in args
