@@ -178,7 +178,10 @@ export function HudChatHome() {
     >
       <PinnedPersonaDock />
       <div className="jarvis-presence-controls-split">
-        <AppearancePresenceControls settings={presentation} onOpenChange={setSettingsPanelOpen} />
+        <AppearancePresenceControls
+          settings={presentation}
+          onOpenChange={(open, menu) => setSettingsPanelOpen(open && menu !== "persona")}
+        />
       </div>
       <section className="hud-orb-zone" aria-label="ANZU state">
         <PresenceHost

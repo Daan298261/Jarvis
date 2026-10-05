@@ -3,7 +3,7 @@ import type { AttentionMode, PresenceMode, PresencePhase } from "./presenceTypes
 /** RFC-0069 duration. Non-reduced rest↔figure morph. Reduced motion snaps. */
 export const LIFECYCLE_MORPH_SECONDS = 1.2
 /** Persona-to-persona changes should feel immediate without popping. */
-export const PERSONA_MORPH_SECONDS = 0.42
+export const PERSONA_MORPH_SECONDS = 0.22
 
 /**
  * RFC-0195 Decision 1 — rest tightness, locked in [0.72, 0.92].

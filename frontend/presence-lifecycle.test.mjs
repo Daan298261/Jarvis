@@ -232,22 +232,26 @@ test("persona selection activates mythic mode on the shared morphable stage", as
   const home = await readFile(new URL("./src/hud/HudChatHome.tsx", import.meta.url), "utf8")
   const settings = await readFile(new URL("./src/settings/AppearanceSettingsPane.tsx", import.meta.url), "utf8")
   const activation = await readFile(new URL("./src/persona/activateNamedPersona.ts", import.meta.url), "utf8")
+  const controls = await readFile(new URL("./src/persona/NamedPersonaControls.tsx", import.meta.url), "utf8")
   const host = await readFile(new URL("./src/presence/PresenceHost.tsx", import.meta.url), "utf8")
   assert.match(home, /presentation\.requestedPresence === "humanoid"/)
   assert.match(home, /\? "humanoid_bust"/)
   assert.match(settings, /Mythic persona A · portrait cloud/)
   assert.match(settings, /Mythic persona B · live gaze/)
   assert.match(activation, /requestedPresence: "particle_bust"/)
+  assert.match(activation, /avatarId: MYTHIC_LIVE_B_AVATAR_ID/)
   assert.match(activation, /Promise\.allSettled/)
+  assert.match(controls, /chooseRevision\.current/)
+  assert.doesNotMatch(controls, /className={`named-persona-card\$\{selected \? " active" : ""}`}[\s\S]{0,180}disabled={busy}/)
   assert.match(host, /resolved\.effective === "particle_bust"/)
   assert.doesNotMatch(host, /ParticleBustPresence/)
   assert.match(host, /key="morphable-presence"/)
-  assert.equal(lifecycle.PERSONA_MORPH_SECONDS, 0.42)
+  assert.equal(lifecycle.PERSONA_MORPH_SECONDS, 0.22)
 
   const humanoid = await readFile(new URL("./src/presence/renderers/HumanoidPresence.tsx", import.meta.url), "utf8")
   const stageCss = await readFile(new URL("./src/presence/renderers/presence-stage.css", import.meta.url), "utf8")
-  assert.match(humanoid, /jarvis-mythic-avatar-shell/)
-  assert.match(humanoid, /mythic && prepareError && personaVisual\?\.portraitUrl/)
+  assert.doesNotMatch(humanoid, /jarvis-mythic-avatar-shell/)
+  assert.match(humanoid, /Portrait sampling unavailable · using the live particle avatar/)
   assert.doesNotMatch(humanoid, /preparing \|\| prepareError/)
   assert.match(stageCss, /position: absolute;/)
   assert.match(stageCss, /overflow: hidden;/)
@@ -386,11 +390,22 @@ test("opening HUD settings morphs the live cloud without a background starfield 
   const hudCss = await readFile(new URL("./src/hud/hud-v2.css", import.meta.url), "utf8")
   const humanoidCss = await readFile(new URL("./src/presence/renderers/humanoid-presence.css", import.meta.url), "utf8")
   assert.match(home, /settingsPanelOpen \? SETTINGS_CLOUD_SHAPE_ID/)
-  assert.match(controls, /onOpenChange\?\.\(openMenu !== null\)/)
+  assert.match(controls, /onOpenChange\?\.\(openMenu !== null, openMenu\)/)
+  assert.match(home, /setSettingsPanelOpen\(open && menu !== "persona"\)/)
   assert.equal(shapes.resolvePresenceShape(variants.SETTINGS_CLOUD_SHAPE_ID).id, "settings_cloud")
   assert.match(shell, /!isChat && <HudStarfield/)
   assert.match(hudCss, /inset: 0;/)
   assert.doesNotMatch(humanoidCss, /jarvis-humanoid-hud-tl::before/)
+})
+
+test("mythic live variants use distinct named-being silhouettes", async () => {
+  const variantsSource = await readFile(new URL("./src/presence/renderers/shapes/mythicVariants.ts", import.meta.url), "utf8")
+  for (const archetype of ["stormbird", "strategist", "owl", "water_sage", "serpent", "justice",
+    "sea_giant", "bard", "messenger", "guardian", "healer", "celestial", "forge", "abyss"]) {
+    assert.match(variantsSource, new RegExp(`archetype: "${archetype}"`))
+  }
+  assert.match(variantsSource, /buildOwlLiveFigure/)
+  assert.match(variantsSource, /base\.id === "memory_rings"/)
 })
 
 test("auto presence quality adapts with sustained thresholds and fit bounds keep safe margins", () => {
