@@ -6,29 +6,28 @@ import { type NamedPersonaId } from "./namedPersonas"
 import {
   advancePersonaSetup,
   beginPersonaSetup,
-  offerPersonaSetup,
   PERSONA_TOOL_PACKS,
   restartPersonaSetup,
   skipPersonaSetup,
   usePersonaSetup,
 } from "./personaSetup"
+import "./named-persona.css"
 
-type Props = { personaId: NamedPersonaId; personaLabel: string }
+type Props = {
+  personaId: NamedPersonaId
+  personaLabel: string
+  defaultOpen?: boolean
+  onDismiss?: () => void
+}
 
-export function PersonaSetupGuide({ personaId, personaLabel }: Props) {
+export function PersonaSetupGuide({ personaId, personaLabel, defaultOpen = true, onDismiss }: Props) {
   const navigate = useNavigate()
   const [speakChatReplies] = useSpeakChatReplies()
   const progress = usePersonaSetup(personaId)
-  const [open, setOpen] = useState(progress.status === "not_started" || progress.status === "in_progress")
+  const [open, setOpen] = useState(defaultOpen)
   const spokenKey = useRef("")
   const pack = PERSONA_TOOL_PACKS[personaId]
   const currentStep = pack.steps[progress.stepIndex]
-
-  useEffect(() => {
-    if (progress.status === "not_started") {
-      offerPersonaSetup(personaId)
-    }
-  }, [personaId, progress.status])
 
   useEffect(() => {
     if (!open || progress.status !== "in_progress" || !speakChatReplies) return
@@ -47,6 +46,11 @@ export function PersonaSetupGuide({ personaId, personaLabel }: Props) {
   function resume() {
     beginPersonaSetup(personaId)
     setOpen(true)
+  }
+
+  function dismiss() {
+    setOpen(false)
+    onDismiss?.()
   }
 
   return (
@@ -85,7 +89,7 @@ export function PersonaSetupGuide({ personaId, personaLabel }: Props) {
                 <button type="button" className="btn secondary" onClick={() => advancePersonaSetup(personaId)}>
                   {progress.stepIndex === pack.steps.length - 1 ? "Mark ready" : "Next step"}
                 </button>
-                <button type="button" className="btn secondary" onClick={() => { skipPersonaSetup(personaId); setOpen(false) }}>Skip for now</button>
+                <button type="button" className="btn secondary" onClick={() => { skipPersonaSetup(personaId); dismiss() }}>Skip for now</button>
               </div>
             </>
           )}

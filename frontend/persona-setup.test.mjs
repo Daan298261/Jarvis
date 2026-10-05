@@ -5,6 +5,7 @@ import test from "node:test"
 const catalog = await readFile(new URL("./src/persona/personaSetup.ts", import.meta.url), "utf8")
 const guide = await readFile(new URL("./src/persona/PersonaSetupGuide.tsx", import.meta.url), "utf8")
 const controls = await readFile(new URL("./src/persona/NamedPersonaControls.tsx", import.meta.url), "utf8")
+const shell = await readFile(new URL("./src/hud/HudShell.tsx", import.meta.url), "utf8")
 
 const ids = ["anzu", "mestor", "nabu", "enki", "veles", "themis", "aegir", "bragi", "hermes", "heimdall", "eir", "maia", "vulcan", "umi"]
 
@@ -24,6 +25,7 @@ test("setup state supports interruption, skip, completion, and revisit", () => {
   assert.match(catalog, /advancePersonaSetup/)
   assert.match(catalog, /skipPersonaSetup/)
   assert.match(catalog, /restartPersonaSetup/)
+  assert.match(catalog, /isPersonaSetupIncomplete/)
 })
 
 test("guide keeps chat and neural speech available without losing progress", () => {
@@ -32,7 +34,24 @@ test("guide keeps chat and neural speech available without losing progress", () 
   assert.match(guide, /Skip for now/)
   assert.match(guide, /Resume setup/)
   assert.match(guide, /Run setup again/)
-  assert.match(controls, /offerPersonaSetup/)
+})
+
+test("tool pack setup is not an auto-popup on persona controls", () => {
+  assert.doesNotMatch(controls, /PersonaSetupGuide/)
+  assert.doesNotMatch(controls, /offerPersonaSetup/)
+  assert.doesNotMatch(guide, /progress\.status === "not_started" \|\| progress\.status === "in_progress"/)
+  assert.doesNotMatch(guide, /offerPersonaSetup\(personaId\)/)
+})
+
+test("top-right admin menu opens the same resumable tool pack flow", () => {
+  assert.match(shell, /Tool pack setup/)
+  assert.match(shell, /hud-admin-setup-entry/)
+  assert.match(shell, /offerPersonaSetup\(setupPersonaId\)/)
+  assert.match(shell, /PersonaSetupGuide/)
+  assert.match(shell, /setupOpen &&/)
+  assert.match(shell, /isPersonaSetupIncomplete/)
+  assert.match(shell, /hud-setup-dot/)
+  assert.match(shell, /onToolPackSetup/)
 })
 
 test("all setup destinations are internal application routes", () => {
