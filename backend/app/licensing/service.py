@@ -47,7 +47,7 @@ def _detect_clock_tamper(last_validated_at: str | None, now: datetime) -> str | 
     except Exception:
         return None
     if now + timedelta(seconds=CLOCK_SKEW_SECONDS) < previous:
-        return "System clock appears to have moved backward since last validation"
+        return CLOCK_ROLLBACK_MESSAGE
     return None
 
 

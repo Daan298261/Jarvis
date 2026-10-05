@@ -115,6 +115,23 @@ def test_empty_roots_deny_owner_path(rea_env):
     assert exc.value.detail == "roots_empty"
 
 
+def test_empty_roots_json_denies_paths_but_allows_lta_job(rea_env, monkeypatch):
+    """D1: empty REA_INVESTIGATION_INPUT_ROOTS_JSON denies owner paths; LTA extract stays allowed."""
+    monkeypatch.setenv("REA_INVESTIGATION_INPUT_ROOTS_JSON", "[]")
+    target = rea_env["tmp"] / "samples" / "app.exe"
+    target.parent.mkdir()
+    target.write_bytes(b"MZ")
+    with pytest.raises(PathNotAllowed) as denied:
+        resolve_rea_investigation_path(str(target))
+    assert denied.value.code == PATH_NOT_ALLOWED
+    assert denied.value.detail == "roots_empty"
+    extract = _write_succeeded_lta_job(rea_env["tmp"])
+    by_job = resolve_rea_investigation_path(lta_job_id="aabbccddeeff")
+    assert by_job == extract.parent.resolve()
+    nested = resolve_rea_investigation_path(str(extract / "sample.bin"))
+    assert nested == (extract / "sample.bin").resolve()
+
+
 def test_owner_path_requires_intersection(rea_env, monkeypatch):
     tmp: Path = rea_env["tmp"]
     samples = tmp / "samples"
