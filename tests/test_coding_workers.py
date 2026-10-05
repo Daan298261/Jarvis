@@ -16,6 +16,7 @@ from app.db.models import TaskEvent
 from app.db.session import SessionLocal
 from app.main import app
 from app.providers.base import ChatResult
+from app.tools.terminal import default_shell
 from sqlalchemy import select
 
 from tests.test_verification_loop import ScriptedProvider, _finished, _tool
@@ -101,7 +102,7 @@ async def test_coding_route_is_recorded_and_completed(jarvis_env):
                 ]
             ),
             ChatResult(content="Updated the json."),
-            ChatResult(tool_calls=[_tool("terminal", {"command": "echo config-updated", "shell": "bash"}, "c2")]),
+            ChatResult(tool_calls=[_tool("terminal", {"command": "echo config-updated", "shell": default_shell()}, "c2")]),
             ChatResult(content="Ran update command."),
             ChatResult(tool_calls=[_tool("verify_code", {"path": str(tmp)}, "c3")]),
             ChatResult(content="verify_code ok."),

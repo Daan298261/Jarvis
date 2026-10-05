@@ -13,7 +13,8 @@ def test_parse_table_accepts_tsv_csv_and_json():
     assert _parse_table('[{"name":"Ada","n":1},{"name":"Bob","n":2}]')[0] == ["name", "n"]
 
 
-def test_office_com_is_not_claimed_on_linux():
+def test_office_com_is_not_claimed_on_linux(monkeypatch):
+    monkeypatch.setattr("app.tools.office.platform.system", lambda: "Linux")
     assert office_com_available() is False
 
 
@@ -90,7 +91,8 @@ async def test_office_respects_sandbox(tmp_path):
     assert "outside allowed directories" in result.error
 
 
-async def test_office_com_backend_errors_without_windows(tmp_path):
+async def test_office_com_backend_errors_without_windows(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.tools.office.platform.system", lambda: "Linux")
     tool = _tool(tmp_path)
     result = await tool.execute(app="word", action="info", path=str(tmp_path / "n.docx"), backend="com")
     assert result.success is False

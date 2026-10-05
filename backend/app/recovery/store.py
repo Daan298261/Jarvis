@@ -33,7 +33,10 @@ def reset_recovery_db() -> None:
         if path.exists():
             path.unlink()
         _DB_PATH = path.parent / "journal.db"
-        _init_schema(connect())
+        # connect() initializes the schema. Close its handle before callers
+        # remove or reconfigure the database (Windows otherwise locks it).
+        conn = connect()
+        conn.close()
 
 
 def connect() -> sqlite3.Connection:
