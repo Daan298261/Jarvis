@@ -25,9 +25,8 @@ def _utc_now() -> str:
 
 
 def _load_run(run_id: str) -> dict[str, Any] | None:
-    conn = connect()
-    row = conn.execute("SELECT * FROM rollback_runs WHERE id = ?", (run_id,)).fetchone()
-    conn.close()
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM rollback_runs WHERE id = ?", (run_id,)).fetchone()
     if not row:
         return None
     return _row_to_run(row)
@@ -58,24 +57,23 @@ def _persist_run(
     evidence: dict[str, Any] | None = None,
     stage_log: list[dict[str, Any]] | None = None,
 ) -> None:
-    conn = connect()
-    fields = ["updated_at = ?", "phase = ?"]
-    values: list[Any] = [_utc_now(), phase]
-    if terminal_status is not None:
-        fields.append("terminal_status = ?")
-        values.append(terminal_status)
-    if plan is not None:
-        fields.append("plan_json = ?")
-        values.append(json.dumps(plan, sort_keys=True))
-    if evidence is not None:
-        fields.append("evidence_json = ?")
-        values.append(json.dumps(evidence, sort_keys=True))
-    if stage_log is not None:
-        fields.append("stage_log_json = ?")
-        values.append(json.dumps(stage_log, sort_keys=True))
-    values.append(run_id)
-    conn.execute(f"UPDATE rollback_runs SET {', '.join(fields)} WHERE id = ?", values)
-    conn.close()
+    with connect() as conn:
+        fields = ["updated_at = ?", "phase = ?"]
+        values: list[Any] = [_utc_now(), phase]
+        if terminal_status is not None:
+            fields.append("terminal_status = ?")
+            values.append(terminal_status)
+        if plan is not None:
+            fields.append("plan_json = ?")
+            values.append(json.dumps(plan, sort_keys=True))
+        if evidence is not None:
+            fields.append("evidence_json = ?")
+            values.append(json.dumps(evidence, sort_keys=True))
+        if stage_log is not None:
+            fields.append("stage_log_json = ?")
+            values.append(json.dumps(stage_log, sort_keys=True))
+        values.append(run_id)
+        conn.execute(f"UPDATE rollback_runs SET {', '.join(fields)} WHERE id = ?", values)
 
 
 def _append_stage(run: dict[str, Any], stage: str, detail: dict[str, Any]) -> list[dict[str, Any]]:
@@ -161,29 +159,28 @@ def start_rollback_run(
     plan = build_rollback_plan(checkpoint_id, forward_replay=forward_replay)
     run_id = str(uuid.uuid4())
     created = _utc_now()
-    conn = connect()
-    conn.execute(
-        """
-        INSERT INTO rollback_runs (
-            id, created_at, updated_at, phase, terminal_status,
-            target_checkpoint_id, target_seq, forward_replay, plan_json, evidence_json, stage_log_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            run_id,
-            created,
-            created,
-            RollbackPhase.PLAN.value,
-            None,
-            checkpoint_id,
-            plan["target_journal_seq"],
-            1 if forward_replay else 0,
-            json.dumps(plan, sort_keys=True),
-            json.dumps({"pre_rollback_snapshot": full_snapshot()}, sort_keys=True),
-            json.dumps([{"at": created, "stage": "PLAN", "detail": {"actor": actor}}]),
-        ),
-    )
-    conn.close()
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO rollback_runs (
+                id, created_at, updated_at, phase, terminal_status,
+                target_checkpoint_id, target_seq, forward_replay, plan_json, evidence_json, stage_log_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                created,
+                created,
+                RollbackPhase.PLAN.value,
+                None,
+                checkpoint_id,
+                plan["target_journal_seq"],
+                1 if forward_replay else 0,
+                json.dumps(plan, sort_keys=True),
+                json.dumps({"pre_rollback_snapshot": full_snapshot()}, sort_keys=True),
+                json.dumps([{"at": created, "stage": "PLAN", "detail": {"actor": actor}}]),
+            ),
+        )
     return get_rollback_status(run_id) or {}
 
 
@@ -359,12 +356,11 @@ def _snapshots_equivalent(target: dict[str, Any], current: dict[str, Any]) -> bo
 
 
 def get_rollback_status(run_id: str | None = None) -> dict[str, Any] | None:
-    conn = connect()
-    if run_id:
-        row = conn.execute("SELECT * FROM rollback_runs WHERE id = ?", (run_id,)).fetchone()
-    else:
-        row = conn.execute("SELECT * FROM rollback_runs ORDER BY created_at DESC LIMIT 1").fetchone()
-    conn.close()
+    with connect() as conn:
+        if run_id:
+            row = conn.execute("SELECT * FROM rollback_runs WHERE id = ?", (run_id,)).fetchone()
+        else:
+            row = conn.execute("SELECT * FROM rollback_runs ORDER BY created_at DESC LIMIT 1").fetchone()
     return _row_to_run(row) if row else None
 
 
