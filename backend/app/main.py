@@ -243,6 +243,12 @@ async def startup() -> None:
         logging.debug("Decision-tier hook registration skipped", exc_info=True)
     logs_dir().mkdir(exist_ok=True)
     try:
+        from .runtime.elevation import log_elevation_startup_status
+
+        log_elevation_startup_status()
+    except Exception:
+        logging.debug("Elevation startup status skipped", exc_info=True)
+    try:
         from .installer.license_sidecar import apply_pending_sidecar_license
 
         apply_pending_sidecar_license()
