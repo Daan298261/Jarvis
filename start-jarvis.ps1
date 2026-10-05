@@ -390,15 +390,16 @@ if ($Wait -and ($Prompt -or $PromptFile)) {
 }
 elseif (-not $NoBrowser) {
     if (-not $OpenPath.StartsWith("/")) { $OpenPath = "/" }
-    $portalUrl = "http://127.0.0.1:4780$OpenPath"
-    Start-Process $portalUrl
-    Write-Host "Opened web portal: $portalUrl" -ForegroundColor Green
     $desktopExe = Join-Path $Root "desktop\Jarvis.exe"
-    if ($Desktop -and (Test-Path $desktopExe)) {
+    if (Test-Path $desktopExe) {
         $env:JARVIS_ROOT = $Root
         $env:JARVIS_OPEN_PATH = $OpenPath
         Start-Process -FilePath $desktopExe -WorkingDirectory $Root
-        Write-Host "Also opened Jarvis Desktop (optional native shell; same backend)." -ForegroundColor DarkGray
+        Write-Host "Opened ANZU Desktop. The local web portal remains available at http://127.0.0.1:4780." -ForegroundColor Green
+    } else {
+        $portalUrl = "http://127.0.0.1:4780$OpenPath"
+        Start-Process $portalUrl
+        Write-Host "Opened web portal: $portalUrl" -ForegroundColor Green
     }
 }
 

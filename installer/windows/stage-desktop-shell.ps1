@@ -56,6 +56,7 @@ if (-not (Test-Path $releaseExe)) {
 
 New-Item -ItemType Directory -Force -Path $PayloadDir | Out-Null
 Copy-Item -Force $releaseExe (Join-Path $PayloadDir "Jarvis.exe")
+Copy-Item -Force $releaseExe (Join-Path $PayloadDir "AnzuManager.exe")
 
 $sidecarSrc = Join-Path $Root "frontend\src-tauri\sidecars\jarvis-backend"
 if (-not (Test-Path $sidecarSrc)) {
