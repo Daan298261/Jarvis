@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from app.runtime import elevation as elev
 
 
@@ -38,3 +40,53 @@ def test_prompt_windows_uac_uses_runas(monkeypatch):
     assert "powershell" in str(captured["file"]).lower()
     assert "-RegisterLogonTask" in str(captured["params"])
     assert "-NoBrowser" in str(captured["params"])
+
+
+def test_logon_task_registered_caches_schtasks_probe(monkeypatch):
+    elev.invalidate_logon_task_cache()
+    calls = {"n": 0}
+
+    def fake_query():
+        calls["n"] += 1
+        return True
+
+    monkeypatch.setattr(elev.os, "name", "nt")
+    monkeypatch.setattr(elev, "_query_logon_task_registered", fake_query)
+    monkeypatch.setattr(elev, "_LOGON_TASK_CACHE_TTL_S", 60.0)
+
+    assert elev.logon_task_registered() is True
+    assert elev.logon_task_registered() is True
+    assert calls["n"] == 1
+
+    elev.invalidate_logon_task_cache()
+    assert elev.logon_task_registered() is True
+    assert calls["n"] == 2
+
+    assert elev.logon_task_registered(force=True) is True
+    assert calls["n"] == 3
+
+
+@pytest.mark.asyncio
+async def test_api_health_does_not_invoke_schtasks_on_repeat(monkeypatch):
+    """Cold-start polls /api/health often; schtasks must not run every time."""
+    from app.main import health
+
+    elev.invalidate_logon_task_cache()
+    calls = {"n": 0}
+
+    def fake_query():
+        calls["n"] += 1
+        return False
+
+    monkeypatch.setattr(elev.os, "name", "nt")
+    monkeypatch.setattr(elev, "_query_logon_task_registered", fake_query)
+    monkeypatch.setattr(elev, "_LOGON_TASK_CACHE_TTL_S", 60.0)
+    monkeypatch.setattr(elev, "is_elevated", lambda: False)
+
+    first = await health()
+    second = await health()
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert first["logon_task_registered"] is False
+    assert second["logon_task_registered"] is False
+    assert calls["n"] == 1
