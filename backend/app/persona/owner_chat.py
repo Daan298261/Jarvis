@@ -33,6 +33,7 @@ from ..agent.front_responder import (
     record_front_timing,
     resolve_front_model_id,
     run_two_lane_chat,
+    spawn_context_expand_keep_busy,
     terminal_front_completes_turn,
 )
 from ..agent.planning import requests_agent_tools
@@ -482,19 +483,8 @@ async def stream_owner_chat(
     worker_model = str(getattr(MANAGER.provider, "model", "") or profile.name)
 
     async def _speak_context_expand(before: int, after: int) -> None:
-        front = await generate_front_reply(
-            cleaned,
-            history=history,
-            settings=settings,
-            turn_started=turn_started,
-        )
-        if front.text and is_safe_front_speech(front.action, front.text):
-            await publish_owner_text(
-                front.text,
-                source="owner_chat",
-                speak=True,
-                user_prompt=cleaned,
-            )
+        # Lane notice is cheap; never await a second front regen here — that
+        # blocked the worker and double-spoke after early TTS (#536 follow-up).
         detail = model_lane_event_payload(
             lane="system",
             model=resolve_front_model_id(settings),
@@ -507,6 +497,20 @@ async def stream_owner_chat(
             detail,
             stage="model",
         )
+        if stream_speak_offset(stream_key) > 0:
+            return
+
+        async def _on_spoken(text: str) -> None:
+            if stream_speak_offset(stream_key) > 0:
+                return
+            await publish_owner_text(
+                text,
+                source="owner_chat",
+                speak=True,
+                user_prompt=cleaned,
+            )
+
+        spawn_context_expand_keep_busy(on_spoken=_on_spoken)
 
     ctx_meta = await ensure_context_for_messages(
         worker_messages,

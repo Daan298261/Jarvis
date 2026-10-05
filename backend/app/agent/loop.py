@@ -146,6 +146,7 @@ from .front_responder import (
     last_front_timing,
     note_front_audio,
     run_two_lane_chat,
+    spawn_context_expand_keep_busy,
     worker_required,
 )
 from .task_fastpath import (
@@ -913,6 +914,9 @@ class AgentRuntime:
             return False
         if not front or not is_safe_front_speech(front.action, front.text):
             return False
+        # Already past early TTS (or a prior speak) — do not re-speak on expand/retry.
+        if stream_speak_offset(stream_key) > 0:
+            return False
         spoken = front.text if front.text.endswith((".", "!", "?")) else f"{front.text}."
         early_id = maybe_enqueue_streaming_social_tts(
             spoken,
@@ -1347,20 +1351,8 @@ class AgentRuntime:
             from ..agent.front_responder import resolve_front_model_id
 
             async def _expand_notice(before: int, after: int) -> None:
-                front = await generate_front_reply(
-                    user_text,
-                    history=prior,
-                    settings=settings,
-                    turn_started=turn_started or model_started,
-                )
-                if front.text:
-                    await self._speak_front_reply(
-                        task_id,
-                        front,
-                        prompt=prompt,
-                        stream_key=stream_key,
-                        turn_started=turn_started or model_started,
-                    )
+                # Publish the resize notice only; do not await a second front
+                # regen (blocked the worker) or re-speak after early TTS.
                 await BUS.publish(
                     task_id,
                     "model_lane",
@@ -1373,6 +1365,20 @@ class AgentRuntime:
                     stage="model",
                     persist=False,
                 )
+                if stream_speak_offset(stream_key) > 0:
+                    return
+
+                async def _on_spoken(text: str) -> None:
+                    if stream_speak_offset(stream_key) > 0:
+                        return
+                    await publish_owner_text(
+                        text,
+                        source="task_chat",
+                        speak=True,
+                        user_prompt=prompt,
+                    )
+
+                spawn_context_expand_keep_busy(on_spoken=_on_spoken)
 
             await ensure_context_for_messages(
                 messages,
