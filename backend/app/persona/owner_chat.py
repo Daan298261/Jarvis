@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import uuid
 from collections import defaultdict
@@ -283,14 +284,19 @@ async def stream_owner_chat(
 
     settings = load_settings()
     profile = resolve_profile(settings.inference.profile)
-    briefing = await weather_system_message(cleaned)
-    history = await hydrate_conversation(cid)
     turn_started = time.perf_counter()
     stream_key = f"owner:{cid}"
     clear_stream_speak_state(stream_key)
     early_tts_ids: list[str] = []
     front_spoken_early = False
     front_text_emitted = False
+
+    # Front-first: do not await weather HTTP or DB hydrate before first text/TTS.
+    # Memory-resident turns are enough for the tiny front lane; worker prep awaits
+    # the deferred tasks below (RFC-0117 / agent-loop front-before-retrieval).
+    history = list(_conversations.get(cid, []))
+    hydrate_task = asyncio.create_task(hydrate_conversation(cid))
+    weather_task = asyncio.create_task(weather_system_message(cleaned))
 
     prefetched_front = await generate_front_reply(
         cleaned,
@@ -408,6 +414,12 @@ async def stream_owner_chat(
                     if early_tts_ids and not delivery.get("tts_id")
                     else delivery.get("tts_id")
                 )
+                hydrate_task.cancel()
+                weather_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await hydrate_task
+                with contextlib.suppress(asyncio.CancelledError):
+                    await weather_task
                 yield {
                     "type": "done",
                     "conversation_id": cid,
@@ -422,6 +434,9 @@ async def stream_owner_chat(
                 }
                 return
             # Fall through to worker so compose_turn_working_set runs with vault hits.
+
+    history = await hydrate_task
+    briefing = await weather_task
 
     if not MANAGER.provider or not MANAGER.state.loaded:
         try:
