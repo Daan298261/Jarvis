@@ -197,13 +197,21 @@ class MCPRuntime:
         name = spec.get("remote_name") or spec["tool"]["name"]
         server_id = self._server_id(server)
         last_error = ""
+        from ..security.rea_paths import PathNotAllowed, is_rea_mcp_server, sanitize_rea_mcp_arguments
+
+        call_args = arguments or {}
+        if is_rea_mcp_server(server):
+            try:
+                call_args = sanitize_rea_mcp_arguments(call_args)
+            except PathNotAllowed as exc:
+                return ToolResult(False, "", error=exc.code, data=exc.as_dict())
         for attempt in range(2):
             try:
                 async with self._lock:
                     if attempt:
                         await self._close_session(server_id)
                     session = await self._connect(server)
-                    result = await session.call_tool(name, arguments or {})
+                    result = await session.call_tool(name, call_args or {})
                 is_error = bool(getattr(result, "is_error", False) or getattr(result, "isError", False))
                 return ToolResult(not is_error, str(getattr(result, "content", result)))
             except Exception as exc:

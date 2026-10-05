@@ -13,6 +13,7 @@ from ..security.lta_archive import (
     get_lta_job,
     list_lta_jobs,
     start_protected_folder_open,
+    succeeded_lta_extract_root,
 )
 from ..security.lta_errors import LtaError, PathDenied
 
@@ -73,6 +74,24 @@ async def lta_job_detail(job_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Unknown LTA job") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/jobs/{job_id}/extract-root")
+async def lta_extract_root(job_id: str) -> dict[str, Any]:
+    """RFC-0200: post-extract path after RFC-0198 open succeeded. No second unlock."""
+    try:
+        root = succeeded_lta_extract_root(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Unknown LTA job") from exc
+    except PathDenied as exc:
+        raise _http_for_lta(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "job_id": job_id,
+        "extract_root": str(root),
+        "persona_bind_hint": dict(THEMIS_PERSONA_HINT),
+    }
 
 
 @router.get("/certs/candidates")

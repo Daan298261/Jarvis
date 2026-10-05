@@ -99,6 +99,20 @@ CATALOG: tuple[PermissionSpec, ...] = (
         gated="hexstrike",
     ),
     PermissionSpec(
+        "cyber.rea_mcp",
+        "cyber",
+        "REA reverse-engineering MCP",
+        "Enable the local REA (rea-agents) MCP so Jarvis can reverse-engineer owner-named paths under approved investigation roots.",
+        "ask",
+    ),
+    PermissionSpec(
+        "cyber.rea_new_root",
+        "cyber",
+        "REA investigation root",
+        "Allow a new directory as a REA investigation root. First use per root needs this approval.",
+        "ask",
+    ),
+    PermissionSpec(
         "blue.static_rules",
         "blue",
         "Blue team — static rules",

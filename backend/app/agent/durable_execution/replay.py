@@ -23,6 +23,7 @@ _TOOL_DEFAULTS: dict[str, tuple[EffectClass, ReplayPolicy]] = {
     "hexstrike_operator": (EffectClass.EXTERNAL, ReplayPolicy.MANUAL_RECOVERY),
     "hexstrike_defensive": (EffectClass.EXTERNAL, ReplayPolicy.MANUAL_RECOVERY),
     "lta_protected_folder": (EffectClass.EXTERNAL, ReplayPolicy.MANUAL_RECOVERY),
+    "rea_investigate": (EffectClass.EXTERNAL, ReplayPolicy.MANUAL_RECOVERY),
     "code_worker": (EffectClass.EXTERNAL, ReplayPolicy.KEYED),
     "mcp_call": (EffectClass.EXTERNAL, ReplayPolicy.MANUAL_RECOVERY),
 }
