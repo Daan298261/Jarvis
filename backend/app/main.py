@@ -414,6 +414,10 @@ async def shutdown() -> None:
     except Exception:
         logging.debug("Crucix shutdown skipped", exc_info=True)
     try:
+        await MCP.close_all()
+    except Exception:
+        logging.debug("MCP shutdown skipped", exc_info=True)
+    try:
         from .db.session import dispose_database_engine
 
         await dispose_database_engine()
