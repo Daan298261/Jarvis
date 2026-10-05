@@ -131,14 +131,59 @@ _DEFENSIVE_OPERATOR_KEYWORDS = (
     "cve-",
     "defensive action",
     "run defense",
+    "protected folder",
+    "lta archive",
+    "lta protected",
 )
+
+# RFC-0198 product intent: "open this protected folder: <path>" / "unlock the LTA archive at <path>"
+# Parsed with bounded string finds (no nested whitespace regex) to avoid ReDoS.
+_LTA_PATH_MARKERS = (
+    "protected folder",
+    "lta archive",
+    "lta folder",
+    "lta bundle",
+)
+_MAX_PLANNING_TEXT = 4000
 
 
 def is_defensive_operator_prompt(text: str) -> bool:
     lowered = (text or "").strip().lower()
     if not lowered:
         return False
+    if lta_protected_folder_path(text):
+        return True
     return any(token in lowered for token in _DEFENSIVE_OPERATOR_KEYWORDS)
+
+
+def lta_protected_folder_path(prompt: str) -> str | None:
+    """Extract owner path from an LTA open/unlock utterance, if present."""
+    text = latest_user_utterance(prompt or "").strip()
+    if not text or len(text) > _MAX_PLANNING_TEXT:
+        return None
+    lowered = text.lower()
+    marker_end = -1
+    for marker in _LTA_PATH_MARKERS:
+        pos = lowered.find(marker)
+        if pos != -1:
+            marker_end = pos + len(marker)
+            break
+    if marker_end < 0:
+        return None
+    head = lowered[:marker_end]
+    if "open" not in head and "unlock" not in head:
+        return None
+    rest = text[marker_end:].strip()
+    if rest[:2].lower() == "at":
+        rest = rest[2:].strip()
+    rest = rest.lstrip(":").strip().strip("\"'`")
+    rest = rest.rstrip(".!?").strip()
+    if not rest or len(rest) > _MAX_PLANNING_TEXT:
+        return None
+    # Reject obvious PEM paste attempts — redirect to local cert/vault picker.
+    if "BEGIN " in rest.upper() and "PRIVATE KEY" in rest.upper():
+        return None
+    return rest
 
 _WEATHER_RE = re.compile(
     r"\b(weather|forecast|temperature|temperatures|raining|rain|umbrella|humidity|windy)\b",
@@ -214,17 +259,21 @@ def follow_up_stays_conversation(follow: str | None, *, security_role: str = "")
     return action_hits == 0
 
 
-_PATH_OR_URL = re.compile(r"(?i)(https?://\S+|[a-z]:[\\/]\S*|\\\\\S+|(?<!\w)/(?:[\w.-]+/)+[\w.-]*)")
+_PATH_OR_URL = re.compile(
+    r"(?i)(https?://\S{1,2048}|[a-z]:[\\/]\S{0,2048}|\\\\\S{1,2048}|(?<!\w)/(?:[\w.-]{1,64}/){1,32}[\w.-]{1,256})"
+)
 _APP_INTENT = re.compile(
-    r"(?i)^\s*(?:(?:please|can you|could you|jarvis|anzu)[,\s]+)*"
-    r"(?:open|start|launch|fire up|close|quit|exit|kill)\s+(?:up\s+)?(?:the\s+)?(?:app\s+)?"
+    r"(?i)^\s{0,16}(?:(?:please|can you|could you|jarvis|anzu)[,\s]{1,16}){0,4}"
+    r"(?:open|start|launch|fire up|close|quit|exit|kill)\s{1,8}(?:up\s{1,8})?(?:the\s{1,8})?(?:app\s{1,8})?"
     r"(?!(?:a|an|new)\s|file\b|folder\b|directory\b|document\b|website\b|webpage\b|page\b|browser\b|tab\b|url\b|https?:|www\.|[a-z]:[\\/])"
-    r"((?:[\w.+&'-]+)(?:\s+[\w.+&'-]+){0,3}?)"
-    r"(?:\s+(?:for me|please|now|app))*\s*(?:(?:,|\band\b|\bthen\b).*)?[.!?]?\s*$"
+    r"((?:[\w.+&'-]+)(?:\s{1,8}[\w.+&'-]+){0,3}?)"
+    r"(?:\s{1,8}(?:for me|please|now|app)){0,3}\s{0,8}(?:(?:,|\band\b|\bthen\b).{0,240})?[.!?]?\s{0,8}$"
 )
 _CLOSE_APP_VERB = re.compile(r"(?i)\b(close|quit|exit|kill)\b")
-_COMPOUND_AFTER_APP = re.compile(r"(?i)(?:,|\band\b|\bthen\b)\s+\S")
-_CODING_SESSION = re.compile(r"(?i)\b(coding session|start coding|code review|pair program|work on (?:the|my) (?:repo|code|project))\b")
+_COMPOUND_AFTER_APP = re.compile(r"(?i)(?:,|\band\b|\bthen\b)\s{1,8}\S")
+_CODING_SESSION = re.compile(
+    r"(?i)\b(coding session|start coding|code review|pair program|work on (?:the|my) (?:repo|code|project))\b"
+)
 
 
 def intent_text(prompt: str) -> str:
@@ -233,9 +282,12 @@ def intent_text(prompt: str) -> str:
     A temp folder named ``pytest-of-owner`` or a repo path must not turn a file task
     into software engineering.
     """
-    text = _PATH_OR_URL.sub(" ", latest_user_utterance(prompt or ""))
+    utterance = latest_user_utterance(prompt or "")
+    if len(utterance) > _MAX_PLANNING_TEXT:
+        utterance = utterance[:_MAX_PLANNING_TEXT]
+    text = _PATH_OR_URL.sub(" ", utterance)
     # "Do not install anything" is a safety hedge, not a shell/install job.
-    return re.sub(r"(?i)\b(?:do not|don't|do not)\s+install\b[^.!?]*", " ", text)
+    return re.sub(r"(?i)\b(?:do not|don't|do not)\s+install\b[^.!?]{0,240}", " ", text)
 
 
 def _first_sentence(text: str) -> str:
@@ -252,12 +304,12 @@ def _remainder_after_first_sentence(text: str) -> str:
 
 
 _APP_HEDGE_FOLLOWUP = re.compile(
-    r"(?i)^\s*(?:(?:"
-    r"if(?:\s+\w+){0,6}\s+already\s+(?:running|open)[^.!?]*"
-    r"|(?:please\s+)?(?:just\s+)?(?:say so|tell me)[^.!?]*"
-    r"|(?:and\s+)?(?:then\s+)?stop[^.!?]*"
-    r"|(?:do not|don't)\s+install[^.!?]*"
-    r")(?:[.!?]|\s)+)+$"
+    r"(?i)^\s{0,16}(?:(?:"
+    r"if(?:\s{1,8}\w+){0,6}\s{1,8}already\s{1,8}(?:running|open)[^.!?]{0,200}"
+    r"|(?:please\s{1,8})?(?:just\s{1,8})?(?:say so|tell me)[^.!?]{0,200}"
+    r"|(?:and\s{1,8})?(?:then\s{1,8})?stop[^.!?]{0,200}"
+    r"|(?:do not|don't)\s{1,8}install[^.!?]{0,200}"
+    r")(?:[.!?]|\s){1,8}){1,6}$"
 )
 
 
@@ -283,6 +335,8 @@ _NOT_AN_APP = frozenset(
 def app_control_target(prompt: str) -> str | None:
     """Program name for 'open steam' / 'close snipping tool' style requests."""
     text = latest_user_utterance(prompt or "").strip()
+    if len(text) > _MAX_PLANNING_TEXT:
+        return None
     match = _APP_INTENT.match(_first_sentence(text)) or _APP_INTENT.match(text)
     if not match:
         return None
@@ -297,6 +351,8 @@ def app_control_target(prompt: str) -> str | None:
 def simple_app_control(prompt: str) -> tuple[str, str] | None:
     """Single open/close with no extra work — safe to run without the language model."""
     text = latest_user_utterance(prompt or "").strip()
+    if len(text) > _MAX_PLANNING_TEXT:
+        return None
     first = _first_sentence(text)
     match = _APP_INTENT.match(first) or _APP_INTENT.match(text)
     if not match:
@@ -314,16 +370,16 @@ def simple_app_control(prompt: str) -> tuple[str, str] | None:
 
 
 _SIMPLE_WRITE = re.compile(
-    r"(?i)^\s*(?:(?:please|can you|could you|jarvis|anzu)[,\s]+)*"
-    r"(?:write|save|put)\s+[\"'](.{1,400}?)[\"']\s+(?:to|into|in)\s+"
-    r"(.+?\.(?:txt|md))"
-    r"(?:\s+(?:for me|please|now))*\s*[.!?]?\s*$"
+    r"(?i)^\s{0,16}(?:(?:please|can you|could you|jarvis|anzu)[,\s]{1,16}){0,4}"
+    r"(?:write|save|put)\s{1,8}[\"'](.{1,400}?)[\"']\s{1,8}(?:to|into|in)\s{1,8}"
+    r"(.{1,400}?\.(?:txt|md))"
+    r"(?:\s{1,8}(?:for me|please|now)){0,3}\s{0,8}[.!?]?\s{0,8}$"
 )
 _SIMPLE_READ = re.compile(
-    r"(?i)^\s*(?:(?:please|can you|could you|jarvis|anzu)[,\s]+)*"
-    r"(?:read|show(?:\s+me)?)\s+(?:the\s+)?(?:file\s+)?"
-    r"(.+?\.(?:txt|md))"
-    r"(?:\s+(?:to me|aloud|please|now))*\s*[.!?]?\s*$"
+    r"(?i)^\s{0,16}(?:(?:please|can you|could you|jarvis|anzu)[,\s]{1,16}){0,4}"
+    r"(?:read|show(?:\s{1,8}me)?)\s{1,8}(?:the\s{1,8})?(?:file\s{1,8})?"
+    r"(.{1,400}?\.(?:txt|md))"
+    r"(?:\s{1,8}(?:to me|aloud|please|now)){0,3}\s{0,8}[.!?]?\s{0,8}$"
 )
 _UNSAFE_FILE_PATH = re.compile(r"(?i)(?:\.\.|system32|windows[/\\]system)")
 
@@ -354,6 +410,9 @@ def simple_file_control(prompt: str) -> tuple[str, str, str] | None:
 def classify_task(prompt: str) -> str:
     if _CODING_SESSION.search(intent_text(prompt)):
         return "software engineering"
+    if lta_protected_folder_path(prompt):
+        # Blue/defensive LTA unlock — managed task with tool exposure (Themis-led).
+        return "mixed"
     if app_control_target(prompt):
         return "windows gui"
     if simple_file_control(prompt):
@@ -421,6 +480,8 @@ def route_request(prompt: str) -> RequestRoute:
     """Route before creating a durable agent loop or exposing its tool catalog."""
     if requests_agent_tools(prompt):
         return RequestRoute(MANAGED_TASK, classify_task(prompt))
+    if lta_protected_folder_path(prompt):
+        return RequestRoute(MANAGED_TASK, "mixed")
     if simple_app_control(prompt) or simple_file_control(prompt):
         return RequestRoute(MANAGED_TASK, classify_task(prompt))
     if is_weather_query(prompt):

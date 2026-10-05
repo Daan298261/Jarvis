@@ -64,10 +64,18 @@ export const particleVertexShader = `
     float m = mix(morph01, lifecycle01, step(0.5, uRestRemap));
     vec3 p = mix(aPos, bPos, m);
     vPortraitColor = mix(aColor, bColor, m);
+    // Idle breathing loosens the same live cloud and lets it settle again.
+    // The anatomical silhouette remains readable; this is not a texture pulse.
+    float restPulse = uBreath * (1.0 - m) * uMotion;
+    float pulseAngle = aSeed * 6.2831853;
+    p.xy *= 1.0 + restPulse * 0.045;
+    p.x += cos(pulseAngle) * restPulse * 0.032;
+    p.y += sin(pulseAngle) * restPulse * 0.026;
+    p.z += sin(pulseAngle * 1.7) * restPulse * 0.028;
     float flight = sin(m * 3.14159265);
     p.x += sin(aSeed * 19.0 + m * 4.0) * flight * 0.22 * uMotion;
     p.z += cos(aSeed * 23.0 + m * 3.0) * flight * 0.3 * uMotion;
-    p.y += uBreath * smoothstep(-1.0, 0.15, p.y);
+    p.y += restPulse * 0.018 * smoothstep(-1.0, 0.15, p.y);
     float flow = mix(aFlow, bFlow, m);
     float size = mix(aSize, bSize, m);
     float t = uTime;
@@ -323,6 +331,9 @@ export function buildRestSilhouette(
       light: orb.light * (0.74 + restT * 0.2),
       flow: Math.min(0.72, orb.flow + loosen * (0.16 + crown * 0.2)),
       size: orb.size * (1 + loosen * (0.08 + crown * 0.1)),
+      // Portrait-backed personas must keep their authored cyan/gold identity at
+      // rest instead of collapsing to the generic persona palette.
+      color: orb.color,
     }
   }
   return out
@@ -476,9 +487,11 @@ export function createMorphablePresenceSystem(
   // The flowing environment stays intact but no longer outnumbers the bust.
   // Galaxy stars are a separate layer (presenceBudgets) and do not reduce these.
   const maxDensity = THREE.MathUtils.clamp(qualityCeiling, 0.01, 1.15)
-  const figureBudget = Math.round(82000 * maxDensity)
+  // An airy 48k ceiling keeps facial landmarks crisp while avoiding the
+  // 94k-point rebuild hitch that made persona changes feel frozen.
+  const figureBudget = Math.round(42000 * maxDensity)
   const fieldBudget = Math.round(15000 * maxDensity)
-  let qualityDensity = THREE.MathUtils.clamp(density, Math.min(0.6, maxDensity), maxDensity)
+  let qualityDensity = THREE.MathUtils.clamp(density, Math.min(0.35, maxDensity), maxDensity)
   let shape = resolvePresenceShape(initialShapeId)
   let figureOrbs = resampleOrbs(shape.buildFigure(maxDensity), figureBudget)
   let restOrbs = buildRestSilhouette(figureOrbs)
@@ -790,7 +803,7 @@ export function createMorphablePresenceSystem(
       galaxyStars.material.uniforms.uMotion.value = motion
     },
     setQuality(density) {
-      qualityDensity = THREE.MathUtils.clamp(Number.isFinite(density) ? density : 0.95, Math.min(0.6, maxDensity), maxDensity)
+      qualityDensity = THREE.MathUtils.clamp(Number.isFinite(density) ? density : 0.95, Math.min(0.35, maxDensity), maxDensity)
       applyQuality()
       return system.sampleCounts()
     },

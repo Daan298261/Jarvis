@@ -62,6 +62,7 @@ class PersonaRow:
     speaking_rate: float
     pitch: float
     glow: float = 0.70
+    detail: float = 0.68
     animation: float = 0.60
     scale: float = 1.0
     phrase: str = ""
@@ -80,6 +81,7 @@ def _row(
     phrase: str,
     *,
     glow: float = 0.70,
+    detail: float = 0.68,
     animation: float = 0.60,
     scale: float = 1.0,
 ) -> PersonaRow:
@@ -94,6 +96,7 @@ def _row(
         speaking_rate=rate,
         pitch=pitch,
         glow=glow,
+        detail=detail,
         animation=animation,
         scale=scale,
         phrase=phrase,
@@ -118,7 +121,7 @@ ROSTER: tuple[PersonaRow, ...] = (
         "umi",
         "Umi",
         "Main assistant — Opus-style reasoning, tools and Pocket TTS voice",
-        "memory_rings",
+        "opus_tide",
         "pocket_tts_alba_en_v1",
         "#7C3AED",
         "#A78BFA",
@@ -183,6 +186,7 @@ def roster_appearance(row: PersonaRow) -> PersonaAppearanceSettings:
         orb_color="",
         accent_color="",
         glow=row.glow,
+        detail=row.detail,
         animation=row.animation,
         scale=row.scale,
         specialists_auto_speak=False,
@@ -391,7 +395,7 @@ def update_appearance(raw_id: str, patch: dict | None, *, reset: bool = False) -
             )
         appearance.voice_profile_id = cleaned
     try:
-        for key in ("pitch", "speaking_rate", "volume", "glow", "animation", "scale"):
+        for key in ("pitch", "speaking_rate", "volume", "glow", "detail", "animation", "scale"):
             if key in data and data[key] is not None:
                 setattr(appearance, key, float(data[key]))
     except (ValidationError, ValueError) as exc:
@@ -451,6 +455,7 @@ def _persona_payload(
             "orb_color": appearance.orb_color or row.orb,
             "accent_color": appearance.accent_color or row.accent,
             "glow": appearance.glow,
+            "detail": appearance.detail,
             "animation": appearance.animation,
             "scale": appearance.scale,
             "specialists_auto_speak": appearance.specialists_auto_speak,

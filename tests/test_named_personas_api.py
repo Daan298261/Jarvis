@@ -39,13 +39,15 @@ async def test_appearance_update_does_not_reapply_active(persona_api_env):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.put(
             "/api/named-personas",
-            json={"id": "anzu", "apply": False, "appearance": {"pitch": 2}},
+            json={"id": "anzu", "apply": False, "appearance": {"pitch": 2, "detail": 0.6, "glow": 0.9}},
         )
     assert response.status_code == 200
     body = response.json()
     assert body["active"]["id"] == "anzu"
     anzu = next(row for row in body["personas"] if row["id"] == "anzu")
     assert anzu["appearance"]["pitch"] == 2
+    assert anzu["appearance"]["detail"] == 0.6
+    assert anzu["appearance"]["glow"] == 0.9
 
 
 @pytest.mark.asyncio

@@ -66,6 +66,8 @@ DEFAULT_PERSONA_BINDS: dict[str, dict[str, Any]] = {
 BLUE_MODE_TOOLS: tuple[str, ...] = (
     "hexstrike_operator",
     "hexstrike_defensive",
+    "lta_protected_folder",
+    "rea_investigate",
     "filesystem",
     "terminal",
     "python",

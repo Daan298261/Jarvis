@@ -6,9 +6,8 @@ from .store import connect
 
 
 def prune_config() -> dict[str, int]:
-    conn = connect()
-    row = conn.execute("SELECT detail_json FROM prune_audit ORDER BY id DESC LIMIT 1").fetchone()
-    conn.close()
+    with connect() as conn:
+        conn.execute("SELECT detail_json FROM prune_audit ORDER BY id DESC LIMIT 1").fetchone()
     return {"default_retain_journal_entries": 5000}
 
 

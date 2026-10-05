@@ -97,10 +97,10 @@ Specs-only:
 
 Implement follow-up:
 
-- [ ] Windows cert store + PKCS#7 decrypt + 7z extract pipeline
-- [ ] Daybreak/job streaming + audit without secret leakage
-- [ ] Deny paths outside allowed_directories
-- [ ] Unit tests with **synthetic** keys generated in test temp dir only
+- [x] Windows cert store + PKCS#7 decrypt + 7z extract pipeline
+- [x] Daybreak/job streaming + audit without secret leakage
+- [x] Deny paths outside allowed_directories
+- [x] Unit tests with **synthetic** keys generated in test temp dir only
 - [ ] blue.re spike files if Taco approves next wave
 - [ ] **Desktop soak**: owner manifest + owner cert → extract listing in Daybreak
 
@@ -124,3 +124,4 @@ Implement follow-up:
 
 - Authorized recovery tooling only; aligns with defensive owner use (Themis-led UX).
 - Cloud VM cannot run Windows cert store or desktop soak.
+- See [RFC-0200](0200-rea-mcp-local-investigation.md) for REA MCP on post-extract paths.

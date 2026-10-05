@@ -19,6 +19,7 @@ import { galaxyFigureShapeId, isGalaxyPresenceEffective } from "../presence/gala
 import { supportsHumanoidRuntime } from "../presence/renderers/humanoidRuntime"
 import { resolvePresenceShapeId } from "../presence/resolvePresenceShapeId"
 import type { PresencePhase } from "../presence/presenceTypes"
+import { SETTINGS_CLOUD_SHAPE_ID } from "../presence/mythicPersonaVariant"
 
 const MOOD_COPY: Record<OrbMood, { label: string; detail: string }> = {
   idle: { label: "Ready", detail: "Local intelligence standing by" },
@@ -72,14 +73,16 @@ export function HudChatHome() {
   const customPresence = useCustomPresence()
   const { hexSuiteExpanded, setHexSuiteExpanded } = useHudOverlay()
   const wasHexStrike = useRef(false)
-  const [moodState, setMoodState] = useState<{ recording: boolean; speaking: boolean; task: Task | null }>({
+  const [settingsPanelOpen, setSettingsPanelOpen] = useState(false)
+  const [moodState, setMoodState] = useState<{ recording: boolean; speaking: boolean; task: Task | null; backendUnavailable: boolean }>({
     recording: false,
     speaking: false,
     task: null,
+    backendUnavailable: false,
   })
 
   const onMoodChange = useCallback(
-    (opts: { recording: boolean; speaking: boolean; task: Task | null }) => setMoodState(opts),
+    (opts: { recording: boolean; speaking: boolean; task: Task | null; backendUnavailable: boolean }) => setMoodState(opts),
     [],
   )
 
@@ -96,7 +99,7 @@ export function HudChatHome() {
   const mood = deriveOrbMood(moodState.task, {
     recording: moodState.recording,
     speaking: moodState.speaking,
-    systemDegraded: moodState.task?.status === "failed" || approvalWaiting,
+    systemDegraded: moodState.backendUnavailable || moodState.task?.status === "failed" || approvalWaiting,
     pendingApproval: approvalWaiting,
   })
   const snapshot = derivePresenceSnapshot({
@@ -104,7 +107,7 @@ export function HudChatHome() {
     recording: moodState.recording,
     speaking: moodState.speaking,
     pendingApproval: approvalWaiting,
-    systemDegraded: false,
+    systemDegraded: moodState.backendUnavailable,
   })
   const activePersona = namedPersonas?.active
   const personaShape = activePersona?.presence_shape_id || undefined
@@ -127,13 +130,14 @@ export function HudChatHome() {
   const presenceSettings = hexStrikeActive
     ? { ...presentation, requestedPresence: "humanoid" as const }
     : presentation
-  const shapeId = galaxyFigureShapeId({
+  const personaStageShapeId = galaxyFigureShapeId({
     requestedPresence: presenceSettings.requestedPresence,
     resolvedShapeId,
     suiteActive: hexStrikeActive,
     customPresetActive: Boolean(customPresence.activeShapeId),
     personaId: activePersona?.id,
   })
+  const shapeId = settingsPanelOpen ? SETTINGS_CLOUD_SHAPE_ID : personaStageShapeId
   const galaxyEffective = isGalaxyPresenceEffective({
     requestedPresence: presentation.requestedPresence,
     suiteOverride: hexStrikeActive,
@@ -151,6 +155,7 @@ export function HudChatHome() {
           orbColor: customComposition.orb_color,
           accentColor: customComposition.accent_color,
           glow: activePersona?.appearance?.glow ?? 0.7,
+          detail: activePersona?.appearance?.detail ?? 0.68,
           animation: activePersona?.appearance?.animation ?? 0.7,
           scale: activePersona?.appearance?.scale ?? 1,
         }
@@ -161,6 +166,7 @@ export function HudChatHome() {
           orbColor: activePersona?.appearance?.orb_color || effectivePersonaVisual.orbColor,
           accentColor: activePersona?.appearance?.accent_color || effectivePersonaVisual.accentColor,
           glow: activePersona?.appearance?.glow ?? 0.82,
+          detail: activePersona?.appearance?.detail ?? 0.68,
           animation: activePersona?.appearance?.animation ?? 0.72,
           scale: activePersona?.appearance?.scale ?? 1,
         }
@@ -174,7 +180,10 @@ export function HudChatHome() {
     >
       <PinnedPersonaDock />
       <div className="jarvis-presence-controls-split">
-        <AppearancePresenceControls settings={presentation} />
+        <AppearancePresenceControls
+          settings={presentation}
+          onOpenChange={(open, menu) => setSettingsPanelOpen(open && menu !== "persona")}
+        />
       </div>
       <section className="hud-orb-zone" aria-label="ANZU state">
         <PresenceHost
@@ -186,12 +195,14 @@ export function HudChatHome() {
         />
         <div className="hud-orb-caption" aria-live="polite">
           <span className={`hud-orb-state${snapshot.phase === "alert" || snapshot.phase === "error" || snapshot.phase === "approval" ? " alert" : ""}`}>
-            {presenceLabel(snapshot.phase, copy.label, hexStrikeActive)}
+            {moodState.backendUnavailable ? "Offline" : presenceLabel(snapshot.phase, copy.label, hexStrikeActive)}
           </span>
           <span className="hud-orb-detail">
             {hexStrikeActive
               ? "HexStrike cybersecurity suite"
-              : taskDetail(moodState.task, mood, threadActive, approvalWaiting)}
+              : moodState.backendUnavailable
+                ? "Reconnecting to the local backend"
+                : taskDetail(moodState.task, mood, threadActive, approvalWaiting)}
           </span>
           {cardSentence && <span className="hud-orb-detail hud-persona-sentence">{cardSentence}</span>}
         </div>

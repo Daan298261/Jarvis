@@ -207,6 +207,9 @@ def test_elevation_snapshot_has_pid():
     assert snap["logon_task_registered"] in {True, False}
     assert "logon_task_hint" in snap
     assert "needs_uac" in snap
-    if not snap["logon_task_registered"]:
+    assert "elevation_degraded" in snap
+    assert "limited_features" in snap
+    assert "run_mode" in snap
+    if snap.get("platform") == "nt" and not snap["logon_task_registered"]:
         assert "RegisterLogonTask" not in str(snap["logon_task_hint"])
-        assert "nothing to type" in str(snap["logon_task_hint"]).lower() or "approve" in str(snap["logon_task_hint"]).lower()
+        assert "nothing to type" in str(snap["logon_task_hint"]).lower() or "allow full pc control" in str(snap["logon_task_hint"]).lower()

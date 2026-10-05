@@ -17,9 +17,9 @@ from app.config import AppSettings
 async def _database_engine_hygiene_after_test():
     """Close pooled aiosqlite workers before pytest closes the test event loop."""
     yield
-    from app.db.session import ENGINE
+    from app.db.session import dispose_database_engine
 
-    await ENGINE.dispose()
+    await dispose_database_engine()
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ async def jarvis_env(tmp_path, monkeypatch):
     from app.db import session as session_mod
 
     db_path = tmp_path / "jarvis.db"
-    session_mod.configure_database(path=db_path)
+    await session_mod.configure_database(path=db_path)
     await session_mod.init_db()
 
     settings = AppSettings(
@@ -56,14 +56,21 @@ async def jarvis_env(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _mcp_runtime_hygiene_after_test():
+async def _mcp_runtime_hygiene_after_test():
     yield
     try:
         from app.tools.mcp_runtime import MCP
 
+        await MCP.close_all()
         MCP.reset_for_tests()
     except Exception:
         pass
+
+
+@pytest.fixture(autouse=True)
+def _clock_log_isolated(tmp_path, monkeypatch):
+    """Keep the daily UTC clock log off the repo data/ dir so suite order cannot leak."""
+    monkeypatch.setattr("app.licensing.clock_log.data_dir", lambda: tmp_path)
 
 
 @pytest.fixture(autouse=True)

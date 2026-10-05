@@ -9,6 +9,7 @@ export type PersonaAppearance = {
   orb_color: string
   accent_color: string
   glow: number
+  detail: number
   animation: number
   scale: number
   specialists_auto_speak: boolean
@@ -79,7 +80,7 @@ export const PERSONA_VISUALS: Record<NamedPersonaId, {
   eir: { shapeId: "breath_leaf", orbColor: "#6EE7B7", accentColor: "#FDA4AF" },
   maia: { shapeId: "star_social", orbColor: "#FB7185", accentColor: "#F472B6" },
   vulcan: { shapeId: "forge_core", orbColor: "#EA580C", accentColor: "#DC2626" },
-  umi: { shapeId: "memory_rings", orbColor: "#7C3AED", accentColor: "#A78BFA" },
+  umi: { shapeId: "opus_tide", orbColor: "#7C3AED", accentColor: "#A78BFA" },
 }
 
 export const PERSONA_LABELS: Record<string, string> = {
@@ -110,11 +111,49 @@ export function personaCardSentence(mainId: string, specialistIds: string[]): st
 
 let cache: NamedPersonaState | null = null
 let selectionRevision = 0
+let appearanceRevision = 0
+let appearanceSaveController: AbortController | null = null
 const listeners = new Set<(state: NamedPersonaState | null) => void>()
 
 function publish(state: NamedPersonaState | null) {
   cache = state
   listeners.forEach((listener) => listener(state))
+}
+
+function fallbackPersona(id: NamedPersonaId): NamedPersona {
+  const visual = PERSONA_VISUALS[id]
+  return {
+    id,
+    label: PERSONA_LABELS[id],
+    role: "",
+    presence_shape_id: visual.shapeId,
+    voice_profile_id: "",
+    default_colors: { orb: visual.orbColor, accent: visual.accentColor },
+    appearance: {
+      voice_profile_id: "",
+      pitch: 0,
+      speaking_rate: 1,
+      volume: 1,
+      orb_color: visual.orbColor,
+      accent_color: visual.accentColor,
+      glow: 0.82,
+      detail: 0.68,
+      animation: 0.72,
+      scale: 1,
+      specialists_auto_speak: false,
+    },
+  }
+}
+
+function fallbackState(activeId: NamedPersonaId): NamedPersonaState {
+  const personas = ROSTER_IDS.map(fallbackPersona)
+  return {
+    active: personas.find((persona) => persona.id === activeId) ?? personas[0],
+    personas,
+    default_id: "anzu",
+    pinned_ids: [],
+    max_pinned: 5,
+  }
 }
 
 export async function loadNamedPersonas(): Promise<NamedPersonaState> {
@@ -129,15 +168,34 @@ export async function loadNamedPersonas(): Promise<NamedPersonaState> {
 export async function selectNamedPersona(id: string): Promise<NamedPersonaState> {
   const previous = cache
   const canonicalId = canonicalizePersonaId(id)
+  const knownId = ROSTER_IDS.find((personaId) => personaId === canonicalId)
+  if (!knownId) throw new Error(`Unknown persona: ${id}`)
   const selected = previous?.personas.find((persona) => persona.id === canonicalId)
+    ?? fallbackPersona(knownId)
+  const optimistic = previous ?? fallbackState(knownId)
   const revision = ++selectionRevision
-  if (previous && selected) publish({ ...previous, active: selected })
+  // The figure must respond on the same click even while the local API is
+  // starting. The server response can enrich voice/configuration afterwards.
+  publish({ ...optimistic, active: selected })
   // A 409 is intentionally allowed to reach activateNamedPersona, which
   // installs the required neural pack and retries without losing this visual.
-  const state = await api<NamedPersonaState>("/api/named-personas", {
-    method: "PUT",
-    body: JSON.stringify({ id: canonicalId }),
-  })
+  const controller = new AbortController()
+  const deadline = globalThis.setTimeout(() => controller.abort(), 8000)
+  let state: NamedPersonaState
+  try {
+    state = await api<NamedPersonaState>("/api/named-personas", {
+      method: "PUT",
+      body: JSON.stringify({ id: canonicalId }),
+      signal: controller.signal,
+    })
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("Persona changed locally; Jarvis did not confirm the saved persona in time.")
+    }
+    throw error
+  } finally {
+    globalThis.clearTimeout(deadline)
+  }
   if (revision === selectionRevision) publish(state)
   return state
 }
@@ -161,11 +219,35 @@ export async function savePersonaAppearance(
   id: string,
   appearance: Partial<PersonaAppearance>,
 ): Promise<NamedPersonaState> {
+  const canonicalId = canonicalizePersonaId(id)
+  const cachedPersona = cache?.personas.find((persona) => persona.id === canonicalId)
+    ?? (cache?.active.id === canonicalId ? cache.active : null)
+  // Each request carries the complete latest appearance. When a fast slider
+  // move aborts the previous request, its optimistic value is already in the
+  // cache and is therefore folded into this last-write-wins save.
+  const mergedAppearance = cachedPersona
+    ? { ...cachedPersona.appearance, ...appearance }
+    : appearance
+  const revision = ++appearanceRevision
+  const selectionAtStart = selectionRevision
+  appearanceSaveController?.abort()
+  const controller = new AbortController()
+  appearanceSaveController = controller
+  if (cache) {
+    const personas = cache.personas.map((persona) => persona.id === canonicalId
+      ? { ...persona, appearance: { ...persona.appearance, ...mergedAppearance } }
+      : persona)
+    const active = cache.active.id === canonicalId
+      ? { ...cache.active, appearance: { ...cache.active.appearance, ...mergedAppearance } }
+      : cache.active
+    publish({ ...cache, active, personas })
+  }
   const state = await api<NamedPersonaState>("/api/named-personas", {
     method: "PUT",
-    body: JSON.stringify({ id, appearance, apply: false }),
+    body: JSON.stringify({ id: canonicalId, appearance: mergedAppearance, apply: false }),
+    signal: controller.signal,
   })
-  publish(state)
+  if (revision === appearanceRevision && selectionAtStart === selectionRevision) publish(state)
   return state
 }
 

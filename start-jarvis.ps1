@@ -68,7 +68,53 @@ function Test-LogonTaskRegistered {
     return ($LASTEXITCODE -eq 0)
 }
 
+function Test-JarvisBackendHealthy {
+    try {
+        $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:4780/api/health" -TimeoutSec 3
+        return ($response.StatusCode -eq 200)
+    } catch {
+        return $false
+    }
+}
+
+function Start-JarvisViaLogonTask {
+    # Prefer the one-time highest-privileges logon task so later starts elevate
+    # without a UAC prompt. Never automate or click through the secure desktop.
+    if ($env:JARVIS_SKIP_ELEVATION_PROMPT -eq "1") { return $false }
+    if ($Prompt -or $PromptFile -or $PrivateKey) { return $false }
+    if (-not (Test-LogonTaskRegistered)) { return $false }
+    Write-Host "Elevated logon task JarvisElevatedBackend is registered; relaunching with highest privileges (no UAC prompt)." -ForegroundColor Cyan
+    # Release the startup mutex so the elevated copy can acquire it.
+    Release-StartupLock
+    cmd /c "schtasks /Run /TN JarvisElevatedBackend >NUL 2>&1" | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "schtasks /Run failed (exit $LASTEXITCODE); continuing as standard user." -ForegroundColor Yellow
+        try {
+            $script:startupLockAcquired = $startupMutex.WaitOne([TimeSpan]::FromMinutes(8))
+        } catch [System.Threading.AbandonedMutexException] {
+            $script:startupLockAcquired = $true
+        }
+        return $false
+    }
+    for ($i = 0; $i -lt 40; $i++) {
+        Start-Sleep -Milliseconds 500
+        if (Test-JarvisBackendHealthy) {
+            Write-Host "Elevated Jarvis is healthy on :4780; this standard-user starter will exit." -ForegroundColor Green
+            return $true
+        }
+    }
+    Write-Host "Elevated task did not become healthy in time; continuing as standard user (degraded)." -ForegroundColor Yellow
+    try {
+        $script:startupLockAcquired = $startupMutex.WaitOne([TimeSpan]::FromMinutes(8))
+    } catch [System.Threading.AbandonedMutexException] {
+        $script:startupLockAcquired = $true
+    }
+    return $false
+}
+
 function Start-ElevatedJarvisCopy {
+    # Explicit full-control path only (RegisterLogonTask / tray). Normal start
+    # must not auto-prompt UAC or exit when the owner declines.
     if ($env:JARVIS_SKIP_ELEVATION_PROMPT -eq "1") { return $false }
     # Task/prompt launches keep their own arguments and run in this process.
     if ($Prompt -or $PromptFile -or $PrivateKey) { return $false }
@@ -174,17 +220,19 @@ if ($RegisterLogonTask) {
 
 $elevated = Test-CurrentProcessElevated
 if (-not $elevated -and -not $RegisterLogonTask) {
+    # Prefer registered highest-privileges logon task (no UAC). Otherwise keep
+    # running as standard user — never exit just because elevation was denied.
     try {
-        if (Start-ElevatedJarvisCopy) {
-            Write-Host "Jarvis startup handed to the elevated process."
-            Release-StartupLock
+        if (Start-JarvisViaLogonTask) {
+            Write-Host "Jarvis startup handed to the elevated logon task."
             exit 0
         }
     } catch {
-        Write-Host "Jarvis will keep running with standard permissions until Windows grants administrator." -ForegroundColor Yellow
+        Write-Host "Logon-task relaunch failed; continuing as standard user." -ForegroundColor Yellow
     }
+    Write-Host "Jarvis is starting without administrator. Full PC control features are limited until you use Allow full PC control." -ForegroundColor Yellow
 }
-Write-Host ("Backend elevation: " + $(if ($elevated) { "administrator" } else { "standard user (Windows asks for administrator; nothing to type)" }))
+Write-Host ("Backend elevation: " + $(if ($elevated) { "administrator" } else { "standard user (degraded; no auto-UAC on start)" }))
 
 Write-Step "Verifying dependencies"
 $venvPython = Join-Path $Root ".venv\Scripts\python.exe"
@@ -275,15 +323,6 @@ if ($LanAccess) {
     $env:JARVIS_BIND_HOST = $bindHost
 }
 $log = Join-Path $Root "logs\backend.log"
-
-function Test-JarvisBackendHealthy {
-    try {
-        $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:4780/api/health" -TimeoutSec 3
-        return ($response.StatusCode -eq 200)
-    } catch {
-        return $false
-    }
-}
 
 $adoptExistingBackend = Test-JarvisBackendHealthy
 if ($adoptExistingBackend) {
@@ -390,15 +429,16 @@ if ($Wait -and ($Prompt -or $PromptFile)) {
 }
 elseif (-not $NoBrowser) {
     if (-not $OpenPath.StartsWith("/")) { $OpenPath = "/" }
-    $portalUrl = "http://127.0.0.1:4780$OpenPath"
-    Start-Process $portalUrl
-    Write-Host "Opened web portal: $portalUrl" -ForegroundColor Green
     $desktopExe = Join-Path $Root "desktop\Jarvis.exe"
-    if ($Desktop -and (Test-Path $desktopExe)) {
+    if (Test-Path $desktopExe) {
         $env:JARVIS_ROOT = $Root
         $env:JARVIS_OPEN_PATH = $OpenPath
         Start-Process -FilePath $desktopExe -WorkingDirectory $Root
-        Write-Host "Also opened Jarvis Desktop (optional native shell; same backend)." -ForegroundColor DarkGray
+        Write-Host "Opened ANZU Desktop. The local web portal remains available at http://127.0.0.1:4780." -ForegroundColor Green
+    } else {
+        $portalUrl = "http://127.0.0.1:4780$OpenPath"
+        Start-Process $portalUrl
+        Write-Host "Opened web portal: $portalUrl" -ForegroundColor Green
     }
 }
 

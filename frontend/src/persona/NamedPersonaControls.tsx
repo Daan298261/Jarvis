@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { loadVoiceProfileCatalog, type VoiceProfileCatalog } from "../tts/voiceProfiles"
 import { activateNamedPersona } from "./activateNamedPersona"
 import {
@@ -12,17 +12,25 @@ import {
   type PersonaAppearance,
 } from "./namedPersonas"
 import { SpecialistShapeMark } from "./SpecialistShapeMark"
+import { updatePresentation, usePresentationSettings } from "../presence/presentationSettings"
+import {
+  MYTHIC_LIVE_B_AVATAR_ID,
+  MYTHIC_PORTRAIT_A_AVATAR_ID,
+  usesMythicLiveVariantB,
+} from "../presence/mythicPersonaVariant"
 import "./named-persona.css"
 
 const SYSTEM_VOICE = "windows_natural_en_v1"
 
 export function NamedPersonaControls() {
   const state = useNamedPersonas()
+  const presentation = usePresentationSettings()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const [progress, setProgress] = useState("")
   const [pendingId, setPendingId] = useState<string | null>(null)
   const [voiceCatalog, setVoiceCatalog] = useState<VoiceProfileCatalog | null>(null)
+  const chooseRevision = useRef(0)
   const active = state?.active
   const appearance = active?.appearance
   const options = state?.personas?.length
@@ -47,6 +55,7 @@ export function NamedPersonaControls() {
   }, [])
 
   async function choose(id: string) {
+    const revision = ++chooseRevision.current
     setBusy(true)
     setPendingId(id)
     setError("")
@@ -55,11 +64,15 @@ export function NamedPersonaControls() {
       await activateNamedPersona(id, { onProgress: setProgress })
       void loadVoiceProfileCatalog().then(setVoiceCatalog).catch(() => undefined)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update the named persona.")
+      if (revision === chooseRevision.current) {
+        setError(err instanceof Error ? err.message : "Could not update the named persona.")
+      }
     } finally {
-      setPendingId(null)
-      setProgress("")
-      setBusy(false)
+      if (revision === chooseRevision.current) {
+        setPendingId(null)
+        setProgress("")
+        setBusy(false)
+      }
     }
   }
 
@@ -83,7 +96,13 @@ export function NamedPersonaControls() {
       setError("Named personas keep a neural voice. Windows SAPI is not a persona voice.")
       return
     }
-    await run(() => savePersonaAppearance(active.id, partial))
+    setError("")
+    try {
+      await savePersonaAppearance(active.id, partial)
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return
+      setError(err instanceof Error ? err.message : "Could not save the persona appearance.")
+    }
   }
 
   return (
@@ -92,7 +111,6 @@ export function NamedPersonaControls() {
         Named persona
         <select
           aria-label="Named persona"
-          disabled={busy}
           value={pendingId || active?.id || "anzu"}
           onChange={(event) => {
             const id = event.target.value
@@ -106,6 +124,34 @@ export function NamedPersonaControls() {
           ))}
         </select>
       </label>
+      <div className="named-persona-render-variants" role="group" aria-label="Mythic avatar version">
+        <button
+          type="button"
+          className={!usesMythicLiveVariantB(presentation.avatarId) ? "active" : ""}
+          aria-pressed={!usesMythicLiveVariantB(presentation.avatarId)}
+          disabled={busy}
+          onClick={() => void run(() => updatePresentation({
+            shell: "hud",
+            requestedPresence: "particle_bust",
+            avatarId: MYTHIC_PORTRAIT_A_AVATAR_ID,
+          }))}
+        >
+          A · portrait cloud
+        </button>
+        <button
+          type="button"
+          className={usesMythicLiveVariantB(presentation.avatarId) ? "active" : ""}
+          aria-pressed={usesMythicLiveVariantB(presentation.avatarId)}
+          disabled={busy}
+          onClick={() => void run(() => updatePresentation({
+            shell: "hud",
+            requestedPresence: "particle_bust",
+            avatarId: MYTHIC_LIVE_B_AVATAR_ID,
+          }))}
+        >
+          B · live gaze
+        </button>
+      </div>
       <div className="named-persona-roster" role="group" aria-label="Named persona avatars">
         {options.map((persona) => {
           const selected = persona.id === (pendingId || active?.id || "anzu")
@@ -119,7 +165,6 @@ export function NamedPersonaControls() {
                 className={`named-persona-card${selected ? " active" : ""}`}
                 aria-pressed={selected}
                 title={persona.role || `${persona.label} persona`}
-                disabled={busy}
                 onClick={() => void choose(persona.id)}
               >
                 <SpecialistShapeMark
@@ -255,17 +300,32 @@ export function NamedPersonaControls() {
             />
           </label>
           <label>
-            Glow
+            Brightness
             <input
               type="range"
-              min={0}
+              min={0.35}
               max={1}
               step={0.05}
               disabled={busy}
               value={appearance.glow}
-              aria-label="Persona glow"
+              aria-label="Persona brightness"
               onChange={(event) => void patch({ glow: Number(event.target.value) })}
             />
+            <output>{Math.round(appearance.glow * 100)}%</output>
+          </label>
+          <label>
+            Particle detail
+            <input
+              type="range"
+              min={0.35}
+              max={1}
+              step={0.05}
+              disabled={busy}
+              value={appearance.detail ?? 0.68}
+              aria-label="Persona particle detail"
+              onChange={(event) => void patch({ detail: Number(event.target.value) })}
+            />
+            <output>{Math.round((appearance.detail ?? 0.68) * 100)}%</output>
           </label>
           <label>
             Animation

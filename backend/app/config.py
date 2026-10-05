@@ -295,6 +295,19 @@ class HexStrikeSettings(BaseModel):
     port: int = Field(default=8888, ge=1, le=65535)
 
 
+class ReaSettings(BaseModel):
+    """RFC-0200 local REA MCP (pinned rea-agents). Disabled until owner approval."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    enabled: bool = False
+    package_version: str = Field(default="3.2.1", min_length=1, max_length=32)
+    investigation_roots: list[str] = Field(default_factory=list)
+    # Upstream process/browser scenario envs stay off unless the owner opts in.
+    process_capture_enabled: bool = False
+    browser_scenario_enabled: bool = False
+
+
 class IdentityRecognitionSettings(BaseModel):
     """Explicit, local-only biometric identity matching. Disabled by default."""
 
@@ -333,6 +346,7 @@ class PersonaAppearanceSettings(BaseModel):
     orb_color: str = ""
     accent_color: str = ""
     glow: float = Field(default=0.70, ge=0, le=1)
+    detail: float = Field(default=0.68, ge=0.35, le=1.0)
     animation: float = Field(default=0.60, ge=0, le=1)
     scale: float = Field(default=1.0, ge=0.5, le=2.0)
     specialists_auto_speak: bool = False
@@ -423,6 +437,7 @@ class AppSettings(BaseModel):
     identity_recognition: IdentityRecognitionSettings = Field(default_factory=IdentityRecognitionSettings)
     tts: TtsSettings = Field(default_factory=TtsSettings)
     hexstrike: HexStrikeSettings = Field(default_factory=HexStrikeSettings)
+    rea: ReaSettings = Field(default_factory=ReaSettings)
     knowledge_vault: KnowledgeVaultSettings = Field(default_factory=KnowledgeVaultSettings)
     supermemory: SupermemorySettings = Field(default_factory=SupermemorySettings)
     crucix: CrucixSettings = Field(default_factory=CrucixSettings)
