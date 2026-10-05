@@ -12,8 +12,6 @@ import {
   type PersonaAppearance,
 } from "./namedPersonas"
 import { SpecialistShapeMark } from "./SpecialistShapeMark"
-import { PersonaSetupGuide } from "./PersonaSetupGuide"
-import { offerPersonaSetup } from "./personaSetup"
 import { updatePresentation, usePresentationSettings } from "../presence/presentationSettings"
 import {
   MYTHIC_LIVE_B_AVATAR_ID,
@@ -35,7 +33,6 @@ export function NamedPersonaControls() {
   const chooseRevision = useRef(0)
   const active = state?.active
   const appearance = active?.appearance
-  const currentPersonaId = (pendingId || active?.id || "anzu") as (typeof ROSTER_IDS)[number]
   const options = state?.personas?.length
     ? state.personas
     : ROSTER_IDS.map((id) => ({
@@ -65,7 +62,6 @@ export function NamedPersonaControls() {
     setProgress("")
     try {
       await activateNamedPersona(id, { onProgress: setProgress })
-      if (ROSTER_IDS.includes(id as (typeof ROSTER_IDS)[number])) offerPersonaSetup(id as (typeof ROSTER_IDS)[number])
       void loadVoiceProfileCatalog().then(setVoiceCatalog).catch(() => undefined)
     } catch (err) {
       if (revision === chooseRevision.current) {
@@ -128,13 +124,6 @@ export function NamedPersonaControls() {
           ))}
         </select>
       </label>
-      {ROSTER_IDS.includes(currentPersonaId) && (
-        <PersonaSetupGuide
-          key={currentPersonaId}
-          personaId={currentPersonaId}
-          personaLabel={active?.id === currentPersonaId ? active.label : PERSONA_LABELS[currentPersonaId]}
-        />
-      )}
       <div className="named-persona-render-variants" role="group" aria-label="Mythic avatar version">
         <button
           type="button"

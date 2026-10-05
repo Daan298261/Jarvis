@@ -223,6 +223,10 @@ export function offerPersonaSetup(id: NamedPersonaId): PersonaSetupProgress {
   return current.status === "not_started" ? save(id, "in_progress", 0) : current
 }
 
+export function isPersonaSetupIncomplete(progress: PersonaSetupProgress): boolean {
+  return progress.status !== "complete"
+}
+
 export function advancePersonaSetup(id: NamedPersonaId): PersonaSetupProgress {
   const current = readPersonaSetup(id)
   const last = PERSONA_TOOL_PACKS[id].steps.length - 1
@@ -242,6 +246,7 @@ export function restartPersonaSetup(id: NamedPersonaId): PersonaSetupProgress {
 export function usePersonaSetup(id: NamedPersonaId): PersonaSetupProgress {
   const [progress, setProgress] = useState(() => readPersonaSetup(id))
   useEffect(() => {
+    setProgress(readPersonaSetup(id))
     const onChanged = (event: Event) => {
       const detail = (event as CustomEvent<{ id: NamedPersonaId; progress: PersonaSetupProgress }>).detail
       if (detail?.id === id) setProgress(detail.progress)
