@@ -21,6 +21,7 @@ from app.agent.tool_retrieval import suggest_tools_for_prompt
 from app.inference.complexity_scorer import score_question_complexity
 from app.tools.registry import REGISTRY
 from app.providers.base import ChatResult
+from app.tools.terminal import default_shell
 from tests.test_verification_loop import ScriptedProvider, _finished, _tool
 
 
@@ -133,7 +134,7 @@ async def test_software_task_completes_with_edit_run_verify(jarvis_env):
                 ]
             ),
             ChatResult(content="edited"),
-            ChatResult(tool_calls=[_tool("terminal", {"command": "echo build-ok", "shell": "bash"}, "c2")]),
+            ChatResult(tool_calls=[_tool("terminal", {"command": "echo build-ok", "shell": default_shell()}, "c2")]),
             ChatResult(content="ran tests"),
             ChatResult(tool_calls=[_tool("verify_code", {"path": str(repo)}, "c3")]),
             ChatResult(content="verify_code reported success."),
@@ -155,15 +156,18 @@ async def test_software_task_completes_with_edit_run_verify(jarvis_env):
 
 @pytest.fixture
 def fake_blender(tmp_path, monkeypatch):
-    script = tmp_path / "blender"
-    script.write_text(
-        "#!/bin/sh\n"
-        'if [ "$1" = "--background" ]; then touch "${JARVIS_FAKE_OUT:-/tmp/out.stl}"; fi\n'
-        "exit 0\n",
-        encoding="utf-8",
-    )
-    script.chmod(script.stat().st_mode | stat.S_IEXEC)
-    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ.get('PATH', '')}")
+    script = tmp_path / ("blender.cmd" if os.name == "nt" else "blender")
+    if os.name == "nt":
+        script.write_text("@echo off\r\nexit /b 0\r\n", encoding="utf-8")
+    else:
+        script.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = "--background" ]; then touch "${JARVIS_FAKE_OUT:-/tmp/out.stl}"; fi\n'
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
     return script
 
 

@@ -1,3 +1,5 @@
+import json
+
 from app.tools.exposure import ToolExposure, tools_for_task
 from app.tools.registry import REGISTRY
 
@@ -78,7 +80,7 @@ async def test_agent_sends_only_exposed_tools(jarvis_env):
                             "type": "function",
                             "function": {
                                 "name": "filesystem",
-                                "arguments": f'{{"action":"write","path":"{target}","content":"READY","create_backup":false}}',
+                                "arguments": json.dumps({"action": "write", "path": str(target), "content": "READY", "create_backup": False}),
                             },
                         }
                     ]
@@ -91,7 +93,7 @@ async def test_agent_sends_only_exposed_tools(jarvis_env):
                             "type": "function",
                             "function": {
                                 "name": "filesystem",
-                                "arguments": f'{{"action":"read","path":"{target}"}}',
+                                "arguments": json.dumps({"action": "read", "path": str(target)}),
                             },
                         }
                     ]

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import shutil
 import subprocess
 import time
 from datetime import datetime, timedelta, timezone
@@ -88,12 +90,15 @@ def _make_synthetic_identity(tmp: Path) -> dict[str, object]:
 
 
 def _cms_encrypt_password(password: str, cert_path: Path, out_dir: Path) -> str:
+    openssl = shutil.which("openssl")
+    if not openssl:
+        pytest.skip("OpenSSL CLI is required for the synthetic CMS integration fixture")
     plain = out_dir / "plain-password.bin"
     cms = out_dir / "access.p7"
     plain.write_bytes(password.encode("utf-8"))
     subprocess.check_call(
         [
-            "openssl",
+            openssl,
             "cms",
             "-encrypt",
             "-aes256",
@@ -133,9 +138,12 @@ def _build_bundle(tmp: Path, *, password: str = "synth-archive-pass-0198") -> di
     payload.mkdir()
     (payload / "evidence.txt").write_text("authorized-recovery-fixture\n", encoding="utf-8")
     archive = work / "archive.7z"
+    archive_tool = shutil.which("7z") or os.environ.get("JARVIS_7Z_PATH")
+    if not archive_tool or not Path(archive_tool).is_file():
+        pytest.skip("7-Zip CLI is required for the encrypted archive integration fixture")
     subprocess.check_call(
         [
-            "7z",
+            archive_tool,
             "a",
             f"-p{password}",
             "-mhe=on",
