@@ -13,6 +13,15 @@ if str(BACKEND) not in sys.path:
 from app.config import AppSettings
 
 
+@pytest.fixture(autouse=True)
+async def _database_engine_hygiene_after_test():
+    """Close pooled aiosqlite workers before pytest closes the test event loop."""
+    yield
+    from app.db.session import ENGINE
+
+    await ENGINE.dispose()
+
+
 @pytest.fixture
 async def jarvis_env(tmp_path, monkeypatch):
     from app.db import session as session_mod
