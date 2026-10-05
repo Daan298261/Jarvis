@@ -333,6 +333,7 @@ class PersonaAppearanceSettings(BaseModel):
     orb_color: str = ""
     accent_color: str = ""
     glow: float = Field(default=0.70, ge=0, le=1)
+    detail: float = Field(default=0.68, ge=0.35, le=1.0)
     animation: float = Field(default=0.60, ge=0, le=1)
     scale: float = Field(default=1.0, ge=0.5, le=2.0)
     specialists_auto_speak: bool = False

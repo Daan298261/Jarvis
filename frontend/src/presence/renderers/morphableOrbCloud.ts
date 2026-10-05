@@ -487,9 +487,11 @@ export function createMorphablePresenceSystem(
   // The flowing environment stays intact but no longer outnumbers the bust.
   // Galaxy stars are a separate layer (presenceBudgets) and do not reduce these.
   const maxDensity = THREE.MathUtils.clamp(qualityCeiling, 0.01, 1.15)
-  const figureBudget = Math.round(82000 * maxDensity)
+  // An airy 48k ceiling keeps facial landmarks crisp while avoiding the
+  // 94k-point rebuild hitch that made persona changes feel frozen.
+  const figureBudget = Math.round(42000 * maxDensity)
   const fieldBudget = Math.round(15000 * maxDensity)
-  let qualityDensity = THREE.MathUtils.clamp(density, Math.min(0.6, maxDensity), maxDensity)
+  let qualityDensity = THREE.MathUtils.clamp(density, Math.min(0.35, maxDensity), maxDensity)
   let shape = resolvePresenceShape(initialShapeId)
   let figureOrbs = resampleOrbs(shape.buildFigure(maxDensity), figureBudget)
   let restOrbs = buildRestSilhouette(figureOrbs)
@@ -801,7 +803,7 @@ export function createMorphablePresenceSystem(
       galaxyStars.material.uniforms.uMotion.value = motion
     },
     setQuality(density) {
-      qualityDensity = THREE.MathUtils.clamp(Number.isFinite(density) ? density : 0.95, Math.min(0.6, maxDensity), maxDensity)
+      qualityDensity = THREE.MathUtils.clamp(Number.isFinite(density) ? density : 0.95, Math.min(0.35, maxDensity), maxDensity)
       applyQuality()
       return system.sampleCounts()
     },

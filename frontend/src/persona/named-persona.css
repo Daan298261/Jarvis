@@ -196,6 +196,15 @@
   font-size: 12px;
 }
 
+.named-persona-overrides output {
+  align-self: flex-end;
+  min-width: 3.2em;
+  margin-top: -4px;
+  color: rgba(226, 245, 250, 0.62);
+  font: 10px/1 "IBM Plex Mono", monospace;
+  text-align: right;
+}
+
 .named-persona-check {
   flex-direction: row !important;
   align-items: center;

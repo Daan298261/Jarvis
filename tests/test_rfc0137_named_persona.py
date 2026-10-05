@@ -199,6 +199,7 @@ def test_appearance_overrides_persist_and_reject_sapi(persona_box):
             "orb_color": "#112233",
             "accent_color": "#abcdef",
             "glow": 0.4,
+            "detail": 0.55,
             "animation": 0.2,
             "scale": 1.1,
             "specialists_auto_speak": False,
@@ -211,6 +212,7 @@ def test_appearance_overrides_persist_and_reject_sapi(persona_box):
     assert appearance["pitch"] == -4
     assert appearance["speaking_rate"] == 0.9
     assert appearance["orb_color"] == "#112233"
+    assert appearance["detail"] == 0.55
     assert appearance["specialists_auto_speak"] is False
     with pytest.raises(NamedPersonaBindError):
         update_appearance("veles", {"voice_profile_id": SAPI})
