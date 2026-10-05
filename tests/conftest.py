@@ -17,9 +17,9 @@ from app.config import AppSettings
 async def _database_engine_hygiene_after_test():
     """Close pooled aiosqlite workers before pytest closes the test event loop."""
     yield
-    from app.db.session import ENGINE
+    from app.db.session import dispose_database_engine
 
-    await ENGINE.dispose()
+    await dispose_database_engine()
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ async def jarvis_env(tmp_path, monkeypatch):
     from app.db import session as session_mod
 
     db_path = tmp_path / "jarvis.db"
-    session_mod.configure_database(path=db_path)
+    await session_mod.configure_database(path=db_path)
     await session_mod.init_db()
 
     settings = AppSettings(

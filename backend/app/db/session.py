@@ -31,8 +31,20 @@ class _SessionLocal:
 SessionLocal = _SessionLocal()
 
 
-def configure_database(url: str | None = None, path: Path | None = None) -> None:
+async def dispose_database_engine() -> None:
+    """Close pooled aiosqlite workers so they cannot post to a closed event loop."""
+    await ENGINE.dispose()
+
+
+async def configure_database(url: str | None = None, path: Path | None = None) -> None:
+    """Point the process at a new DB URL, disposing the previous engine first.
+
+    Reassigning ``ENGINE`` without dispose orphans aiosqlite worker threads
+    (PR #531 class). Callers must await this so the old pool is closed before
+    the event loop ends.
+    """
     global ENGINE, _sessionmaker, DB_PATH
+    old = ENGINE
     if path is not None:
         DB_PATH = Path(path)
         url = f"sqlite+aiosqlite:///{DB_PATH.as_posix()}"
@@ -40,6 +52,8 @@ def configure_database(url: str | None = None, path: Path | None = None) -> None
         url = f"sqlite+aiosqlite:///{data_dir().joinpath('jarvis.db').as_posix()}"
     ENGINE = create_async_engine(url, echo=False, future=True, connect_args={"timeout": 30})
     _sessionmaker = async_sessionmaker(ENGINE, expire_on_commit=False, class_=AsyncSession)
+    if old is not None and old is not ENGINE:
+        await old.dispose()
 
 
 def _add_missing_columns(sync_conn) -> None:

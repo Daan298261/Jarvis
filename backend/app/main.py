@@ -389,6 +389,12 @@ async def shutdown() -> None:
         STATUS_MONITOR.stop()
     except Exception:
         logging.debug("Model status monitor stop skipped", exc_info=True)
+    try:
+        from .memory.obsidian_vault import stop_watch
+
+        stop_watch()
+    except Exception:
+        logging.debug("Obsidian vault watch stop skipped", exc_info=True)
     await WHATSAPP_PAIRING.close()
     await mobile_runtime.stop()
     try:
@@ -407,6 +413,12 @@ async def shutdown() -> None:
         await shutdown_crucix()
     except Exception:
         logging.debug("Crucix shutdown skipped", exc_info=True)
+    try:
+        from .db.session import dispose_database_engine
+
+        await dispose_database_engine()
+    except Exception:
+        logging.debug("Database engine dispose skipped", exc_info=True)
 
 
 async def _autoload_model(current) -> None:
