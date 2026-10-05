@@ -6,6 +6,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
+from ..agent.front_responder import speakable_worker_remainder
 from ..config import load_settings
 from ..events import BUS
 from .quiet import should_speak_chat_reply
@@ -68,7 +69,9 @@ async def publish_owner_text(
     settings = load_settings()
     want_speech = should_speak_chat_reply(settings) if speak is None else bool(speak)
     tts_id = None
-    remainder = cleaned[tts_char_offset:].strip() if tts_char_offset else cleaned
+    # Offset is raw front length into a merged `{front}\n\nDeeper result\n{worker}`
+    # string; always strip the merge label so TTS never speaks "Deeper result".
+    remainder = speakable_worker_remainder(cleaned, tts_char_offset)
     if want_speech and remainder:
         tts_id = enqueue_chat_tts(
             remainder,
