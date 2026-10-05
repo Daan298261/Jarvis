@@ -9,10 +9,11 @@ from app.projects import portal_store
 
 @pytest.fixture
 async def portal_db(tmp_path):
-    configure_database(path=tmp_path / "portal.db")
+    await configure_database(path=tmp_path / "portal.db")
     await init_db()
     yield
-    configure_database(path=tmp_path / "portal.db")
+    # Do not reconfigure here: that would orphan the hot engine. Autouse
+    # hygiene disposes the current ENGINE after the test.
 
 
 @pytest.mark.asyncio
