@@ -8,7 +8,9 @@ GPU; this module is the dataset + scoring harness that comparison will use.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,7 +66,20 @@ CheckFn = Callable[[Path, dict[str, str]], tuple[bool, str]]
 
 
 def _run(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=str(cwd), capture_output=True, text=True, check=False)
+    if args and args[0] in {"python", "python3"}:
+        args = [sys.executable, *args[1:]]
+    if args and args[0] == "sh" and not shutil.which("sh"):
+        git = shutil.which("git")
+        if git:
+            for root in Path(git).resolve().parents:
+                bundled_sh = root / "usr" / "bin" / "sh.exe"
+                if bundled_sh.is_file():
+                    args = [str(bundled_sh), *args[1:]]
+                    break
+    try:
+        return subprocess.run(args, cwd=str(cwd), capture_output=True, text=True, check=False)
+    except FileNotFoundError as exc:
+        return subprocess.CompletedProcess(args, 127, "", str(exc))
 
 
 def _git_identity(repo: Path) -> None:

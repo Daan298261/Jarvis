@@ -27,7 +27,8 @@ def test_composer_cost_uses_published_rates():
     assert grok == 2.2
 
 
-def test_fast_models_are_not_selectable_by_default():
+def test_fast_models_are_not_selectable_by_default(monkeypatch):
+    monkeypatch.setattr("app.coding.catalog.shutil.which", lambda _name: None)
     probe = probe_cursor_models(AppSettings())
     assert probe["status"] == "not_connected"
     assert probe["allow_fast_variants"] is False
@@ -116,7 +117,8 @@ async def test_usage_summary_tracks_cost_per_verified_success(jarvis_env):
     assert workers["cursor_acp"]["cost_per_verified_success"] == 0.5
 
 
-async def test_coding_api_models_and_route(jarvis_env):
+async def test_coding_api_models_and_route(jarvis_env, monkeypatch):
+    monkeypatch.setattr("app.coding.catalog.shutil.which", lambda _name: None)
     from app.main import app
 
     client = TestClient(app)
@@ -186,7 +188,8 @@ async def test_web_fetch_rejects_non_http():
         assert "http/https" in result.error
 
 
-async def test_office_info_does_not_dispatch():
+async def test_office_info_does_not_dispatch(monkeypatch):
+    monkeypatch.setattr("app.tools.office.platform.system", lambda: "Linux")
     tool = OfficeTool()
     info = await tool.execute(app="word", action="info")
     assert info.success

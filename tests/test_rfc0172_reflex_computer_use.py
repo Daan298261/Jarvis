@@ -638,12 +638,14 @@ def test_api_reflex_benchmark():
 
     from app.main import app
 
-    with TestClient(app) as client:
-        response = client.get("/api/computer-use/reflex/benchmark")
-        assert response.status_code == 200
-        body = response.json()
-        assert body["suite"] == "rfc0172_reflex_vs_anzu"
-        assert body["summary"]["reflex_successes"] >= 1
+    # This endpoint is deterministic and does not need the full app lifespan.
+    # Starting the lifespan here also starts unrelated live services on Windows.
+    client = TestClient(app)
+    response = client.get("/api/computer-use/reflex/benchmark")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["suite"] == "rfc0172_reflex_vs_anzu"
+    assert body["summary"]["reflex_successes"] >= 1
 
 
 def test_sandbox_refuses_smuggled_payload_even_on_done():
