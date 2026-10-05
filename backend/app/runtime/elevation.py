@@ -59,7 +59,11 @@ def _query_logon_task_registered() -> bool:
 
 
 def logon_task_registered(*, force: bool = False) -> bool:
-    """Cached schtasks probe used by /api/health and elevation snapshots."""
+    """Cached schtasks probe used by /api/health and elevation snapshots.
+
+    ``force=True`` always re-queries and atomically replaces the cached value
+    and timestamp so later unforced reads see the fresh probe.
+    """
     global _logon_task_cached, _logon_task_cached_at
     if os.name != "nt":
         return False
@@ -78,8 +82,9 @@ def logon_task_registered(*, force: bool = False) -> bool:
     return registered
 
 
-def snapshot() -> dict[str, object]:
-    registered = logon_task_registered()
+def snapshot(*, force: bool = False) -> dict[str, object]:
+    """Elevation + logon-task status. ``force`` refreshes the schtasks cache first."""
+    registered = logon_task_registered(force=force)
     elevated = is_elevated()
     hint = ""
     if not registered:
@@ -100,10 +105,12 @@ def snapshot() -> dict[str, object]:
 
 def prompt_windows_uac() -> dict[str, object]:
     """Ask Windows for administrator. The owner only clicks Yes or No — no command to run."""
-    snap = snapshot()
     if os.name != "nt":
+        snap = snapshot()
         return {**snap, "ok": False, "prompted": False, "detail": "Full PC control uses a Windows logon task."}
-    if is_elevated() and logon_task_registered(force=True):
+    # Force-refresh so the returned payload matches the boolean check (not a stale cache).
+    snap = snapshot(force=True)
+    if is_elevated() and snap["logon_task_registered"]:
         return {**snap, "ok": True, "prompted": False, "detail": "Jarvis already has administrator on this session."}
     # Prefer os.path over pathlib: tests patch os.name to "nt" on Linux, which
     # makes pathlib.Path construct WindowsPath and Path.resolve() raise.
@@ -119,12 +126,12 @@ def prompt_windows_uac() -> dict[str, object]:
         rc = int(ctypes.windll.shell32.ShellExecuteW(None, "runas", "powershell.exe", params, root, 1))
     except Exception as exc:  # noqa: BLE001 — UAC UI is best-effort
         invalidate_logon_task_cache()
-        return {**snapshot(), "ok": False, "prompted": False, "detail": str(exc)[:240]}
+        return {**snapshot(force=True), "ok": False, "prompted": False, "detail": str(exc)[:240]}
     prompted = rc > 32
-    # Owner may approve registration; drop stale negative cache.
+    # Owner may approve registration; drop stale negative cache then rebuild.
     invalidate_logon_task_cache()
     return {
-        **snapshot(),
+        **snapshot(force=True),
         "ok": prompted,
         "prompted": prompted,
         "detail": (
