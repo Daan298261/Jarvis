@@ -9,7 +9,7 @@ import type { PresentationSettings } from "./presenceTypes"
 
 type AppearancePresenceControlsProps = {
   settings: PresentationSettings
-  onOpenChange?: (open: boolean) => void
+  onOpenChange?: (open: boolean, menu: PresenceMenu | null) => void
 }
 
 type PresenceMenu = "persona" | "voice" | "appearance" | "cybersecurity"
@@ -60,8 +60,8 @@ export function AppearancePresenceControls({ settings, onOpenChange }: Appearanc
   const [openMenu, setOpenMenu] = useState<PresenceMenu | null>(null)
 
   useEffect(() => {
-    onOpenChange?.(openMenu !== null)
-    return () => onOpenChange?.(false)
+    onOpenChange?.(openMenu !== null, openMenu)
+    return () => onOpenChange?.(false, null)
   }, [onOpenChange, openMenu])
 
   function toggle(menu: PresenceMenu) {

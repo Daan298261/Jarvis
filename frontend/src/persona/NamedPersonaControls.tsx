@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { loadVoiceProfileCatalog, type VoiceProfileCatalog } from "../tts/voiceProfiles"
 import { activateNamedPersona } from "./activateNamedPersona"
 import {
@@ -32,6 +32,7 @@ export function NamedPersonaControls() {
   const [progress, setProgress] = useState("")
   const [pendingId, setPendingId] = useState<string | null>(null)
   const [voiceCatalog, setVoiceCatalog] = useState<VoiceProfileCatalog | null>(null)
+  const chooseRevision = useRef(0)
   const active = state?.active
   const appearance = active?.appearance
   const currentPersonaId = (pendingId || active?.id || "anzu") as (typeof ROSTER_IDS)[number]
@@ -57,6 +58,7 @@ export function NamedPersonaControls() {
   }, [])
 
   async function choose(id: string) {
+    const revision = ++chooseRevision.current
     setBusy(true)
     setPendingId(id)
     setError("")
@@ -66,11 +68,15 @@ export function NamedPersonaControls() {
       if (ROSTER_IDS.includes(id as (typeof ROSTER_IDS)[number])) offerPersonaSetup(id as (typeof ROSTER_IDS)[number])
       void loadVoiceProfileCatalog().then(setVoiceCatalog).catch(() => undefined)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update the named persona.")
+      if (revision === chooseRevision.current) {
+        setError(err instanceof Error ? err.message : "Could not update the named persona.")
+      }
     } finally {
-      setPendingId(null)
-      setProgress("")
-      setBusy(false)
+      if (revision === chooseRevision.current) {
+        setPendingId(null)
+        setProgress("")
+        setBusy(false)
+      }
     }
   }
 
@@ -103,7 +109,6 @@ export function NamedPersonaControls() {
         Named persona
         <select
           aria-label="Named persona"
-          disabled={busy}
           value={pendingId || active?.id || "anzu"}
           onChange={(event) => {
             const id = event.target.value
@@ -165,7 +170,6 @@ export function NamedPersonaControls() {
                 className={`named-persona-card${selected ? " active" : ""}`}
                 aria-pressed={selected}
                 title={persona.role || `${persona.label} persona`}
-                disabled={busy}
                 onClick={() => void choose(persona.id)}
               >
                 <SpecialistShapeMark

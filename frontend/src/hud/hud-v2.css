@@ -747,7 +747,7 @@ html[data-session-mode] .hud-app {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   min-height: 0;
-  padding: 0 0 12px;
+  padding: 0;
   overflow: hidden;
 }
 
@@ -860,13 +860,12 @@ html[data-session-mode] .hud-app {
 .hud-orb-state.alert { color: var(--hud-orange); }
 
 /* Full-stage presence profiles share one viewport-filling orb zone. */
-@media (min-width: 761px) {
-  .hud-center:has(.jarvis-presence-stage) {
+.hud-center:has(.jarvis-presence-stage) {
     align-items: stretch;
     overflow: hidden;
-  }
+}
 
-  .hud-home:has(.jarvis-presence-stage) {
+.hud-home:has(.jarvis-presence-stage) {
     position: relative;
     display: grid;
     grid-template-columns: minmax(140px, var(--hud-menu-track)) minmax(0, 1fr);
@@ -875,9 +874,9 @@ html[data-session-mode] .hud-app {
     min-height: 0;
     padding: 0;
     overflow: hidden;
-  }
+}
 
-  .hud-home:has(.jarvis-presence-stage) > .hud-orb-zone {
+.hud-home:has(.jarvis-presence-stage) > .hud-orb-zone {
     position: absolute;
     inset: 0;
     width: auto;
@@ -886,18 +885,18 @@ html[data-session-mode] .hud-app {
     max-height: none;
     grid-column: 1 / -1;
     grid-row: 1;
-  }
+}
 
-  .hud-home:has(.jarvis-presence-stage) .hud-orb-caption {
+.hud-home:has(.jarvis-presence-stage) .hud-orb-caption {
     position: absolute;
     left: 50%;
     bottom: clamp(146px, 17dvh, 210px);
     width: min(720px, calc(100% - 48px));
     margin: 0;
     transform: translateX(-50%);
-  }
+}
 
-  .hud-home:has(.jarvis-presence-stage) > .hud-chat {
+.hud-home:has(.jarvis-presence-stage) > .hud-chat {
     position: relative;
     z-index: 8;
     left: auto;
@@ -908,7 +907,6 @@ html[data-session-mode] .hud-app {
     grid-row: 2;
     justify-self: center;
     margin: 0 auto clamp(12px, 2vh, 24px);
-  }
 }
 
 .hud-app.hud-sky .hud-orb-zone,
@@ -970,7 +968,7 @@ html[data-session-mode] .hud-app {
 
 .hud-home.hexstrike-active > .hud-orb-zone {
   position: absolute;
-  inset: 0 0 0 var(--hud-menu-track);
+  inset: 0;
   width: auto;
   height: 100%;
   min-height: 0;

@@ -102,7 +102,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
           ? mythicLiveVariantShapeId(shapeId)
           : galaxy
             ? shapeId
-            : artwork?.shapeId || shapeId || "humanoid_bust"}
+            : artwork?.key === artworkKey ? artwork.shapeId : shapeId || "humanoid_bust"}
       personaVisual={personaVisual}
       className={`jarvis-presence jarvis-presence-stage jarvis-presence-humanoid${mythic ? " jarvis-presence-particle" : ""}${galaxy ? " galaxy" : ""}`}
       ariaLabel={`${mythic ? personaVisual?.personaLabel || "ANZU mythic" : muscular ? "ANZU muscular humanoid" : "ANZU particle"} presence is ${snapshot.phase === "executing" ? "working" : snapshot.phase}`}
@@ -116,20 +116,8 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
       )}
       {prepareError && mythic && (
         <span className="jarvis-presence-fallback-note" role="status">
-          Particle sampling unavailable · showing the persona portrait
+          Portrait sampling unavailable · using the live particle avatar
         </span>
-      )}
-      {mythic && prepareError && personaVisual?.portraitUrl && (
-        <div
-          className="jarvis-mythic-avatar-shell"
-          style={{
-            "--mythic-primary": personaVisual.orbColor || "#67dcff",
-            "--mythic-accent": personaVisual.accentColor || "#d4a017",
-          } as CSSProperties}
-          aria-hidden="true"
-        >
-          <img src={personaVisual.portraitUrl} alt="" />
-        </div>
       )}
       {galaxy ? (
         <p

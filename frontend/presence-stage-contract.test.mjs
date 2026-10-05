@@ -23,6 +23,16 @@ test("shared presence stage CSS fills the host without a primary aspect cap", ()
   assert.doesNotMatch(stage, /920px/)
 })
 
+test("HUD presence stage remains viewport-filling at narrow widths", () => {
+  const css = read("hud/hud-v2.css")
+  const fullStage = css.indexOf(".hud-center:has(.jarvis-presence-stage)")
+  const desktopMedia = css.lastIndexOf("@media (min-width: 761px)", fullStage)
+  assert.ok(fullStage >= 0)
+  assert.ok(desktopMedia < 0 || css.indexOf("}", desktopMedia) < fullStage,
+    "full-stage layout must not be gated behind the desktop breakpoint")
+  assert.match(css, /\.hud-home\.hexstrike-active > \.hud-orb-zone \{[\s\S]*?inset:\s*0;/)
+})
+
 test("profile CSS does not reintroduce competing Neural vs Humanoid stage boxes", () => {
   for (const file of ["apex-presence.css", "humanoid-presence.css"]) {
     const css = readRenderer(file)

@@ -117,6 +117,41 @@ function publish(state: NamedPersonaState | null) {
   listeners.forEach((listener) => listener(state))
 }
 
+function fallbackPersona(id: NamedPersonaId): NamedPersona {
+  const visual = PERSONA_VISUALS[id]
+  return {
+    id,
+    label: PERSONA_LABELS[id],
+    role: "",
+    presence_shape_id: visual.shapeId,
+    voice_profile_id: "",
+    default_colors: { orb: visual.orbColor, accent: visual.accentColor },
+    appearance: {
+      voice_profile_id: "",
+      pitch: 0,
+      speaking_rate: 1,
+      volume: 1,
+      orb_color: visual.orbColor,
+      accent_color: visual.accentColor,
+      glow: 0.82,
+      animation: 0.72,
+      scale: 1,
+      specialists_auto_speak: false,
+    },
+  }
+}
+
+function fallbackState(activeId: NamedPersonaId): NamedPersonaState {
+  const personas = ROSTER_IDS.map(fallbackPersona)
+  return {
+    active: personas.find((persona) => persona.id === activeId) ?? personas[0],
+    personas,
+    default_id: "anzu",
+    pinned_ids: [],
+    max_pinned: 5,
+  }
+}
+
 export async function loadNamedPersonas(): Promise<NamedPersonaState> {
   const revision = selectionRevision
   const state = await api<NamedPersonaState>("/api/named-personas")
@@ -129,15 +164,34 @@ export async function loadNamedPersonas(): Promise<NamedPersonaState> {
 export async function selectNamedPersona(id: string): Promise<NamedPersonaState> {
   const previous = cache
   const canonicalId = canonicalizePersonaId(id)
+  const knownId = ROSTER_IDS.find((personaId) => personaId === canonicalId)
+  if (!knownId) throw new Error(`Unknown persona: ${id}`)
   const selected = previous?.personas.find((persona) => persona.id === canonicalId)
+    ?? fallbackPersona(knownId)
+  const optimistic = previous ?? fallbackState(knownId)
   const revision = ++selectionRevision
-  if (previous && selected) publish({ ...previous, active: selected })
+  // The figure must respond on the same click even while the local API is
+  // starting. The server response can enrich voice/configuration afterwards.
+  publish({ ...optimistic, active: selected })
   // A 409 is intentionally allowed to reach activateNamedPersona, which
   // installs the required neural pack and retries without losing this visual.
-  const state = await api<NamedPersonaState>("/api/named-personas", {
-    method: "PUT",
-    body: JSON.stringify({ id: canonicalId }),
-  })
+  const controller = new AbortController()
+  const deadline = globalThis.setTimeout(() => controller.abort(), 8000)
+  let state: NamedPersonaState
+  try {
+    state = await api<NamedPersonaState>("/api/named-personas", {
+      method: "PUT",
+      body: JSON.stringify({ id: canonicalId }),
+      signal: controller.signal,
+    })
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("Persona changed locally; Jarvis did not confirm the saved persona in time.")
+    }
+    throw error
+  } finally {
+    globalThis.clearTimeout(deadline)
+  }
   if (revision === selectionRevision) publish(state)
   return state
 }
