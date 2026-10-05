@@ -6,6 +6,7 @@ from app.runtime import elevation as elev
 
 
 def test_elevation_hint_does_not_tell_the_owner_to_run_a_command(monkeypatch):
+    monkeypatch.setattr(elev.os, "name", "nt")
     monkeypatch.setattr(elev, "is_elevated", lambda: False)
     monkeypatch.setattr(elev, "logon_task_registered", lambda **_kwargs: False)
     snap = elev.snapshot()
@@ -13,7 +14,8 @@ def test_elevation_hint_does_not_tell_the_owner_to_run_a_command(monkeypatch):
     assert "registerlogontask" not in hint
     assert "start-jarvis" not in hint
     assert snap["needs_uac"] is True
-    assert "approve" in hint
+    assert snap["elevation_degraded"] is True
+    assert "allow full pc control" in hint or "nothing to type" in hint
 
 
 def test_prompt_windows_uac_uses_runas(monkeypatch):

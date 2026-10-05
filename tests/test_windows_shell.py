@@ -68,9 +68,19 @@ def test_start_jarvis_allows_voice_only_without_gguf():
     assert "-ErrorAction Stop" in text
     assert "Remove-Item Env:JARVIS_SKIP_MODEL" in text
     assert "Start-ElevatedJarvisCopy" in text
+    assert "Start-JarvisViaLogonTask" in text
+    assert "schtasks /Run /TN JarvisElevatedBackend" in text
     assert "JARVIS_SKIP_ELEVATION_PROMPT" in text
     assert "Windows will ask once" in text
+    assert "starting without administrator" in text.lower()
+    assert "standard user (degraded" in text.lower()
     assert "Allow full PC control" in _read(TRAY_SCRIPT)
+    # Normal start must prefer logon-task relaunch, not auto-exit after RunAs.
+    elev_block = text.split("$elevated = Test-CurrentProcessElevated", 1)[1]
+    elev_block = elev_block.split("Write-Step \"Verifying dependencies\"", 1)[0]
+    assert "Start-JarvisViaLogonTask" in elev_block
+    assert "Start-ElevatedJarvisCopy" not in elev_block
+    assert "continuing as standard user" in elev_block.lower() or "starting without administrator" in elev_block.lower()
 
 
 def test_stop_jarvis_still_mentions_llama_server():
