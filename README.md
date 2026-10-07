@@ -1,12 +1,14 @@
 <div align="center">
 
-# JARVIS
+# ANZU Superassistant
 
-### Your AI. Your hardware. Your rules.
+### A personal AI that turns intent into finished work.
 
-**A self-hosted AI assistant and agent platform built for local-first work, extensible tools, and a future multi-device swarm.**
+**Local intelligence. Capable agents. A desktop experience with presence.**
 
-[Getting started](#getting-started) · [Features](#what-jarvis-does) · [Architecture](#how-it-works) · [Documentation](#documentation) · [Contributing](#development--contributing)
+A self-hosted assistant for research, coding, writing, automation, and everyday work — built around your hardware and your control.
+
+[Getting started](#getting-started) · [Features](#what-anzu-does) · [Architecture](#how-it-works) · [Documentation](#documentation) · [Contributing](#development--contributing)
 
 ![Platform](https://img.shields.io/badge/platform-Windows%2011-0078D4?style=flat-square) ![Deployment](https://img.shields.io/badge/deployment-self--hosted-202C3A?style=flat-square) ![Inference](https://img.shields.io/badge/inference-local--first-16A34A?style=flat-square) ![Status](https://img.shields.io/badge/status-active%20development-F59E0B?style=flat-square)
 
@@ -14,29 +16,37 @@
 
 ---
 
-## An assistant that works on your terms
+## Meet ANZU
 
-Jarvis brings local language models, tool execution, task management, and an approachable control interface together in one self-hosted system. Run inference on your own machine, connect an OpenAI-compatible inference server when needed, and build workflows around the tools you actually use.
+ANZU brings local language models, tool execution, task management, and an approachable control interface together in one self-hosted system. Run inference on your own machine, connect an OpenAI-compatible inference server when needed, and build workflows around the tools you actually use.
+
+**ANZU Superassistant is the product name; Jarvis remains the repository and technical identifier in existing scripts, paths, and installer names.**
 
 A public clone can start as a **household voice chatbot** (Kokoro) without a 9B/27B GGUF. Add a local model, run `bootstrap.ps1 -InstallLocalLLM`, or point at any OpenAI-compatible server when you want full agent work. The default local LLM when present is **Qwen3.5-9B Abliterated**; **Qwen3.5-27B** is Expert escalation.
 
-The project is being developed toward a larger vision: a coordinated network of devices with specialized agents, persistent services, and configurable autonomy. **The current Windows desktop agent is the foundation; the full swarm and autonomous-operator vision are ongoing development, not features promised in this release.**
+### The experience we are building
+
+Tell ANZU what you want accomplished. It should plan the work, use the right tools, recover when something fails, verify the result, and report clearly. You should not need to manage models, workers, or individual tool calls for every task.
+
+The goal is a polished, luxurious assistant: a calm workspace, clear progress, thoughtful typography, responsive voice, and a distinctive animated presence. Appearance and reliability are part of the same product standard. A beautiful interface must make useful work easier to understand and control.
+
+**Development snapshot · October 2026:** the repository contains the desktop portal, native tools, persistent tasks and memory, persona bindings, agent-room infrastructure, and phone integrations. Availability depends on installed models, packages, and device setup. Multi-device autonomy and the broader specialist ecosystem remain under development; code presence does not establish a verified end-to-end release.
 
 ## Interface
 
 | Owner HUD | Particle humanoid |
 | :---: | :---: |
-| ![Jarvis owner HUD with particle humanoid](docs/screenshots/humanoid-hud.png) | ![Cinematic particle humanoid showcase](docs/screenshots/humanoid-showcase.png) |
+| ![ANZU owner HUD with particle humanoid](docs/screenshots/humanoid-hud.png) | ![Cinematic particle humanoid showcase](docs/screenshots/humanoid-showcase.png) |
 
 | Anzu — storm bird | Nabu — owl of knowledge |
 | :---: | :---: |
 | ![Anzu storm-bird particle avatar](docs/screenshots/anzu-stormbird.png) | ![Nabu owl particle avatar](docs/screenshots/nabu-owl.png) |
 
-![Named-persona picker in the Jarvis HUD](docs/screenshots/persona-gallery.png)
+![Named-persona picker in the ANZU HUD](docs/screenshots/persona-gallery.png)
 
 The presence is a live WebGL dot cloud: it forms, breathes, reacts to assistant state, and morphs between the humanoid and each persona-specific mythical avatar.
 
-## What Jarvis does
+## What ANZU does
 
 | Capability | Description |
 | :--- | :--- |
@@ -49,7 +59,36 @@ The presence is a live WebGL dot cloud: it forms, breathes, reacts to assistant 
 | **Extensible tools** | Native tools and MCP integrations; see the tool catalog for available integrations and requirements. |
 | **Configurable access** | Keep the service on localhost by default or explicitly enable authenticated LAN access. |
 
-**On the roadmap:** a universal desktop experience, richer voice and vision, Android companionship, agent teams, multi-node scheduling, role-based device placement, security workers, and autonomous operator workflows. These are tracked in the design documents below; individual components may be experimental or incomplete.
+### Recent development foundations
+
+| Area | What is in the repository | Specification |
+| :--- | :--- | :--- |
+| **Personas and presence** | Named specialist catalog, WebGL shape bindings, appearance settings, and neural voice profiles | [RFC-0137](docs/rfcs/0137-persona-presence-shape-and-voice-binding.md) |
+| **Agent collaboration** | Agent-room supervisor, shared blackboard, history, audit, and resource governor | [RFC-0174](docs/rfcs/0174-multi-agent-rooms-blackboard-deadlock-and-handoff.md) |
+| **Local-model reliability** | Model/tool compatibility work and evaluation infrastructure | [RFC-0180](docs/rfcs/0180-local-model-agentic-reliability.md) |
+| **Long-running work** | Persistent task context and work toward bounded processing of large inputs | [RFC-0182](docs/rfcs/0182-context-and-segmented-agentic-tasks.md) |
+| **Local management** | Separate manager service and local control interface | [RFC-0196](docs/rfcs/0196-native-anzu-manager.md) |
+
+These are implementation foundations, with live Windows, model, voice, and device validation still required for their respective workflows.
+
+<details>
+<summary><strong>Meet the specialist personas</strong></summary>
+
+| Persona | Focus |
+| :--- | :--- |
+| **Anzu** | Main assistant and orchestration |
+| **Mestor** | Planning and operations |
+| **Nabu** | Memory and research |
+| **Enki** | Coding and engineering |
+| **Veles / Themis** | Threat analysis / defensive security |
+| **Aegir / Bragi** | Media / writing |
+| **Hermes** | Browser, messaging, and APIs |
+| **Heimdall / Eir** | Monitoring / household routines |
+| **Maia / Vulcan** | Audience growth / hardware and infrastructure |
+
+Personas bind presentation, voice, and specialist intent. Their names do not imply that every planned domain workflow is complete.
+
+</details>
 
 ## Getting started
 
@@ -71,7 +110,7 @@ cd ..
 
 Open **http://127.0.0.1:4780** if the portal does not open automatically.
 
-To stop Jarvis:
+To stop ANZU:
 
 ```powershell
 .\stop-jarvis.ps1
@@ -81,7 +120,7 @@ To stop Jarvis:
 
 ### Everyday workflows
 
-Start Jarvis with a task and wait for completion:
+Start ANZU with a task and wait for completion:
 
 ```powershell
 .\start-jarvis.ps1 -Prompt "Inspect directory and generate project report" -Wait
@@ -97,20 +136,14 @@ The portal also includes **Guide & Workflows** for operating instructions and ta
 
 ## How it works
 
-```text
-                 ┌─────────────────────────────┐
-                 │  Portal / client interfaces │
-                 └──────────────┬──────────────┘
-                                │
-                 ┌──────────────▼──────────────┐
-                 │      FastAPI control plane  │
-                 │ Tasks · tools · settings    │
-                 └───────┬─────────────┬───────┘
-                         │             │
-               ┌─────────▼──────┐  ┌───▼──────────────────┐
-               │ Agent + tools  │  │ Inference backend   │
-               │ Native / MCP   │  │ llama.cpp / remote  │
-               └────────────────┘  └──────────────────────┘
+```mermaid
+flowchart TD
+    UI["Desktop portal · voice · phone"] --> API["FastAPI control plane"]
+    API --> AG["Plan → act → verify"]
+    API --> MODEL["Local or compatible remote inference"]
+    AG --> TOOLS["Native tools · MCP · optional workers"]
+    AG <--> MEM["Tasks · memory · checkpoints"]
+    API --> OWNER["Settings · approvals · resource controls"]
 ```
 
 The current application combines a **FastAPI backend** with a **React control portal**. Local inference uses **llama.cpp**; an OpenAI-compatible server can be configured as an alternative. A REST API provides the interface for clients and integrations. See [ARCHITECTURE.md](ARCHITECTURE.md) and [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for implementation details.
@@ -127,7 +160,7 @@ The documented reference installation uses **Windows 11 Pro, an Intel Core i7-14
 
 The portal exposes **Fast / Balanced / Quality** model profiles. Agent execution modes are separate from model profiles. See [INSTALL.md](docs/INSTALL.md) for exact model paths and setup, and [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for CUDA or model-loading issues.
 
-## Project direction
+## Where ANZU is heading
 
 | Area | Direction | Reference |
 | :--- | :--- | :--- |
@@ -137,7 +170,7 @@ The portal exposes **Fast / Balanced / Quality** model profiles. Agent execution
 | **Security** | Defensive monitoring and gated security-agent design | [Security agents](SECURITY_AGENTS.md) |
 | **Additional interfaces** | Windows desktop shell, phone companion, voice, and home integration | [Windows shell](WINDOWS_SHELL.md) · [Android client](ANDROID_CLIENT.md) · [Home IoT](HOME_IOT.md) |
 
-These documents contain a mixture of designs, implementation work, and future goals. **[JARVIS_MASTER_PLAN.md](JARVIS_MASTER_PLAN.md) is authoritative for priorities and implementation status.**
+The master plan sets priorities; newer RFCs and the code provide detail on later implementation. Read their status and acceptance criteria together rather than treating a design document as proof of a shipped feature.
 
 ## Documentation
 
@@ -157,7 +190,7 @@ For the wider roadmap, see [Jarvis master plan](JARVIS_MASTER_PLAN.md) and [Jarv
 
 ## Development & contributing
 
-Jarvis is under active development. Start with [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), then read the [development process](docs/PROCESS.md) and relevant [RFCs](docs/rfcs/) before making architectural changes.
+ANZU Superassistant is under active development. Start with [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), then read the [development process](docs/PROCESS.md) and relevant [RFCs](docs/rfcs/) before making architectural changes.
 
 - **`main`** is the stable release branch; development work branches from **`development`** and targets it with pull requests.
 - Keep changes scoped to one RFC or development-queue item per worker.
@@ -181,7 +214,7 @@ Test commands are provided for contributors; this README does not assert that ev
 
 <div align="center">
 
-**Built for an AI assistant you can run, extend, and control yourself.**
+**ANZU Superassistant — your intent, carried through.**
 
 [Explore the documentation](docs/INSTALL.md) · [View the roadmap](JARVIS_MASTER_PLAN.md) · [Browse the code](https://github.com/Daan298261/Jarvis)
 
