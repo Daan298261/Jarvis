@@ -36,8 +36,9 @@ def test_speakable_worker_remainder_skips_deeper_result_label():
     front = "On it. Checking the details."
     worker = "Mild rain later this afternoon, sir."
     merged = merge_front_and_worker(front, worker, "ack_continue")
-    assert DEEPER_RESULT_LABEL in merged
+    assert DEEPER_RESULT_LABEL not in merged
     assert merged.startswith(front)
+    assert worker in merged
 
     remainder = speakable_worker_remainder(merged, len(front))
     assert remainder == worker

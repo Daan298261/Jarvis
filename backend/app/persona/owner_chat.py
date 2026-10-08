@@ -26,7 +26,9 @@ from .weather import weather_system_message
 from ..events import BUS
 from ..tts.persona_speech import speech_lane_for_model
 from ..agent.front_responder import (
+    QueueSentenceWatch,
     TwoLaneTiming,
+    ack_is_held,
     front_worker_should_overlap,
     generate_front_reply,
     is_safe_front_speech,
@@ -35,8 +37,10 @@ from ..agent.front_responder import (
     record_front_timing,
     resolve_front_model_id,
     run_two_lane_chat,
+    should_prefetch_turn_retrieval,
     spawn_context_expand_keep_busy,
     terminal_front_completes_turn,
+    wait_for_late_ack,
 )
 from ..agent.planning import requests_agent_tools
 from ..agent.segmented_input import condense_segments
@@ -202,15 +206,16 @@ async def _overlap_owner_worker(
     cleaned: str,
     hydrate_task: asyncio.Task,
     weather_task: asyncio.Task,
+    retrieval_task: asyncio.Task | None = None,
 ) -> None:
     """Load and stream the worker while the front reply is still in flight.
 
     Tokens land in ``queue``. Speech stays gated until the front line is spoken.
     ``cancel`` is set when the front reply ends the turn, so this task must not
     be what a terminal greeting uses — callers only spawn it for handoff heuristics.
+    Retrieval, when scheduled, is the turn-start task — this path does not compose again.
     """
     try:
-        await hydrate_task
         briefing = await weather_task
         if cancel.is_set():
             return
@@ -218,7 +223,19 @@ async def _overlap_owner_worker(
             await MANAGER.load(settings, profile.name)
         if cancel.is_set():
             return
-        worker_messages = await _owner_messages(conversation_id, cleaned, briefing)
+        if retrieval_task is not None:
+            built = await retrieval_task
+            if cancel.is_set() or not built:
+                return
+            worker_messages, _working = built
+            if briefing:
+                worker_messages = list(worker_messages)
+                worker_messages.insert(1, ChatMessage(role="system", content=briefing))
+        else:
+            await hydrate_task
+            if cancel.is_set():
+                return
+            worker_messages = await _owner_messages(conversation_id, cleaned, briefing)
         if cancel.is_set():
             return
         await ensure_context_for_messages(
@@ -275,18 +292,17 @@ async def stream_owner_chat(
         except Exception as exc:
             yield {"type": "error", "detail": f"Could not start tool run: {exc}"[:500]}
             return
-        spoken = "Right — I'll run that with the agent harness and tools on this PC."
+        # One ack only: the agent loop's front lane owns ack_continue / handoff
+        # speech. This shell path must not speak a second harness line.
         _conversations.setdefault(cid, [])
         _conversations[cid].append(ChatMessage(role="user", content=cleaned))
-        _conversations[cid].append(ChatMessage(role="assistant", content=spoken))
-        await publish_owner_text(spoken, source="owner_chat", speak=True, user_prompt=cleaned)
         yield {
             "type": "task_delegated",
             "conversation_id": cid,
             "task_id": task.id,
-            "reply": spoken,
+            "reply": "",
         }
-        yield {"type": "done", "conversation_id": cid, "reply": spoken}
+        yield {"type": "done", "conversation_id": cid, "reply": "", "ack": "loop"}
         return
 
     from ..agent.context_policy import profile_cap
@@ -352,8 +368,7 @@ async def stream_owner_chat(
     front_text_emitted = False
 
     # Front-first: do not await weather HTTP or DB hydrate before first text/TTS.
-    # Memory-resident turns are enough for the tiny front lane; worker prep awaits
-    # the deferred tasks below (RFC-0117 / agent-loop front-before-retrieval).
+    # Retrieval starts beside the front lane and is cancelled on terminal turns.
     history = list(_conversations.get(cid, []))
     hydrate_task = asyncio.create_task(hydrate_conversation(cid))
     weather_task = asyncio.create_task(weather_system_message(cleaned))
@@ -361,8 +376,28 @@ async def stream_owner_chat(
     overlap_queue: asyncio.Queue = asyncio.Queue()
     overlap_errors: list[BaseException] = []
     overlap_task: asyncio.Task | None = None
+    retrieval_task: asyncio.Task | None = None
+    sentence_watch: QueueSentenceWatch | None = None
     worker_speech_gate = asyncio.Event()
-    if front_worker_should_overlap(settings, cleaned, strategy=intake.strategy):
+    from ..memory.obsidian_vault import vault_ask_requires_working_set
+
+    if should_prefetch_turn_retrieval(
+        cleaned,
+        vault_required=vault_ask_requires_working_set(cleaned),
+    ):
+
+        async def _prefetch_owner_working_set():
+            await hydrate_task
+            if overlap_cancel.is_set():
+                return None
+            return await compose_owner_turn_messages(cid, cleaned, None)
+
+        retrieval_task = asyncio.create_task(_prefetch_owner_working_set())
+
+    def _arm_worker_overlap() -> None:
+        nonlocal overlap_task, sentence_watch
+        if overlap_task is not None:
+            return
         overlap_task = asyncio.create_task(
             _overlap_owner_worker(
                 cancel=overlap_cancel,
@@ -374,8 +409,14 @@ async def stream_owner_chat(
                 cleaned=cleaned,
                 hydrate_task=hydrate_task,
                 weather_task=weather_task,
+                retrieval_task=retrieval_task,
             )
         )
+        sentence_watch = QueueSentenceWatch(overlap_queue)
+        sentence_watch.start()
+
+    if front_worker_should_overlap(settings, cleaned, strategy=intake.strategy):
+        _arm_worker_overlap()
 
     prefetched_front = await generate_front_reply(
         cleaned,
@@ -388,7 +429,30 @@ async def stream_owner_chat(
         and prefetched_front.action != "silent_skip"
         and is_safe_front_speech(prefetched_front.action, prefetched_front.text)
     )
-    if front_safe:
+    ack_suppressed = False
+    emit_front_now = False
+    if front_safe and terminal_front_completes_turn(prefetched_front.action):
+        # final_basic / ask_clarification stay immediate — no hold.
+        emit_front_now = True
+    elif front_safe and ack_is_held(prefetched_front.action):
+        if intake.strategy == "direct":
+            _arm_worker_overlap()
+        ready = sentence_watch.ready if sentence_watch is not None else asyncio.Event()
+        if await wait_for_late_ack(
+            prefetched_front.action,
+            turn_started=turn_started,
+            worker_ready=ready,
+        ):
+            emit_front_now = True
+        else:
+            # Worker sentence beat the hold: do not show or speak the ack.
+            ack_suppressed = True
+            front_text_emitted = True
+            worker_speech_gate.set()
+    elif front_safe:
+        emit_front_now = True
+
+    if emit_front_now:
         # Emit ONLY validated sanitized text — never raw model chunks / JSON envelopes.
         safe_text = (prefetched_front.text or "").strip()
         chunks = [safe_text] if safe_text else []
@@ -503,12 +567,19 @@ async def stream_owner_chat(
                 hydrate_task.cancel()
                 weather_task.cancel()
                 overlap_cancel.set()
+                if sentence_watch is not None:
+                    sentence_watch.stop()
+                if retrieval_task is not None:
+                    retrieval_task.cancel()
                 if overlap_task is not None:
                     overlap_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await hydrate_task
                 with contextlib.suppress(asyncio.CancelledError):
                     await weather_task
+                if retrieval_task is not None:
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        await retrieval_task
                 if overlap_task is not None:
                     with contextlib.suppress(asyncio.CancelledError):
                         await overlap_task
@@ -557,7 +628,16 @@ async def stream_owner_chat(
 
     worker_messages: list[ChatMessage] = []
     if overlap_task is None:
-        worker_messages = await _owner_messages(cid, cleaned, briefing)
+        built = None
+        if retrieval_task is not None:
+            built = await retrieval_task
+        if built:
+            worker_messages, _working = built
+            if briefing:
+                worker_messages = list(worker_messages)
+                worker_messages.insert(1, ChatMessage(role="system", content=briefing))
+        else:
+            worker_messages = await _owner_messages(cid, cleaned, briefing)
     if overlap_task is None and intake.strategy == "compress":
         async def _segment_progress(index: int, total: int) -> None:
             await BUS.publish_ephemeral(
@@ -636,6 +716,13 @@ async def stream_owner_chat(
 
     async def worker_stream():
         if overlap_task is not None:
+            if sentence_watch is not None:
+                for item in await sentence_watch.finish():
+                    if item is None:
+                        if overlap_errors:
+                            raise overlap_errors[0]
+                        return
+                    yield item
             while True:
                 item = await overlap_queue.get()
                 if item is None:
@@ -702,19 +789,25 @@ async def stream_owner_chat(
             worker_stream=worker_stream,
             on_delta=on_delta,
             prefetched_front=prefetched_front if prefetched_front.text else None,
+            suppress_front=ack_suppressed,
         ):
             kind = event.get("type")
             if kind == "delta":
-                if event.get("lane") == "front" and front_text_emitted:
+                if event.get("lane") == "front" and (front_text_emitted or ack_suppressed):
+                    continue
+                if event.get("lane") != "front":
+                    # Worker text is consolidated after the stream so a paraphrase
+                    # of the front line is not shown as a second block.
                     continue
                 yield {"type": "delta", "conversation_id": cid, "text": event.get("text") or "", "lane": event.get("lane")}
             elif kind == "front_response_completed":
                 front = event.get("reply")
                 text = getattr(front, "text", "") or ""
-                if text and not parts and not front_text_emitted:
+                if text and not parts and not front_text_emitted and not ack_suppressed:
                     yield {"type": "delta", "conversation_id": cid, "text": text, "lane": "front"}
                 if (
                     front
+                    and not ack_suppressed
                     and not front_spoken_early
                     and settings.front_responder.speak_immediately
                     and is_safe_front_speech(front.action, front.text)
@@ -774,6 +867,19 @@ async def stream_owner_chat(
 
     reply = ((done or {}).get("text") or "".join(parts)).strip()
     if reply:
+        front_line = "" if ack_suppressed else (prefetched_front.text or "").strip()
+        novel = reply
+        if front_line and reply.startswith(front_line):
+            novel = reply[len(front_line) :].strip()
+        elif front_text_emitted and not ack_suppressed and reply == front_line:
+            novel = ""
+        if novel:
+            yield {
+                "type": "delta",
+                "conversation_id": cid,
+                "text": novel,
+                "lane": "worker",
+            }
         # History keeps what the worker saw, so a compressed paste stays compressed next turn.
         _conversations[cid].append(ChatMessage(role="user", content=worker_text))
         _conversations[cid].append(ChatMessage(role="assistant", content=reply))

@@ -129,7 +129,7 @@ def test_merge_front_and_worker_is_one_turn():
         "ack_continue",
     )
     assert merged.startswith("On it.")
-    assert "Deeper result" in merged
+    assert "Deeper result" not in merged
     assert "Mild rain later, sir." in merged
     assert merge_front_and_worker("Hi, sir.", "", "final_basic") == "Hi, sir."
     turns = merge_consecutive_assistant_turns(
@@ -307,7 +307,7 @@ async def test_two_lane_runs_worker_for_ack_continue(jarvis_env):
     assert done["front_action"] == "ack_continue"
     assert "On it." in done["text"]
     assert "Mild rain later" in done["text"]
-    assert "Deeper result" in done["text"]
+    assert "Deeper result" not in done["text"]
 
 
 @pytest.mark.asyncio

@@ -139,6 +139,8 @@ from ..persona.think_aloud import run_with_think_aloud
 from ..persona.weather import weather_system_message
 from ..providers.completion_text import empty_generation_error
 from .front_responder import (
+    QueueSentenceWatch,
+    ack_is_held,
     classify_front_action,
     enforce_front_safety,
     fallback_text_for_action,
@@ -147,9 +149,15 @@ from .front_responder import (
     is_safe_front_speech,
     last_front_timing,
     note_front_audio,
+    note_worker_first_sentence,
+    open_worker_sentence_watch,
+    close_worker_sentence_watch,
     run_two_lane_chat,
+    should_prefetch_turn_retrieval,
     spawn_context_expand_keep_busy,
+    wait_for_late_ack,
     worker_required,
+    first_sentence_ready,
 )
 from .task_fastpath import (
     TERMINAL_FRONT_ACTIONS,
@@ -1012,6 +1020,7 @@ class AgentRuntime:
         history: list[ChatMessage] | None = None,
     ) -> None:
         """Fast first reply/TTS while a managed worker continues (does not block the loop)."""
+        watch = open_worker_sentence_watch(task_id)
         try:
             await self._publish_front_events(task_id, "front_response_started", "Front response started")
             front = await generate_front_reply(
@@ -1031,6 +1040,9 @@ class AgentRuntime:
                 )
                 if not ack_text:
                     ack_text = task_acknowledgement(prompt)
+                held = heuristic if ack_is_held(heuristic) else "ack_continue"
+                if not await wait_for_late_ack(held, turn_started=turn_started, worker_ready=watch):
+                    return
                 await BUS.publish(
                     task_id,
                     "chat_tts",
@@ -1064,6 +1076,12 @@ class AgentRuntime:
             )
             stream_key = f"task:{task_id}:front"
             clear_stream_speak_state(stream_key)
+            if ack_is_held(front.action) and not await wait_for_late_ack(
+                front.action,
+                turn_started=turn_started,
+                worker_ready=watch,
+            ):
+                return
             await self._speak_front_reply(
                 task_id,
                 front,
@@ -1083,6 +1101,8 @@ class AgentRuntime:
         except Exception:
             # BUS chat_tts alone does not enqueue speech — publish_owner_text does.
             ack_text = task_acknowledgement(prompt)
+            if not await wait_for_late_ack("ack_continue", turn_started=turn_started, worker_ready=watch):
+                return
             await BUS.publish(
                 task_id,
                 "chat_tts",
@@ -1099,6 +1119,8 @@ class AgentRuntime:
                 )
             except Exception:
                 log.debug("Managed front fallback ack failed for %s", task_id, exc_info=True)
+        finally:
+            close_worker_sentence_watch(task_id)
 
     async def _run_conversation(
         self,
@@ -1175,6 +1197,8 @@ class AgentRuntime:
         overlap_queue: asyncio.Queue = asyncio.Queue()
         overlap_errors: list[BaseException] = []
         overlap_task: asyncio.Task | None = None
+        retrieval_task: asyncio.Task | None = None
+        sentence_watch: QueueSentenceWatch | None = None
         worker_speech_gate = asyncio.Event()
 
         async def _produce_conversation_worker() -> None:
@@ -1182,13 +1206,16 @@ class AgentRuntime:
                 briefing_local = await weather_task
                 if overlap_cancel.is_set():
                     return
-                turn_ws_local = await compose_turn_working_set(
-                    user_text,
-                    task_class=CONVERSATION_CLASS,
-                    agent_id="owner",
-                    recent_messages=prior,
-                    needs_tools=False,
-                )
+                if retrieval_task is not None:
+                    turn_ws_local = await retrieval_task
+                else:
+                    turn_ws_local = await compose_turn_working_set(
+                        user_text,
+                        task_class=CONVERSATION_CLASS,
+                        agent_id="owner",
+                        recent_messages=prior,
+                        needs_tools=False,
+                    )
                 if overlap_cancel.is_set():
                     return
                 recent = list(turn_ws_local.recent_turns)
@@ -1254,8 +1281,25 @@ class AgentRuntime:
             finally:
                 await overlap_queue.put(None)
 
+        from ..memory.obsidian_vault import vault_ask_requires_working_set as _vault_required
+
+        if should_prefetch_turn_retrieval(user_text, vault_required=_vault_required(user_text)):
+
+            async def _prefetch_conversation_ws():
+                return await compose_turn_working_set(
+                    user_text,
+                    task_class=CONVERSATION_CLASS,
+                    agent_id="owner",
+                    recent_messages=prior,
+                    needs_tools=False,
+                )
+
+            retrieval_task = asyncio.create_task(_prefetch_conversation_ws())
+
         if front_worker_should_overlap(settings, user_text, strategy="direct"):
             overlap_task = asyncio.create_task(_produce_conversation_worker())
+            sentence_watch = QueueSentenceWatch(overlap_queue)
+            sentence_watch.start()
 
         prefetched_front = await generate_front_reply(
             user_text,
@@ -1266,7 +1310,21 @@ class AgentRuntime:
         stream_key = f"task:{task_id}"
         clear_stream_speak_state(stream_key)
         front_spoken_early = False
-        if prefetched_front.text and prefetched_front.action != "silent_skip":
+        ack_suppressed = False
+        show_front_ack = True
+        if (
+            prefetched_front.text
+            and prefetched_front.action != "silent_skip"
+            and ack_is_held(prefetched_front.action)
+        ):
+            ready = sentence_watch.ready if sentence_watch is not None else asyncio.Event()
+            show_front_ack = await wait_for_late_ack(
+                prefetched_front.action,
+                turn_started=turn_started,
+                worker_ready=ready,
+            )
+            ack_suppressed = not show_front_ack
+        if prefetched_front.text and prefetched_front.action != "silent_skip" and show_front_ack:
             await self._publish_front_events(task_id, "front_response_started", "Front response started")
             await self._publish_front_events(
                 task_id,
@@ -1301,10 +1359,17 @@ class AgentRuntime:
             note_fastpath_decision(terminal, task_id=task_id)
             overlap_cancel.set()
             weather_task.cancel()
+            if sentence_watch is not None:
+                sentence_watch.stop()
+            if retrieval_task is not None:
+                retrieval_task.cancel()
             if overlap_task is not None:
                 overlap_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await weather_task
+            if retrieval_task is not None:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await retrieval_task
             if overlap_task is not None:
                 with contextlib.suppress(asyncio.CancelledError):
                     await overlap_task
@@ -1360,10 +1425,17 @@ class AgentRuntime:
         if lookup.admitted:
             note_fastpath_decision(lookup, task_id=task_id)
             overlap_cancel.set()
+            if sentence_watch is not None:
+                sentence_watch.stop()
+            if retrieval_task is not None:
+                retrieval_task.cancel()
             if overlap_task is not None:
                 overlap_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await overlap_task
+            if retrieval_task is not None:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await retrieval_task
             await BUS.publish(
                 task_id,
                 "fastpath",
@@ -1399,13 +1471,16 @@ class AgentRuntime:
         # Fast-path miss: retrieve vault/tools/Supermemory only now (does not delay first reply).
         # Overlap already started that retrieval beside the front reply.
         if overlap_task is None:
-            turn_ws = await compose_turn_working_set(
-                user_text,
-                task_class=CONVERSATION_CLASS,
-                agent_id="owner",
-                recent_messages=prior,
-                needs_tools=False,
-            )
+            if retrieval_task is not None:
+                turn_ws = await retrieval_task
+            else:
+                turn_ws = await compose_turn_working_set(
+                    user_text,
+                    task_class=CONVERSATION_CLASS,
+                    agent_id="owner",
+                    recent_messages=prior,
+                    needs_tools=False,
+                )
             prior = list(turn_ws.recent_turns)
             if len(prior) > MAX_RECENT_TURNS:
                 prior = prior[-MAX_RECENT_TURNS:]
@@ -1521,6 +1596,13 @@ class AgentRuntime:
 
             async def worker_stream():
                 if overlap_task is not None:
+                    if sentence_watch is not None:
+                        for item in await sentence_watch.finish():
+                            if item is None:
+                                if overlap_errors:
+                                    raise overlap_errors[0]
+                                return
+                            yield item
                     while True:
                         item = await overlap_queue.get()
                         if item is None:
@@ -1539,7 +1621,7 @@ class AgentRuntime:
                 ):
                     yield delta
 
-            if front_spoken_early or not (prefetched_front.text or "").strip():
+            if front_spoken_early or ack_suppressed or not (prefetched_front.text or "").strip():
                 worker_speech_gate.set()
 
             async def on_delta(lane: str, delta: str) -> None:
@@ -1550,7 +1632,11 @@ class AgentRuntime:
                     await worker_speech_gate.wait()
                 if lane == "worker":
                     mark_worker_useful_owner_text(task_id)
-                spoken_parts.append(delta)
+                    spoken_parts.append(delta)
+                    if first_sentence_ready("".join(spoken_parts)):
+                        note_worker_first_sentence(task_id)
+                else:
+                    spoken_parts.append(delta)
                 elapsed = max(0.0, (time.perf_counter() - (turn_started or model_started)) * 1000)
                 if not first_response_ms:
                     first_response_ms = elapsed
@@ -1562,6 +1648,9 @@ class AgentRuntime:
                 lane_model = resolve_front_model_id(settings) if lane == "front" else str(
                     getattr(MANAGER.provider, "model", "") or profile.name
                 )
+                # A visible front line is already on screen. Worker tokens are
+                # consolidated after the stream so a paraphrase is not appended live.
+                publish_worker_live = lane != "worker" or ack_suppressed
                 early_id = maybe_enqueue_streaming_social_tts(
                     accumulated,
                     source="task_chat",
@@ -1579,14 +1668,15 @@ class AgentRuntime:
                         stage="chat",
                     )
                     note_front_audio(None, elapsed)
-                await BUS.publish(
-                    task_id,
-                    "assistant_delta",
-                    "Reply",
-                    delta,
-                    stage="chat",
-                    persist=False,
-                )
+                if publish_worker_live:
+                    await BUS.publish(
+                        task_id,
+                        "assistant_delta",
+                        "Reply",
+                        delta,
+                        stage="chat",
+                        persist=False,
+                    )
                 await BUS.publish(
                     task_id,
                     "model_lane",
@@ -1604,6 +1694,7 @@ class AgentRuntime:
                 worker_stream=worker_stream,
                 on_delta=on_delta,
                 prefetched_front=prefetched_front if prefetched_front.text else None,
+                suppress_front=ack_suppressed,
             ):
                 kind = event.get("type")
                 if kind == "front_response_started":
@@ -1701,6 +1792,22 @@ class AgentRuntime:
             )
             await BUS.publish(task_id, "failed", "Conversation failed", err, stage="failed")
             return
+        if not ack_suppressed:
+            front_line = (front_text or "").strip()
+            novel = content
+            if front_line and content.startswith(front_line):
+                novel = content[len(front_line) :].strip()
+            elif content == front_line:
+                novel = ""
+            if novel and novel != content:
+                await BUS.publish(
+                    task_id,
+                    "assistant_delta",
+                    "Reply",
+                    novel,
+                    stage="chat",
+                    persist=False,
+                )
         await publish_owner_text(
             content,
             source="task_chat",
@@ -2128,7 +2235,21 @@ class AgentRuntime:
                 )
                 return
         user_turn = (extra_prompt or "").strip()
+        managed_retrieval: asyncio.Task | None = None
+        managed_retrieval_prompt = active_prompt
         if not pending_tool and (not continue_existing or user_turn):
+            async def _prefetch_managed_ws():
+                return await compose_turn_working_set(
+                    managed_retrieval_prompt,
+                    task_class=working.task_class,
+                    extra_capabilities=working.requested_tools,
+                    security_role=working.security_role,
+                    agent_id="owner",
+                    recent_messages=existing,
+                    needs_tools=working.ingress_needs_tools,
+                )
+
+            managed_retrieval = asyncio.create_task(_prefetch_managed_ws())
             progress_watch = asyncio.create_task(
                 run_worker_progress_watchdog(
                     task_id,
@@ -2441,15 +2562,26 @@ class AgentRuntime:
                     stage="understand",
                 )
                 await BUS.publish(task_id, "progress", "Recalled similar earlier tasks", lessons[:1500], stage="understand")
-            turn_ws = await compose_turn_working_set(
-                active_prompt,
-                task_class=working.task_class,
-                extra_capabilities=working.requested_tools,
-                security_role=working.security_role,
-                agent_id="owner",
-                recent_messages=existing,
-                needs_tools=working.ingress_needs_tools,
-            )
+            turn_ws = None
+            if managed_retrieval is not None and active_prompt == managed_retrieval_prompt:
+                try:
+                    turn_ws = await managed_retrieval
+                except (asyncio.CancelledError, Exception):
+                    turn_ws = None
+            elif managed_retrieval is not None:
+                managed_retrieval.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await managed_retrieval
+            if turn_ws is None:
+                turn_ws = await compose_turn_working_set(
+                    active_prompt,
+                    task_class=working.task_class,
+                    extra_capabilities=working.requested_tools,
+                    security_role=working.security_role,
+                    agent_id="owner",
+                    recent_messages=existing,
+                    needs_tools=working.ingress_needs_tools,
+                )
             if working.ingress_needs_tools is False and not turn_ws.tool_schemas:
                 await BUS.publish(
                     task_id,
@@ -2862,6 +2994,8 @@ class AgentRuntime:
                 await self._update(task_id, **metrics.as_fields())
                 if (result.content or "").strip():
                     mark_worker_useful_owner_text(task_id)
+                    if first_sentence_ready(result.content or ""):
+                        note_worker_first_sentence(task_id)
 
                 if force_final:
                     content = (result.content or "").strip() or (

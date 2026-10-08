@@ -72,15 +72,80 @@ export function filterModelLaneEvents(events: OwnerChatEvent[]): ModelLaneLine[]
   }
   return lines
 }
-const DEEPER_RESULT_LABEL = "Deeper result"
+const COMPARE_STOP = new Set(
+  "a an the of to and or if it is are was were be been being just my your you youre seeing those that this them they me i we our sir please will ill its for on in at with".split(
+    " ",
+  ),
+)
 
+function normalizeCompare(value: string): string {
+  return (value || "")
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function contentTokens(value: string): string[] {
+  return normalizeCompare(value)
+    .split(" ")
+    .filter((token) => token.length > 2 && !COMPARE_STOP.has(token))
+}
+
+function sequenceRatio(left: string, right: string): number {
+  const a = normalizeCompare(left)
+  const b = normalizeCompare(right)
+  if (!a || !b) return 0
+  if (a === b) return 1
+  const bigrams = (text: string) => {
+    const grams = new Map<string, number>()
+    const padded = ` ${text} `
+    for (let index = 0; index < padded.length - 1; index += 1) {
+      const gram = padded.slice(index, index + 2)
+      grams.set(gram, (grams.get(gram) || 0) + 1)
+    }
+    return grams
+  }
+  const leftGrams = bigrams(a)
+  const rightGrams = bigrams(b)
+  let overlap = 0
+  for (const [gram, count] of leftGrams) {
+    overlap += Math.min(count, rightGrams.get(gram) || 0)
+  }
+  return (2 * overlap) / (a.length + b.length + 2)
+}
+
+function sentenceRestates(sentence: string, front: string): boolean {
+  const best = sequenceRatio(sentence, front)
+  const novel = contentTokens(sentence).filter((token) => !contentTokens(front).includes(token))
+  const workerTokens = contentTokens(sentence)
+  const coverage = workerTokens.length ? 1 - novel.length / workerTokens.length : 1
+  if (best >= 0.72) return true
+  if (best >= 0.58 && novel.length <= 2) return true
+  if (coverage >= 0.72 && novel.length <= 2) return true
+  const left = normalizeCompare(front)
+  const right = normalizeCompare(sentence)
+  return Boolean(left && right && (left === right || left.includes(right) || right.includes(left)))
+}
+
+/** Join a front line and a worker continuation without a section heading. */
 export function mergeAssistantTexts(front: string, worker: string): string {
   const left = (front || "").trim()
   const right = (worker || "").trim()
   if (!left) return right
-  if (!right || left === right || right.startsWith(left) || left.includes(right)) return right || left
-  if (left.toLowerCase().includes(DEEPER_RESULT_LABEL.toLowerCase())) return `${left}\n\n${right}`
-  return `${left}\n\n${DEEPER_RESULT_LABEL}\n${right}`
+  if (!right || left === right || left.startsWith(right) || left.includes(right)) return left
+  if (right.startsWith(left)) {
+    const tail = right.slice(left.length).trim()
+    if (!tail || sentenceRestates(tail, left)) return left
+    return right
+  }
+  const sentences = right.split(/(?<=[.!?])\s+/).map((part) => part.trim()).filter(Boolean)
+  const novel = sentences.filter((sentence) => !sentenceRestates(sentence, left))
+  if (!novel.length) return left
+  const novelText = novel.join(" ")
+  if (novelText === right) return `${left}\n\n${right}`
+  return `${left}\n\n${novelText}`
 }
 
 /** Events suitable for the work / details panel (drops noisy model heartbeat). */
