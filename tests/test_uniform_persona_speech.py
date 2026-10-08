@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from app.config import AppSettings, PersonaAppearanceSettings
+from app.config import AppSettings
 from app.persona.chat_delivery import enqueue_chat_tts, pending_chat_tts, reset_chat_delivery
 from app.tts.persona_speech import (
-    SpeechRefused,
     chatterbox_speech_blocked,
     recent_speech_trace,
+    reset_chatterbox_block_cache,
     reset_speech_trace,
     resolve_speaking_voice,
     speak_text,
@@ -43,35 +43,36 @@ def persona_voice(monkeypatch):
     _bind(monkeypatch, settings)
     reset_speech_trace()
     reset_chat_delivery()
+    reset_chatterbox_block_cache()
     yield settings
     reset_speech_trace()
     reset_chat_delivery()
+    reset_chatterbox_block_cache()
 
 
 def test_lane_label_does_not_invent_a_voice(persona_voice):
     assert speech_lane_for_model("front", "Qwen3.5-2B") == "front"
     assert speech_lane_for_model("worker", "Qwen3.5-27B") == "worker"
     assert speech_lane_for_model("worker", "laya-multilingual") == "laya"
-    assert speech_lane_for_model("specialist", "enki-coder") == "specialist"
+    assert speech_lane_for_model("specialist", "enki-coder") == "worker"
     assert speech_lane_for_model("worker", "expert") == "worker"
 
 
 def test_every_lane_resolves_the_active_persona_voice(persona_voice):
     seen = []
-    for lane, model, speaker in (
-        ("front", "Qwen3.5-2B", None),
-        ("worker", "Qwen3.5-27B", None),
-        ("laya", "laya-multilingual", None),
-        ("specialist", "expert-27b", "enki"),
+    for lane, model in (
+        ("front", "Qwen3.5-2B"),
+        ("worker", "Qwen3.5-27B"),
+        ("laya", "laya-multilingual"),
     ):
-        voice = resolve_speaking_voice(lane=lane, model=model, speaker_persona_id=speaker)
+        voice = resolve_speaking_voice(lane=lane, model=model)
         seen.append(voice)
         assert voice.refused is False
         assert voice.persona_id == "mestor"
         assert voice.profile_id == "tactical_aide_original_v1"
         assert voice.engine_id == "kokoro"
         assert voice.profile_id != "windows_natural_en_v1"
-    assert {item.lane for item in seen} == {"front", "worker", "laya", "specialist"}
+    assert {item.lane for item in seen} == {"front", "worker", "laya"}
     paths = {item["path"] for item in recent_speech_trace()}
     assert paths == {"persona_speech.resolve_speaking_voice"}
 
@@ -113,36 +114,56 @@ async def test_speak_text_is_the_only_synthesis_entry(persona_voice, monkeypatch
         ("front", "Qwen3.5-2B"),
         ("worker", "Qwen3.5-27B"),
         ("laya", "laya-multilingual"),
-        ("specialist", "Qwen3.5-27B"),
     ):
-        result = await speak_text("Good evening.", lane=lane, model=model, speaker_persona_id="enki")
+        result = await speak_text("Good evening.", lane=lane, model=model)
         assert result.audio == b"RIFFpersona"
         assert result.profile_id == "tactical_aide_original_v1"
 
-    assert len(calls) == 4
+    assert len(calls) == 3
     assert {call["voice_profile_id"] for call in calls} == {"tactical_aide_original_v1"}
     assert all(call["allow_neural_fallback"] is True for call in calls)
     assert all(call["playback"][0] == pytest.approx(0.96) for call in calls)
     spoken = [item for item in recent_speech_trace() if item["path"] == "persona_speech.speak_text"]
-    assert [item["lane"] for item in spoken] == ["front", "worker", "laya", "specialist"]
+    assert [item["lane"] for item in spoken] == ["front", "worker", "laya"]
     assert {item["persona_id"] for item in spoken} == {"mestor"}
 
 
 def test_enqueue_stamps_the_persona_voice_for_each_lane(persona_voice):
-    for lane in ("front", "worker", "laya", "specialist"):
+    for lane in ("front", "worker", "laya"):
         item_id = enqueue_chat_tts(
             "Good evening, sir.",
             source="owner_chat",
             user_prompt="hello",
             lane=lane,
             model="Qwen3.5-27B" if lane == "worker" else "laya-multilingual" if lane == "laya" else "",
-            speaker_persona_id="enki",
         )
         assert item_id
     pending = pending_chat_tts()
-    assert [item["lane"] for item in pending] == ["front", "worker", "laya", "specialist"]
+    assert [item["lane"] for item in pending] == ["front", "worker", "laya"]
     assert {item["persona_id"] for item in pending} == {"mestor"}
     assert {item["voice_profile_id"] for item in pending} == {"tactical_aide_original_v1"}
+
+
+def test_front_enqueue_does_not_probe_nvidia_smi(persona_voice, monkeypatch):
+    def boom(*_args, **_kwargs):
+        raise AssertionError("enqueue must not run the synchronous nvidia-smi check")
+
+    monkeypatch.setattr("app.tts.persona_speech.chatterbox_speech_blocked", boom)
+    monkeypatch.setattr("app.hardware.detect_hardware", boom)
+    persona_voice.named_personas.active_id = "aegir"
+    persona_voice.named_personas.activated_voice_profile_id = "chatterbox_expressive_en_v1"
+    item_id = enqueue_chat_tts(
+        "Good evening, sir.",
+        source="owner_chat",
+        user_prompt="hello",
+        lane="front",
+        model="Qwen3.5-2B",
+    )
+    assert item_id
+    pending = pending_chat_tts()
+    assert pending[-1]["lane"] == "front"
+    assert pending[-1]["persona_id"] == "aegir"
+    assert pending[-1]["voice_profile_id"] == "chatterbox_expressive_en_v1"
 
 
 def test_windows_natural_is_never_the_persona_voice(persona_voice, monkeypatch):
@@ -153,41 +174,6 @@ def test_windows_natural_is_never_the_persona_voice(persona_voice, monkeypatch):
     assert voice.persona_id == "anzu"
     assert voice.profile_id == "butler_original_v1"
     assert voice.engine_id == "kokoro"
-
-
-def test_specialist_auto_speak_false_keeps_the_main_voice(persona_voice):
-    persona_voice.named_personas.profiles["enki"] = PersonaAppearanceSettings(specialists_auto_speak=False)
-    voice = resolve_speaking_voice(lane="specialist", speaker_persona_id="enki", model="enki-coder")
-    assert voice.persona_id == "mestor"
-    assert voice.profile_id == "tactical_aide_original_v1"
-
-
-def test_specialist_auto_speak_uses_that_personas_pack(persona_voice, monkeypatch):
-    persona_voice.named_personas.profiles["enki"] = PersonaAppearanceSettings(
-        specialists_auto_speak=True,
-        speaking_rate=1.06,
-        pitch=1,
-    )
-    monkeypatch.setattr("app.persona.named_persona.pack_status", lambda profile_id: "ok")
-    voice = resolve_speaking_voice(lane="specialist", speaker_persona_id="enki")
-    assert voice.refused is False
-    assert voice.persona_id == "enki"
-    assert voice.profile_id == "synthetic_command_original_v1"
-    assert voice.playback[0] == pytest.approx(1.06)
-    assert voice.playback[1] == pytest.approx(1)
-
-
-def test_specialist_missing_pack_is_not_spoken(persona_voice, monkeypatch):
-    persona_voice.named_personas.profiles["aegir"] = PersonaAppearanceSettings(specialists_auto_speak=True)
-    monkeypatch.setattr(
-        "app.persona.named_persona.pack_status",
-        lambda profile_id: "tts_unavailable" if "chatterbox" in profile_id else "ok",
-    )
-    voice = resolve_speaking_voice(lane="specialist", speaker_persona_id="aegir")
-    assert voice.refused is True
-    assert voice.profile_id != "windows_natural_en_v1"
-    assert enqueue_chat_tts("On air.", source="task_chat", lane="specialist", speaker_persona_id="aegir") == ""
-    assert pending_chat_tts() == []
 
 
 @pytest.mark.asyncio
@@ -215,6 +201,7 @@ async def test_neural_request_never_yields_sapi(persona_voice, monkeypatch):
 async def test_chatterbox_vram_miss_falls_back_without_loading_it(monkeypatch):
     from app.workers import voice
 
+    reset_chatterbox_block_cache()
     settings = _settings(active="aegir", activated="chatterbox_expressive_en_v1")
     _bind(monkeypatch, settings)
     loaded: list[str] = []
@@ -244,14 +231,39 @@ async def test_chatterbox_vram_miss_falls_back_without_loading_it(monkeypatch):
     spoken = [item for item in recent_speech_trace() if item["path"] == "persona_speech.speak_text"]
     assert spoken[-1]["persona_id"] == "aegir"
     assert spoken[-1]["actual_engine"] == "kokoro"
+    reset_chatterbox_block_cache()
 
 
 @pytest.mark.asyncio
-async def test_speak_text_refuses_a_missing_specialist_pack(persona_voice, monkeypatch):
-    persona_voice.named_personas.profiles["maia"] = PersonaAppearanceSettings(specialists_auto_speak=True)
-    monkeypatch.setattr("app.persona.named_persona.pack_status", lambda _profile_id: "install_required")
-    with pytest.raises(SpeechRefused):
-        await speak_text("Hello.", lane="specialist", speaker_persona_id="maia", model="maia-copy")
+async def test_chatterbox_probe_runs_off_the_event_loop_and_is_cached(monkeypatch):
+    import threading
+
+    reset_chatterbox_block_cache()
+    settings = _settings(active="aegir", activated="chatterbox_expressive_en_v1")
+    _bind(monkeypatch, settings)
+    seen: dict[str, object] = {"calls": 0, "thread": None}
+
+    def probe():
+        seen["calls"] = int(seen["calls"]) + 1
+        seen["thread"] = threading.current_thread()
+        return True, "vram_tight:free_mib=128"
+
+    async def synthesize(_text, *, engine_id, profile=None, speaker_ref="", model_dir=None, playback=None):
+        assert engine_id == "kokoro"
+        return b"RIFFkokoro"
+
+    from app.workers import voice
+
+    monkeypatch.setattr("app.tts.persona_speech.chatterbox_speech_blocked", probe)
+    monkeypatch.setattr(voice, "pick_engine_for_profile", lambda _profile: "chatterbox")
+    monkeypatch.setattr(voice, "is_engine_available", lambda engine_id: engine_id in {"chatterbox", "kokoro"})
+    monkeypatch.setattr(voice, "synthesize_with_engine", synthesize)
+
+    await speak_text("On air.", lane="worker", model="Qwen3.5-27B")
+    await speak_text("Still on air.", lane="front", model="Qwen3.5-2B")
+    assert seen["calls"] == 1
+    assert seen["thread"] is not threading.current_thread()
+    reset_chatterbox_block_cache()
 
 
 def test_vram_probe_failure_blocks_chatterbox_rather_than_guessing(monkeypatch):

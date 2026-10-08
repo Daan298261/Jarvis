@@ -59,7 +59,6 @@ async def publish_owner_text(
     user_prompt: str | None = None,
     tts_char_offset: int = 0,
     lane: str = "worker",
-    speaker_persona_id: str | None = None,
     model: str = "",
 ) -> dict[str, Any]:
     """Deliver assistant text on the owner chat event channel and optionally queue TTS."""
@@ -88,7 +87,6 @@ async def publish_owner_text(
             user_prompt=user_prompt,
             full_text_for_class=cleaned,
             lane=lane,
-            speaker_persona_id=speaker_persona_id,
             model=model,
         )
         if tts_id:
@@ -112,7 +110,6 @@ def enqueue_chat_tts(
     partial: bool = False,
     reply_class: ReplySpeechClass | None = None,
     lane: str = "worker",
-    speaker_persona_id: str | None = None,
     model: str = "",
 ) -> str:
     basis = (full_text_for_class or text or "").strip()
@@ -128,15 +125,10 @@ def enqueue_chat_tts(
     from ..tts.persona_speech import SpeechRefused, resolve_speaking_voice
 
     try:
-        voice = resolve_speaking_voice(
-            lane=lane,
-            speaker_persona_id=speaker_persona_id,
-            model=model,
-        )
+        voice = resolve_speaking_voice(lane=lane, model=model)
     except SpeechRefused:
         return ""
     if voice.refused:
-        # Specialist pack missing: do not speak, do not fall through to SAPI.
         return ""
     item = ChatTtsItem(
         id=str(uuid.uuid4()),
@@ -216,7 +208,6 @@ def maybe_enqueue_streaming_social_tts(
     user_prompt: str | None = None,
     awaiting_tool_result: bool = False,
     lane: str = "worker",
-    speaker_persona_id: str | None = None,
     model: str = "",
 ) -> str | None:
     """RFC-0036 / RFC-0075: enqueue first stable social sentence without waiting for full reply."""
@@ -247,7 +238,6 @@ def maybe_enqueue_streaming_social_tts(
         partial=True,
         reply_class="social",
         lane=lane,
-        speaker_persona_id=speaker_persona_id,
         model=model,
     )
     if not item_id:

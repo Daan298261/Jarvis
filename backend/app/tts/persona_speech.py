@@ -1,9 +1,8 @@
 """One speech path for every model.
 
-Front, worker, Laya, and specialist text all become audio here. The voice
-is the active persona's neural pack (or a specialist's own pack when that
-persona has ``specialists_auto_speak``). Which model wrote the sentence
-does not choose an engine or a speaker.
+Front, worker, and Laya text all become audio here. The voice is the
+active persona's neural pack. Which model wrote the sentence does not
+choose an engine or a speaker.
 
 Persona *binding* still fails closed (RFC-0137): selecting Aegir, Bragi,
 Hermes, or Maia does not succeed when Chatterbox is not installed, and
@@ -11,28 +10,26 @@ Hermes, or Maia does not succeed when Chatterbox is not installed, and
 already-bound persona uses the existing neural engine chain (RFC-0070):
 if Chatterbox cannot take VRAM without crowding the worker, this path
 skips it and speaks with Kokoro instead of going silent or evicting the
-9B/27B. A specialist line whose own pack is missing is not spoken.
+9B/27B.
 """
 
 from __future__ import annotations
 
+import asyncio
+import time
 from dataclasses import dataclass
 
 from ..config import load_settings
-from ..persona.named_persona import (
-    CATALOG,
-    NamedPersonaBindError,
-    _appearance_for,
-    _resolve_voice,
-    resolve_persona_id,
-)
+from ..persona.named_persona import CATALOG, _appearance_for
 from ..voice_profiles.catalog import WINDOWS_NATURAL_VOICE_PROFILE_ID, get_catalog
 from ..voice_profiles.ip_guard import contains_forbidden_ip_term
 from ..workers.voice import SynthesizedSpeech, synthesize_speech_result
 
 # Same floor warm-start uses before it will load Chatterbox beside the worker.
 CHATTERBOX_VRAM_FLOOR_MIB = 2560
-SPEECH_LANES = ("front", "worker", "laya", "specialist")
+SPEECH_LANES = ("front", "worker", "laya")
+_VRAM_CACHE_TTL_SECONDS = 30.0
+_vram_cache: tuple[float, tuple[bool, str]] | None = None
 _CHATTERBOX_ENGINES = frozenset({"chatterbox", "chatterbox_turbo", "chatterbox-turbo"})
 _SYSTEM_ENGINES = frozenset({"system", "sapi", "windows", "espeak", "espeak-ng", "pyttsx3"})
 _KNOWN_NEURAL_IDS = frozenset(
@@ -76,7 +73,6 @@ class SpeechVoice:
     playback: tuple[float, float, float]
     refused: bool = False
     reason: str = ""
-    blocked_engines: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, str]:
         return {
@@ -106,16 +102,20 @@ def speech_lane_for_model(lane: str, model: str = "") -> str:
         return "laya"
     if raw_lane == "front":
         return "front"
-    if raw_lane == "specialist":
-        return "specialist"
     return "worker"
+
+
+def reset_chatterbox_block_cache() -> None:
+    global _vram_cache
+    _vram_cache = None
 
 
 def chatterbox_speech_blocked() -> tuple[bool, str]:
     """True when loading Chatterbox for this line would crowd the worker.
 
-    Warm-start still applies its own CPU-preferred skip and does not change
-    synthesis by itself. This check is only the speech-time VRAM gate.
+    Synchronous: it calls ``detect_hardware``, which can run ``nvidia-smi``
+    with a 12s timeout. Call this only from ``_chatterbox_block_for_speech``.
+    Enqueue must not call it.
     """
     try:
         from ..hardware import detect_hardware
@@ -128,6 +128,18 @@ def chatterbox_speech_blocked() -> tuple[bool, str]:
     if int(free) < CHATTERBOX_VRAM_FLOOR_MIB:
         return True, f"vram_tight:free_mib={free}"
     return False, f"free_mib={free}"
+
+
+async def _chatterbox_block_for_speech() -> tuple[bool, str]:
+    """Run the VRAM probe off the event-loop thread and reuse it briefly."""
+    global _vram_cache
+    now = time.monotonic()
+    if _vram_cache is not None and (now - _vram_cache[0]) < _VRAM_CACHE_TTL_SECONDS:
+        return _vram_cache[1]
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, chatterbox_speech_blocked)
+    _vram_cache = (time.monotonic(), result)
+    return result
 
 
 def _main_persona_id(settings) -> str:
@@ -191,71 +203,27 @@ def _neural_profile_for_main(settings, persona_id: str) -> str:
     return ""
 
 
-def resolve_speaking_voice(
-    *,
-    lane: str,
-    speaker_persona_id: str | None = None,
-    model: str = "",
-) -> SpeechVoice:
-    """Resolve the persona voice for this utterance. Does not synthesize."""
+def resolve_speaking_voice(*, lane: str, model: str = "") -> SpeechVoice:
+    """Resolve the active persona voice. Does not synthesize or probe VRAM."""
     resolved_lane = speech_lane_for_model(lane, model)
     settings = load_settings()
     main_id = _main_persona_id(settings)
-    persona_id = main_id
-    profile_id = ""
+    profile_id = _neural_profile_for_main(settings, main_id)
     refused = False
     reason = ""
-
-    if resolved_lane == "specialist" and (speaker_persona_id or "").strip():
-        try:
-            specialist_id = resolve_persona_id(speaker_persona_id, required=True)
-        except NamedPersonaBindError:
-            specialist_id = ""
-        if specialist_id and specialist_id in CATALOG:
-            appearance = _appearance_for(settings, specialist_id).model_copy(deep=True)
-            if appearance.specialists_auto_speak:
-                try:
-                    voice_id, _requested = _resolve_voice(specialist_id, appearance)
-                except NamedPersonaBindError as exc:
-                    refused = True
-                    reason = exc.detail or "specialist neural pack is not available"
-                    persona_id = specialist_id
-                    profile_id = exc.profile_id or ""
-                else:
-                    if not _acceptable_neural_id(voice_id):
-                        refused = True
-                        reason = "specialist voice is not a neural pack"
-                        persona_id = specialist_id
-                        profile_id = voice_id
-                    else:
-                        persona_id = specialist_id
-                        profile_id = voice_id
-            # auto-speak off: the line stays on the main persona's neural voice.
-
-    if not refused and not profile_id:
-        profile_id = _neural_profile_for_main(settings, main_id)
-        persona_id = main_id
-        if not profile_id:
-            refused = True
-            reason = "active persona has no neural voice"
-
+    if not profile_id:
+        refused = True
+        reason = "active persona has no neural voice"
     engine_id = _engine_id_for(profile_id) if profile_id else ""
-    blocked: tuple[str, ...] = ()
-    if not refused and engine_id in _CHATTERBOX_ENGINES:
-        blocked_now, block_reason = chatterbox_speech_blocked()
-        if blocked_now:
-            blocked = tuple(sorted(_CHATTERBOX_ENGINES))
-            reason = block_reason
-    playback = _playback_for(settings, persona_id if persona_id in CATALOG else main_id)
+    playback = _playback_for(settings, main_id)
     voice = SpeechVoice(
         lane=resolved_lane,
-        persona_id=persona_id,
+        persona_id=main_id,
         profile_id=profile_id,
         engine_id=engine_id,
         playback=playback,
         refused=refused,
         reason=reason,
-        blocked_engines=blocked,
     )
     _note(voice.as_dict())
     return voice
@@ -265,19 +233,19 @@ async def speak_text(
     text: str,
     *,
     lane: str = "worker",
-    speaker_persona_id: str | None = None,
     model: str = "",
 ) -> SynthesizedSpeech:
     """Turn text into speech in the active persona's voice.
 
     This is the only model-speech entry. It does not install packages and
     it does not run a TTS health synthesis; engine readiness stays on the
-    cached runtime probe.
+    cached runtime probe. The Chatterbox VRAM probe runs here, off the
+    event-loop thread, and is not part of enqueue.
     """
     cleaned = (text or "").strip()
     if not cleaned:
         raise RuntimeError("text is required")
-    voice = resolve_speaking_voice(lane=lane, speaker_persona_id=speaker_persona_id, model=model)
+    voice = resolve_speaking_voice(lane=lane, model=model)
     if voice.refused:
         raise SpeechRefused(voice.reason or "speech refused", persona_id=voice.persona_id, profile_id=voice.profile_id)
     if voice.profile_id == WINDOWS_NATURAL_VOICE_PROFILE_ID or voice.engine_id in _SYSTEM_ENGINES:
@@ -286,10 +254,17 @@ async def speak_text(
             persona_id=voice.persona_id,
             profile_id=voice.profile_id,
         )
+    blocked: tuple[str, ...] = ()
+    reason = voice.reason
+    if voice.engine_id in _CHATTERBOX_ENGINES:
+        blocked_now, block_reason = await _chatterbox_block_for_speech()
+        if blocked_now:
+            blocked = tuple(sorted(_CHATTERBOX_ENGINES))
+            reason = block_reason
     result = await synthesize_speech_result(
         cleaned,
         voice_profile_id=voice.profile_id,
-        blocked_engines=voice.blocked_engines,
+        blocked_engines=blocked,
         playback=voice.playback,
         allow_neural_fallback=True,
     )
@@ -298,6 +273,7 @@ async def speak_text(
             **voice.as_dict(),
             "path": "persona_speech.speak_text",
             "actual_engine": result.engine_id,
+            "reason": reason,
         }
     )
     return result

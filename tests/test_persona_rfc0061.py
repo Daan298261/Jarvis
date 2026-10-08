@@ -158,10 +158,9 @@ async def test_voice_speak_returns_audio_bytes(monkeypatch):
     from app.api.voice import SpeakIn
     from app.workers.voice import SynthesizedSpeech
 
-    async def fake_synthesize(text: str, *, lane: str = "worker", speaker_persona_id: str | None = None, model: str = "") -> SynthesizedSpeech:
+    async def fake_synthesize(text: str, *, lane: str = "worker", model: str = "") -> SynthesizedSpeech:
         assert text == "Hello there."
         assert lane == "worker"
-        assert speaker_persona_id is None
         return SynthesizedSpeech(b"RIFFfake-wav", "kokoro", "butler_original_v1")
 
     monkeypatch.setattr("app.api.voice.speak_text", fake_synthesize)

@@ -32,7 +32,6 @@ class SpeakIn(BaseModel):
         pattern=r"^[a-z0-9_]+$",
     )
     lane: str | None = Field(default=None, max_length=32)
-    speaker_persona_id: str | None = Field(default=None, max_length=80)
     model: str | None = Field(default=None, max_length=120)
 
 
@@ -132,7 +131,6 @@ async def voice_speak(body: SpeakIn):
         result = await speak_text(
             text,
             lane=body.lane or "worker",
-            speaker_persona_id=body.speaker_persona_id,
             model=body.model or "",
         )
     except SpeechRefused:

@@ -573,24 +573,15 @@ def reapply_stored_main_persona() -> dict | None:
 
 
 async def attach_specialist(raw_id: str, task_id: str) -> dict:
-    """Write specialist_persona_ids on the task. Does not replace the main persona."""
+    """Write specialist_persona_ids on the task.
+
+    Does not replace the main persona and does not change the active voice.
+    Specialist lines are not spoken from here.
+    """
     persona_id = resolve_persona_id(raw_id, required=True)
     cleaned_task = (task_id or "").strip()
     if not cleaned_task:
         raise NamedPersonaBindError("unknown", "task_id is required")
-    settings, _changed = _load()
-    appearance = _appearance_for(settings, persona_id).model_copy(deep=True)
-    spoken = False
-    if appearance.specialists_auto_speak:
-        try:
-            voice_id, _requested = _resolve_voice(persona_id, appearance)
-            main_voice = settings.named_personas.activated_voice_profile_id
-            _activate(voice_id)
-            spoken = True
-            if main_voice and main_voice != voice_id and pack_status(main_voice) == "ok":
-                _activate(main_voice)
-        except NamedPersonaBindError:
-            spoken = False
     from ..db.models import Task
     from ..db.session import SessionLocal
 
@@ -613,5 +604,4 @@ async def attach_specialist(raw_id: str, task_id: str) -> dict:
     state["task_id"] = cleaned_task
     state["specialist_persona_ids"] = ids
     state["card_sentence"] = card_sentence(state["active"]["id"], ids)
-    state["specialist_spoken"] = spoken
     return state
