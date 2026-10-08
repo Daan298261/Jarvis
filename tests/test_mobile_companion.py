@@ -170,32 +170,75 @@ async def test_mobile_can_resolve_coding_decision_with_explicit_instructions(mob
 
 
 @pytest.mark.asyncio
-async def test_mobile_voice_profiles_are_minimized_and_tts_selection_is_forwarded(mobile_env, monkeypatch):
+async def test_mobile_voice_profiles_are_minimized(mobile_env):
     from app.api.companion import router
-    from app.workers import voice
     app = FastAPI()
     app.include_router(router)
     key, device = paired()
     session = identity.exchange(device["id"], signature(key, device))
     headers = {"Authorization": "Bearer " + session["access_token"], "X-Jarvis-Device": device["id"]}
-    received = {}
-
-    async def synthesize(text, *, voice_profile_id=None):
-        received.update(text=text, voice_profile_id=voice_profile_id)
-        return voice.SynthesizedSpeech(b"RIFFtest", "kokoro", voice_profile_id or "")
-
-    monkeypatch.setattr(voice, "synthesize_speech_result", synthesize)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost") as client:
         assert (await client.get("/api/companion/voice/profiles")).status_code == 401
         profiles = (await client.get("/api/companion/voice/profiles", headers=headers)).json()["profiles"]
         assert profiles and set(profiles[0]) <= {
             "id", "display_name", "archetype", "available", "active", "vram_class", "unavailable_reason"
         }
-        response = await client.post("/api/companion/voice/speak", headers=headers,
-                                     json={"text": "Status report", "voice_profile_id": "butler_original_v1"})
-    assert response.status_code == 200 and response.content == b"RIFFtest"
-    assert response.headers["X-Jarvis-TTS-Engine"] == "kokoro"
-    assert received == {"text": "Status report", "voice_profile_id": "butler_original_v1"}
+
+
+@pytest.mark.asyncio
+async def test_companion_speak_uses_persona_voice_and_refuses_without_sapi(mobile_env, monkeypatch):
+    from app.api.companion import router
+    from app.config import AppSettings
+    from app.tts.persona_speech import SpeechRefused
+    from app.workers import voice
+
+    app = FastAPI()
+    app.include_router(router)
+    key, device = paired()
+    session = identity.exchange(device["id"], signature(key, device))
+    headers = {"Authorization": "Bearer " + session["access_token"], "X-Jarvis-Device": device["id"]}
+    settings = AppSettings()
+    settings.named_personas.active_id = "mestor"
+    settings.named_personas.activated_voice_profile_id = "tactical_aide_original_v1"
+    received: list[dict] = []
+    sapi_calls: list[str] = []
+
+    async def synthesize(text, *, voice_profile_id=None, blocked_engines=None, playback=None, exact_profile=False, allow_neural_fallback=False):
+        received.append({"text": text, "voice_profile_id": voice_profile_id})
+        return voice.SynthesizedSpeech(b"RIFFpersona", "kokoro", voice_profile_id or "")
+
+    async def refuse_sapi(*_args, **_kwargs):
+        sapi_calls.append("sapi")
+        raise AssertionError("companion speak must not reach SAPI")
+
+    monkeypatch.setattr("app.tts.persona_speech.load_settings", lambda: settings)
+    monkeypatch.setattr("app.tts.persona_speech.synthesize_speech_result", synthesize)
+    monkeypatch.setattr("app.tts.system_sapi.speak_sapi", refuse_sapi)
+    monkeypatch.setattr("app.workers.voice.synthesize_speech_result", synthesize)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost") as client:
+        response = await client.post(
+            "/api/companion/voice/speak",
+            headers=headers,
+            json={"text": "Status report", "voice_profile_id": "windows_natural_en_v1"},
+        )
+        assert response.status_code == 200 and response.content == b"RIFFpersona"
+        assert response.headers["X-Jarvis-TTS-Engine"] == "kokoro"
+        assert response.headers["X-Jarvis-Voice-Profile"] == "tactical_aide_original_v1"
+        assert received == [{"text": "Status report", "voice_profile_id": "tactical_aide_original_v1"}]
+        assert sapi_calls == []
+
+        async def refused(text, *, lane="worker", model=""):
+            raise SpeechRefused("speech refused", persona_id="mestor", profile_id="tactical_aide_original_v1")
+
+        monkeypatch.setattr("app.tts.persona_speech.speak_text", refused)
+        blocked = await client.post(
+            "/api/companion/voice/speak",
+            headers=headers,
+            json={"text": "Status report", "voice_profile_id": "butler_original_v1"},
+        )
+    assert blocked.status_code == 204
+    assert blocked.content == b""
+    assert sapi_calls == []
 
 
 def test_daily_schedule_preserves_local_time_across_dst():

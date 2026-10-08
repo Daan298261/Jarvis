@@ -63,11 +63,11 @@ def test_speak_endpoint_refuses_unspeakable_text(jarvis_env, monkeypatch):
 
     called: list[str] = []
 
-    async def fake_synth(text, voice_profile_id=None):
+    async def fake_synth(text, **_kwargs):
         called.append(text)
         raise RuntimeError("not reached in this test")
 
-    monkeypatch.setattr("app.api.voice.synthesize_speech_result", fake_synth)
+    monkeypatch.setattr("app.api.voice.speak_text", fake_synth)
     client = TestClient(app)
     response = client.post("/api/voice/speak", json={"text": LEAKED_TRACE})
     assert response.status_code == 204

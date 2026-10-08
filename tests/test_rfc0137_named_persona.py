@@ -227,6 +227,8 @@ async def test_specialist_attach_keeps_main_shape_and_sentence(persona_box, jarv
     from app.db.session import SessionLocal
 
     apply_main_persona("anzu")
+    update_appearance("enki", {"specialists_auto_speak": True})
+    update_appearance("themis", {"specialists_auto_speak": True})
     async with SessionLocal() as session:
         session.add(Task(id="task-0137", title="Verify", prompt="check the card"))
         await session.commit()
@@ -236,6 +238,8 @@ async def test_specialist_attach_keeps_main_shape_and_sentence(persona_box, jarv
     assert result["card_sentence"] == LOCKED
     assert result["active"]["presence_shape_id"] == "stormbird"
     assert result["active"]["id"] == "anzu"
+    assert result["active"]["voice_profile_id"] == "butler_original_v1"
+    assert "specialist_spoken" not in result
     assert calls == []
     async with SessionLocal() as session:
         task = await session.get(Task, "task-0137")

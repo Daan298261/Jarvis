@@ -9,11 +9,13 @@ from app.mobile import media
 @pytest.mark.asyncio
 async def test_interruption_during_tts_does_not_enqueue_old_audio(monkeypatch):
     started, release = asyncio.Event(), asyncio.Event()
-    async def synthesize(text):
+    async def synthesize(text, **_kwargs):
         started.set()
         await release.wait()
-        return b"not decoded after interruption"
-    monkeypatch.setattr(media, "synthesize_speech", synthesize)
+        from app.workers.voice import SynthesizedSpeech
+
+        return SynthesizedSpeech(b"not decoded after interruption", "kokoro", "butler_original_v1")
+    monkeypatch.setattr(media, "speak_text", synthesize)
     speaker = media.Speaker()
     work = asyncio.create_task(speaker.speak("old answer"))
     await started.wait()

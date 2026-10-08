@@ -330,6 +330,7 @@ async def transcribe(request: Request, device=Device):
 
 class Speak(BaseModel):
     text: str = Field(min_length=1, max_length=6000)
+    # Ignored. Companion speech uses the active persona voice, same as every other lane.
     voice_profile_id: str | None = Field(default=None, min_length=1, max_length=80, pattern=r"^[a-z0-9_]+$")
 
 
@@ -379,16 +380,19 @@ async def preview_voice_profile(profile_id: str, device=Device):
 
 @router.post("/voice/speak")
 async def speak(body: Speak, device=Device):
-    from ..workers.voice import synthesize_speech_result
+    from ..tts.persona_speech import SpeechRefused, speak_text
+
     try:
-        result = await synthesize_speech_result(body.text, voice_profile_id=body.voice_profile_id)
-        return Response(
-            result.audio,
-            media_type="audio/wav",
-            headers={"X-Jarvis-TTS-Engine": result.engine_id, "X-Jarvis-Voice-Profile": result.profile_id},
-        )
+        result = await speak_text(body.text, lane="worker")
+    except SpeechRefused:
+        return Response(status_code=204)
     except RuntimeError as exc:
-        raise HTTPException(503, str(exc))
+        raise HTTPException(503, str(exc)) from exc
+    return Response(
+        result.audio,
+        media_type="audio/wav",
+        headers={"X-Jarvis-TTS-Engine": result.engine_id, "X-Jarvis-Voice-Profile": result.profile_id},
+    )
 
 
 @router.websocket("/voice/realtime")

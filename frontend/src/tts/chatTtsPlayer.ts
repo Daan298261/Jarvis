@@ -1,6 +1,5 @@
 import { fetchAudio } from "../api"
 import { attachPlaybackAnalyser, detachVoiceAnalyser } from "./voiceAnalyser"
-import { getActiveVoiceProfileId } from "./voiceProfiles"
 
 const MAX_SPEAK_CHARS = 800
 
@@ -49,13 +48,10 @@ export function stopChatTts(): void {
   finish?.()
 }
 
-function speakPayload(text: string): { text: string; voice_profile_id?: string } {
-  const payload: { text: string; voice_profile_id?: string } = {
-    text: text.slice(0, MAX_SPEAK_CHARS),
-  }
-  const voiceProfileId = getActiveVoiceProfileId()
-  if (voiceProfileId) payload.voice_profile_id = voiceProfileId
-  return payload
+function speakPayload(text: string): { text: string } {
+  // The server resolves the active persona voice on every request.
+  // A cached profile id must not pick a different voice per model.
+  return { text: text.slice(0, MAX_SPEAK_CHARS) }
 }
 
 function fetchSpeakBlob(text: string): Promise<Blob> {

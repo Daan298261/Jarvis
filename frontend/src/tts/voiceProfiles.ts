@@ -321,10 +321,6 @@ export async function previewVoiceProfile(profile: VoiceProfile): Promise<VoiceP
   }
 }
 
-export function getActiveVoiceProfileId(): string | null {
-  return readActiveVoiceProfileBootstrap()
-}
-
 export function useVoiceProfileSwitching(): boolean {
   const [switching, setSwitching] = useState(() => voiceProfileSwitching)
 

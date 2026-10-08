@@ -22,7 +22,8 @@ from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 
 from . import service
 from .store import database, get
-from ..workers.voice import synthesize_speech, transcribe_audio, VoiceSTTError
+from ..tts.persona_speech import speak_text
+from ..workers.voice import transcribe_audio, VoiceSTTError
 
 MAX_AUDIO_BYTES = 4 * 1024 * 1024
 MAX_TURN_SECONDS = 90
@@ -38,7 +39,6 @@ class VoiceTurn:
     turn_id: str
     device_id: str
     conversation_id: str | None
-    voice_profile_id: str | None
     inference_profile: str | None = None
     started_at: float = field(default_factory=time.monotonic)
     audio: bytearray = field(default_factory=bytearray)
@@ -56,7 +56,6 @@ class VoiceSession:
     session_id: str
     device_id: str
     conversation_id: str | None = None
-    voice_profile_id: str | None = None
     inference_profile: str | None = None
     created_at: float = field(default_factory=time.monotonic)
     turns: dict[str, VoiceTurn] = field(default_factory=dict)
@@ -101,7 +100,6 @@ def _rate_ok(device_id: str) -> bool:
 def create_session(
     device: dict,
     conversation_id: str | None = None,
-    voice_profile_id: str | None = None,
     inference_profile: str | None = None,
 ) -> VoiceSession:
     _purge_expired()
@@ -114,7 +112,6 @@ def create_session(
         session_id=secrets.token_urlsafe(24),
         device_id=device_id,
         conversation_id=conversation_id,
-        voice_profile_id=voice_profile_id,
         inference_profile=inference_profile,
     )
     _SESSIONS[session.session_id] = session
@@ -141,7 +138,6 @@ def begin_turn(session: VoiceSession, turn_id: str | None = None) -> VoiceTurn:
         turn_id=tid,
         device_id=session.device_id,
         conversation_id=session.conversation_id,
-        voice_profile_id=session.voice_profile_id,
         inference_profile=session.inference_profile,
     )
     session.turns[tid] = turn
@@ -256,7 +252,9 @@ async def stream_reply(turn: VoiceTurn, text: str) -> AsyncIterator[dict[str, An
                 for sentence in _split_sentences(remainder):
                     if turn.cancelled:
                         return
-                    audio = await synthesize_speech(sentence, voice_profile_id=turn.voice_profile_id)
+                    audio = (
+                        await speak_text(sentence, lane="worker", model=turn.inference_profile or "")
+                    ).audio
                     turn.tts_seq += 1
                     yield {
                         "type": "tts",
@@ -307,9 +305,8 @@ async def handle_realtime(websocket: WebSocket, device: dict) -> None:
                     await send({"type": "error", "detail": "Session already open"})
                     continue
                 conversation_id = message.get("conversation_id")
-                voice_profile_id = message.get("voice_profile_id")
                 inference_profile = message.get("profile") or message.get("inference_profile")
-                session = create_session(device, conversation_id, voice_profile_id, inference_profile)
+                session = create_session(device, conversation_id, inference_profile=inference_profile)
                 _SEND[session.session_id] = send
                 await send({
                     "type": "session",

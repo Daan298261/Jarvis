@@ -100,7 +100,6 @@ def test_rate_limit_blocks_excessive_turns(mobile_env):
 async def test_stream_reply_emits_tts_before_final_and_uses_profile(mobile_env, monkeypatch):
     session = realtime_voice.create_session(
         {"id": "phone"},
-        voice_profile_id="butler_original_v1",
         inference_profile="qwen38_9b",
     )
     turn = realtime_voice.begin_turn(session)
@@ -122,19 +121,21 @@ async def test_stream_reply_emits_tts_before_final_and_uses_profile(mobile_env, 
     async def snapshot(task_id):
         return next(snapshots)
 
-    async def synthesize(text, *, voice_profile_id=None):
-        spoken.append((text, voice_profile_id))
-        return b"RIFFdata"
+    async def synthesize(text, *, lane="worker", model=""):
+        spoken.append((text, lane, model))
+        from app.workers.voice import SynthesizedSpeech
+
+        return SynthesizedSpeech(b"RIFFdata", "kokoro", "butler_original_v1")
 
     monkeypatch.setattr(realtime_voice.service, "submit", submit)
     monkeypatch.setattr(realtime_voice.service, "task_snapshot", snapshot)
-    monkeypatch.setattr(realtime_voice, "synthesize_speech", synthesize)
+    monkeypatch.setattr(realtime_voice, "speak_text", synthesize)
 
     events = [event async for event in realtime_voice.stream_reply(turn, "Hello")]
     assert events[0]["type"] == "tts" and events[0]["final"] is False and events[0]["data"]
     assert any(event["type"] == "tts" and event["final"] for event in events)
     assert any(event["type"] == "done" for event in events)
-    assert spoken and all(profile == "butler_original_v1" for _, profile in spoken)
+    assert spoken and all(lane == "worker" for _, lane, _model in spoken)
     assert spoken[0][0] == "One sentence."
     assert submitted["profile"] == "qwen38_9b"
 
@@ -208,10 +209,14 @@ async def test_clip_endpoints_remain_as_fallback(mobile_env, monkeypatch):
     app.include_router(router)
     _device, headers = _headers()
 
-    async def synthesize(text, *, voice_profile_id=None):
-        return voice.SynthesizedSpeech(b"RIFFclip", "kokoro", voice_profile_id or "")
+    seen: dict[str, str] = {}
 
-    monkeypatch.setattr(voice, "synthesize_speech_result", synthesize)
+    async def synthesize(text, *, lane="worker", model=""):
+        seen["text"] = text
+        seen["lane"] = lane
+        return voice.SynthesizedSpeech(b"RIFFclip", "kokoro", "tactical_aide_original_v1")
+
+    monkeypatch.setattr("app.tts.persona_speech.speak_text", synthesize)
     import httpx
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post(
@@ -220,3 +225,4 @@ async def test_clip_endpoints_remain_as_fallback(mobile_env, monkeypatch):
             json={"text": "Fallback clip", "voice_profile_id": "butler_original_v1"},
         )
     assert response.status_code == 200 and response.content == b"RIFFclip"
+    assert seen == {"text": "Fallback clip", "lane": "worker"}

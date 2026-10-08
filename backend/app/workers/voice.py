@@ -551,6 +551,9 @@ async def synthesize_speech_result(
     *,
     voice_profile_id: str | None = None,
     exact_profile: bool = False,
+    blocked_engines: frozenset[str] | set[str] | tuple[str, ...] | None = None,
+    playback: tuple[float, float, float] | None = None,
+    allow_neural_fallback: bool = False,
 ) -> SynthesizedSpeech:
     cleaned = (text or "").strip()
     if not cleaned:
@@ -563,7 +566,7 @@ async def synthesize_speech_result(
 
             catalog = get_catalog()
             profile = catalog.get_available(selected_profile_id)
-            if profile is None and voice_profile_id:
+            if profile is None and voice_profile_id and not allow_neural_fallback:
                 raise RuntimeError(f"Voice profile is not available: {selected_profile_id}")
             if profile is None:
                 profile = catalog.get(selected_profile_id)
@@ -606,6 +609,11 @@ async def synthesize_speech_result(
         )
     if not explicit_system:
         candidates = [candidate for candidate in candidates if not is_system_tts_engine(candidate)]
+    blocked = {item.strip().lower() for item in (blocked_engines or ()) if str(item).strip()}
+    if blocked:
+        # Persona speech can drop Chatterbox when it cannot have VRAM without
+        # touching the worker. The rest of the neural chain (Kokoro) still runs.
+        candidates = [candidate for candidate in candidates if candidate.strip().lower() not in blocked]
     if not candidates:
         raise RuntimeError(
             "The household neural voice is not ready. Windows SAPI will not be used as a fallback."
@@ -617,11 +625,15 @@ async def synthesize_speech_result(
             candidate_matches_profile = profile is not None and candidate == requested_engine
             candidate_profile = profile if candidate_matches_profile else None
             candidate_speaker = speaker_ref if candidate_matches_profile else ""
+            synth_kwargs: dict[str, Any] = {}
+            if playback is not None:
+                synth_kwargs["playback"] = playback
             audio = await synthesize_with_engine(
                 cleaned,
                 engine_id=candidate,
                 profile=candidate_profile,
                 speaker_ref=candidate_speaker,
+                **synth_kwargs,
             )
             actual_model = (
                 getattr(profile.tts, "model_id", "")

@@ -24,6 +24,7 @@ from .chat_delivery import (
 )
 from .weather import weather_system_message
 from ..events import BUS
+from ..tts.persona_speech import speech_lane_for_model
 from ..agent.front_responder import (
     TwoLaneTiming,
     front_worker_should_overlap,
@@ -415,6 +416,8 @@ async def stream_owner_chat(
                 source="owner_chat",
                 stream_key=stream_key,
                 user_prompt=cleaned,
+                lane="front",
+                model=prefetched_front.model or "",
             )
             if not early_id:
                 delivery = await publish_owner_text(
@@ -422,6 +425,8 @@ async def stream_owner_chat(
                     source="owner_chat",
                     speak=True,
                     user_prompt=cleaned,
+                    lane="front",
+                    model=prefetched_front.model or "",
                 )
                 if delivery.get("tts_id"):
                     early_tts_ids.append(str(delivery["tts_id"]))
@@ -486,6 +491,8 @@ async def stream_owner_chat(
                     speak=True,
                     user_prompt=cleaned,
                     tts_char_offset=stream_speak_offset(stream_key),
+                    lane="front",
+                    model=prefetched_front.model or "",
                 )
                 clear_stream_speak_state(stream_key)
                 tts_id = (
@@ -655,6 +662,7 @@ async def stream_owner_chat(
             await worker_speech_gate.wait()
         parts.append(delta)
         model_id = resolve_front_model_id(settings) if lane == "front" else worker_model
+        speech_lane = speech_lane_for_model(lane, model_id)
         await BUS.publish_ephemeral(
             OWNER_CHAT_CHANNEL,
             "model_lane",
@@ -668,6 +676,8 @@ async def stream_owner_chat(
             source="owner_chat",
             stream_key=stream_key,
             user_prompt=cleaned,
+            lane=speech_lane,
+            model=model_id,
         )
         if early_id:
             early_tts_ids.append(early_id)
@@ -715,6 +725,8 @@ async def stream_owner_chat(
                         source="owner_chat",
                         stream_key=stream_key,
                         user_prompt=cleaned,
+                        lane="front",
+                        model=getattr(front, "model", "") or "",
                     )
                     if not early_id:
                         delivery = await publish_owner_text(
@@ -722,6 +734,8 @@ async def stream_owner_chat(
                             source="owner_chat",
                             speak=True,
                             user_prompt=cleaned,
+                            lane="front",
+                            model=getattr(front, "model", "") or "",
                         )
                         if delivery.get("tts_id"):
                             early_tts_ids.append(str(delivery["tts_id"]))
@@ -787,6 +801,8 @@ async def stream_owner_chat(
             speak=True,
             user_prompt=cleaned,
             tts_char_offset=stream_speak_offset(stream_key),
+            lane="worker",
+            model=worker_model,
         )
         clear_stream_speak_state(stream_key)
         tts_id = early_tts_ids[0] if early_tts_ids and not delivery.get("tts_id") else delivery.get("tts_id")
