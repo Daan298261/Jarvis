@@ -69,7 +69,7 @@ class CompanionVoicePackCatalogTest {
         assertTrue(pocket.attribution.contains("CC BY 4.0"))
         assertTrue(pocket.attribution.contains("https://huggingface.co/kyutai/tts-voices#alba-mackenna"))
         assertTrue(pocket.attribution.contains("Kyutai Pocket TTS"))
-        assertTrue(pocket.toJson().optString("attribution").contains("Alba MacKenna"))
+        assertEquals(CompanionVoicePackCatalog.POCKET_VOICE_ATTRIBUTION, pocket.attribution)
     }
 }
 

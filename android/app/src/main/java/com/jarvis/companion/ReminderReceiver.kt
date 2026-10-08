@@ -14,7 +14,10 @@ class ReminderReceiver : BroadcastReceiver() {
         when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_LOCKED_BOOT_COMPLETED,
-            -> StandaloneActions.rearmUnfiredReminders(app)
+            -> {
+                StandaloneActions.deliverDueReminders(app)
+                StandaloneActions.rearmUnfiredReminders(app)
+            }
             StandaloneActions.ACTION_REMINDER -> {
                 val id = intent.getStringExtra(StandaloneActions.EXTRA_REMINDER_ID).orEmpty()
                 StandaloneActions.fireReminder(app, id)

@@ -82,7 +82,7 @@ class StandaloneModeTest {
         val at = now.plusMinutes(5)
         val result = StandaloneActions.scheduleReminder(context, "Remind me at 8:00 pm", at).getOrThrow()
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        Shadows.shadowOf(manager).cancelAll()
+        manager.cancelAll()
         val receiver = ReminderReceiver()
         val intent = StandaloneActions.reminderBroadcastIntent(context, result.id)
         receiver.onReceive(context, intent)
@@ -94,7 +94,7 @@ class StandaloneModeTest {
 
     @Test
     fun bootCompletedRearmsUnfiredReminders() {
-        val at = now.plusHours(3)
+        val at = ZonedDateTime.now(ZoneId.of("UTC")).plusHours(3)
         val result = StandaloneActions.scheduleReminder(context, "Remind me at 6:00 pm", at).getOrThrow()
         val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val pending = PendingIntent.getBroadcast(
