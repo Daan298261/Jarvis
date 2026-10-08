@@ -574,6 +574,9 @@ def test_anzu_wizard_theme_assets_and_glow_timer():
     assert "AnzuGlowIntervalMs = 69" in iss
     assert "AnzuGlowFrames = 16" in iss
     assert "CreateCallback(@GlowTimerProc)" in iss
+    assert "GlowCallback: LongWord" in iss
+    assert "lpTimerFunc: LongWord" in iss
+    assert "NativeInt" not in iss
     assert "PngImage.LoadFromFile" in iss
     assert "procedure DeinitializeSetup" in iss
     shutdown = iss.split("procedure DeinitializeSetup", 1)[1]
