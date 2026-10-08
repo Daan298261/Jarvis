@@ -228,6 +228,10 @@ def is_plain_conversation(prompt: str) -> bool:
     lowered = text.lower()
     if any(marker in lowered for marker in _CONVERSATION_BLOCKERS):
         return False
+    from .instruction_gate import is_reply_only_request
+
+    if is_reply_only_request(text):
+        return True
     action_hits = sum(1 for _, keywords in TASK_CATEGORIES for keyword in keywords if keyword in lowered)
     if action_hits > 0:
         return False
@@ -495,6 +499,10 @@ def route_request(prompt: str) -> RequestRoute:
         return RequestRoute(DIRECT_LOOKUP, CONVERSATION_CLASS)
     if is_plain_conversation(prompt):
         return RequestRoute(DIRECT_REPLY, CONVERSATION_CLASS)
+    from .instruction_gate import owner_forbids_file_writes
+
+    if owner_forbids_file_writes(prompt):
+        return RequestRoute(DIRECT_REPLY, CONVERSATION_CLASS)
     return RequestRoute(MANAGED_TASK, classify_task(prompt))
 
 
@@ -714,6 +722,8 @@ class WorkingState:
     cyber_execution: dict[str, Any] = field(default_factory=dict)
     purple_phase: str = ""
     purple_locked: bool = False
+    # Set when an owner "remember" request was actually written.
+    memory_stored: bool = False
 
     def note_tool(self, name: str, observation: str, success: bool) -> None:
         snippet = f"{name}: {observation[:400]}"

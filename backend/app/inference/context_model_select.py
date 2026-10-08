@@ -24,6 +24,10 @@ def _local_weights_ready(profile: ProfileT) -> bool:
     if not name:
         return True
     provider = str(getattr(profile, "provider", "") or "").lower()
+    # Shared Ollama (including community models) is not a silent fallback.
+    # Those runtimes load only when the owner picks them.
+    if provider == "ollama":
+        return False
     if provider and provider not in {"local-llama", "llama.cpp", "llamacpp"}:
         return True
     from .profiles import PROFILES, profile_gguf

@@ -31,6 +31,9 @@ class ChatMessage:
     tool_call_id: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
     reasoning_content: str | None = None
+    # ``internal`` marks agent instructions. Inference still sends ``role``,
+    # but the owner transcript must not attribute that text to the user.
+    audience: str = ""
 
 
 @dataclass

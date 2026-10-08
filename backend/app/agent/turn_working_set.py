@@ -418,6 +418,17 @@ async def _compose_memory_working_set(
                 error=supermemory_error,
                 source="native_fallback",
             )
+        from ..memory.owner_facts import identity_recall_block, is_memory_recall_request
+
+        if is_memory_recall_request(query):
+            recalled = identity_recall_block(snapshot)
+            if recalled:
+                return _MemoryComposeResult(
+                    recalled,
+                    MEMORY_RETRIEVAL_HITS,
+                    error=supermemory_error,
+                    source="native_fallback",
+                )
         if supermemory_error:
             return _MemoryComposeResult("", MEMORY_RETRIEVAL_ERROR, error=supermemory_error, source="supermemory")
         return _MemoryComposeResult("", MEMORY_RETRIEVAL_MISS)

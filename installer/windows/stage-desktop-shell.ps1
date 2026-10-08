@@ -35,6 +35,7 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
 
 Write-Host "==> Staging Jarvis Desktop (Tauri + backend sidecar)" -ForegroundColor Cyan
 
+# Sidecar build collects kokoro + soundfile and fails if the frozen exe cannot import them.
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root "scripts\build-backend-sidecar.ps1")
 if ($LASTEXITCODE -ne 0) { throw "Backend sidecar build failed with exit code $LASTEXITCODE" }
 
