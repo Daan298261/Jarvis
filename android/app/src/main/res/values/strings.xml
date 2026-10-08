@@ -13,17 +13,13 @@
     <string name="chat_empty_hint">One conversation across your phone and ANZU. Send a message, file, or voice note.</string>
     <string name="tasks_empty_hint">Tasks appear here as soon as ANZU starts working.</string>
     <string name="pending_may_be_working">ANZU may already be working on it. Check Tasks before sending it again. Dismissing does not cancel a task.</string>
-    <string name="anzu_is_offline">ANZU is offline</string>
-    <string name="model_not_loaded_on_anzu">Conversation model is not loaded on ANZU</string>
     <string name="auto_anzu_selects">Auto · ANZU selects</string>
-    <string name="could_not_reach_anzu">Could not reach ANZU.</string>
     <string name="studio_wait_for_anzu">Creative tools stay read-only until ANZU reports studio.available=true. No local preview engine runs on the phone.</string>
     <string name="studio_connect_hint">Connect on the More tab to load live studio status from ANZU.</string>
     <string name="instructions_for_anzu">Instructions for ANZU</string>
     <string name="anzu_https_endpoint">ANZU HTTPS endpoint</string>
     <string name="confirm_fingerprint_anzu_desktop">Confirm this fingerprint on your ANZU desktop to finish pairing.</string>
     <string name="scan_pairing_qr_anzu_desktop">Scan the pairing QR shown on your ANZU desktop</string>
-    <string name="invalid_pairing_qr">That QR code is not a valid ANZU pairing invitation.</string>
     <string name="whatsapp_save_anzu">Save ANZU as a WhatsApp contact on this phone so you can message the linked desktop session.</string>
     <string name="add_anzu_on_whatsapp">Add ANZU on WhatsApp</string>
     <string name="push_needs_anzu_service">Background push needs the ANZU push service configured.</string>
