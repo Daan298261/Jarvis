@@ -197,11 +197,6 @@ async def prepare_inference(
     if budget.pressure < PRESSURE_COMPACT:
         return PreparedInference(messages, tools, profile, budget)
 
-    from .large_input import acknowledge
-    for message in messages:
-        if message.role == "user" and isinstance(message.content, str) and estimate_text_tokens(message.content) > 8192:
-            await acknowledge(message.content)
-
     if emit:
         await emit("context_pressure_detected", budget, "preflight pressure >= 0.70")
 

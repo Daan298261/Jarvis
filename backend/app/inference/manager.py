@@ -47,6 +47,7 @@ from .prompt_budget import (
     prepare_inference,
     recover_context_after_overflow,
 )
+from .request_lease import RequestLease
 
 
 def resolve_vision(settings: AppSettings, requested: bool | None = None) -> bool:
@@ -253,6 +254,7 @@ class InferenceManager:
         self.state = InferenceState()
         self.backend: InferenceBackend | None = None
         self._lock = asyncio.Lock()
+        self._request_lease = RequestLease()
         self.provider: OpenAICompatProvider | None = None
 
     def _active_profile(
@@ -402,6 +404,34 @@ class InferenceManager:
     ):
         if not self.provider:
             raise RuntimeError("Inference model is not loaded")
+        async with self._request_lease.shared():
+            return await self._chat_holding_lease(
+                messages,
+                tools=tools,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                max_tokens=max_tokens,
+                thinking=thinking,
+                extra=extra,
+                settings=settings,
+                working_state_block=working_state_block,
+            )
+
+    async def _chat_holding_lease(
+        self,
+        messages: list[Any],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        max_tokens: int | None = None,
+        thinking: bool | None = None,
+        extra: dict[str, Any] | None = None,
+        settings: AppSettings | None = None,
+        working_state_block: str | None = None,
+    ):
         app_settings = settings or load_settings()
         profile = self._active_profile(app_settings)
         typed = [
@@ -535,6 +565,33 @@ class InferenceManager:
     ) -> AsyncIterator[str]:
         if not self.provider:
             raise RuntimeError("Inference model is not loaded")
+        async with self._request_lease.shared():
+            async for delta in self._chat_stream_holding_lease(
+                messages,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                max_tokens=max_tokens,
+                thinking=thinking,
+                extra=extra,
+                settings=settings,
+                working_state_block=working_state_block,
+            ):
+                yield delta
+
+    async def _chat_stream_holding_lease(
+        self,
+        messages: list[Any],
+        *,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        max_tokens: int | None = None,
+        thinking: bool | None = False,
+        extra: dict[str, Any] | None = None,
+        settings: AppSettings | None = None,
+        working_state_block: str | None = None,
+    ) -> AsyncIterator[str]:
         app_settings = settings or load_settings()
         profile = self._active_profile(app_settings)
         typed = [
@@ -905,20 +962,48 @@ class InferenceManager:
         except Exception:
             pass
 
-    async def apply_context(self, settings: AppSettings, context_size: int, *, allow_shrink: bool = False) -> int:
+    def mark_unloaded(self, error: str = "") -> None:
+        """Reflect that the live instance is gone. Does not talk to the server."""
+        self.provider = None
+        self.state.loaded = False
+        self.state.loading = False
+        self.state.last_error = error
+        self.state.server_n_ctx = 0
+        self._invalidate_status_cache()
+
+    async def apply_context(
+        self,
+        settings: AppSettings,
+        context_size: int,
+        *,
+        allow_shrink: bool = False,
+        allow_reload: bool = False,
+    ) -> int:
         """Set the live context window. Mid-task callers pass allow_shrink=False so we only grow.
 
-        Local LM Studio may reload an idle instance after resource admission.
+        Local LM Studio may reload an idle instance only when ``allow_reload`` is true
+        (turn start). Mid-turn callers compact or trim; they never unload the model.
         Other external servers stay capped at their actual loaded slot.
         """
         target = int(context_size or 0)
         if target <= 0:
             return int(self.state.context_size or 0)
         live_cap = int(self.state.server_n_ctx or 0)
-        if target > live_cap and self.state.backend in LMSTUDIO_ALIASES:
-            from .lmstudio_context import grow_local_instance
+        if allow_reload and target > live_cap and self.state.backend in LMSTUDIO_ALIASES:
+            from .lmstudio_context import LocalContextRestoreError, grow_local_instance
             identifier = getattr(self.provider, "model", "")
-            grown = await grow_local_instance(settings, target, identifier)
+            try:
+                grown = await grow_local_instance(
+                    settings,
+                    target,
+                    identifier,
+                    lease=self._request_lease,
+                    on_unloaded=self.mark_unloaded,
+                )
+            except LocalContextRestoreError as exc:
+                if self.state.loaded:
+                    self.mark_unloaded(str(exc))
+                raise
             if grown:
                 self.state.server_n_ctx = grown
                 self.state.context_size = grown

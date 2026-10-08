@@ -10,11 +10,30 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from ..config import data_dir
+from ..config import SocialCommentarySettings, data_dir, load_settings
 from ..providers.base import ChatMessage
 
-ACKNOWLEDGMENT = "That's a lot of text, sir. I'll divide it into sections so I can read it properly."
 _announced: dict[str, float] = {}
+
+
+def address_suffix(settings: SocialCommentarySettings | None = None) -> str:
+    from ..persona.social import resolve_address_style
+    social = settings or load_settings().social_commentary
+    style = resolve_address_style(social)
+    if style == "sir_maam":
+        return ", sir"
+    if style in {"first_name", "configured"}:
+        name = (social.configured_address_name or "").strip()
+        if name:
+            return f", {name}"
+    return ""
+
+
+def acknowledgment_line(settings: SocialCommentarySettings | None = None) -> str:
+    return (
+        f"That's a lot of text{address_suffix(settings)}. "
+        "I'll divide it into sections so I can read it properly."
+    )
 
 
 def text_cost(text: str) -> int:
@@ -46,7 +65,7 @@ async def acknowledge(text: str) -> None:
         _announced.pop(next(iter(_announced)))
     _announced[digest] = now
     from ..persona.chat_delivery import publish_owner_text
-    await publish_owner_text(ACKNOWLEDGMENT, source="context_preparation", speak=True)
+    await publish_owner_text(acknowledgment_line(), source="context_preparation", speak=True)
 
 
 def retain_input(text: str) -> Path:
@@ -96,14 +115,14 @@ async def reduce_user_text(messages: list[ChatMessage], *, provider, max_chars: 
             continue
         text = message.content
         path = await asyncio.to_thread(retain_input, text)
-        if not notified:
-            await acknowledge(text)
-            notified = True
         chunk_size = max(1024, min(16384, context // 3))
         current = text
         section_count = len(sections(text, chunk_size))
         if section_count > 256:
             raise ValueError(f"Input needs more than 256 sections. Full input retained at {path}; use a file investigation.")
+        if not notified:
+            await acknowledge(text)
+            notified = True
         for depth in range(5):
             if text_cost(current) <= allowance - 600:
                 break

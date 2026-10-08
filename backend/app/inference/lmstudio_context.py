@@ -3,14 +3,24 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import psutil
 
+from ..observability.rolling_log import record_event
+from .request_lease import RequestLease
+
+_log = logging.getLogger(__name__)
 _resize_lock = asyncio.Lock()
+
+
+class LocalContextRestoreError(Exception):
+    """The local instance was unloaded and could not be restored to its original load."""
 
 
 def admitted(estimated_gpu_gib: float, estimated_total_gib: float, *, gpu_total_gib: float,
@@ -20,7 +30,83 @@ def admitted(estimated_gpu_gib: float, estimated_total_gib: float, *, gpu_total_
             and estimated_total_gib + 12 <= available_ram_gib)
 
 
-async def grow_local_instance(settings, target: int, identifier: str) -> int | None:
+def _nested_config(row: dict[str, Any]) -> dict[str, Any]:
+    config = row.get("config")
+    return config if isinstance(config, dict) else {}
+
+
+def gpu_offload_from_row(row: dict[str, Any]) -> str | None:
+    """Return the original ``lms load --gpu`` value, or None if it was not recorded."""
+    gpu = row.get("gpu")
+    if gpu is None:
+        gpu = _nested_config(row).get("gpu")
+    if isinstance(gpu, dict):
+        kind = str(gpu.get("type") or gpu.get("offload") or "").strip().lower()
+        if kind in {"max", "off"}:
+            return kind
+        ratio = gpu.get("ratio", gpu.get("value"))
+        if ratio is True or ratio == 1 or ratio == "max":
+            return "max"
+        if ratio is False or ratio == 0 or ratio == "off":
+            return "off"
+        if isinstance(ratio, (int, float)) and not isinstance(ratio, bool):
+            if ratio >= 1:
+                return "max"
+            if ratio <= 0:
+                return "off"
+            return str(ratio)
+        if isinstance(ratio, str) and ratio.strip():
+            return ratio.strip()
+        return None
+    if gpu is True or gpu == "max":
+        return "max"
+    if gpu is False or gpu in {"off", "0"}:
+        return "off"
+    if isinstance(gpu, (int, float)) and not isinstance(gpu, bool):
+        if gpu >= 1:
+            return "max"
+        if gpu <= 0:
+            return "off"
+        return str(gpu)
+    if isinstance(gpu, str) and gpu.strip():
+        return gpu.strip()
+    return None
+
+
+def instance_load_args(row: dict[str, Any], *, key: str, identifier: str, context_length: int) -> list[Any]:
+    """Rebuild ``lms load`` arguments from the original ``lms ps --json`` row."""
+    config = _nested_config(row)
+    args: list[Any] = [key, "--identifier", identifier]
+    gpu = gpu_offload_from_row(row)
+    if gpu is not None:
+        args.extend(["--gpu", gpu])
+    parallel = row.get("parallel", config.get("parallel"))
+    if parallel is not None:
+        args.extend(["--parallel", parallel])
+    args.extend(["--context-length", context_length, "--yes"])
+    ttl = row.get("ttl", config.get("ttl"))
+    if isinstance(ttl, (int, float)) and not isinstance(ttl, bool) and ttl > 0:
+        args.extend(["--ttl", int(ttl)])
+    flash = row.get("flashAttention", config.get("flashAttention", config.get("flash_attn")))
+    if flash is True or flash in {"on", "auto-on"}:
+        args.append("--flash-attention")
+    return args
+
+
+def _surface_restore_failure(identifier: str, error: BaseException) -> None:
+    message = f"Failed to restore LM Studio instance {identifier}: {error}"
+    _log.error(message)
+    record_event("context_restore_failed", message=message, identifier=identifier)
+
+
+async def grow_local_instance(
+    settings,
+    target: int,
+    identifier: str,
+    *,
+    lease: RequestLease | None = None,
+    on_unloaded: Any | None = None,
+) -> int | None:
     # CLI talks to the local daemon. Never use it for another computer/port.
     if settings.inference.host not in {"localhost", "127.0.0.1", "::1"} or settings.inference.port != 1234:
         return None
@@ -30,6 +116,7 @@ async def grow_local_instance(settings, target: int, identifier: str) -> int | N
         cli = str(fallback)
     if not cli:
         return None
+    lease = lease or RequestLease()
 
     async def run(*args):
         def execute():
@@ -48,6 +135,8 @@ async def grow_local_instance(settings, target: int, identifier: str) -> int | N
             raise
 
     async with _resize_lock:
+        original_args: list[Any] = []
+        old = 0
         try:
             rows = json.loads(await run("ps", "--json"))
             row = next((r for r in rows if r.get("identifier") == identifier), None)
@@ -60,6 +149,7 @@ async def grow_local_instance(settings, target: int, identifier: str) -> int | N
                 return None
             key = row["modelKey"]
             target = min(target, int(row["maxContextLength"]))
+            original_args = instance_load_args(row, key=key, identifier=identifier, context_length=old)
 
             async def estimate(size):
                 output = await run("load", key, "--gpu", "max", "--parallel", 1,
@@ -88,28 +178,53 @@ async def grow_local_instance(settings, target: int, identifier: str) -> int | N
                     break
             if not chosen:
                 return None
-            # Recheck idle immediately before mutation. A busy instance is left alone.
-            check = next((r for r in json.loads(await run("ps", "--json")) if r.get("identifier") == identifier), {})
-            if check.get("status") != "idle" or check.get("queued", 0):
-                return None
-            try:
-                await run("unload", identifier)
-                await run("load", key, "--identifier", identifier, "--gpu", "max", "--parallel", 1,
-                          "--context-length", chosen, "--yes")
-                loaded = next(r for r in json.loads(await run("ps", "--json")) if r.get("identifier") == identifier)
-                if int(loaded["contextLength"]) != chosen:
-                    raise ValueError("Loaded context differs from requested context")
-                return chosen
-            except BaseException:
-                # Shield restoration from task cancellation; preserve the same API identifier.
-                async def restore():
+            async with lease.exclusive() as acquired:
+                if not acquired:
+                    return None
+                # Recheck idle under the exclusive lease so no request can start in the gap.
+                check = next((r for r in json.loads(await run("ps", "--json")) if r.get("identifier") == identifier), {})
+                if check.get("status") != "idle" or check.get("queued", 0):
+                    return None
+                try:
+                    await run("unload", identifier)
+                    await run("load", key, "--identifier", identifier, "--gpu", "max", "--parallel", 1,
+                              "--context-length", chosen, "--yes")
+                    loaded = next(r for r in json.loads(await run("ps", "--json")) if r.get("identifier") == identifier)
+                    if int(loaded["contextLength"]) != chosen:
+                        raise ValueError("Loaded context differs from requested context")
+                    return chosen
+                except BaseException as original:
                     try:
-                        await run("unload", identifier)
-                    except Exception:
-                        pass
-                    await run("load", key, "--identifier", identifier, "--gpu", "max", "--parallel",
-                              row.get("parallel", 1), "--context-length", old, "--yes")
-                await asyncio.shield(restore())
-                raise
+                        await _restore_original(run, identifier, original_args, old)
+                    except LocalContextRestoreError as restore_exc:
+                        if on_unloaded is not None:
+                            on_unloaded(str(restore_exc))
+                        raise restore_exc
+                    raise original
+        except LocalContextRestoreError:
+            raise
         except (RuntimeError, ValueError, KeyError, StopIteration, OSError, subprocess.SubprocessError):
             return None
+
+
+async def _restore_original(run, identifier: str, original_args: list[Any], old: int) -> None:
+    """Reload the instance with the captured original settings. Failures are fatal."""
+    async def restore():
+        try:
+            await run("unload", identifier)
+        except Exception as exc:
+            _log.warning("unload during context restore failed for %s: %s", identifier, exc)
+        if not original_args:
+            raise RuntimeError("original load settings were not captured")
+        await run("load", *original_args)
+        loaded = next(r for r in json.loads(await run("ps", "--json")) if r.get("identifier") == identifier)
+        if int(loaded["contextLength"]) != old:
+            raise ValueError("Restored context differs from the original load")
+
+    try:
+        await asyncio.shield(restore())
+    except Exception as exc:
+        _surface_restore_failure(identifier, exc)
+        raise LocalContextRestoreError(
+            f"The local model was unloaded and could not be restored at {old} context: {exc}"
+        ) from exc
