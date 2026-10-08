@@ -69,6 +69,7 @@ $env:PYTHONPATH = $backendImportPath + [IO.Path]::PathSeparator + $env:PYTHONPAT
     --collect-submodules app `
     --collect-all app `
     $entry
+if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
 
 $exe = Join-Path $OutDir "$name\$name.exe"
 if (-not (Test-Path $exe)) {

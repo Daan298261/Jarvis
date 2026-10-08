@@ -34,13 +34,13 @@ async def verify(args):
     await init_db()
     MANAGER.provider = OpenAICompatProvider(base_url=args.endpoint, model=args.model)
     MANAGER.state.loaded = True
-    MANAGER.state.profile = "balanced"
+    MANAGER.state.profile = args.profile
     MANAGER.state.context_size = 32768
     MANAGER.state.server_n_ctx = 32768
     MANAGER.state.manages_process = False
     REGISTRY.apply_settings(settings)
     try:
-        task = await AGENT.create_task(f"Reverse engineer {target}. What exact storage key does storage_key return? Cite saved evidence and produce an investigation report.", profile="balanced")
+        task = await AGENT.create_task(f"Reverse engineer {target}. What exact storage key does storage_key return? Cite saved evidence and produce an investigation report.", profile=args.profile)
         await asyncio.wait_for(asyncio.shield(AGENT._tasks[task.id]), args.timeout)
         async with SessionLocal() as session:
             row = await session.get(Task, task.id)
@@ -65,6 +65,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--endpoint", default="http://127.0.0.1:1234/v1")
     parser.add_argument("--model", required=True)
+    parser.add_argument("--profile", default="fast", choices=["fast", "balanced", "quality"])
     parser.add_argument("--workspace", default=str(Path.home() / ".anzu/acceptance/rfc0200/chat"))
     parser.add_argument("--timeout", type=int, default=900)
     asyncio.run(verify(parser.parse_args()))
