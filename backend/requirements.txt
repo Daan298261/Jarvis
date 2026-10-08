@@ -17,6 +17,7 @@ pywin32>=308
 comtypes>=1.4.0
 mss>=10.0.0
 mcp>=1.12.0
+jsonschema>=4.23,<5
 huggingface_hub>=0.30.0
 kokoro==0.9.4
 soundfile==0.14.0

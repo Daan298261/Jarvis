@@ -1,0 +1,11 @@
+{
+  "rea": {"version":"3.2.1","url":"https://registry.npmjs.org/rea-agents/-/rea-agents-3.2.1.tgz","integrity":"sha512-R+EwNkWiZjJi4cAxnQzwnCC5w+b4GlZoSJ5VNjliyLB4OoDsJyUngJleLuxgtoyyxHF9DFZ5x+JMQags+INPKw=="},
+  "ubuntu": {"url":"https://cloud-images.ubuntu.com/wsl/releases/noble/20240423/ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz","sha256":"8251e27ffff381a4af5f41dcb94d867de3e0d9774a9241908ab34555d99315ea"},
+  "jdk_windows": {"version":"21.0.12.1+1","url":"https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jdk_x64_windows_hotspot_21.0.12.1_1.zip","sha256":"f9d6e191ab098c0d416e7d588a24420a8621cd2f4720dab2459b8b7b2d2d8b4e"},
+  "android_tools": {"version":"19.0","url":"https://dl.google.com/android/repository/commandlinetools-win-13114758_latest.zip","algorithm":"sha1","sha1":"54a582f3bf73e04253602f2d1c80bd5868aac115"},
+  "node_windows": {"version":"24.14.0","url":"https://nodejs.org/dist/v24.14.0/node-v24.14.0-win-x64.zip","sha256":"313fa40c0d7b18575821de8cb17483031fe07d95de5994f6f435f3b345f85c66"},
+  "node": {"version":"24.14.0","url":"https://nodejs.org/dist/v24.14.0/node-v24.14.0-linux-x64.tar.xz","sha256":"41cd79bb7877c81605a9e68ec4c91547774f46a40c67a17e34d7179ef11729df"},
+  "jdk": {"version":"21.0.12.1+1","url":"https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jdk_x64_linux_hotspot_21.0.12.1_1.tar.gz","sha256":"ce79869e1307ed8ee1e2baa86a412b1eb5b75d10a01006d788a6f968bcfaee94"},
+  "ghidra": {"version":"12.1.4","url":"https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip","sha256":"ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db"},
+  "jadx": {"version":"1.5.6","url":"https://github.com/skylot/jadx/releases/download/v1.5.6/jadx-1.5.6.zip","sha256":"545ea2be9c242511bc145755cf4bda2485ade42966e096f8b4d3da2a230e8974"}
+}

@@ -205,6 +205,10 @@ def _cybersecurity_skill_requested(policy: LocalHarnessPolicy, goal: str, member
 def load_skill_blocks(policy: LocalHarnessPolicy, goal: str = "") -> list[str]:
     """Load compact skill guidance blocks on demand from task class and explicit ids."""
     blocks: list[str] = []
+    from ..reverse_engineering.skill import prompt_block
+    reverse_skill = prompt_block(goal, policy.task_class)
+    if reverse_skill:
+        blocks.append(reverse_skill)
     seen: set[str] = set()
     task_key = (policy.task_class or "").strip().lower()
     if task_key in SKILL_HINTS and task_key not in seen:

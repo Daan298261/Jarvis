@@ -220,6 +220,9 @@ def is_weather_query(prompt: str) -> bool:
 def is_plain_conversation(prompt: str) -> bool:
     """Heuristic: casual owner talk that should not enter the tool/approval agent loop."""
     text = latest_user_utterance(prompt)
+    from ..reverse_engineering.skill import requested
+    if requested(text):
+        return False
     if not text or len(text) > 800:
         return False
     lowered = text.lower()
@@ -408,6 +411,9 @@ def simple_file_control(prompt: str) -> tuple[str, str, str] | None:
 
 
 def classify_task(prompt: str) -> str:
+    from ..reverse_engineering.skill import requested
+    if requested(latest_user_utterance(prompt)):
+        return "reverse engineering"
     if _CODING_SESSION.search(intent_text(prompt)):
         return "software engineering"
     if lta_protected_folder_path(prompt):
@@ -451,7 +457,8 @@ def requests_agent_tools(prompt: str) -> bool:
     text = (prompt or "").strip()
     if not text:
         return False
-    return bool(_TOOL_REQUEST.search(text))
+    from ..reverse_engineering.skill import requested
+    return requested(text) or bool(_TOOL_REQUEST.search(text))
 
 
 def split_long_owner_prompt(prompt: str, *, max_chars: int = 2200) -> list[str]:

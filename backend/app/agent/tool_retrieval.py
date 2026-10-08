@@ -72,6 +72,7 @@ def _restricted() -> frozenset[str]:
 # Distinctive prompt terms that should retrieve a tool. Generic verbs like
 # "write" / "file" must not count — those bloated mixed tasks into a catalog.
 _SEARCH_TERMS: dict[str, tuple[str, ...]] = {
+    "reverse_engineer": ("reverse engineer", "reverse-engineer", "reverse engineering", "decompile", "disassemble"),
     "office": ("excel", "spreadsheet", "powerpoint", "docx", "xlsx"),
     "browser": ("browse", "website", "webpage", "playwright"),
     "web_fetch": ("http", "https"),

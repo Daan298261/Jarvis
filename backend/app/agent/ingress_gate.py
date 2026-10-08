@@ -90,6 +90,9 @@ def heuristic_size_class(text: str) -> str | None:
 
 
 def heuristic_needs_tools(text: str, task_class: str) -> bool | None:
+    from ..reverse_engineering.skill import requested
+    if task_class == "reverse engineering" or requested(text):
+        return True
     if _ACTION_TOOL_RE.search(text or ""):
         return True
     if _FACTUAL_QA_RE.search(text or ""):

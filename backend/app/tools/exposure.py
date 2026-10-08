@@ -10,6 +10,7 @@ CORE_TOOLS = frozenset({"filesystem", REQUEST_CAPABILITY})
 # Task class â†’ native tools Jarvis should send on each inference call.
 # Keep these small: the point is fewer definitions, less confusion, lower latency.
 TASK_TOOL_SETS: dict[str, frozenset[str]] = {
+    "reverse engineering": frozenset({"reverse_engineer", "filesystem"}),
     "filesystem": frozenset({"filesystem", "python"}),
     "shell": frozenset({"filesystem", "terminal", "python"}),
     "system administration": frozenset({"filesystem", "terminal", "python", "desktop", "screenshot", "apps"}),
@@ -77,6 +78,7 @@ CAPABILITY_ALIASES: dict[str, str] = {
 }
 
 NATIVE_TOOLS = (
+    "reverse_engineer",
     "filesystem",
     "terminal",
     "python",

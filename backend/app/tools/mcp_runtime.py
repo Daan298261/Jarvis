@@ -350,6 +350,13 @@ class MCPRuntime:
         if not spec:
             return ToolResult(False, "", error=f"Unknown MCP tool {tool_key}")
         server = spec["server"]
+        from ..reverse_engineering.runtime import STATIC_OPERATIONS, RUNTIME_OPERATIONS
+        if (
+            "rea-agents" in str(server)
+            or str(server.get("name", "")).lower() in {"rea", "anzu-rea"}
+            or spec.get("remote_name") in STATIC_OPERATIONS | RUNTIME_OPERATIONS
+        ):
+            return ToolResult(False, "", error="REA calls require the task-bound reverse_engineer adapter; direct/proxy calls are blocked")
         name = spec.get("remote_name") or spec["tool"]["name"]
         args = dict(arguments or {})
         from ..security.hexstrike_defensive import (
