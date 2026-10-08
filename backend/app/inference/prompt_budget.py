@@ -195,6 +195,11 @@ async def prepare_inference(
     if budget.pressure < PRESSURE_COMPACT:
         return PreparedInference(messages, tools, profile, budget)
 
+    from .large_input import acknowledge
+    for message in messages:
+        if message.role == "user" and isinstance(message.content, str) and estimate_text_tokens(message.content) > 8192:
+            await acknowledge(message.content)
+
     if emit:
         await emit("context_pressure_detected", budget, "preflight pressure >= 0.70")
 
@@ -247,7 +252,20 @@ async def prepare_inference(
             budget = calculate_prompt_budget(messages, tools, profile=profile, max_tokens=max_tokens, active_context=manager.live_context_size())
             if budget.pressure < PRESSURE_EXPAND_OK:
                 return PreparedInference(messages, tools, profile, budget)
-        if budget.required_context > profile_cap(profile) and budget.pressure >= PRESSURE_EXPAND_OK:
+        if budget.pressure >= PRESSURE_EXPAND_OK:
+            from .large_input import reduce_user_text
+            # Reserve schemas, output, identity, and non-user turns before reducing user text.
+            user_tokens = sum(estimate_text_tokens(m.content) for m in messages
+                              if m.role == "user" and isinstance(m.content, str))
+            fixed = budget.required_context - user_tokens
+            available = int(manager.live_context_size() * 0.75) - fixed
+            if available > 512:
+                messages = await reduce_user_text(messages, provider=getattr(manager, "provider", None),
+                                                 max_chars=available * CHARS_PER_TOKEN,
+                                                 context=manager.live_context_size())
+                budget = calculate_prompt_budget(messages, tools, profile=profile, max_tokens=max_tokens,
+                                                 active_context=manager.live_context_size())
+        if budget.required_context > budget.active_context:
             raise ModelCapacityExceeded(budget)
 
     return PreparedInference(messages, tools, profile, budget)
