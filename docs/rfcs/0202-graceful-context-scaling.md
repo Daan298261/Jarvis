@@ -30,3 +30,7 @@ Backend inference profiles, context window, backends, manager, prompt budget, ne
 ## Out of scope
 
 Cloud model provisioning, new inference servers, public PR merges, reverse engineering (RFC-0201 / PR #547).
+
+## Desktop latency correction
+
+The owner requested slow behavior be fixed after the initial code was pushed. A real thread dump found startup self-check calling VoiceStudio network availability on the API event loop. Move these checks to worker threads, give all fallback endpoints one shared deadline, and cache short-lived availability results. Verify ordinary requests remain responsive while a voice probe is blocked; include the voice-status API path in this correction. This supports prompt speech feedback without blocking chat or model status.
