@@ -1,6 +1,6 @@
 """Read-only desktop proof of command intake; sample commands are never executed.
 
-Run: python tools/verify_command_intake.py
+Run: python scripts/verify_command_intake.py
 Uses the installed, persisted Laya runtime. No fixtures or model downloads.
 """
 from __future__ import annotations
