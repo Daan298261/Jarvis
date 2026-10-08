@@ -39,6 +39,11 @@ New-Item -ItemType Directory -Force -Path $OutDir, $work | Out-Null
 $entry = Join-Path $Root "backend\jarvis_sidecar.py"
 $name = "jarvis-backend"
 
+# Collection runs while the spec is evaluated, before Analysis applies --paths.
+# Make the actual app package visible to the collector, including lazy imports.
+$backendImportPath = Join-Path $Root "backend"
+$env:PYTHONPATH = $backendImportPath + [IO.Path]::PathSeparator + $env:PYTHONPATH
+
 # one-folder (not --onefile) for faster start and clearer AV/debug behavior
 & $py -m PyInstaller `
     --noconfirm `
@@ -69,6 +74,15 @@ $exe = Join-Path $OutDir "$name\$name.exe"
 if (-not (Test-Path $exe)) {
     throw "PyInstaller finished but $exe is missing"
 }
+
+# Namespace-package collection can omit on-demand REA assets. Stage these
+# explicitly beside the frozen package so setup and skill loading work installed.
+$reaSource = Join-Path $Root "backend\app\reverse_engineering"
+$reaAssets = Join-Path $OutDir "$name\_internal\app\reverse_engineering"
+New-Item -ItemType Directory -Force -Path $reaAssets | Out-Null
+Get-ChildItem -LiteralPath $reaSource -File | Where-Object { $_.Extension -in ".json", ".sh", ".mjs" } |
+    Copy-Item -Destination $reaAssets -Force
+Copy-Item -LiteralPath (Join-Path $reaSource "skill") -Destination $reaAssets -Recurse -Force
 
 # Copy into Tauri resources for bundling
 $tauriSidecar = Join-Path $Root "frontend\src-tauri\sidecars"
