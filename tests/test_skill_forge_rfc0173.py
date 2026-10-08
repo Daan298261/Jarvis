@@ -424,6 +424,27 @@ def test_persona_and_goal_runtime_routing_hooks(skill_forge_store):
     assert "Skill Forge" in goal_ctx["prompt_block"] or goal_ctx["skills"][0]["name"]
 
 
+def test_search_skills_persona_boost_prefers_tagged_over_universal(skill_forge_store):
+    shared_purpose = "shared export report workflow"
+    tagged = _activate_manifest(_persona_skill_manifest("tagged-skill", shared_purpose, ["anzu"]))
+    universal = _activate_manifest(_persona_skill_manifest("universal-skill", shared_purpose, []))
+    query = "export report workflow"
+
+    with_persona = search_skills(query, persona_id="anzu", task_class="office")
+    by_id = {hit["skill_id"]: hit for hit in with_persona}
+    assert tagged.skill_id in by_id and universal.skill_id in by_id
+    assert by_id[tagged.skill_id]["score"] == by_id[universal.skill_id]["score"] + 1.5
+    assert with_persona[0]["skill_id"] == tagged.skill_id
+
+    neutral = search_skills(query, task_class="office")
+    neutral_scores = {
+        hit["skill_id"]: hit["score"]
+        for hit in neutral
+        if hit["skill_id"] in {tagged.skill_id, universal.skill_id}
+    }
+    assert neutral_scores[tagged.skill_id] == neutral_scores[universal.skill_id]
+
+
 def test_goal_runtime_skill_context_ranks_by_persona(skill_forge_store):
     shared = "persona goal export report workflow"
     anzu_version = _activate_manifest(
