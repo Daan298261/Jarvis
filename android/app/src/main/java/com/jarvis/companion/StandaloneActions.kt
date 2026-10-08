@@ -8,10 +8,13 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.provider.OpenableColumns
 import android.app.Notification
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStream
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -28,6 +31,7 @@ object StandaloneActions {
     const val PREFS = "standalone_actions"
     const val KEY_REMINDERS = "reminders_json"
     const val EXTRA_REMINDER_ID = "com.jarvis.companion.REMINDER_ID"
+    const val ACTION_REMINDER = "com.jarvis.companion.STANDALONE_REMINDER"
 
     fun queueOrRefuseCopy(): String = "I'll do that when the ANZU desktop is back."
 
@@ -135,12 +139,66 @@ object StandaloneActions {
         ensureChannel(context)
         val id = UUID.randomUUID().toString()
         val triggerAt = at.toInstant().toEpochMilli()
+        val inexact = armAlarm(context, id, triggerAt)
+        persistReminder(context, id, ownerText, triggerAt)
+        return Result.success(
+            ReminderScheduleResult(id, at, inexact, reminderOnThisPhoneCopy(at, inexact)),
+        )
+    }
+
+    fun reminderBroadcastIntent(context: Context, id: String): Intent =
+        Intent(context, ReminderReceiver::class.java)
+            .setAction(ACTION_REMINDER)
+            .putExtra(EXTRA_REMINDER_ID, id)
+
+    fun reminderIsFired(context: Context, id: String): Boolean {
+        val items = loadReminders(context)
+        for (index in 0 until items.length()) {
+            val item = items.optJSONObject(index) ?: continue
+            if (item.optString("id") == id) return item.optBoolean("fired", false)
+        }
+        return false
+    }
+
+    fun fireReminder(context: Context, id: String) {
+        if (id.isBlank()) return
+        val items = loadReminders(context)
+        var changed = false
+        for (index in 0 until items.length()) {
+            val item = items.optJSONObject(index) ?: continue
+            if (item.optString("id") != id) continue
+            if (item.optBoolean("fired", false)) return
+            postReminderNotification(context, id, item.optString("text"))
+            item.put("fired", true)
+            changed = true
+            break
+        }
+        if (changed) saveReminders(context, items)
+    }
+
+    fun rearmUnfiredReminders(context: Context, nowMillis: Long = System.currentTimeMillis()) {
+        val items = loadReminders(context)
+        for (index in 0 until items.length()) {
+            val item = items.optJSONObject(index) ?: continue
+            if (item.optBoolean("fired", false)) continue
+            val whenMs = item.optLong("at", 0L)
+            val id = item.optString("id")
+            if (id.isBlank() || whenMs <= nowMillis) continue
+            armAlarm(context, id, whenMs)
+        }
+    }
+
+    fun armAlarm(context: Context, id: String, triggerAt: Long): Boolean {
         val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        // Manifest is owned by a parallel UX PR, so the alarm must wake the existing
-        // launcher activity. CompanionModel delivers due reminders on start/refresh.
-        val pending = PendingIntent.getActivity(
+        val broadcast = PendingIntent.getBroadcast(
             context,
             id.hashCode(),
+            reminderBroadcastIntent(context, id),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val show = PendingIntent.getActivity(
+            context,
+            id.hashCode() xor 0x51ed,
             activityWakeIntent(context, id),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -151,23 +209,17 @@ object StandaloneActions {
         }
         try {
             if (!inexact && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                alarm.setAlarmClock(AlarmManager.AlarmClockInfo(triggerAt, pending), pending)
+                alarm.setAlarmClock(AlarmManager.AlarmClockInfo(triggerAt, show), broadcast)
             } else if (!inexact) {
-                alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
+                alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, broadcast)
             } else {
-                alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
+                alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, broadcast)
             }
         } catch (_: SecurityException) {
-            alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
-            persistReminder(context, id, ownerText, triggerAt)
-            return Result.success(
-                ReminderScheduleResult(id, at, true, reminderOnThisPhoneCopy(at, true)),
-            )
+            alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, broadcast)
+            return true
         }
-        persistReminder(context, id, ownerText, triggerAt)
-        return Result.success(
-            ReminderScheduleResult(id, at, inexact, reminderOnThisPhoneCopy(at, inexact)),
-        )
+        return inexact
     }
 
     fun deliverDueReminders(context: Context, nowMillis: Long = System.currentTimeMillis()) {
@@ -196,7 +248,7 @@ object StandaloneActions {
         ensureChannel(context)
         val body = text.ifBlank { "Reminder on this phone" }
         val notification = Notification.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+            .setSmallIcon(R.drawable.ic_jarvis)
             .setContentTitle("ANZU reminder")
             .setContentText(body)
             .setStyle(Notification.BigTextStyle().bigText(body))
@@ -221,19 +273,65 @@ object StandaloneActions {
         val isText = type == "text/plain" || type == "text/markdown" || type == "text/x-markdown" ||
             name.endsWith(".txt") || name.endsWith(".md") || name.endsWith(".markdown")
         if (!isText) return Result.failure(IllegalArgumentException(nonTextFileCopy()))
-        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            ?: return Result.failure(IllegalStateException("Cannot read that file on this phone."))
-        if (bytes.size > PICKED_TEXT_MAX_BYTES) {
-            return Result.failure(IllegalArgumentException(pickedTextTooLargeCopy()))
+        knownContentLength(context, uri)?.let { size ->
+            if (size > PICKED_TEXT_MAX_BYTES) {
+                return Result.failure(IllegalArgumentException(pickedTextTooLargeCopy()))
+            }
         }
-        return Result.success(bytes.toString(Charsets.UTF_8))
+        val stream = context.contentResolver.openInputStream(uri)
+            ?: return Result.failure(IllegalStateException("Cannot read that file on this phone."))
+        return stream.use { readBoundedUtf8(it, PICKED_TEXT_MAX_BYTES) }
     }
 
-    fun storeQueuedMedia(context: Context, bytes: ByteArray, filename: String): File {
+    fun readBoundedUtf8(input: InputStream, maxBytes: Int): Result<String> {
+        val cap = maxBytes + 1
+        val buffer = ByteArray(8192)
+        val collected = ByteArrayOutputStream()
+        var total = 0
+        while (total < cap) {
+            val want = minOf(buffer.size, cap - total)
+            val n = input.read(buffer, 0, want)
+            if (n < 0) break
+            collected.write(buffer, 0, n)
+            total += n
+        }
+        if (total > maxBytes) {
+            return Result.failure(IllegalArgumentException(pickedTextTooLargeCopy()))
+        }
+        return Result.success(collected.toByteArray().toString(Charsets.UTF_8))
+    }
+
+    fun storeQueuedMedia(context: Context, uri: Uri, filename: String): File {
         val dir = File(context.filesDir, "offline-media").apply { mkdirs() }
-        val target = File(dir, filename.ifBlank { "capture-${System.currentTimeMillis()}" })
-        target.writeBytes(bytes)
+        val safeName = filename.ifBlank { "capture-${System.currentTimeMillis()}" }.replace("/", "_")
+        val target = File(dir, safeName)
+        val stream = context.contentResolver.openInputStream(uri)
+            ?: error("Cannot read attachment")
+        stream.use { input ->
+            target.outputStream().use { output -> input.copyTo(output) }
+        }
         return target
+    }
+
+    private fun knownContentLength(context: Context, uri: Uri): Long? {
+        val cursor = context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
+        cursor?.use {
+            if (it.moveToFirst()) {
+                val index = it.getColumnIndex(OpenableColumns.SIZE)
+                if (index >= 0 && !it.isNull(index)) {
+                    val size = it.getLong(index)
+                    if (size > 0L) return size
+                }
+            }
+        }
+        return null
+    }
+
+    private fun saveReminders(context: Context, items: JSONArray) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_REMINDERS, items.toString())
+            .apply()
     }
 
     fun isImageOrVideo(mimeType: String?, displayName: String): Boolean {

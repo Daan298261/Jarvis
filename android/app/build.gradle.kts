@@ -53,6 +53,11 @@ android {
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("bootstrap"))
+    packaging {
+        jniLibs {
+            excludes += "**/libonnxruntime4j_jni.so"
+        }
+    }
 }
 
 val bootstrap by tasks.registering {
@@ -89,11 +94,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("com.google.firebase:firebase-messaging:24.1.0")
     implementation("io.github.webrtc-sdk:android:125.6422.07")
-    // ONNX Runtime Mobile for Pocket TTS (RFC-0204 S2). MIT license.
-    // AAR ships per-ABI libonnxruntime.so (~12–16 MiB arm64-v8a). CMake also
-    // links the same AAR native library into libjarvis_voice_tts.so.
-    // Pinned to 1.20.0 (1.20.1 was never published on Maven Central).
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
+    // ONNX Runtime Mobile is linked from CMake (hashed Maven AAR), not Gradle,
+    // so the APK does not ship libonnxruntime4j_jni.so or a duplicate .so.
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.14.1")
     testImplementation("androidx.test:core:1.6.1")

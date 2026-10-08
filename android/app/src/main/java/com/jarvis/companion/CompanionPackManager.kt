@@ -1,6 +1,7 @@
 package com.jarvis.companion
 
 import android.content.Context
+import android.content.SharedPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -9,14 +10,108 @@ import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+
+fun interface FileHasher {
+    fun hash(file: File): String
+}
+
+/**
+ * SHA-256 cache keyed by (absolute path, length, lastModified).
+ * [matchesExpected] is O(1) and never reads file contents — safe on the main thread.
+ * [digestOf] reads the file and must run off the main thread.
+ */
+class VerifiedDigestCache(
+    private val hasher: FileHasher = FileHasher { defaultFileSha256(it) },
+    private val persist: SharedPreferences? = null,
+) {
+    data class Entry(val length: Long, val lastModified: Long, val digest: String)
+
+    private val lock = Any()
+    private val memory = LinkedHashMap<String, Entry>()
+    private val hashCalls = AtomicInteger(0)
+
+    fun hashCallCount(): Int = hashCalls.get()
+
+    fun matchesExpected(file: File, expected: String): Boolean {
+        if (expected.isBlank() || !file.isFile || file.length() == 0L) return false
+        val hit = lookup(file) ?: return false
+        return hit.digest.equals(expected, ignoreCase = true)
+    }
+
+    fun digestOf(file: File): String {
+        lookup(file)?.let { return it.digest }
+        hashCalls.incrementAndGet()
+        val digest = hasher.hash(file)
+        remember(file, digest)
+        return digest
+    }
+
+    fun remember(file: File, digest: String) {
+        val entry = Entry(file.length(), file.lastModified(), digest)
+        synchronized(lock) { memory[file.absolutePath] = entry }
+        persist?.edit()?.putString(persistKey(file), serialize(entry))?.apply()
+    }
+
+    fun invalidate(file: File) {
+        synchronized(lock) { memory.remove(file.absolutePath) }
+        persist?.edit()?.remove(persistKey(file))?.apply()
+    }
+
+    private fun lookup(file: File): Entry? {
+        if (!file.isFile) return null
+        val length = file.length()
+        val mtime = file.lastModified()
+        val path = file.absolutePath
+        synchronized(lock) {
+            val mem = memory[path]
+            if (mem != null && mem.length == length && mem.lastModified == mtime) return mem
+        }
+        val raw = persist?.getString(persistKey(file), null) ?: return null
+        val stored = deserialize(raw) ?: return null
+        if (stored.length != length || stored.lastModified != mtime) return null
+        synchronized(lock) { memory[path] = stored }
+        return stored
+    }
+
+    private fun persistKey(file: File) = "digest:${file.absolutePath}"
+
+    private fun serialize(entry: Entry) = "${entry.length}|${entry.lastModified}|${entry.digest}"
+
+    private fun deserialize(raw: String): Entry? {
+        val parts = raw.split("|", limit = 3)
+        if (parts.size != 3) return null
+        val length = parts[0].toLongOrNull() ?: return null
+        val mtime = parts[1].toLongOrNull() ?: return null
+        if (parts[2].length != 64) return null
+        return Entry(length, mtime, parts[2])
+    }
+}
+
+fun defaultFileSha256(file: File): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    file.inputStream().use { input ->
+        val buffer = ByteArray(65536)
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            digest.update(buffer, 0, read)
+        }
+    }
+    return digest.digest().joinToString("") { "%02x".format(it) }
+}
 
 /** Pack lifecycle: missing / downloading / ready / running / error */
 class CompanionPackManager(
     context: Context,
     val engine: LocalInferenceEngine = LlamaCppInferenceEngine(),
+    digestCache: VerifiedDigestCache? = null,
 ) {
     private val app = context.applicationContext
+    val digestCache: VerifiedDigestCache = digestCache ?: VerifiedDigestCache(
+        persist = context.applicationContext.getSharedPreferences("companion_pack_digest", Context.MODE_PRIVATE),
+    )
     private val prefs = app.getSharedPreferences("companion_pack", Context.MODE_PRIVATE)
     private val packDir = File(app.filesDir, "model-packs").apply { mkdirs() }
     private val client = OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build()
@@ -52,10 +147,7 @@ class CompanionPackManager(
     fun packCanLoad(pack: CompanionPack): Boolean {
         val file = packFile(pack)
         if (!file.isFile || file.length() == 0L) return false
-        if (pack.sha256.isNotBlank()) {
-            val digest = sha256(file)
-            if (!digest.equals(pack.sha256, ignoreCase = true)) return false
-        }
+        if (pack.sha256.isNotBlank() && !digestCache.matchesExpected(file, pack.sha256)) return false
         return DeviceInferenceGuard.blockReason(app, pack) == null
     }
 
@@ -89,8 +181,9 @@ class CompanionPackManager(
             return@withContext
         }
         if (pack.sha256.isNotBlank()) {
-            val digest = sha256(file)
+            val digest = digestCache.digestOf(file)
             if (!digest.equals(pack.sha256, ignoreCase = true)) {
+                digestCache.invalidate(file)
                 statusRef.set(CompanionPackStatus.ERROR)
                 errorRef.set("Pack checksum mismatch — delete and download again")
                 return@withContext
@@ -137,8 +230,9 @@ class CompanionPackManager(
             }
         }
         if (pack.sha256.isNotBlank()) {
-            val digest = sha256(partial)
+            val digest = digestCache.digestOf(partial)
             if (!digest.equals(pack.sha256, ignoreCase = true)) {
+                digestCache.invalidate(partial)
                 partial.delete()
                 statusRef.set(CompanionPackStatus.ERROR)
                 errorRef.set("Download checksum mismatch")
@@ -146,6 +240,8 @@ class CompanionPackManager(
             }
         }
         partial.renameTo(target)
+        digestCache.invalidate(partial)
+        if (pack.sha256.isNotBlank()) digestCache.remember(target, pack.sha256)
         statusRef.set(CompanionPackStatus.READY)
         progressRef.set(100)
     }
@@ -153,7 +249,11 @@ class CompanionPackManager(
     fun deleteSelected() {
         val pack = selectedPack()
         engine.unload()
-        if (pack != null) packFile(pack).delete()
+        if (pack != null) {
+            val file = packFile(pack)
+            digestCache.invalidate(file)
+            file.delete()
+        }
         statusRef.set(CompanionPackStatus.MISSING)
         errorRef.set("")
         progressRef.set(0)
@@ -186,16 +286,4 @@ class CompanionPackManager(
         if (statusRef.get() == CompanionPackStatus.RUNNING) statusRef.set(CompanionPackStatus.READY)
     }
 
-    private fun sha256(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
-            val buffer = ByteArray(65536)
-            while (true) {
-                val read = input.read(buffer)
-                if (read < 0) break
-                digest.update(buffer, 0, read)
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
-    }
 }

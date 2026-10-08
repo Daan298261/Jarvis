@@ -26,45 +26,34 @@ target_link_libraries(jarvis_whisper whisper android log)
 # Hide static ggml symbols so they cannot clash with llama.cpp at load time.
 target_link_options(jarvis_whisper PRIVATE -Wl,--exclude-libs,ALL)
 
-# ONNX Runtime Mobile (Maven artifact onnxruntime-android) — MIT license.
-# Headers from the matching GitHub tag; native .so from the official Android AAR.
+# ONNX Runtime Mobile — single source: Maven AAR with pinned SHA-256.
+# Headers come from the AAR's headers/ directory (no raw.githubusercontent).
+# Do not also add the Gradle Java binding; that would ship libonnxruntime4j_jni.so
+# and a second libonnxruntime.so.
 set(ORT_VERSION "1.20.0")
+set(ORT_AAR_SHA256 "07a8f71ef890afed8c6087a56220e6d558a492804276ee2dd7cb7f6262242027")
 set(ORT_AAR_DIR "${CMAKE_CURRENT_BINARY_DIR}/ort-aar")
-set(ORT_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/ort-include")
 set(ORT_AAR_FILE "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime-android-${ORT_VERSION}.aar")
 set(ORT_AAR_URL "https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/${ORT_VERSION}/onnxruntime-android-${ORT_VERSION}.aar")
 
-if(NOT EXISTS "${ORT_AAR_FILE}")
-    message(STATUS "Downloading ONNX Runtime Android ${ORT_VERSION}")
-    file(DOWNLOAD "${ORT_AAR_URL}" "${ORT_AAR_FILE}" SHOW_PROGRESS TLS_VERIFY ON
-         STATUS ORT_DL_STATUS)
-    list(GET ORT_DL_STATUS 0 ORT_DL_CODE)
-    if(NOT ORT_DL_CODE EQUAL 0)
-        message(FATAL_ERROR "Failed to download ONNX Runtime Android AAR: ${ORT_DL_STATUS}")
-    endif()
+message(STATUS "Fetching ONNX Runtime Android ${ORT_VERSION} (hashed)")
+file(DOWNLOAD "${ORT_AAR_URL}" "${ORT_AAR_FILE}"
+     EXPECTED_HASH SHA256=${ORT_AAR_SHA256}
+     SHOW_PROGRESS TLS_VERIFY ON
+     STATUS ORT_DL_STATUS)
+list(GET ORT_DL_STATUS 0 ORT_DL_CODE)
+if(NOT ORT_DL_CODE EQUAL 0)
+    message(FATAL_ERROR "Failed to download ONNX Runtime Android AAR: ${ORT_DL_STATUS}")
 endif()
 
-if(NOT EXISTS "${ORT_AAR_DIR}/jni")
+if(NOT EXISTS "${ORT_AAR_DIR}/jni" OR NOT EXISTS "${ORT_AAR_DIR}/headers/onnxruntime_cxx_api.h")
     file(MAKE_DIRECTORY "${ORT_AAR_DIR}")
     file(ARCHIVE_EXTRACT INPUT "${ORT_AAR_FILE}" DESTINATION "${ORT_AAR_DIR}")
 endif()
-
-set(ORT_HEADER_BASE "https://raw.githubusercontent.com/microsoft/onnxruntime/v${ORT_VERSION}/include/onnxruntime/core/session")
-file(MAKE_DIRECTORY "${ORT_INCLUDE_DIR}")
-foreach(ORT_HEADER
-        onnxruntime_c_api.h
-        onnxruntime_cxx_api.h
-        onnxruntime_cxx_inline.h
-        onnxruntime_float16.h)
-    if(NOT EXISTS "${ORT_INCLUDE_DIR}/${ORT_HEADER}")
-        file(DOWNLOAD "${ORT_HEADER_BASE}/${ORT_HEADER}" "${ORT_INCLUDE_DIR}/${ORT_HEADER}"
-             TLS_VERIFY ON STATUS ORT_HDR_STATUS)
-        list(GET ORT_HDR_STATUS 0 ORT_HDR_CODE)
-        if(NOT ORT_HDR_CODE EQUAL 0)
-            message(FATAL_ERROR "Failed to download ${ORT_HEADER}: ${ORT_HDR_STATUS}")
-        endif()
-    endif()
-endforeach()
+set(ORT_INCLUDE_DIR "${ORT_AAR_DIR}/headers")
+if(NOT EXISTS "${ORT_INCLUDE_DIR}/onnxruntime_cxx_api.h")
+    message(FATAL_ERROR "ONNX Runtime AAR is missing headers/: ${ORT_INCLUDE_DIR}")
+endif()
 
 if(NOT ANDROID_ABI)
     set(ANDROID_ABI "arm64-v8a")

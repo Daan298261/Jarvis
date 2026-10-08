@@ -131,6 +131,72 @@ class PocketOrPiperTtsEngine : OnDeviceTtsEngine {
     }
 }
 
+/**
+ * Speakable chunker for on-device Pocket TTS (RFC-0204).
+ * Strips markdown/code/URLs, then splits into sentence groups that fit the LM cache
+ * and the 40 s native frame cap (~500 frames). No text is dropped.
+ */
+object SpeakableTtsChunker {
+    const val MAX_CHUNK_CHARS = 360
+
+    fun forSpeech(text: String): String {
+        var cleaned = text.replace("\r\n", "\n")
+        cleaned = FENCED_CODE.replace(cleaned, " ")
+        cleaned = INLINE_CODE.replace(cleaned, " ")
+        cleaned = MD_LINK.replace(cleaned) { it.groupValues[1] }
+        cleaned = URL.replace(cleaned, " ")
+        cleaned = HEADING.replace(cleaned, " ")
+        cleaned = MD_EMPHASIS.replace(cleaned, "$1")
+        return cleaned.replace(WHITESPACE, " ").trim()
+    }
+
+    fun chunk(text: String, maxChars: Int = MAX_CHUNK_CHARS): List<String> {
+        val spoken = forSpeech(text)
+        if (spoken.isEmpty()) return emptyList()
+        val sentences = SENTENCE.split(spoken).map { it.trim() }.filter { it.isNotEmpty() }
+        val pieces = if (sentences.isEmpty()) listOf(spoken) else sentences
+        val out = ArrayList<String>()
+        val current = StringBuilder()
+        fun flush() {
+            val piece = current.toString().trim()
+            if (piece.isNotEmpty()) out.add(piece)
+            current.clear()
+        }
+        for (sentence in pieces) {
+            if (sentence.length > maxChars) {
+                flush()
+                var rest = sentence
+                while (rest.length > maxChars) {
+                    val cut = rest.lastIndexOf(' ', maxChars).let { if (it < 8) maxChars else it }
+                    out.add(rest.substring(0, cut).trim())
+                    rest = rest.substring(cut).trim()
+                }
+                if (rest.isNotEmpty()) current.append(rest)
+                continue
+            }
+            val candidate = if (current.isEmpty()) sentence else "${current} $sentence"
+            if (candidate.length > maxChars) {
+                flush()
+                current.append(sentence)
+            } else {
+                if (current.isNotEmpty()) current.append(' ')
+                current.append(sentence)
+            }
+        }
+        flush()
+        return out
+    }
+
+    private val FENCED_CODE = Regex("```[\\s\\S]*?```")
+    private val INLINE_CODE = Regex("`[^`]*`")
+    private val MD_LINK = Regex("\\[([^\\]]+)\\]\\([^)]+\\)")
+    private val URL = Regex("https?://\\S+", RegexOption.IGNORE_CASE)
+    private val HEADING = Regex("(?m)^#+\\s+.*$")
+    private val MD_EMPHASIS = Regex("[*_~]{1,2}([^*_~]+)[*_~]{1,2}")
+    private val WHITESPACE = Regex("\\s+")
+    private val SENTENCE = Regex("(?<=[.!?])\\s+")
+}
+
 object VoiceNativeBridge {
     private var whisperLoaded = false
     private var ttsLoaded = false

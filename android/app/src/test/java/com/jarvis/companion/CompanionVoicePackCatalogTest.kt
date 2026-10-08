@@ -61,6 +61,16 @@ class CompanionVoicePackCatalogTest {
             }
         }
     }
+
+    @Test
+    fun pocketTtsRowCarriesAlbaMackennaAttribution() {
+        val pocket = CompanionVoicePackCatalog.builtIn.first { it.id == "pocket-tts-en" }
+        assertTrue(pocket.attribution.contains("Alba MacKenna"))
+        assertTrue(pocket.attribution.contains("CC BY 4.0"))
+        assertTrue(pocket.attribution.contains("https://huggingface.co/kyutai/tts-voices#alba-mackenna"))
+        assertTrue(pocket.attribution.contains("Kyutai Pocket TTS"))
+        assertTrue(pocket.toJson().optString("attribution").contains("Alba MacKenna"))
+    }
 }
 
 class CompanionVoiceRoutingTest {
@@ -134,5 +144,28 @@ class PocketOrPiperTtsEngineTest {
         assertTrue(PocketOrPiperTtsEngine.isNearSilentPcmWav(header))
         val loud = ByteArray(44 + 200) { i -> if (i < 44) 0 else 40 }
         assertFalse(PocketOrPiperTtsEngine.isNearSilentPcmWav(loud))
+    }
+}
+
+class SpeakableTtsChunkerTest {
+    @Test
+    fun longReplyYieldsChunksUnderBudgetWithNoLoss() {
+        val paragraphs = (1..12).joinToString("\n\n") { n ->
+            "Paragraph $n explains the orchard gate, the north path, and the spare key. " +
+                "It also mentions the greenhouse schedule and the Friday delivery."
+        }
+        val withJunk = "```\ncode()\n```\nSee https://example.invalid/docs and **bold**.\n$paragraphs"
+        val chunks = SpeakableTtsChunker.chunk(withJunk)
+        assertTrue("expected multiple chunks, got ${chunks.size}", chunks.size >= 2)
+        chunks.forEach { piece ->
+            assertTrue(piece.length <= SpeakableTtsChunker.MAX_CHUNK_CHARS)
+            assertFalse(piece.contains("https://"))
+            assertFalse(piece.contains("```"))
+        }
+        val spoken = SpeakableTtsChunker.forSpeech(withJunk)
+        val joined = chunks.joinToString(" ")
+        spoken.split(" ").filter { it.isNotBlank() }.forEach { word ->
+            assertTrue("lost word $word", joined.contains(word))
+        }
     }
 }

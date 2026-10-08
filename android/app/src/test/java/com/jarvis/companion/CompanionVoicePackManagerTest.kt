@@ -23,9 +23,10 @@ class CompanionVoicePackManagerTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
-        manager = CompanionVoicePackManager(context)
         context.getSharedPreferences("companion_voice_pack", Context.MODE_PRIVATE).edit().clear().apply()
+        context.getSharedPreferences("companion_voice_digest", Context.MODE_PRIVATE).edit().clear().apply()
         File(context.filesDir, "voice-packs").deleteRecursively()
+        manager = CompanionVoicePackManager(context)
     }
 
     @Test

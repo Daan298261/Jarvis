@@ -148,7 +148,6 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             while (true) {
-                StandaloneActions.deliverDueReminders(app)
                 if (foreground && api.deviceId.isNotEmpty()) {
                     if (mutable.value.pendingApproval) {
                         runCatching {
@@ -548,13 +547,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             StandaloneIntent.LOCAL_REMINDER -> {
                 val at = decision.reminderAt ?: error("Reminder time did not parse")
                 val scheduled = StandaloneActions.scheduleReminder(getApplication(), text, at)
-                val result = scheduled.getOrElse { error(it.message ?: StandaloneActions.reminderPermissionDeniedCopy()) }
-                viewModelScope.launch {
-                    val wait = result.at.toInstant().toEpochMilli() - System.currentTimeMillis()
-                    if (wait > 0L) delay(wait)
-                    StandaloneActions.deliverDueReminders(getApplication())
-                }
-                result.message
+                scheduled.getOrElse { error(it.message ?: StandaloneActions.reminderPermissionDeniedCopy()) }.message
             }
             StandaloneIntent.REMINDER_NEEDS_TIME -> StandaloneActions.reminderNeedsTimeCopy()
             StandaloneIntent.LOCAL_NOTE -> StandaloneActions.noteAckCopy()
@@ -762,7 +755,9 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private suspend fun handleOfflineAttachment(uri: Uri, name: String, type: String) {
         val context = getApplication<Application>()
         if (StandaloneActions.isPlainText(type, name)) {
-            val loaded = StandaloneActions.readPickedText(context, uri, type, name)
+            val loaded = withContext(Dispatchers.IO) {
+                StandaloneActions.readPickedText(context, uri, type, name)
+            }
             val text = loaded.getOrElse { error ->
                 appendOfflineNotice(name, error.message ?: StandaloneActions.pickedTextTooLargeCopy())
                 return
@@ -776,17 +771,14 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             }
             return
         }
-        val bytes = withContext(Dispatchers.IO) {
-            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                ?: error("Cannot read attachment")
+        val stored = withContext(Dispatchers.IO) {
+            StandaloneActions.storeQueuedMedia(context, uri, name)
         }
-        val stored = StandaloneActions.storeQueuedMedia(context, bytes, name)
         val notice = if (StandaloneActions.isImageOrVideo(type, name)) {
             StandaloneActions.mediaSavedCopy()
         } else {
             StandaloneActions.queueOrRefuseCopy()
         }
-        check(!StandaloneActions.claimsAlreadyAnalyzed(notice))
         appendOfflineNotice("${stored.name}: $notice", notice, consequential = false)
     }
 
@@ -1130,8 +1122,14 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         if (route.tts == TtsVoiceRoute.ON_DEVICE) {
             mutable.value = mutable.value.copy(onDeviceVoiceActive = true, activity = "Speaking on this phone…")
             try {
-                val audio = voicePackManager.synthesize(text.take(6000))
-                playAudio(audio)
+                val chunks = SpeakableTtsChunker.chunk(text)
+                if (chunks.isEmpty()) error("Nothing speakable in that reply")
+                val first = voicePackManager.synthesize(chunks.first())
+                playAudio(first)
+                for (piece in chunks.drop(1)) {
+                    while (mutable.value.speaking) delay(40)
+                    playAudio(voicePackManager.synthesize(piece))
+                }
             } finally {
                 voicePackManager.unloadIdle()
                 publishVoiceRoute()

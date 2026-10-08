@@ -28,6 +28,7 @@ data class CompanionVoicePack(
     val url: String,
     val recommended: Boolean,
     val artifacts: List<CompanionVoiceArtifact>,
+    val attribution: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id)
@@ -40,6 +41,7 @@ data class CompanionVoicePack(
         .put("sha256", sha256)
         .put("url", url)
         .put("recommended", recommended)
+        .put("attribution", attribution)
         .put("artifacts", JSONArray().also { arr -> artifacts.forEach { arr.put(it.toJson()) } })
 }
 
@@ -54,6 +56,8 @@ object CompanionVoicePackCatalog {
         "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json"
     private const val POCKET_BASE =
         "https://huggingface.co/soniqo/Pocket-TTS-100M-ONNX-INT8/resolve/v1.0.0"
+    const val POCKET_VOICE_ATTRIBUTION =
+        "Voice: Alba MacKenna (CC BY 4.0). https://huggingface.co/kyutai/tts-voices#alba-mackenna — Kyutai Pocket TTS checkpoint (CC BY 4.0)."
 
     val builtIn: List<CompanionVoicePack> = listOf(
         CompanionVoicePack(
@@ -119,6 +123,7 @@ object CompanionVoicePackCatalog {
                 CompanionVoiceArtifact("vocab.json", "$POCKET_BASE/vocab.json",
                     "a2673c232cf49dd6eb1ad850e7c7682f6443c2ab64040d1150e9d8f2a7e3587b", 69_479L),
             ),
+            attribution = POCKET_VOICE_ATTRIBUTION,
         ),
         CompanionVoicePack(
             id = "piper-en-lessac-medium",
@@ -184,6 +189,7 @@ object CompanionVoicePackCatalog {
                 sha256 = item.optString("sha256", base?.sha256 ?: ""),
                 url = item.optString("url", base?.url ?: ""),
                 recommended = item.optBoolean("recommended", base?.recommended ?: false),
+                attribution = item.optString("attribution", base?.attribution ?: ""),
                 artifacts = artifacts.ifEmpty {
                     listOf(
                         CompanionVoiceArtifact(

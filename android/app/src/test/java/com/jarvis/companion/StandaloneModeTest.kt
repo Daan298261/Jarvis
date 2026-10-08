@@ -2,7 +2,9 @@ package com.jarvis.companion
 
 import android.app.AlarmManager
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import org.json.JSONObject
@@ -17,7 +19,10 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows
 import org.robolectric.annotation.Config
+import java.io.ByteArrayInputStream
 import java.io.File
+import java.io.FilterInputStream
+import java.io.InputStream
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
@@ -50,6 +55,7 @@ class StandaloneModeTest {
         context = ApplicationProvider.getApplicationContext()
         context.getSharedPreferences(StandaloneActions.PREFS, Context.MODE_PRIVATE).edit().clear().apply()
         context.getSharedPreferences("companion_pack", Context.MODE_PRIVATE).edit().clear().apply()
+        context.getSharedPreferences("companion_pack_digest", Context.MODE_PRIVATE).edit().clear().apply()
     }
 
     @Test
@@ -63,6 +69,51 @@ class StandaloneModeTest {
         val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val scheduled = Shadows.shadowOf(alarm).scheduledAlarms
         assertTrue("expected a real AlarmManager alarm", scheduled != null && scheduled.isNotEmpty())
+        val pending = scheduled[0].operation
+        assertTrue("reminder alarm must be a broadcast PendingIntent", Shadows.shadowOf(pending).isBroadcastIntent)
+        assertEquals(
+            ReminderReceiver::class.java.name,
+            Shadows.shadowOf(pending).savedIntent.component?.className,
+        )
+    }
+
+    @Test
+    fun reminderReceiverPostsExactlyOneNotificationAndMarksFired() {
+        val at = now.plusMinutes(5)
+        val result = StandaloneActions.scheduleReminder(context, "Remind me at 8:00 pm", at).getOrThrow()
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        Shadows.shadowOf(manager).cancelAll()
+        val receiver = ReminderReceiver()
+        val intent = StandaloneActions.reminderBroadcastIntent(context, result.id)
+        receiver.onReceive(context, intent)
+        assertEquals(1, Shadows.shadowOf(manager).allNotifications.size)
+        assertTrue(StandaloneActions.reminderIsFired(context, result.id))
+        receiver.onReceive(context, intent)
+        assertEquals(1, Shadows.shadowOf(manager).allNotifications.size)
+    }
+
+    @Test
+    fun bootCompletedRearmsUnfiredReminders() {
+        val at = now.plusHours(3)
+        val result = StandaloneActions.scheduleReminder(context, "Remind me at 6:00 pm", at).getOrThrow()
+        val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val pending = PendingIntent.getBroadcast(
+            context,
+            result.id.hashCode(),
+            StandaloneActions.reminderBroadcastIntent(context, result.id),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        alarm.cancel(pending)
+        ReminderReceiver().onReceive(context, Intent(Intent.ACTION_BOOT_COMPLETED))
+        val restored = Shadows.shadowOf(alarm).scheduledAlarms.firstOrNull { scheduled ->
+            Shadows.shadowOf(scheduled.operation).isBroadcastIntent &&
+                Shadows.shadowOf(scheduled.operation).savedIntent
+                    .getStringExtra(StandaloneActions.EXTRA_REMINDER_ID) == result.id
+        }
+        assertNotNull("BOOT_COMPLETED must re-arm unfired reminders", restored)
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        assertTrue(Shadows.shadowOf(manager).allNotifications.isEmpty())
+        assertFalse(StandaloneActions.reminderIsFired(context, result.id))
     }
 
     @Test
@@ -164,6 +215,14 @@ class StandaloneModeTest {
         underFile.writeText(under)
         val loaded = StandaloneActions.readPickedText(context, Uri.fromFile(underFile), "text/markdown", "under-cap.md")
         assertEquals(under, loaded.getOrThrow())
+
+        val counting = CountingInputStream(ByteArrayInputStream(over))
+        val bounded = StandaloneActions.readBoundedUtf8(counting, StandaloneActions.PICKED_TEXT_MAX_BYTES)
+        assertTrue(bounded.isFailure)
+        assertTrue(
+            "must not read more than cap+1 bytes, read=${counting.bytesRead}",
+            counting.bytesRead <= StandaloneActions.PICKED_TEXT_MAX_BYTES + 1,
+        )
     }
 
     @Test
@@ -281,5 +340,42 @@ class StandaloneModeTest {
         assertFalse(blocked.reason.contains("Jarvis"))
         val prompt = StandalonePrompt.build(emptyList(), "hello")
         assertTrue(StandalonePrompt.identifiesAnzu(prompt))
+    }
+
+    @Test
+    fun secondResolveOfflinePackDoesNotRereadTheFile() {
+        val pack = CompanionPackCatalog.builtIn.first { it.id == CompanionPackCatalog.INSTRUCT_15B_ID }
+        var hashCalls = 0
+        val hasher = FileHasher { hashCalls += 1; pack.sha256 }
+        val cache = VerifiedDigestCache(hasher)
+        val engine = ScriptedInferenceEngine()
+        val manager = CompanionPackManager(context, engine, cache)
+        manager.selectPack(pack.id)
+        val file = manager.packFile(pack)
+        file.parentFile?.mkdirs()
+        file.writeBytes("gguf-fixture".toByteArray())
+        cache.digestOf(file)
+        assertEquals(1, hashCalls)
+        assertEquals(pack.id, manager.resolveOfflinePack()?.id)
+        assertEquals(pack.id, manager.resolveOfflinePack()?.id)
+        assertEquals("second resolve must not re-hash", 1, hashCalls)
+        assertEquals(1, cache.hashCallCount())
+    }
+}
+
+private class CountingInputStream(wrapped: InputStream) : FilterInputStream(wrapped) {
+    var bytesRead = 0
+        private set
+
+    override fun read(): Int {
+        val value = super.read()
+        if (value >= 0) bytesRead += 1
+        return value
+    }
+
+    override fun read(b: ByteArray, off: Int, len: Int): Int {
+        val n = super.read(b, off, len)
+        if (n > 0) bytesRead += n
+        return n
     }
 }
