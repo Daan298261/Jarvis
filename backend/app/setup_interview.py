@@ -120,6 +120,34 @@ MODEL_MANIFEST: dict[str, dict[str, Any]] = {
         "why": "Optional offensive-security specialist for explicitly authorized assessments.",
         "limitations": "Never auto-enabled. Requires red-team on the license package with law enforcement, plus case reference and human confirmation per routing policy.",
     },
+    "front_2b": {
+        "id": "front_2b",
+        "label": "Faster · Qwen3.5 2B",
+        "role": "Front lane",
+        "repo": "unsloth/Qwen3.5-2B-GGUF",
+        "include": "Qwen3.5-2B-Q4_K_M.gguf",
+        "relative_dir": "Qwen3.5-2B-GGUF",
+        "filename": "Qwen3.5-2B-Q4_K_M.gguf",
+        "downloadable": True,
+        "bundled": False,
+        "estimated_disk_gb": 1.6,
+        "why": "Default front model. Short acknowledgements on CPU, no GPU memory.",
+        "limitations": "Interprets and hands off. It is not the worker that answers hard questions.",
+    },
+    "front_4b": {
+        "id": "front_4b",
+        "label": "Smarter · Qwen3.5 4B",
+        "role": "Front lane",
+        "repo": "unsloth/Qwen3.5-4B-GGUF",
+        "include": "Qwen3.5-4B-Q4_K_M.gguf",
+        "relative_dir": "Qwen3.5-4B-GGUF",
+        "filename": "Qwen3.5-4B-Q4_K_M.gguf",
+        "downloadable": True,
+        "bundled": False,
+        "estimated_disk_gb": 2.8,
+        "why": "Optional front model on the GPU when VRAM remains beside the worker and voice.",
+        "limitations": "Starts only when the VRAM fit check passes. Otherwise Jarvis stays on the 2B CPU front model.",
+    },
 }
 
 
@@ -357,6 +385,26 @@ def plan_interview(answers: dict[str, Any] | None = None, hw: HardwareInfo | Non
             ]
         )
 
+    front_choice = str(answers.get("front_profile") or "front_2b").strip()
+    if front_choice not in {"front_2b", "front_4b"}:
+        front_choice = "front_2b"
+    models.append(
+        _model_row(
+            "front_2b",
+            status="front lane download",
+            selected=front_choice == "front_2b",
+            reason="Faster front model. Qwen3.5 2B Q4 stays on CPU and does not use GPU memory.",
+        )
+    )
+    models.append(
+        _model_row(
+            "front_4b",
+            status="front lane download",
+            selected=front_choice == "front_4b",
+            reason="Smarter front model. Qwen3.5 4B Q4 uses the GPU only when VRAM remains beside the worker and voice.",
+        )
+    )
+
     recommended_class = str(hardware_rec.get("recommended_class") or "")
     role_policies = dict(hardware_rec.get("role_policies") or {})
     inference_choice = "local"
@@ -383,6 +431,7 @@ def plan_interview(answers: dict[str, Any] | None = None, hw: HardwareInfo | Non
         "inference_choice": inference_choice,
         "inference_profile": "bootstrap",
         "install_expert_27b": install_expert,
+        "front_profile": front_choice,
         "install_playwright": True,
         "selected_models": [row["id"] for row in models if row.get("selected")],
     }
@@ -409,6 +458,11 @@ def plan_interview(answers: dict[str, Any] | None = None, hw: HardwareInfo | Non
         f"Primary intents: {', '.join(intents)}.",
         f"Routing preference: {policy}; host resource target: {global_percent}%.",
         "Ornith 1.5 9B Q4_K_M remains the local bootstrap/fallback model.",
+        (
+            "Front lane: Faster (Qwen3.5 2B on CPU)."
+            if front_choice == "front_2b"
+            else "Front lane: Smarter (Qwen3.5 4B on GPU when it fits)."
+        ),
         disk["message"],
         "LM Studio is optional; Jarvis uses its bundled llama.cpp runtime by default.",
         "Phone access defaults to LAN pairing; off-LAN uses Phone > Prepare connection for TCP 4781 only.",

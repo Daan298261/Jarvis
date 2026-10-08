@@ -386,6 +386,28 @@ export function SetupPage() {
             </div>
           </div>
 
+          <h3 className="setup-model-title">Front model</h3>
+          <div className="setup-model-list">
+            <label className="row">
+              <input
+                type="radio"
+                name="front_profile"
+                checked={(answers.front_profile || "front_2b") !== "front_4b"}
+                onChange={() => void buildPlan({ ...answers, front_profile: "front_2b" })}
+              />
+              Faster — Qwen3.5 2B on CPU (default)
+            </label>
+            <label className="row">
+              <input
+                type="radio"
+                name="front_profile"
+                checked={answers.front_profile === "front_4b"}
+                onChange={() => void buildPlan({ ...answers, front_profile: "front_4b" })}
+              />
+              Smarter — Qwen3.5 4B on GPU when VRAM fits
+            </label>
+          </div>
+
           <h3 className="setup-model-title">Models</h3>
           <div className="setup-model-list">
             {plan.recommended_models.map((model) => (

@@ -180,6 +180,11 @@ async def apply_setup():
         settings.inference.backend = "llama.cpp"
         settings.inference.profile = str(state.get("inference_profile") or "bootstrap")
         settings.inference.auto_load = True
+    front_profile = str(state.get("front_profile") or "").strip()
+    if front_profile in {"front_2b", "front_4b"}:
+        settings.front_responder.profile = front_profile
+        settings.front_responder.device = "auto"
+        settings.front_responder.resident = True
     save_settings(settings)
 
     try:

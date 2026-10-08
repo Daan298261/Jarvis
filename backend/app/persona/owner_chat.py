@@ -26,6 +26,7 @@ from .weather import weather_system_message
 from ..events import BUS
 from ..agent.front_responder import (
     TwoLaneTiming,
+    front_worker_should_overlap,
     generate_front_reply,
     is_safe_front_speech,
     last_front_timing,
@@ -189,6 +190,63 @@ async def _owner_messages(
     return messages
 
 
+async def _overlap_owner_worker(
+    *,
+    cancel: asyncio.Event,
+    queue: asyncio.Queue,
+    errors: list[BaseException],
+    settings: Any,
+    profile: Any,
+    conversation_id: str,
+    cleaned: str,
+    hydrate_task: asyncio.Task,
+    weather_task: asyncio.Task,
+) -> None:
+    """Load and stream the worker while the front reply is still in flight.
+
+    Tokens land in ``queue``. Speech stays gated until the front line is spoken.
+    ``cancel`` is set when the front reply ends the turn, so this task must not
+    be what a terminal greeting uses — callers only spawn it for handoff heuristics.
+    """
+    try:
+        await hydrate_task
+        briefing = await weather_task
+        if cancel.is_set():
+            return
+        if not MANAGER.provider or not MANAGER.state.loaded:
+            await MANAGER.load(settings, profile.name)
+        if cancel.is_set():
+            return
+        worker_messages = await _owner_messages(conversation_id, cleaned, briefing)
+        if cancel.is_set():
+            return
+        await ensure_context_for_messages(
+            worker_messages,
+            settings=settings,
+            profile_name=profile.name,
+        )
+        if cancel.is_set():
+            return
+        active = resolve_profile(settings.inference.profile)
+        async for delta in MANAGER.chat_stream(
+            worker_messages,
+            temperature=active.temperature,
+            top_p=active.top_p,
+            top_k=active.top_k,
+            max_tokens=owner_chat_max_tokens(active),
+            thinking=False,
+        ):
+            if cancel.is_set():
+                break
+            await queue.put(delta)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        errors.append(exc)
+    finally:
+        await queue.put(None)
+
+
 async def stream_owner_chat(
     user_text: str,
     *,
@@ -298,6 +356,25 @@ async def stream_owner_chat(
     history = list(_conversations.get(cid, []))
     hydrate_task = asyncio.create_task(hydrate_conversation(cid))
     weather_task = asyncio.create_task(weather_system_message(cleaned))
+    overlap_cancel = asyncio.Event()
+    overlap_queue: asyncio.Queue = asyncio.Queue()
+    overlap_errors: list[BaseException] = []
+    overlap_task: asyncio.Task | None = None
+    worker_speech_gate = asyncio.Event()
+    if front_worker_should_overlap(settings, cleaned, strategy=intake.strategy):
+        overlap_task = asyncio.create_task(
+            _overlap_owner_worker(
+                cancel=overlap_cancel,
+                queue=overlap_queue,
+                errors=overlap_errors,
+                settings=settings,
+                profile=profile,
+                conversation_id=cid,
+                cleaned=cleaned,
+                hydrate_task=hydrate_task,
+                weather_task=weather_task,
+            )
+        )
 
     prefetched_front = await generate_front_reply(
         cleaned,
@@ -364,6 +441,7 @@ async def stream_owner_chat(
             note_front_audio(None, audio_ms)
             prefetched_front.first_audio_ms = audio_ms
             front_spoken_early = True
+            worker_speech_gate.set()
 
         # final_basic / ask_clarification: complete without loading the worker —
         # unless RFC-0107 requires the vault working set (bound + vault-relevant).
@@ -417,10 +495,16 @@ async def stream_owner_chat(
                 )
                 hydrate_task.cancel()
                 weather_task.cancel()
+                overlap_cancel.set()
+                if overlap_task is not None:
+                    overlap_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await hydrate_task
                 with contextlib.suppress(asyncio.CancelledError):
                     await weather_task
+                if overlap_task is not None:
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await overlap_task
                 yield {
                     "type": "done",
                     "conversation_id": cid,
@@ -436,10 +520,17 @@ async def stream_owner_chat(
                 return
             # Fall through to worker so compose_turn_working_set runs with vault hits.
 
-    history = await hydrate_task
-    briefing = await weather_task
+    if front_spoken_early or not front_safe:
+        worker_speech_gate.set()
 
-    if not MANAGER.provider or not MANAGER.state.loaded:
+    if overlap_task is None:
+        history = await hydrate_task
+        briefing = await weather_task
+    else:
+        history = list(_conversations.get(cid, []))
+        briefing = None
+
+    if overlap_task is None and (not MANAGER.provider or not MANAGER.state.loaded):
         try:
             await BUS.publish_ephemeral(
                 OWNER_CHAT_CHANNEL,
@@ -453,12 +544,14 @@ async def stream_owner_chat(
             yield {"type": "error", "detail": f"Inference model is not loaded: {exc}"[:500]}
             return
 
-    if not MANAGER.provider:
+    if overlap_task is None and not MANAGER.provider:
         yield {"type": "error", "detail": "Inference model is not loaded"}
         return
 
-    worker_messages = await _owner_messages(cid, cleaned, briefing)
-    if intake.strategy == "compress":
+    worker_messages: list[ChatMessage] = []
+    if overlap_task is None:
+        worker_messages = await _owner_messages(cid, cleaned, briefing)
+    if overlap_task is None and intake.strategy == "compress":
         async def _segment_progress(index: int, total: int) -> None:
             await BUS.publish_ephemeral(
                 OWNER_CHAT_CHANNEL,
@@ -512,28 +605,38 @@ async def stream_owner_chat(
 
         spawn_context_expand_keep_busy(on_spoken=_on_spoken)
 
-    ctx_meta = await ensure_context_for_messages(
-        worker_messages,
-        settings=settings,
-        profile_name=profile.name,
-        on_expanding=_speak_context_expand,
-        bus_channel=OWNER_CHAT_CHANNEL,
-    )
-    profile = resolve_profile(settings.inference.profile)
-    worker_model = str(getattr(MANAGER.provider, "model", "") or profile.name)
-    await BUS.publish_ephemeral(
-        OWNER_CHAT_CHANNEL,
-        "model_lane",
-        "Worker context",
-        model_lane_event_payload(
-            lane="worker",
-            model=worker_model,
-            extra=ctx_meta,
-        ),
-        stage="model",
-    )
+    if overlap_task is None:
+        ctx_meta = await ensure_context_for_messages(
+            worker_messages,
+            settings=settings,
+            profile_name=profile.name,
+            on_expanding=_speak_context_expand,
+            bus_channel=OWNER_CHAT_CHANNEL,
+        )
+        profile = resolve_profile(settings.inference.profile)
+        worker_model = str(getattr(MANAGER.provider, "model", "") or profile.name)
+        await BUS.publish_ephemeral(
+            OWNER_CHAT_CHANNEL,
+            "model_lane",
+            "Worker context",
+            model_lane_event_payload(
+                lane="worker",
+                model=worker_model,
+                extra=ctx_meta,
+            ),
+            stage="model",
+        )
 
     async def worker_stream():
+        if overlap_task is not None:
+            while True:
+                item = await overlap_queue.get()
+                if item is None:
+                    break
+                yield item
+            if overlap_errors:
+                raise overlap_errors[0]
+            return
         async for delta in MANAGER.chat_stream(
             worker_messages,
             temperature=profile.temperature,
@@ -548,6 +651,8 @@ async def stream_owner_chat(
         # Front text/TTS already left the gate; do not re-append or re-speak it.
         if lane == "front" and (front_text_emitted or front_spoken_early):
             return
+        if lane != "front" and not worker_speech_gate.is_set():
+            await worker_speech_gate.wait()
         parts.append(delta)
         model_id = resolve_front_model_id(settings) if lane == "front" else worker_model
         await BUS.publish_ephemeral(
@@ -636,10 +741,17 @@ async def stream_owner_chat(
                             float(getattr(front, "first_audio_ms", 0.0) or 0.0),
                             (time.perf_counter() - turn_started) * 1000,
                         )
+                worker_speech_gate.set()
+            elif kind in {"front_response_skipped", "worker_response_started"}:
+                worker_speech_gate.set()
             elif kind == "done":
                 done = event
     except Exception as exc:
         await nudger.stop()
+        worker_speech_gate.set()
+        overlap_cancel.set()
+        if overlap_task is not None:
+            overlap_task.cancel()
         clear_stream_speak_state(stream_key)
         yield {"type": "error", "detail": str(exc)[:500]}
         return
