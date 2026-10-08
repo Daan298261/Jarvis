@@ -5,13 +5,12 @@ from __future__ import annotations
 import pytest
 from datetime import datetime, timezone
 
-from app.goals.runtime import suggest_skills_for_goal
 from app.skills.eligibility import evaluate_trajectory_eligibility
 from app.skills.extract import ExtractionError, extract_candidate_manifest
 from app.skills.forge import ForgeError, forge
 from app.skills.permissions import PrivilegeExpansionError, compute_effective_capabilities
 from app.skills.provenance import verify_manifest_integrity
-from app.skills.routing import search_skills
+from app.skills.routing import goal_runtime_skill_context, search_skills
 from app.skills.schema import (
     DeterministicTest,
     FieldType,
@@ -381,7 +380,7 @@ def test_persona_and_goal_runtime_routing_hooks(skill_forge_store):
     assert hits
     assert hits[0]["skill_id"] == active.skill_id
 
-    goal_ctx = suggest_skills_for_goal("goal-office-1", "export report.xlsx", task_class="office")
+    goal_ctx = goal_runtime_skill_context("goal-office-1", "export report.xlsx", task_class="office")
     assert goal_ctx["skills"]
     assert "Skill Forge" in goal_ctx["prompt_block"] or goal_ctx["skills"][0]["name"]
 
