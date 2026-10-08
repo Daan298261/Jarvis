@@ -79,7 +79,7 @@ class StandaloneModeTest {
 
     @Test
     fun reminderReceiverPostsExactlyOneNotificationAndMarksFired() {
-        val at = now.plusMinutes(5)
+        val at = ZonedDateTime.now(ZoneId.of("UTC")).minusMinutes(1)
         val result = StandaloneActions.scheduleReminder(context, "Remind me at 8:00 pm", at).getOrThrow()
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.cancelAll()
@@ -112,6 +112,30 @@ class StandaloneModeTest {
         }
         assertNotNull("BOOT_COMPLETED must re-arm unfired reminders", restored)
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        assertTrue(Shadows.shadowOf(manager).allNotifications.isEmpty())
+        assertFalse(StandaloneActions.reminderIsFired(context, result.id))
+    }
+
+    @Test
+    fun fireReminderRefusesWhenDueMoreThanSixtySecondsAhead() {
+        val at = ZonedDateTime.now(ZoneId.of("UTC")).plusHours(2)
+        val result = StandaloneActions.scheduleReminder(context, "Remind me at 6:00 pm", at).getOrThrow()
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.cancelAll()
+        StandaloneActions.fireReminder(context, result.id)
+        ReminderReceiver().onReceive(context, StandaloneActions.reminderBroadcastIntent(context, result.id))
+        assertTrue(Shadows.shadowOf(manager).allNotifications.isEmpty())
+        assertFalse(StandaloneActions.reminderIsFired(context, result.id))
+    }
+
+    @Test
+    fun reminderReceiverIgnoresIntentsWithoutReminderAction() {
+        val at = ZonedDateTime.now(ZoneId.of("UTC")).minusMinutes(1)
+        val result = StandaloneActions.scheduleReminder(context, "Remind me at 8:00 pm", at).getOrThrow()
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.cancelAll()
+        val stray = Intent().putExtra(StandaloneActions.EXTRA_REMINDER_ID, result.id)
+        ReminderReceiver().onReceive(context, stray)
         assertTrue(Shadows.shadowOf(manager).allNotifications.isEmpty())
         assertFalse(StandaloneActions.reminderIsFired(context, result.id))
     }
@@ -223,6 +247,34 @@ class StandaloneModeTest {
             "must not read more than cap+1 bytes, read=${counting.bytesRead}",
             counting.bytesRead <= StandaloneActions.PICKED_TEXT_MAX_BYTES + 1,
         )
+    }
+
+    @Test
+    fun queuedMediaNameIsSanitizedDedupedAndCapped() {
+        assertEquals("shot.jpg", StandaloneActions.safeMediaBasename("../foo/bar/shot.jpg"))
+        assertFalse(StandaloneActions.safeMediaBasename("foo/../../../etc/passwd").contains(".."))
+        assertFalse(StandaloneActions.safeMediaBasename("a\nb.jpg").contains("\n"))
+
+        val dir = File(context.filesDir, "offline-media").apply { mkdirs() }
+        File(dir, "shot.jpg").writeText("first")
+        assertEquals("shot-1.jpg", StandaloneActions.uniqueMediaFile(dir, "shot.jpg").name)
+
+        val over = ByteArray(80) { 1 }
+        val counting = CountingInputStream(ByteArrayInputStream(over))
+        val thrown = runCatching {
+            StandaloneActions.copyBounded(counting, java.io.ByteArrayOutputStream(), 40)
+        }.exceptionOrNull()
+        assertNotNull(thrown)
+        assertTrue(thrown!!.message!!.contains("32 MiB"))
+
+        val source = File(context.cacheDir, "src.bin")
+        source.writeBytes(ByteArray(16) { 2 })
+        val first = StandaloneActions.storeQueuedMedia(context, Uri.fromFile(source), "../evil/shot.jpg")
+        assertEquals("shot.jpg", first.name)
+        val second = StandaloneActions.storeQueuedMedia(context, Uri.fromFile(source), "shot.jpg")
+        assertEquals("shot-1.jpg", second.name)
+        assertTrue(first.exists() && second.exists())
+        assertTrue(first.readBytes().contentEquals(second.readBytes()))
     }
 
     @Test

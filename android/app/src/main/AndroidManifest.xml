@@ -43,9 +43,6 @@
         <service android:name=".CallService" android:exported="false" android:foregroundServiceType="phoneCall|microphone" />
         <receiver android:name=".ReminderReceiver" android:exported="true">
             <intent-filter>
-                <action android:name="com.jarvis.companion.STANDALONE_REMINDER" />
-            </intent-filter>
-            <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>

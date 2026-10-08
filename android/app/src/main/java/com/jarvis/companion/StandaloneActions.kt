@@ -15,6 +15,7 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
+import java.io.OutputStream
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -27,6 +28,8 @@ object StandaloneActions {
     const val ORIGIN_USER = "device_offline"
     const val ORIGIN_ASSISTANT = "device_local_draft"
     const val PICKED_TEXT_MAX_BYTES = 64 * 1024
+    const val QUEUED_MEDIA_MAX_BYTES = 32L * 1024 * 1024
+    const val FIRE_GRACE_MS = 60_000L
     const val CHANNEL_ID = "anzu_phone_reminders"
     const val PREFS = "standalone_actions"
     const val KEY_REMINDERS = "reminders_json"
@@ -67,6 +70,9 @@ object StandaloneActions {
 
     fun pickedTextTooLargeCopy(): String =
         "That text file is larger than 64 KiB. Pick a smaller file or trim it, then try again."
+
+    fun queuedMediaTooLargeCopy(): String =
+        "That attachment is larger than 32 MiB. Pick a smaller file, then try again."
 
     fun nonTextFileCopy(): String =
         "I can only read plain text or markdown on this phone. Other files wait for the ANZU desktop."
@@ -160,7 +166,7 @@ object StandaloneActions {
         return false
     }
 
-    fun fireReminder(context: Context, id: String) {
+    fun fireReminder(context: Context, id: String, nowMillis: Long = System.currentTimeMillis()) {
         if (id.isBlank()) return
         val items = loadReminders(context)
         var changed = false
@@ -168,6 +174,8 @@ object StandaloneActions {
             val item = items.optJSONObject(index) ?: continue
             if (item.optString("id") != id) continue
             if (item.optBoolean("fired", false)) return
+            val whenMs = item.optLong("at", 0L)
+            if (whenMs > nowMillis + FIRE_GRACE_MS) return
             postReminderNotification(context, id, item.optString("text"))
             item.put("fired", true)
             changed = true
@@ -303,29 +311,70 @@ object StandaloneActions {
 
     fun storeQueuedMedia(context: Context, uri: Uri, filename: String): File {
         val dir = File(context.filesDir, "offline-media").apply { mkdirs() }
-        val safeName = filename.ifBlank { "capture-${System.currentTimeMillis()}" }.replace("/", "_")
-        val target = File(dir, safeName)
+        val target = uniqueMediaFile(dir, safeMediaBasename(filename))
         val stream = context.contentResolver.openInputStream(uri)
             ?: error("Cannot read attachment")
-        stream.use { input ->
-            target.outputStream().use { output -> input.copyTo(output) }
+        try {
+            stream.use { input ->
+                target.outputStream().use { output ->
+                    copyBounded(input, output, QUEUED_MEDIA_MAX_BYTES)
+                }
+            }
+        } catch (error: Exception) {
+            target.delete()
+            throw error
         }
         return target
     }
 
-    private fun knownContentLength(context: Context, uri: Uri): Long? {
+    fun safeMediaBasename(filename: String): String {
+        var name = filename.replace('\\', '/').substringAfterLast('/')
+        name = name.replace("..", "")
+        name = name.filter { ch -> ch > ' ' && ch != '/' && ch != '\\' && ch != '\u0000' }.trim()
+        return name.take(180).ifBlank { "capture-${System.currentTimeMillis()}" }
+    }
+
+    fun uniqueMediaFile(dir: File, basename: String): File {
+        val safe = File(basename).name
+        val dot = safe.lastIndexOf('.')
+        val stem = if (dot > 0) safe.substring(0, dot) else safe
+        val ext = if (dot > 0) safe.substring(dot) else ""
+        var candidate = File(dir, safe)
+        var n = 1
+        while (candidate.exists()) {
+            candidate = File(dir, "$stem-$n$ext")
+            n++
+        }
+        return candidate
+    }
+
+    fun copyBounded(input: InputStream, output: OutputStream, maxBytes: Long) {
+        val buffer = ByteArray(8192)
+        var total = 0L
+        while (true) {
+            val n = input.read(buffer)
+            if (n < 0) break
+            total += n
+            if (total > maxBytes) {
+                error(queuedMediaTooLargeCopy())
+            }
+            output.write(buffer, 0, n)
+        }
+    }
+
+    private fun knownContentLength(context: Context, uri: Uri): Long? = runCatching {
         val cursor = context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
         cursor?.use {
             if (it.moveToFirst()) {
                 val index = it.getColumnIndex(OpenableColumns.SIZE)
                 if (index >= 0 && !it.isNull(index)) {
                     val size = it.getLong(index)
-                    if (size > 0L) return size
+                    if (size > 0L) return@runCatching size
                 }
             }
         }
-        return null
-    }
+        null
+    }.getOrNull()
 
     private fun saveReminders(context: Context, items: JSONArray) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
