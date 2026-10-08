@@ -14,6 +14,93 @@
 
 ---
 
+## ANZU Superassistant
+
+**ANZU Superassistant** is the end-user product being built by the **Jarvis** engineering project: a polished, local-first, multi-device autonomous AI system designed to feel like one coherent personal superassistant rather than a collection of models, agents and developer tools.
+
+> **Tell ANZU what you want. ANZU figures out how to accomplish it.**
+
+ANZU is intended to understand the desired result, inspect its environment, plan and execute the work, recover when an approach fails, and independently verify the result before reporting completion. A command running successfully is not enough; the requested outcome must actually be achieved.
+
+### Product north star
+
+The project is judged by the intended user experience, not by literal compliance with an older implementation detail. RFCs and architecture specifications define requirements and safeguards, but they serve the product goal rather than replace it.
+
+ANZU should be:
+
+- **Premium and visually finished** — restrained, coherent, smooth and deliberately designed. It should look like a mature commercial product, not an engineering dashboard.
+- **Simple by default** — models, context windows, workers, GPU allocation, task graphs and routing should remain hidden unless the owner chooses to inspect or control them.
+- **Fast when the task is simple** — deterministic/reflex execution should handle trivial operations without unnecessary large-model reasoning (`RFC-0085`, `RFC-0117`, `RFC-0127/0128`, `RFC-0171`, `RFC-0172`).
+- **Powerful when the task is difficult** — complex goals may use planning, specialist agents, multiple models, tools, browser/computer use and parallel workers.
+- **Alive and recognisable** — ANZU has a persistent visual and voice presence that communicates listening, thinking, working, speaking, waiting and error states (`RFC-0069`, `RFC-0137`, `RFC-0175–0178`, `RFC-0195`).
+- **Natural to talk to** — voice is a primary interface, with real local TTS/STT, low perceived latency, interruption support and no silent fallback masquerading as a premium voice (`RFC-0070`, `RFC-0075`, `RFC-0092`, `RFC-0111`, `RFC-0117`).
+- **Autonomous without being reckless** — routine reversible work should proceed without constant approval, while consequential actions remain controlled, auditable and reversible (`RFC-0002`, `RFC-0031`, `RFC-0071`, `RFC-0110`).
+- **Verification-driven** — ANZU should verify outcomes rather than confuse activity with success (`RFC-0026`).
+- **Local-first and owner-controlled** — local inference and storage remain first-class, with optional escalation to other nodes or cloud models according to privacy, capability, latency and cost policy.
+- **One assistant, many specialists** — personas, agents, models and machines are internal resources. The owner should normally experience a single ANZU identity (`RFC-0137`, `RFC-0173`, `RFC-0174`).
+- **Hardware-scalable** — adding a workstation, GPU node, laptop, Raspberry Pi or phone should increase available capability without increasing normal interaction complexity.
+- **Resilient** — loss of a cloud service, model, node or internet connection should degrade capability gracefully rather than make the product incomprehensible or unusable.
+
+### What already exists
+
+The current codebase already contains substantial foundations for the end state, including:
+
+- Windows desktop application and conversational owner-facing UI foundations;
+- local and OpenAI-compatible inference abstraction;
+- task execution, checkpoints, persistence and recovery;
+- native tool execution and automation controls;
+- persistent memory and project foundations;
+- ANZU persona/presence system and specialist identities (`RFC-0137`);
+- particle/morphable presence architecture and later continuous-presence work (`RFC-0069`, `RFC-0175–0178`);
+- natural/local voice foundations and explicit TTS runtime handling (`RFC-0070`, `RFC-0092`, `RFC-0111`);
+- low-latency front-response and reflex execution architecture (`RFC-0117`, `RFC-0171`, `RFC-0172`);
+- project placement and context foundations (`RFC-0121`);
+- Skill Forge for turning successful work into reusable skills (`RFC-0173`);
+- Multi-Agent Rooms for bounded parallel specialist work (`RFC-0174`);
+- autonomy policy, approval and reversibility foundations (`RFC-0002`, `RFC-0031`, `RFC-0110`);
+- explicit execution verification states (`RFC-0026`);
+- one-node swarm architecture with Orchestrator, Leader, Senior Worker and Junior Worker concepts, role preferences/forcing and host-resource budgets;
+- phone pairing, offline-model and Android presence/voice foundations (`RFC-0074`, `RFC-0108`, `RFC-0123`, `RFC-0139`, `RFC-0140`).
+
+Implementation status varies by feature: some areas are production-usable, while others still require Windows, GPU, phone or physical-device sign-off and UX refinement.
+
+### Where ANZU is going
+
+Major planned capabilities include true secure multi-node swarm execution; richer phone/WAN operation; polished installer and lifecycle management; final visual acceptance under `RFC-0195`; natural low-latency voice refinement; durable project knowledge and richer artifact handling; Agent Profiles and Specialist Packs; adaptive model/node routing; cost and privacy governors; Decision Inbox and richer authority policies; live execution maps; event-driven durable goals; **Away Mode**; autonomous coding and software maintenance; marketing, SEO, publishing and media workers; Home IoT; Household Vision; defensive infrastructure security; grid-down/offline mobile capability; and a wider integration/plugin ecosystem.
+
+The long-term system is an **owner-controlled intelligence fabric**. Models are replaceable resources. Agent identities are not permanently tied to one model. Workers are not permanently tied to one computer. ANZU decides how to use the available resources while the owner controls policy and can override placement when needed.
+
+### The implementation test
+
+A feature is not complete merely because its backend exists or an RFC checkbox can be marked done. Significant work should be tested against the following questions:
+
+1. Does it reduce the technical knowledge required from the user?
+2. Does it make ANZU faster, more capable, more reliable or easier to trust?
+3. Does it look and behave like part of the same premium product?
+4. Can a normal user understand what is happening without reading engineering documentation?
+5. Does it hide complexity by default while preserving owner control?
+6. Can ANZU recover intelligently when the happy path fails?
+7. Does ANZU verify the result rather than merely execute steps?
+8. Does it degrade gracefully when optional models, workers, nodes or network connections disappear?
+9. Does it preserve privacy and local operation wherever practical?
+10. Does it avoid unnecessary approvals and configuration?
+11. Does it remain responsive during both simple commands and long-running work?
+12. Would the design still make sense when ANZU spans several computers, a phone and the home?
+13. Is it aesthetically and ergonomically good enough to ship?
+14. Does it move ANZU toward being one coherent superassistant rather than simply adding another feature?
+
+If the final answer is **no**, the implementation is probably moving in the wrong direction even if it technically follows a lower-level specification.
+
+### Canonical product and architecture documents
+
+- [`ANZU_PRODUCT_NORTH_STAR.md`](ANZU_PRODUCT_NORTH_STAR.md) — highest-level product-intent and UX reference.
+- [`JARVIS_MASTER_PLAN.md`](JARVIS_MASTER_PLAN.md) — current implementation roadmap and RFC status.
+- [`JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md`](JARVIS_EXTENSIBLE_AGENT_OS_REQUIREMENTS.md) — long-term Agent OS, specialist-pack, routing, swarm and governance requirements.
+
+> **Finished ANZU:** an elegant, local-first, multi-device autonomous intelligence with the depth of a professional automation platform and the simplicity of a premium personal assistant. The user should not feel that they are operating the underlying swarm. They are operating **ANZU**.
+
+---
+
 ## An assistant that works on your terms
 
 Jarvis brings local language models, tool execution, task management, and an approachable control interface together in one self-hosted system. Run inference on your own machine, connect an OpenAI-compatible inference server when needed, and build workflows around the tools you actually use.
