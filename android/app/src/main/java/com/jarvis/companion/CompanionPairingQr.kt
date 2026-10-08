@@ -17,7 +17,7 @@ object CompanionPairingQrParser {
         val payload = try {
             Json.parseToJsonElement(raw).jsonObject
         } catch (_: Exception) {
-            throw IllegalArgumentException("That QR code is not a Jarvis pairing invitation.")
+            throw IllegalArgumentException("That QR code is not a valid ANZU pairing invitation.")
         }
         val endpoint = TransportPolicy.origin(payload["endpoint"]?.jsonPrimitive?.content.orEmpty())
         val pin = payload["server_pin"]?.jsonPrimitive?.content.orEmpty().trim().lowercase()

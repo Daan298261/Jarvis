@@ -114,7 +114,7 @@ class JarvisApi(context: Context) {
         when (val validation = CompanionCodeValidator.validate(value)) {
             is CompanionCodeValidation.Valid -> body.put("code", validation.code)
             else -> {
-                require(value.length >= 20) { "Enter the 6-digit code shown on your Jarvis desktop" }
+                require(value.length >= 20) { "Enter the 6-digit code shown on your ANZU desktop" }
                 body.put("invitation", value)
             }
         }
@@ -189,7 +189,7 @@ class JarvisApi(context: Context) {
         }
     }
     fun pinnedClient(): OkHttpClient {
-        require(endpoint.startsWith("https://") && pin.length == 64) { "Set the Jarvis endpoint and server fingerprint" }
+        require(endpoint.startsWith("https://") && pin.length == 64) { "Set the ANZU endpoint and server fingerprint" }
         val expectedPin = pin
         return cachedClient?.takeIf { it.first == expectedPin }?.second ?: run {
             val trust = object : X509TrustManager {
@@ -198,7 +198,7 @@ class JarvisApi(context: Context) {
                 override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
                     if (chain.isEmpty()) throw java.security.cert.CertificateException("Missing certificate")
                     chain[0].checkValidity()
-                    if (sha256(chain[0].publicKey.encoded) != expectedPin) throw java.security.cert.CertificateException("Jarvis server fingerprint changed; verify it on the desktop")
+                    if (sha256(chain[0].publicKey.encoded) != expectedPin) throw java.security.cert.CertificateException("ANZU server fingerprint changed; verify it on the desktop")
                 }
             }
             val tls = SSLContext.getInstance("TLS").apply { init(null, arrayOf(trust), null) }
@@ -222,7 +222,7 @@ class JarvisApi(context: Context) {
         extraHeaders: Map<String, String> = emptyMap(),
     ): ByteArray = withContext(Dispatchers.IO) {
         if (authenticated) session()
-        require(endpoint.startsWith("https://") && pin.length == 64) { "Set the Jarvis endpoint and server fingerprint" }
+        require(endpoint.startsWith("https://") && pin.length == 64) { "Set the ANZU endpoint and server fingerprint" }
         val recent = preferred.takeIf { System.currentTimeMillis() - preferredAt < 60000 }
         val locals = TransportPolicy.localIpv4Addresses()
         val addresses = TransportPolicy.dialOrder(
@@ -279,7 +279,7 @@ class JarvisApi(context: Context) {
                 failure = error
             }
         }
-        throw failure ?: java.io.IOException("No reachable Jarvis endpoint")
+        throw failure ?: java.io.IOException("No reachable ANZU endpoint")
     }
 
     private suspend fun raceOrigins(
@@ -333,7 +333,7 @@ class JarvisApi(context: Context) {
             }
             if (error is java.io.IOException) failure = error
         }
-        throw failure ?: java.io.IOException("No reachable Jarvis endpoint")
+        throw failure ?: java.io.IOException("No reachable ANZU endpoint")
     }
 
     private fun originRequest(
@@ -378,7 +378,7 @@ class JarvisApi(context: Context) {
                     expiresAt = 0
                 }
                 val reason = runCatching { JSONObject(result.toString(Charsets.UTF_8)).optString("detail") }.getOrDefault("")
-                throw ApiException(response.code, reason.ifEmpty { "Jarvis returned ${response.code}" })
+                throw ApiException(response.code, reason.ifEmpty { "ANZU returned ${response.code}" })
             }
             noteReachable(address)
             return result
