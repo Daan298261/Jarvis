@@ -256,8 +256,8 @@ class StandaloneModeTest {
         assertFalse(StandaloneActions.safeMediaBasename("a\nb.jpg").contains("\n"))
 
         val dir = File(context.filesDir, "offline-media").apply { mkdirs() }
-        File(dir, "shot.jpg").writeText("first")
-        assertEquals("shot-1.jpg", StandaloneActions.uniqueMediaFile(dir, "shot.jpg").name)
+        File(dir, "note.jpg").writeText("first")
+        assertEquals("note-1.jpg", StandaloneActions.uniqueMediaFile(dir, "note.jpg").name)
 
         val over = ByteArray(80) { 1 }
         val counting = CountingInputStream(ByteArrayInputStream(over))
@@ -269,10 +269,10 @@ class StandaloneModeTest {
 
         val source = File(context.cacheDir, "src.bin")
         source.writeBytes(ByteArray(16) { 2 })
-        val first = StandaloneActions.storeQueuedMedia(context, Uri.fromFile(source), "../evil/shot.jpg")
-        assertEquals("shot.jpg", first.name)
-        val second = StandaloneActions.storeQueuedMedia(context, Uri.fromFile(source), "shot.jpg")
-        assertEquals("shot-1.jpg", second.name)
+        val first = StandaloneActions.storeQueuedMedia(context, Uri.fromFile(source), "../evil/photo.jpg")
+        assertEquals("photo.jpg", first.name)
+        val second = StandaloneActions.storeQueuedMedia(context, Uri.fromFile(source), "photo.jpg")
+        assertEquals("photo-1.jpg", second.name)
         assertTrue(first.exists() && second.exists())
         assertTrue(first.readBytes().contentEquals(second.readBytes()))
     }
