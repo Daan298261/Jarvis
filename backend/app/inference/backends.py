@@ -278,7 +278,9 @@ class InferenceBackend:
         return None
 
     def health_url(self) -> str:
-        return f"http://{self.settings.inference.host}:{self.settings.inference.port}/health"
+        host = getattr(self, "host_override", None) or self.settings.inference.host
+        port = getattr(self, "port_override", None) or self.settings.inference.port
+        return f"http://{host}:{port}/health"
 
     def missing_requirements(self, profile: ModelProfile) -> list[str]:
         return []
@@ -362,6 +364,13 @@ class LlamaCppBackend(InferenceBackend):
         *,
         context_size: int | None = None,
         vision: bool = False,
+        port: int | None = None,
+        host: str | None = None,
+        reasoning: bool | None = None,
+        parallel: int | None = None,
+        n_gpu_layers: int | None = None,
+        keep: int | None = None,
+        prompt_cache: bool | None = None,
     ) -> list[str]:
         hardware = detect_hardware()
         inference = self.settings.inference
@@ -369,6 +378,7 @@ class LlamaCppBackend(InferenceBackend):
         projector = resolve_mmproj(profile) if vision else None
         threads = inference.threads or hardware.cpu_cores
         ctx = int(context_size or profile.context_size or inference.context_size)
+        think = profile.thinking if reasoning is None else bool(reasoning)
         args = [
             str(self.server_path()),
             "--model",
@@ -376,20 +386,20 @@ class LlamaCppBackend(InferenceBackend):
             "--alias",
             profile.alias,
             "--host",
-            inference.host,
+            host or inference.host,
             "--port",
-            str(inference.port),
+            str(inference.port if port is None else int(port)),
             "--ctx-size",
             str(ctx),
             "--keep",
-            "0",
+            str(0 if keep is None else int(keep)),
             "--flash-attn",
             inference.flash_attn,
             "--jinja",
             "--reasoning-format",
             "deepseek",
             "--reasoning",
-            "on" if profile.thinking else "off",
+            "on" if think else "off",
             "--cache-type-k",
             inference.cache_type_k,
             "--cache-type-v",
@@ -408,7 +418,17 @@ class LlamaCppBackend(InferenceBackend):
             "3",
             "--metrics",
         ]
-        if inference.fit:
+        if parallel is not None and int(parallel) > 0:
+            args.extend(["--parallel", str(int(parallel))])
+        # Prompt KV reuse is on in current llama-server builds. Only the off
+        # switch is explicit, so the worker command line stays unchanged.
+        if prompt_cache is False:
+            args.append("--no-cache-prompt")
+        if n_gpu_layers is not None:
+            # Explicit layer count (0 = CPU / SSD, no VRAM). Do not also pass
+            # --fit: fit can still park layers on the GPU or steal worker RAM.
+            args.extend(["--n-gpu-layers", str(int(n_gpu_layers))])
+        elif inference.fit:
             from .ram_policy import effective_fit_target_mib
 
             fit_target = effective_fit_target_mib(self.settings)
@@ -427,14 +447,35 @@ class LlamaCppBackend(InferenceBackend):
         *,
         context_size: int | None = None,
         vision: bool = False,
+        port: int | None = None,
+        host: str | None = None,
+        reasoning: bool | None = None,
+        parallel: int | None = None,
+        n_gpu_layers: int | None = None,
+        keep: int | None = None,
+        prompt_cache: bool | None = None,
+        log_name: str | None = None,
     ) -> bool:
         await self.stop()
-        log_file = logs_dir() / "llama-server.log"
+        self.host_override = host
+        self.port_override = port
+        log_file = logs_dir() / (log_name or "llama-server.log")
         self._log_handle = open(log_file, "ab", buffering=0)
         env = os.environ.copy()
         env["CUDA_MODULE_LOADING"] = "LAZY"
         self._process = await asyncio.create_subprocess_exec(
-            *self.build_args(profile, context_size=context_size, vision=vision),
+            *self.build_args(
+                profile,
+                context_size=context_size,
+                vision=vision,
+                port=port,
+                host=host,
+                reasoning=reasoning,
+                parallel=parallel,
+                n_gpu_layers=n_gpu_layers,
+                keep=keep,
+                prompt_cache=prompt_cache,
+            ),
             cwd=str(runtime_dir()),
             stdout=self._log_handle,
             stderr=self._log_handle,

@@ -142,16 +142,64 @@ def diagnostics_text(payload: dict[str, Any] | None = None) -> str:
 
 
 def _front_responder_diagnostics(settings) -> dict[str, Any]:
+    from .agent.front_benchmark import load_benchmark_report
     from .agent.front_responder import last_front_timing
+    from .inference.front_runtime import FRONT_RUNTIME
+    from .tts.warm_start import last_warm_report
 
     cfg = settings.front_responder
     timing = last_front_timing()
+    runtime = FRONT_RUNTIME.status()
     return {
         "enabled": bool(cfg.enabled),
-        "model": (cfg.model or "").strip() or (timing.get("front_model") or ""),
+        "model": (cfg.model or "").strip() or runtime.get("model") or (timing.get("front_model") or ""),
+        "profile": (cfg.profile or "").strip(),
+        "device": cfg.device,
+        "placement": cfg.placement,
+        "placement_policy": cfg.placement_policy,
+        "remote_base_url": (cfg.remote_base_url or "").strip(),
+        "prompt_cache": bool(cfg.prompt_cache),
+        "timeout_ms": int(cfg.timeout_ms),
         "max_output_tokens": int(cfg.max_output_tokens),
         "speak_immediately": bool(cfg.speak_immediately),
+        "runtime": runtime,
         "last_turn": timing,
+        "benchmark": load_benchmark_report(),
+        "laya": _laya_diagnostics(),
+        "tts_warm": last_warm_report(),
+    }
+
+
+def _laya_diagnostics() -> dict[str, Any]:
+    """Honest resident state. Warm-but-disabled is not 'resident'."""
+    try:
+        from .decision.laya.runtime import status as laya_status
+
+        raw = laya_status()
+    except Exception as exc:
+        return {"state": "not installed", "detail": str(exc)[:240]}
+    installed = bool(raw.get("installed"))
+    enabled = bool(raw.get("enabled"))
+    loading = bool(raw.get("loading"))
+    warm = bool(raw.get("warm"))
+    if not installed:
+        state = "not installed"
+    elif not enabled:
+        state = "not enabled"
+    elif loading:
+        state = "loading"
+    elif warm:
+        state = "resident"
+    else:
+        state = "not resident"
+    return {
+        "state": state,
+        "installed": installed,
+        "enabled": enabled,
+        "warm": warm,
+        "loading": loading,
+        "install_error": raw.get("install_error") or "",
+        "load_error": raw.get("load_error") or "",
     }
 
 

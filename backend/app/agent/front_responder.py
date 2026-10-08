@@ -264,15 +264,22 @@ def front_lane_config(settings: AppSettings | None = None) -> FrontLaneConfig:
 
 
 def resolve_front_model_id(settings: AppSettings | None = None) -> str:
-    """Configurable OpenAI-compat id on the existing local/LM Studio endpoint.
+    """Configurable OpenAI-compat id on the front endpoint.
 
-    Empty settings use the currently loaded remote_model / advertised alias.
-    No vendor model name is hard-coded.
+    An explicit ``model`` override wins. Otherwise a healthy dedicated front
+    server (local CPU llama-server or a manual remote endpoint) advertises its
+    profile alias. Empty settings with no dedicated server use the loaded
+    worker alias. No vendor model name is hard-coded in this function.
     """
     app = settings or load_settings()
     configured = (app.front_responder.model or "").strip()
     if configured:
         return configured
+    from ..inference.front_runtime import FRONT_RUNTIME
+
+    dedicated = FRONT_RUNTIME.model_id(app)
+    if dedicated:
+        return dedicated
     advertised = list(getattr(MANAGER.state, "advertised_models", None) or [])
     return MANAGER.provider_model(app, advertised)
 
@@ -518,6 +525,11 @@ def small_context_envelope(
 
 def front_provider(settings: AppSettings | None = None):
     app = settings or load_settings()
+    from ..inference.front_runtime import FRONT_RUNTIME
+
+    dedicated = FRONT_RUNTIME.provider(app)
+    if dedicated is not None:
+        return dedicated
     loaded = MANAGER.provider
     configured = (app.front_responder.model or "").strip()
     if loaded and not configured:
@@ -904,7 +916,34 @@ def _extract_json_object(raw: str) -> dict[str, Any] | None:
     return None
 
 
+def front_worker_should_overlap(
+    settings: AppSettings,
+    user_text: str,
+    *,
+    strategy: str = "direct",
+) -> bool:
+    """Start worker prep while the front reply is still generating.
+
+    Only when the front endpoint is a different server, the heuristic needs a
+    worker, and intake is a single direct turn. Terminal heuristics stay
+    serial so they never call ``MANAGER.load``.
+    """
+    cfg = settings.front_responder
+    if not cfg.enabled or not cfg.parallel_when_distinct_model:
+        return False
+    if (strategy or "direct") != "direct":
+        return False
+    heuristic = classify_front_action(user_text)
+    if heuristic not in {"ack_continue", "handoff_notice"}:
+        return False
+    return _distinct_front_model(settings, resolve_front_model_id(settings))
+
+
 def _distinct_front_model(settings: AppSettings, front_model: str) -> bool:
+    from ..inference.front_runtime import FRONT_RUNTIME
+
+    if FRONT_RUNTIME.is_distinct(settings):
+        return True
     configured = (settings.front_responder.model or "").strip()
     if not configured:
         return False
