@@ -256,6 +256,8 @@ function Resolve-SetupExe {
     $reg = Read-OwnedPathsRegistry
     if ($reg.SetupExe) { $candidates += $reg.SetupExe }
     $candidates += @(
+        (Join-Path (Resolve-InstallRootCandidate -InstallRoot $InstallRoot) "installer\windows\dist\AnzuSetup.exe"),
+        (Join-Path $scriptDir "dist\AnzuSetup.exe"),
         (Join-Path (Resolve-InstallRootCandidate -InstallRoot $InstallRoot) "installer\windows\dist\JarvisSetup.exe"),
         (Join-Path $scriptDir "dist\JarvisSetup.exe")
     )
@@ -290,7 +292,7 @@ function Confirm-OwnerWipe {
     if ($SkipConfirm) { return $true }
     $list = ($Roots | ForEach-Object { "  - $_" }) -join [Environment]::NewLine
     $msg = @"
-Clean Install / Reinstall permanently removes Jarvis application files, models, chats, logs, and other Jarvis-owned data on this PC, then runs Setup again.
+Clean Install / Reinstall permanently removes ANZU application files, models, chats, logs, and other ANZU-owned data on this PC, then runs Setup again.
 
 Owned roots to remove:
 $list
@@ -308,7 +310,7 @@ This cannot be undone. Continue?
         return $false
     }
     $second = [System.Windows.Forms.MessageBox]::Show(
-        "Final confirmation: permanently delete the paths listed and reinstall Jarvis?",
+        "Final confirmation: permanently delete the paths listed and reinstall ANZU?",
         "Clean Install / Reinstall",
         [System.Windows.Forms.MessageBoxButtons]::YesNo,
         [System.Windows.Forms.MessageBoxIcon]::Warning,
@@ -344,7 +346,7 @@ foreach ($root in $ownedRoots) {
 $setupResolved = Resolve-SetupExe -Requested $SetupExePath -OwnedRoots $ownedRoots
 if (-not $setupResolved -and $Mode -eq "Portal") {
     $exitReason = "setup-not-found"
-    Write-CleanLog "abort: JarvisSetup.exe not found before wipe"
+    Write-CleanLog "abort: AnzuSetup.exe not found before wipe"
     Exit-CleanReinstall -Code 3 -Reason $exitReason
 }
 if ($setupResolved) {

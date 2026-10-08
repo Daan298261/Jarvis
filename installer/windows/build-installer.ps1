@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Compile JarvisSetup.exe with Inno Setup (iscc).
+  Compile AnzuSetup.exe with Inno Setup (iscc).
 
 .DESCRIPTION
   Run from the repository root or from installer/windows.
@@ -10,7 +10,7 @@
   start with local inference and a warm front lane without those downloads
   on the target PC.
 
-  Output: installer/windows/dist/JarvisSetup.exe.
+  Output: installer/windows/dist/AnzuSetup.exe.
 
 .PARAMETER SkipBootstrapModel
   Developer-only escape hatch. Builds an installer without the large offline
@@ -21,7 +21,7 @@
 
 .PARAMETER Release
   Product release cut. Creates gitignored `.vendor/license-issuer` keys if
-  needed and writes Jarvis-unrestricted.jarvis-license beside JarvisSetup.exe.
+  needed and writes Jarvis-unrestricted.jarvis-license beside AnzuSetup.exe.
   1.4.6 shipped without this file; later releases must not.
 
 .PARAMETER SkipDesktopShell
@@ -158,7 +158,7 @@ if ($SkipDesktopShell) { $defines += "/DSkipDesktopShell=1" }
 & $iscc @defines "/O$OutDir" $Iss
 if ($LASTEXITCODE -ne 0) { throw "iscc failed with exit code $LASTEXITCODE" }
 
-$exe = Join-Path $OutDir "JarvisSetup.exe"
+$exe = Join-Path $OutDir "AnzuSetup.exe"
 if (-not (Test-Path $exe)) { throw "Expected output not found: $exe" }
 Write-Host ""
 Write-Host "Built: $exe" -ForegroundColor Green
@@ -172,7 +172,7 @@ if (-not $SkipVoicePack) {
     Write-Host "Includes: Kokoro-82M default household butler voice" -ForegroundColor Green
 }
 if (-not $SkipDesktopShell) {
-    Write-Host "Includes: Jarvis Desktop (Tauri) + backend sidecar" -ForegroundColor Green
+    Write-Host "Includes: ANZU Desktop (Tauri) + backend sidecar" -ForegroundColor Green
 }
 
 Write-Host "==> Vendor license manager JarvisLicenseManager (vendor machine only; skipped on the public tree)" -ForegroundColor Cyan

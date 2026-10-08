@@ -180,8 +180,8 @@ def test_jarvis_iss_wiring():
     assert "-InstallerDir" in text
     assert "-AppRoot" in text
     assert "force-stop-jarvis.ps1" in text
-    assert "Start Jarvis" in text
-    assert "Stop Jarvis" in text
+    assert "Start ANZU" in text
+    assert "Stop ANZU" in text
     assert "dl_kokoro" in text
     assert "dl_personavoices" in text
     assert "dl_whisper" in text
@@ -270,9 +270,9 @@ def test_existing_install_upgrade_and_removal_choices_are_wired():
     lower = text.lower()
     assert "detectexistinginstallation" in lower
     assert "comparepackedversion" in lower
-    assert "existing jarvis installation found" in lower
-    assert "upgrade to jarvis" in lower
-    assert "reinstall jarvis" in lower
+    assert "existing anzu installation found" in lower
+    assert "upgrade to anzu" in lower
+    assert "reinstall anzu" in lower
     assert "semi-clean reinstall" in lower
     assert "clean reinstall" in lower
     assert "reset-user-data.ps1" in lower
@@ -327,7 +327,7 @@ def test_reset_user_data_script_exists():
 def test_build_script_invokes_iscc():
     text = _read(BUILD_SCRIPT)
     assert "iscc" in text.lower()
-    assert "JarvisSetup.exe" in text
+    assert 'Join-Path $OutDir "AnzuSetup.exe"' in text
     lower = text.lower()
     assert "localappdata" in lower or r"programs\inno setup 6" in lower
     assert "build-license-manager.ps1" in text
@@ -455,6 +455,7 @@ def test_customer_deliverables_publish_to_gitignored_release_dir():
     assert 'Join-Path $Root "release"' in stage
     assert "[string]$DriveReleasesPath" in stage
     assert "Customer deliverables copied from $ReleaseDir to $drive" in stage
+    assert "AnzuSetup.exe" in stage
     assert "JarvisSetup.exe" in stage
     assert "JarvisLicenseManager.exe" in stage
     assert "*.jarvis-license" in stage
@@ -475,7 +476,7 @@ def test_customer_deliverables_publish_to_gitignored_release_dir():
 def test_readme_documents_build_oneliner():
     text = _read(README)
     assert "build-installer.ps1" in text
-    assert "JarvisSetup.exe" in text
+    assert "AnzuSetup.exe" in text
     assert "ensure-vendor-issuer.ps1" in text
     assert "Jarvis-unrestricted.jarvis-license" in text
     assert "$Release" in text or "-Release" in text
@@ -618,3 +619,35 @@ def test_anzu_wizard_theme_assets_and_glow_timer():
     assert glow_hashes[0] != glow_hashes[15]
     assert (assets / "fonts" / "AnzuWizardSans-SemiBold.ttf").is_file()
     assert (assets / "fonts" / "OFL.txt").is_file()
+
+
+def test_app_mutex_and_close_applications_release_locked_exe():
+    """Upgrade/uninstall must see a running ANZU and stop it before touching Jarvis.exe."""
+    iss = _read(ISS)
+    assert "AppMutex=Local\\ANZU" in iss
+    assert "CloseApplications=yes" in iss
+    assert "RestartApplications=no" in iss
+    filter_line = next(line for line in iss.splitlines() if line.startswith("CloseApplicationsFilter="))
+    for name in ("Jarvis.exe", "AnzuManager.exe", "jarvis-backend.exe", "llama-server.exe"):
+        assert name in filter_line
+    assert "function InitializeUninstall: Boolean;" in iss
+    assert "procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);" in iss
+    assert "usAppMutexCheck" in iss
+    assert "usUninstall" in iss
+    assert "ReleaseAnzuFileLocks" in iss
+    assert "CheckOnly" in iss
+    assert "Sleep(1500)" in iss
+    assert "AnzuFilesStillLockedMessage" in iss
+    assert "Access denied" in iss
+    assert "[UninstallDelete]" in iss
+    assert '{app}\\desktop\\Jarvis.exe' in iss
+    assert "function PrepareToInstall(var NeedsRestart: Boolean): String;" in iss
+    prepare = iss.split("function PrepareToInstall", 1)[1].split("function ", 1)[0]
+    assert "StopJarvisProcessesForPrepare" in prepare
+    assert "AnzuFilesStillLockedMessage" in prepare
+    shell = _read(REPO_ROOT / "frontend" / "src-tauri" / "src" / "lib.rs")
+    assert "Local\\\\ANZU" in shell
+    assert "fn hold_anzu_install_mutex" in shell
+    assert "CreateMutexW" in shell
+    run = shell.split("pub fn run()", 1)[1]
+    assert run.index("hold_anzu_install_mutex()") < run.index("tauri::Builder::default()")

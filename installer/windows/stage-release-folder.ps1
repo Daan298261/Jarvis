@@ -8,7 +8,8 @@
   <repoRoot>\release\, in addition to the build's existing output directory.
 
   The customer set is the self-contained package we ship:
-    - JarvisSetup.exe and JarvisSetup-*.bin disk slices
+    - AnzuSetup.exe and AnzuSetup-*.bin disk slices
+    - older JarvisSetup.exe / JarvisSetup-*.bin builds, still accepted
     - Tauri NSIS *-setup.exe when that bundle directory is the source
     - issued *.jarvis-license files
     - JarvisLicenseManager.exe / .cmd when the vendor build produced them
@@ -53,12 +54,12 @@ function Test-CustomerDeliverable {
         return $false
     }
     if ($lower.EndsWith(".jarvis-license")) { return $true }
-    if ($lower -eq "jarvissetup.exe") { return $true }
+    if ($lower -eq "anzusetup.exe" -or $lower -eq "jarvissetup.exe") { return $true }
     if ($lower.EndsWith("-setup.exe")) { return $true }
     if ($lower -eq "jarvislicensemanager.exe") { return $true }
     if ($lower -eq "jarvislicensemanager.cmd") { return $true }
     if ($lower.EndsWith(".apk")) { return $true }
-    if ($Name.StartsWith("JarvisSetup-") -and $lower.EndsWith(".bin")) { return $true }
+    if (($Name.StartsWith("AnzuSetup-") -or $Name.StartsWith("JarvisSetup-")) -and $lower.EndsWith(".bin")) { return $true }
     return $false
 }
 
@@ -69,7 +70,7 @@ function Get-CustomerDeliverables {
     }
     $found = New-Object System.Collections.Generic.List[System.IO.FileInfo]
     $seen = @{}
-    foreach ($name in @("JarvisSetup.exe", "JarvisLicenseManager.exe", "JarvisLicenseManager.cmd")) {
+    foreach ($name in @("AnzuSetup.exe", "JarvisSetup.exe", "JarvisLicenseManager.exe", "JarvisLicenseManager.cmd")) {
         $path = Join-Path $Dir $name
         if (Test-Path -LiteralPath $path) {
             $item = Get-Item -LiteralPath $path
@@ -79,7 +80,7 @@ function Get-CustomerDeliverables {
             }
         }
     }
-    foreach ($filter in @("*-setup.exe", "JarvisSetup-*.bin", "*.jarvis-license", "*.apk")) {
+    foreach ($filter in @("*-setup.exe", "AnzuSetup-*.bin", "JarvisSetup-*.bin", "*.jarvis-license", "*.apk")) {
         Get-ChildItem -LiteralPath $Dir -Filter $filter -File -ErrorAction SilentlyContinue | ForEach-Object {
             if ((Test-CustomerDeliverable $_.Name) -and -not $seen.ContainsKey($_.Name)) {
                 $seen[$_.Name] = $true
@@ -92,7 +93,7 @@ function Get-CustomerDeliverables {
 
 $items = @(Get-CustomerDeliverables $DistDir)
 if ($items.Count -eq 0) {
-    throw "No customer deliverables in $DistDir. Expected JarvisSetup.exe, a *-setup.exe installer, a companion APK, an issued license, or the license manager."
+    throw "No customer deliverables in $DistDir. Expected AnzuSetup.exe, a *-setup.exe installer, a companion APK, an issued license, or the license manager."
 }
 
 New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null
@@ -140,14 +141,19 @@ $tag = "r$Version"
 $out = Join-Path $ReleasesRoot $tag
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
-$setup = Join-Path $DistDir "JarvisSetup.exe"
+$setup = Join-Path $DistDir "AnzuSetup.exe"
 if (-not (Test-Path $setup)) {
-    throw "Missing $setup - run installer\windows\build-installer.ps1 first."
+    $setup = Join-Path $DistDir "JarvisSetup.exe"
+}
+if (-not (Test-Path $setup)) {
+    throw "Missing AnzuSetup.exe - run installer\windows\build-installer.ps1 first."
 }
 
-Copy-Item -Force $setup (Join-Path $out "JarvisSetup.exe")
-Get-ChildItem -Path $DistDir -Filter "JarvisSetup-*.bin" -ErrorAction SilentlyContinue | ForEach-Object {
-    Copy-Item -Force $_.FullName (Join-Path $out $_.Name)
+Copy-Item -Force $setup (Join-Path $out (Split-Path -Leaf $setup))
+foreach ($sliceFilter in @("AnzuSetup-*.bin", "JarvisSetup-*.bin")) {
+    Get-ChildItem -Path $DistDir -Filter $sliceFilter -ErrorAction SilentlyContinue | ForEach-Object {
+        Copy-Item -Force $_.FullName (Join-Path $out $_.Name)
+    }
 }
 $license = Join-Path $DistDir "Jarvis-unrestricted.jarvis-license"
 if (Test-Path $license) {
@@ -158,24 +164,24 @@ $git = ""
 try { $git = (git -C $Root rev-parse HEAD 2>$null) } catch { }
 $stamp = (Get-Date).ToString("yyyy-MM-dd HH:mm")
 $releaseTxt = @"
-Jarvis $Version (hotfix)
+ANZU $Version (hotfix)
 git: $git
 built: $stamp
-portal: Start Jarvis opens http://127.0.0.1:4780 (LAN when enabled in Settings)
-desktop: optional - .\start-jarvis.ps1 -Desktop or Start Menu Jarvis Desktop
-payload: JarvisSetup.exe (+ spanning .bin slices if present), unrestricted license when built with -Release
+portal: Start ANZU opens http://127.0.0.1:4780 (LAN when enabled in Settings)
+desktop: optional - .\start-jarvis.ps1 -Desktop or Start Menu ANZU Desktop
+payload: AnzuSetup.exe (+ spanning .bin slices if present), unrestricted license when built with -Release
 "@
 Set-Content -Path (Join-Path $out "RELEASE.txt") -Value $releaseTxt -Encoding UTF8
 
 $attestation = @"
-# Functional attestation - Jarvis $Version
+# Functional attestation - ANZU $Version
 
 ## Verified in CI / dev (automated)
 - python -m pytest (full suite)
 - npm --prefix frontend run build
 
 ## Owner-facing behavior (manual sign-off on Windows)
-- [ ] Start Jarvis opens browser portal on :4780
+- [ ] Start ANZU opens browser portal on :4780
 - [ ] Settings → Network → LAN on; restart; other device reaches http://<pc-ip>:4780 with private key on /api
 - [ ] HUD left menus (Voice / Appearance / Cybersecurity) expand in separate rows without overlap
 - [ ] Chat: assistant bubbles left (session personality name), user right, timestamps visible

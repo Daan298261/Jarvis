@@ -33,11 +33,11 @@ def is_customer_deliverable(name: str) -> bool:
         return False
     if lower.endswith(".jarvis-license"):
         return True
-    if lower == "jarvissetup.exe" or lower.endswith("-setup.exe"):
+    if lower in {"jarvissetup.exe", "anzusetup.exe"} or lower.endswith("-setup.exe"):
         return True
     if lower in {"jarvislicensemanager.exe", "jarvislicensemanager.cmd"}:
         return True
-    if name.startswith("JarvisSetup-") and lower.endswith(".bin"):
+    if (name.startswith("JarvisSetup-") or name.startswith("AnzuSetup-")) and lower.endswith(".bin"):
         return True
     if lower.endswith(".apk"):
         return True

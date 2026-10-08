@@ -609,7 +609,42 @@ fn load_shell_prefs(state: &mut BackendState) {
     }
 }
 
+/// Named mutex Inno Setup watches via `AppMutex=Local\ANZU` in
+/// `installer/windows/Jarvis.iss`. The handle stays open for the process
+/// lifetime so an upgrade or uninstall can see that ANZU (or ANZU Manager,
+/// the same binary) is running and can close it before replacing
+/// `desktop\Jarvis.exe`.
+#[cfg(windows)]
+fn hold_anzu_install_mutex() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateMutexW(
+            lp_mutex_attributes: *mut core::ffi::c_void,
+            b_initial_owner: i32,
+            lp_name: *const u16,
+        ) -> *mut core::ffi::c_void;
+    }
+
+    static HELD: AtomicUsize = AtomicUsize::new(0);
+    if HELD.load(Ordering::Relaxed) != 0 {
+        return;
+    }
+    let name: Vec<u16> = "Local\\ANZU\0".encode_utf16().collect();
+    unsafe {
+        let handle = CreateMutexW(std::ptr::null_mut(), 0, name.as_ptr());
+        if !handle.is_null() {
+            HELD.store(handle as usize, Ordering::Relaxed);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn hold_anzu_install_mutex() {}
+
 pub fn run() {
+    hold_anzu_install_mutex();
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_autostart::init(

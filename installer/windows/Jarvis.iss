@@ -1,13 +1,13 @@
 ; Jarvis Windows installer (Inno Setup 6)
 ; Build on Windows with build-installer.ps1 (requires Inno Setup 6 + iscc on PATH).
 
-#define MyAppName "Jarvis"
+#define MyAppName "ANZU"
 ; AppVersion is the semver customers see (pre-release tags allowed).
 ; Windows VERSIONINFO is numeric only, so VersionInfoVersion uses the core
 ; before the first '-' (1.5.3-beta -> 1.5.3.0).
 #define MyAppVersion "1.5.3-beta"
 #define MyAppVersionCore Copy(MyAppVersion, 1, Pos("-", MyAppVersion + "-") - 1)
-#define MyAppPublisher "Jarvis"
+#define MyAppPublisher "ANZU"
 #define MyAppURL "https://github.com/Daan298261/Jarvis"
 #define MyAppExe "powershell.exe"
 
@@ -15,6 +15,7 @@
 AppId={{A7B3C4D5-E6F7-4890-ABCD-EF1234567890}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+AppVerName={#MyAppName} {#MyAppVersion}
 VersionInfoVersion={#MyAppVersionCore}.0
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
@@ -24,7 +25,7 @@ DefaultDirName={localappdata}\Jarvis
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=dist
-OutputBaseFilename=JarvisSetup
+OutputBaseFilename=AnzuSetup
 Compression=lzma2/ultra64
 SolidCompression=yes
 ; Bundled Ornith Q4_K_M is ~5.4 GB; a single Setup.exe cannot exceed ~4.2 GB on Windows.
@@ -41,15 +42,22 @@ ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\start-jarvis.ps1
 SetupIconFile=
 ChangesAssociations=no
-CloseApplications=no
+; Local\ANZU is created at desktop-shell startup (frontend/src-tauri/src/lib.rs
+; hold_anzu_install_mutex) and held until that process exits. Per-user installs
+; cannot create a Global\ mutex. CloseApplications asks Restart Manager to
+; release Jarvis.exe and the sidecar images before they are overwritten.
+AppMutex=Local\ANZU
+CloseApplications=yes
+RestartApplications=no
+CloseApplicationsFilter=Jarvis.exe,AnzuManager.exe,jarvis-backend.exe,llama-server.exe
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a &Desktop shortcut to start Jarvis"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
-Name: "launchjarvis"; Description: "Start Jarvis when setup finishes"; GroupDescription: "After installing:"; Flags: checkedonce
-Name: "elevatedlogon"; Description: "Start Jarvis elevated at Windows logon (one UAC prompt)"; GroupDescription: "After installing:"; Flags: checkedonce
+Name: "desktopicon"; Description: "Create a &Desktop shortcut to start ANZU"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
+Name: "launchjarvis"; Description: "Start ANZU when setup finishes"; GroupDescription: "After installing:"; Flags: checkedonce
+Name: "elevatedlogon"; Description: "Start ANZU elevated at Windows logon (one UAC prompt)"; GroupDescription: "After installing:"; Flags: checkedonce
 Name: "anzualias"; Description: "Use anzu in local browser addresses (http://anzu:4780)"; GroupDescription: "Local convenience:"; Flags: checkedonce
 Name: "voicebutler"; Description: "Household butler (Kokoro — Anzu default)"; GroupDescription: "Voice models:"; Flags: checkedonce
 Name: "voicedry"; Description: "Dry household butler (Nabu, Eir)"; GroupDescription: "Voice models:"; Flags: checkedonce
@@ -131,11 +139,11 @@ Source: "payload\desktop\sidecars\*"; DestDir: "{app}\desktop\sidecars"; Flags: 
 #endif
 
 [Icons]
-Name: "{group}\Start Jarvis"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"""; WorkingDir: "{app}"; Comment: "Start Jarvis (desktop shell when installed, else browser portal)"
-Name: "{group}\Jarvis Desktop"; Filename: "{app}\desktop\Jarvis.exe"; WorkingDir: "{app}"; Comment: "Open Jarvis in the native desktop window (Obsidian embed)"; Check: DesktopShellInstalled
+Name: "{group}\Start ANZU"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"""; WorkingDir: "{app}"; Comment: "Start ANZU (desktop shell when installed, else browser portal)"
+Name: "{group}\ANZU Desktop"; Filename: "{app}\desktop\Jarvis.exe"; WorkingDir: "{app}"; Comment: "Open ANZU in the native desktop window (Obsidian embed)"; Check: DesktopShellInstalled
 Name: "{group}\ANZU Manager"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-anzu-manager.ps1"""; WorkingDir: "{app}"; Comment: "Open ANZU Manager in the tray"
-Name: "{group}\Stop Jarvis"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\stop-jarvis.ps1"" -IncludeTray"; WorkingDir: "{app}"; Comment: "Stop Jarvis backend and llama.cpp"
-Name: "{autodesktop}\Start Jarvis"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"""; WorkingDir: "{app}"; Tasks: desktopicon; Comment: "Start Jarvis (desktop shell when installed, else browser portal)"
+Name: "{group}\Stop ANZU"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\stop-jarvis.ps1"" -IncludeTray"; WorkingDir: "{app}"; Comment: "Stop ANZU backend and llama.cpp"
+Name: "{autodesktop}\Start ANZU"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"""; WorkingDir: "{app}"; Tasks: desktopicon; Comment: "Start ANZU (desktop shell when installed, else browser portal)"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
 [Registry]
@@ -146,12 +154,12 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 ; Normal release installers already contain the bootstrap GGUF and therefore skip
 ; model downloads entirely during target-machine bootstrap.
 #ifndef SkipBootstrapModel
-Filename: "powershell.exe"; Parameters: "{code:GetBootstrapRunParameters}"; WorkingDir: "{app}"; StatusMsg: "Preparing Jarvis, persona voices, Gmail and WhatsApp..."; Flags: runhidden waituntilterminated; Check: ShouldRunInstallerBootstrap
+Filename: "powershell.exe"; Parameters: "{code:GetBootstrapRunParameters}"; WorkingDir: "{app}"; StatusMsg: "Preparing ANZU, persona voices, Gmail and WhatsApp..."; Flags: runhidden waituntilterminated; Check: ShouldRunInstallerBootstrap
 #else
-Filename: "powershell.exe"; Parameters: "{code:GetBootstrapRunParameters}"; WorkingDir: "{app}"; StatusMsg: "Preparing Jarvis, its AI model and persona voices (this can take a while)..."; Flags: runhidden waituntilterminated; Check: ShouldRunInstallerBootstrap
+Filename: "powershell.exe"; Parameters: "{code:GetBootstrapRunParameters}"; WorkingDir: "{app}"; StatusMsg: "Preparing ANZU, its AI model and persona voices (this can take a while)..."; Flags: runhidden waituntilterminated; Check: ShouldRunInstallerBootstrap
 #endif
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"" -RegisterLogonTask"; WorkingDir: "{app}"; Description: "Register elevated Jarvis at Windows logon"; Flags: postinstall waituntilterminated skipifsilent; Tasks: elevatedlogon
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"" -OpenPath ""/setup?step=integrations"""; WorkingDir: "{app}"; Description: "Connect Gmail and WhatsApp in Jarvis"; Flags: postinstall nowait skipifsilent; Tasks: launchjarvis
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"" -RegisterLogonTask"; WorkingDir: "{app}"; Description: "Register elevated ANZU at Windows logon"; Flags: postinstall waituntilterminated skipifsilent; Tasks: elevatedlogon
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"" -OpenPath ""/setup?step=integrations"""; WorkingDir: "{app}"; Description: "Connect Gmail and WhatsApp in ANZU"; Flags: postinstall nowait skipifsilent; Tasks: launchjarvis
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-anzu-manager.ps1"""; WorkingDir: "{app}"; Description: "Start ANZU Manager"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
@@ -159,6 +167,15 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 Filename: "powershell.exe"; Parameters: "{code:GetUninstallForceStopParameters}"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "StopJarvis"
 Filename: "schtasks.exe"; Parameters: "/Delete /TN JarvisElevatedBackend /F"; Flags: runhidden; RunOnceId: "RemoveJarvisElevatedBackend"
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\installer\windows\manage-anzu-hosts.ps1"" -Action Remove"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveAnzuAlias"
+
+[UninstallDelete]
+; [Files] already uninstalls copied payloads. These entries run after
+; [UninstallRun] and after CurUninstallStepChanged has stopped ANZU, so a
+; previously locked desktop\Jarvis.exe is removed instead of being left behind.
+Type: files; Name: "{app}\desktop\Jarvis.exe"
+Type: files; Name: "{app}\desktop\AnzuManager.exe"
+Type: files; Name: "{app}\desktop\sidecars\jarvis-backend\jarvis-backend.exe"
+Type: files; Name: "{app}\runtime\llama.cpp\llama-server.exe"
 
 [Code]
 const
@@ -766,8 +783,8 @@ begin
   if ExistingInstallDetected and (ExistingVersionRelation < 0) then
   begin
     MsgBox(
-      'Jarvis ' + ExistingVersion + ' is already installed, but this installer contains older version {#MyAppVersion}.' + #13#10 + #13#10 +
-      'Setup will stop to prevent an accidental downgrade. Use a newer installer or uninstall Jarvis from Windows Settings first.',
+      'ANZU ' + ExistingVersion + ' is already installed, but this installer contains older version {#MyAppVersion}.' + #13#10 + #13#10 +
+      'Setup will stop to prevent an accidental downgrade. Use a newer installer or uninstall ANZU from Windows Settings first.',
       mbError, MB_OK);
     Result := False;
   end;
@@ -782,20 +799,20 @@ begin
     Exit;
 
   if ExistingVersionRelation > 0 then
-    PrimaryAction := '&Upgrade to Jarvis {#MyAppVersion} (recommended)'
+    PrimaryAction := '&Upgrade to ANZU {#MyAppVersion} (recommended)'
   else
-    PrimaryAction := '&Repair Jarvis {#MyAppVersion}';
+    PrimaryAction := '&Repair ANZU {#MyAppVersion}';
 
   ExistingInstallPage := CreateInputOptionPage(
     wpSelectDir,
-    'Existing Jarvis installation found',
+    'Existing ANZU installation found',
     'Installed: ' + ExistingVersion + '    Installer: {#MyAppVersion}',
     'Choose how Setup should continue. Settings, downloaded models, task data, logs, and local connections are treated as custom files.',
     True, False);
   ExistingInstallPage.Add(PrimaryAction + ' - keep all custom files');
-  ExistingInstallPage.Add('&Reinstall Jarvis - remove the application, but keep custom files');
+  ExistingInstallPage.Add('&Reinstall ANZU - remove the application, but keep custom files');
   ExistingInstallPage.Add('&Semi-clean reinstall - reset chats, routines, memory, and logs; keep models');
-  ExistingInstallPage.Add('&Clean reinstall - remove Jarvis and all custom files');
+  ExistingInstallPage.Add('&Clean reinstall - remove ANZU and all custom files');
   ExistingInstallPage.SelectedValueIndex := 0;
   if not WizardSilent then
     ThemeExistingInstallPage;
@@ -858,6 +875,64 @@ begin
   end;
 end;
 
+function AnzuFilesStillLockedMessage: String;
+begin
+  Result :=
+    'ANZU is still running, so Setup cannot replace or remove desktop\Jarvis.exe.' + #13#10 +
+    'The backend (jarvis-backend) and llama-server were asked to exit as well.' + #13#10 + #13#10 +
+    'Quit ANZU from the tray, then try again. A program still has the file open;' + #13#10 +
+    'continuing would fail with Access denied.' + #13#10 + #13#10 +
+    'See %TEMP%\Jarvis-installer-stop.log for the process that still holds the file.';
+end;
+
+function InstallTreeStillLocked(const AppDir: String): Boolean;
+var
+  ResultCode: Integer;
+  ForceScript: String;
+  Params: String;
+begin
+  { CheckOnly returns 1 while ANZU, the backend, or llama-server still match. }
+  Result := True;
+  if AppDir = '' then
+  begin
+    Result := False;
+    Exit;
+  end;
+  ForceScript := ResolveForceStopScript(AppDir);
+  if ForceScript = '' then
+    Exit;
+  Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ForceScript +
+    '" -InstallRoot "' + RemoveBackslashUnlessRoot(AppDir) +
+    '" -IncludeTray -CheckOnly -MaxWaitSeconds 5 -LogPath "' +
+    ExpandConstant('{tmp}\installer-stop.log') + '"';
+  if not Exec('powershell.exe', Params, ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Exit;
+  Result := (ResultCode <> 0);
+end;
+
+function ReleaseAnzuFileLocks(const AppDir: String): Boolean;
+var
+  Attempt: Integer;
+begin
+  { Short wait + retry after the first stop, so a handle that outlives the
+    process (or a sidecar that respawns) is gone before files are replaced. }
+  Result := False;
+  for Attempt := 1 to 3 do
+  begin
+    Sleep(750);
+    if not InstallTreeStillLocked(AppDir) then
+    begin
+      Result := True;
+      Exit;
+    end;
+    Log('desktop\Jarvis.exe or a sidecar is still locked; retry ' + IntToStr(Attempt));
+    if not ForceStopJarvisUnder(AppDir) then
+      Log('Retry stop did not clear ANZU processes.');
+  end;
+  Sleep(750);
+  Result := not InstallTreeStillLocked(AppDir);
+end;
+
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
@@ -869,7 +944,7 @@ begin
     if not IsSafeJarvisInstallDir(ExistingInstallDir) then
     begin
       MsgBox(
-        'Jarvis cannot safely verify the existing installation folder, so custom files will not be removed.' + #13#10 + #13#10 +
+        'ANZU cannot safely verify the existing installation folder, so custom files will not be removed.' + #13#10 + #13#10 +
         'Choose an option that keeps custom files.',
         mbError, MB_OK);
       Result := False;
@@ -877,7 +952,7 @@ begin
     end;
 
     Result := MsgBox(
-      'Clean reinstall permanently removes all Jarvis settings, downloaded models, task data, logs, and other files in:' + #13#10 +
+      'Clean reinstall permanently removes all ANZU settings, downloaded models, task data, logs, and other files in:' + #13#10 +
       ExistingInstallDir + #13#10 + #13#10 +
       'This cannot be undone. Continue?',
       mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
@@ -890,7 +965,7 @@ begin
     if not IsSafeJarvisInstallDir(ExistingInstallDir) then
     begin
       MsgBox(
-        'Jarvis cannot safely verify the existing installation folder, so user data will not be reset.' + #13#10 + #13#10 +
+        'ANZU cannot safely verify the existing installation folder, so user data will not be reset.' + #13#10 + #13#10 +
         'Choose an option that keeps custom files.',
         mbError, MB_OK);
       Result := False;
@@ -909,10 +984,18 @@ begin
   { RFC-0136: stop hung/zombie backends before any upgrade path continues (PrepareToInstall remains backstop). }
   if not ForceStopJarvisUnder(ExistingInstallDir) then
   begin
-    MsgBox(
-      'Jarvis is still running and could not be stopped. Close Jarvis and try again.' + #13#10 +
-      'See %TEMP%\Jarvis-installer-stop.log for details.',
-      mbError, MB_OK);
+    Sleep(1500);
+    Log('Existing-install stop failed; retrying before Setup continues.');
+    if not ForceStopJarvisUnder(ExistingInstallDir) then
+    begin
+      MsgBox(AnzuFilesStillLockedMessage, mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+  end;
+  if not ReleaseAnzuFileLocks(ExistingInstallDir) then
+  begin
+    MsgBox(AnzuFilesStillLockedMessage, mbError, MB_OK);
     Result := False;
   end;
 end;
@@ -938,6 +1021,14 @@ begin
   else
     AppDir := ExpandConstant('{localappdata}\Jarvis');
   Result := ForceStopJarvisUnder(AppDir);
+  if not Result then
+  begin
+    Log('First ANZU stop left a lock; waiting before retry.');
+    Sleep(1500);
+    Result := ForceStopJarvisUnder(AppDir);
+  end;
+  if Result then
+    Result := ReleaseAnzuFileLocks(AppDir);
 end;
 
 function GetUninstallForceStopParameters(Param: String): String;
@@ -947,11 +1038,37 @@ begin
 end;
 
 function InitializeUninstall: Boolean;
+var
+  AppDir: String;
 begin
+  AppDir := ExpandConstant('{app}');
   Result := ForceStopJarvisUnder(ExpandConstant('{app}'));
   if not Result then
-    MsgBox('Jarvis could not be stopped, so uninstall was cancelled.' + #13#10 +
-      'See %TEMP%\Jarvis-installer-stop.log for the process and error.', mbError, MB_OK);
+  begin
+    Sleep(1500);
+    Log('Uninstall stop failed; retrying before files are removed.');
+    Result := ForceStopJarvisUnder(AppDir);
+  end;
+  if Result then
+    Result := ReleaseAnzuFileLocks(AppDir);
+  if not Result then
+    MsgBox(AnzuFilesStillLockedMessage, mbError, MB_OK);
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  AppDir: String;
+begin
+  if (CurUninstallStep <> usAppMutexCheck) and (CurUninstallStep <> usUninstall) then
+    Exit;
+  AppDir := ExpandConstant('{app}');
+  if not InstallTreeStillLocked(AppDir) then
+    Exit;
+  Log('Stopping ANZU before uninstall step so desktop\Jarvis.exe can be removed.');
+  if ForceStopJarvisUnder(AppDir) and ReleaseAnzuFileLocks(AppDir) then
+    Exit;
+  MsgBox(AnzuFilesStillLockedMessage, mbError, MB_OK);
+  Abort;
 end;
 
 procedure RecordOwnedPathsRegistry(const InstallDir, SetupExe: String);
@@ -1233,8 +1350,7 @@ begin
   { Windows Settings -> Apps -> Modify and direct setup launches use this same safe path. }
   if not StopJarvisProcessesForPrepare then
   begin
-    Result := 'Jarvis is still running and could not be stopped. Close Jarvis and try again.' + #13#10 +
-      'See %TEMP%\Jarvis-installer-stop.log for details.';
+    Result := AnzuFilesStillLockedMessage;
     Exit;
   end;
 
@@ -1264,7 +1380,7 @@ begin
   begin
     if not RemoveExistingApplication then
     begin
-      Result := 'Setup could not remove the existing Jarvis application. Close Jarvis and try again.';
+      Result := 'Setup could not remove the existing ANZU application.' + #13#10 + AnzuFilesStillLockedMessage;
       Exit;
     end;
     Exit;
@@ -1274,12 +1390,12 @@ begin
   begin
     if not ResetJarvisUserData(ExistingInstallDir) then
     begin
-      Result := 'Setup could not reset Jarvis user data. Close Jarvis and try again.';
+      Result := 'Setup could not reset ANZU user data. Quit ANZU and try again.';
       Exit;
     end;
     if not RemoveExistingApplication then
     begin
-      Result := 'Setup reset user data but could not remove the old application. Close Jarvis and try again.';
+      Result := 'Setup reset user data but could not remove the old application.' + #13#10 + AnzuFilesStillLockedMessage;
       Exit;
     end;
     Exit;
@@ -1289,7 +1405,7 @@ begin
   begin
     if not RunCleanReinstallOwnedWipe(ExistingInstallDir) then
     begin
-      Result := 'Clean reinstall could not remove all Jarvis-owned files. Close Jarvis and try again.' + #13#10 +
+      Result := 'Clean reinstall could not remove all ANZU-owned files.' + #13#10 + AnzuFilesStillLockedMessage + #13#10 +
         'See logs\clean-reinstall.log and %TEMP%\Jarvis-clean-reinstall.log for details.';
       Exit;
     end;
