@@ -30,13 +30,22 @@
 .PARAMETER SkipFrontModel
   Developer-only escape hatch. Builds an installer without the bundled
   Qwen3.5-2B front-lane weights. Forbidden with -Release.
+
+.PARAMETER DriveReleasesPath
+  Optional external folder, such as the Google Drive "Jarvis Releases"
+  directory. Every build copies customer deliverables into the gitignored
+  repo folder <repoRoot>\release\ (installer exe, issued license, license
+  manager, companion APK when present). When -DriveReleasesPath is set, that
+  same set is copied from release\ into this path. When the parameter is
+  omitted, only the in-repo release\ copy runs.
 #>
 param(
     [switch]$SkipBootstrapModel,
     [switch]$SkipVoicePack,
     [switch]$SkipDesktopShell,
     [switch]$SkipFrontModel,
-    [switch]$Release
+    [switch]$Release,
+    [string]$DriveReleasesPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -189,8 +198,17 @@ if ($Release -and (-not (Test-Path $unrestricted) -or (Get-Item $unrestricted).L
     throw "Release cut must write $unrestricted. 1.4.6 shipped without a generated license file; following releases must issue it as a build step."
 }
 
-if ($Release) {
-    Write-Host "==> Staging Releases/r* deliverable folder" -ForegroundColor Cyan
-    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ScriptDir "stage-release-folder.ps1")
-    if ($LASTEXITCODE -ne 0) { throw "stage-release-folder.ps1 failed with exit code $LASTEXITCODE" }
+# Every build, not only -Release: customer deliverables also land in <repo>\release\.
+# -DriveReleasesPath copies that same set from release\ to the external folder.
+Write-Host "==> Publishing customer deliverables to release\" -ForegroundColor Cyan
+$publishArgs = @()
+if ($DriveReleasesPath) {
+    $publishArgs += "-DriveReleasesPath"
+    $publishArgs += $DriveReleasesPath
 }
+if ($Release) {
+    $publishArgs += "-StageVersionedHotfix"
+    Write-Host "==> Also staging Releases/r* hotfix notes" -ForegroundColor Cyan
+}
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ScriptDir "stage-release-folder.ps1") @publishArgs
+if ($LASTEXITCODE -ne 0) { throw "stage-release-folder.ps1 failed with exit code $LASTEXITCODE" }

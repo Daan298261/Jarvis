@@ -49,9 +49,13 @@ npm run tauri build
 Pop-Location
 
 $bundle = Join-Path $Root "frontend\src-tauri\target\release\bundle\nsis"
+Write-Host "==> Publishing Tauri NSIS installer into release\" -ForegroundColor Cyan
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root "installer\windows\stage-release-folder.ps1") -DistDir $bundle
+if ($LASTEXITCODE -ne 0) { throw "stage-release-folder.ps1 failed with exit code $LASTEXITCODE" }
 Write-Host ""
 Write-Host "Build complete." -ForegroundColor Green
 Write-Host "Installer output (typical): $bundle" -ForegroundColor Green
+Write-Host "Customer copy: $(Join-Path $Root 'release')" -ForegroundColor Green
 Write-Host "Copy/rename the NSIS setup exe to JarvisSetup.exe for distribution if desired." -ForegroundColor DarkGray
 Write-Host "User data (data/, models/, runtime/, logs/) remains outside the install binaries and survives upgrades." -ForegroundColor DarkGray
 Write-Host "Auto-update / code signing: enable Tauri updater later with signing keys — not required for this RFC." -ForegroundColor DarkGray
