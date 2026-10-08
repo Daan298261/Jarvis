@@ -275,6 +275,11 @@ class CompanionVoicePackManager(
         }
         val audio = result.getOrNull()
         if (audio == null || audio.isEmpty()) error("On-device TTS produced no audio — retry or reinstall the pack")
+        if (PocketOrPiperTtsEngine.isNearSilentPcmWav(audio)) {
+            ttsStatusRef.set(CompanionVoicePackStatus.ERROR)
+            errorRef.set("On-device TTS returned near-silent audio — refusing soft-fail")
+            error("On-device TTS returned near-silent audio — refusing soft-fail")
+        }
         return audio
     }
 

@@ -44,6 +44,23 @@ class CompanionVoicePackCatalogTest {
             assertTrue(expected.message!!.contains("empty url"))
         }
     }
+
+    @Test
+    fun pocketIsDefaultTtsAndPiperIsFallbackOnly() {
+        val tts = CompanionVoicePackCatalog.builtIn.filter { it.role == "tts" }
+        assertEquals("pocket-tts-en", tts.first { it.recommended }.id)
+        assertEquals("pocket-tts-onnx", tts.first { it.recommended }.engine)
+        val piper = tts.first { it.id == "piper-en-lessac-medium" }
+        assertFalse(piper.recommended)
+        assertEquals("piper-onnx", piper.engine)
+        tts.forEach { pack ->
+            assertTrue(pack.url.startsWith("https://"))
+            pack.artifacts.forEach { art ->
+                assertTrue(art.url.startsWith("https://"))
+                assertEquals(64, art.sha256.length)
+            }
+        }
+    }
 }
 
 class CompanionVoiceRoutingTest {

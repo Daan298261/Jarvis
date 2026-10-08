@@ -49,13 +49,33 @@ class CompanionPackManager(
 
     fun packFile(pack: CompanionPack): File = File(packDir, pack.filename)
 
+    fun packCanLoad(pack: CompanionPack): Boolean {
+        val file = packFile(pack)
+        if (!file.isFile || file.length() == 0L) return false
+        if (pack.sha256.isNotBlank()) {
+            val digest = sha256(file)
+            if (!digest.equals(pack.sha256, ignoreCase = true)) return false
+        }
+        return DeviceInferenceGuard.blockReason(app, pack) == null
+    }
+
+    fun resolveOfflinePack(): CompanionPack? =
+        CompanionPackCatalog.resolveOfflinePack(catalog, selectedPackId(), ::packCanLoad)
+
     fun isPackReady(): Boolean {
+        if (resolveOfflinePack() != null) return true
         val pack = selectedPack() ?: return false
         val file = packFile(pack)
         return file.isFile && file.length() > 0 && statusRef.get() in setOf(CompanionPackStatus.READY, CompanionPackStatus.RUNNING)
     }
 
     suspend fun refreshStatus() = withContext(Dispatchers.IO) {
+        val fallback = resolveOfflinePack()
+        if (fallback != null) {
+            statusRef.set(CompanionPackStatus.READY)
+            errorRef.set("")
+            return@withContext
+        }
         val pack = selectedPack()
         if (pack == null) {
             statusRef.set(CompanionPackStatus.ERROR)
@@ -76,13 +96,18 @@ class CompanionPackManager(
                 return@withContext
             }
         }
+        DeviceInferenceGuard.blockReason(app, pack)?.let { reason ->
+            statusRef.set(CompanionPackStatus.ERROR)
+            errorRef.set(reason)
+            return@withContext
+        }
         statusRef.set(CompanionPackStatus.READY)
         errorRef.set("")
     }
 
     suspend fun downloadSelected(onProgress: (Int) -> Unit = {}) = withContext(Dispatchers.IO) {
         val pack = selectedPack() ?: error("No pack selected")
-        require(pack.url.isNotBlank()) { "Leader has not published a download URL for this pack yet" }
+        require(pack.url.isNotBlank()) { "ANZU desktop has not published a download URL for this pack yet" }
         DeviceInferenceGuard.blockReason(app, pack)?.let { error(it) }
         statusRef.set(CompanionPackStatus.DOWNLOADING)
         progressRef.set(0)
@@ -134,8 +159,8 @@ class CompanionPackManager(
         progressRef.set(0)
     }
 
-    suspend fun generate(prompt: String, maxTokens: Int = 256, onToken: (String) -> Unit): String {
-        val pack = selectedPack() ?: error("No pack selected")
+    suspend fun generate(prompt: String, maxTokens: Int = DeviceInferenceGuard.BUDGET_CLEAR, onToken: (String) -> Unit): String {
+        val pack = resolveOfflinePack() ?: selectedPack() ?: error("No pack selected")
         DeviceInferenceGuard.blockReason(app, pack)?.let { error(it) }
         val path = packFile(pack)
         if (!path.isFile) error("Install the companion model pack first")

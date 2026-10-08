@@ -75,7 +75,7 @@ object CompanionVoiceRouting {
             val stt = if (sttReady) SttVoiceRoute.ON_DEVICE else SttVoiceRoute.INSTALL
             val tts = if (ttsReady) TtsVoiceRoute.ON_DEVICE else TtsVoiceRoute.INSTALL
             val error = if (stt == SttVoiceRoute.INSTALL || tts == TtsVoiceRoute.INSTALL) {
-                "Leader unreachable — install on-device voice packs in More → Voice"
+                "ANZU desktop unreachable — install on-device voice packs in More → Voice"
             } else {
                 null
             }
@@ -83,7 +83,7 @@ object CompanionVoiceRouting {
                 mode = mode,
                 stt = stt,
                 tts = tts,
-                banner = if (error == null) "On-device voice (Leader unreachable)" else null,
+                banner = if (error == null) "On-device voice (ANZU desktop unreachable)" else null,
                 error = error,
                 onDeviceIndicator = error == null,
             )
