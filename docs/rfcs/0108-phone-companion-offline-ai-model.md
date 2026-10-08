@@ -4,7 +4,8 @@
 **Queue item:** (none — no new §58 checkbox; D2 pack-cache / post-pair popup is a follow-up after this amend lands)  
 **Author:** Jarvis Architect  
 **Date:** 2026-09-17  
-**Amended:** 2026-09-18 (Taco via CoS — HOLD lifted for this slice: allowlisted pack URL, Leader packaging cache, first-up background download, post-pair popup)
+**Amended:** 2026-09-18 (Taco via CoS — HOLD lifted for this slice: allowlisted pack URL, Leader packaging cache, first-up background download, post-pair popup)  
+**Amended:** 2026-10-08 (Chief of Staff, authorized by Taco — [RFC-0204](0204-android-anzu-standalone-upgrade.md)). **Reason:** the phone must be a standalone ANZU when the desktop is unreachable, including an unrestricted on-device GGUF, not an Instruct-only local reply. The offline brain is no longer Instruct-only. An abliterated, phone-sized GGUF is permitted and preferred once the project lead names it (RFC-0204 §2.1; the name is still a pending decision — do not invent one here). The Qwen2.5 Instruct packs in §2.1 remain the clean fallback. §2 weights, the STT/TTS paragraph, and §3 are revised below. The #309 / #319 / #317 runtime, routing, Outbox, and sync contract is not reopened.
 
 **Parent / index:** [`INTEGRATION_SPECS.md`](../../INTEGRATION_SPECS.md) (Taco priority #2).  
 **Related (do not rewrite):** RFC-0039 Android native client (Leader remains authoritative **when reachable**). RFC-0059 companion delivery (implemented). RFC-0064 / RFC-0066 realtime voice. RFC-0074 pairing + QR. RFC-0076 APK delivery UX. RFC-0032 ultra-low-bit / edge routing (**optional ephemeral worker is not this ticket**). RFC-0035 tiny command front-end (host-side; this RFC is **on-device**). RFC-0092 neural TTS default (**do not rewrite**; phone TTS/STT stay as today unless 0092 already landed). [`RFC-0123`](0123-companion-reachability-and-anti-impersonation.md) companion reachability + anti-impersonation (sibling; do not invent LE/Red/Purple gates). `ANDROID_CLIENT.md` (phone is a controller, not P3 swarm). `docs/android-companion.md`.
@@ -39,11 +40,11 @@ When the session returns, the phone **syncs**: upload queued user turns + local 
 Ship a working local LLM path inside the APK **or** as an owner-downloaded pack the app loads from app-private storage:
 
 1. **Runtime:** in-process engine capable of GGUF (or equivalent documented mobile format) on CPU / NPU / GPU as the device allows. **v1 engine is llama.cpp JNI** (`LlamaCppInferenceEngine` / native `jarvis_llama`) already used in the ecosystem. One engine in v1; do not leave the runtime unspecified.
-2. **Weights:** **not** in git. Owner downloads a **phone-sized** instruct GGUF (order: 1B–3B class first; larger only if the device reports enough RAM). Catalog is a **pinned allowlist** of filenames **and fetch URLs** (plus hashes / `size_bytes`) **or** a Leader-mediated pack served from that same allowlist after the Leader has cached the file. **Never** an arbitrary URL the owner or model types. Progress is visible; failure is recoverable; missing weights show **install**, not a fake chat. Empty `url` / placeholder-only catalog rows are a **fail**.
+2. **Weights:** **not** in git. **Revised 2026-10-08 (RFC-0204):** the preferred offline pack is an **abliterated / unrestricted** phone-sized GGUF once RFC-0204 §2.1 is filled in (name still **pending** — do not pick a repo or filename in this RFC). Until that allowlisted row exists, and whenever that pack is missing, hash-failed, or refused for RAM, the stock **Instruct** packs in §2.1 are the required fallback. Size order stays 1B–3B class first (RFC-0204 allows up to about 4B only when the device guard agrees); larger only if the device reports enough RAM. Never a 27B host profile. Catalog is a **pinned allowlist** of filenames **and fetch URLs** (plus hashes / `size_bytes`) **or** a Leader-mediated pack served from that same allowlist after the Leader has cached the file. **Never** an arbitrary URL the owner or model types. Progress is visible; failure is recoverable; missing weights show **install**, not a fake chat. Empty `url` / placeholder-only catalog rows are a **fail**, including a “pending model” row with a blank URL. “Unrestricted” means the refusal layer is removed from the weights. It does not add Leader tools.
 3. **Quality bar:** offline chat must return model tokens on a device with the pack installed. Mock completions, canned strings, or “model coming soon” as the shipped path are **fails**.
 4. **Resources:** respect thermal/battery; do not keep a 27B-class host profile on the phone; do not evict companion UX to load a giant model. If the device cannot load the selected pack, refuse with an actionable reason (RAM/storage), do not crash-loop.
 
-Phone STT/TTS stay the existing companion paths (clip / RFC-0064 WSS when online). This RFC does **not** change host RFC-0092 defaults. Offline TTS may use the existing on-device Android speech APIs for playback of local replies; it must not reintroduce silent SAPI on the **PC**. Fine-tune of the phone pack is **out of scope** for this amend (later ticket OK).
+**Revised 2026-10-08 (RFC-0204):** online STT/TTS stay the existing companion paths (clip / RFC-0064 WSS when the Leader session is live). This RFC does **not** change host RFC-0092 defaults and must not reintroduce silent SAPI on the **PC**. The offline success path is no longer “Android speech APIs if they happen to work.” Grid-down STT is Whisper and grid-down TTS is Pocket TTS, as [RFC-0140](0140-companion-on-device-voice-models.md) Mode B, made real by [RFC-0204](0204-android-anzu-standalone-upgrade.md) §3. Fine-tune of the phone pack stays **out of scope**.
 
 ### 2.1 Pinned allowlist (required download path)
 
@@ -97,9 +98,11 @@ Pairing itself must not require the GGUF (existing rule). RFC-0123 pairing-key /
 
 ### 3. What offline may and must not do
 
-**May (v1):** local Q&A against the on-device model; read last-synced conversation/task snapshot cached on device; compose a message/attachment into Outbox; capture camera/gallery for later Leader analyze (RFC-0109); show honest connectivity (“Leader unreachable — answering on-device”).
+**Revised 2026-10-08 (RFC-0204).** RFC-0204 adds the standalone set (local notes, phone-local reminders, owner-picked text, Whisper → model → Pocket TTS) and permits an abliterated GGUF as the preferred weights. The must-not list below is the revised rule: unrestricted weights are allowed, desktop tools are not.
 
-**Must not (v1):** start HexStrike / RFC-0105 tools; mutate Leader filesystem; claim BlackGrid gen is running on the phone; become a swarm Node / RFC-0032 ephemeral worker (that remains a separate enrollment). Tool-using work **queues for the Leader**.
+**May:** local Q&A against the on-device model (Instruct fallback, or the abliterated pack once RFC-0204 §2.1 names it); read last-synced conversation/task snapshot cached on device; compose a message/attachment into Outbox; capture camera/gallery for later Leader analyze (RFC-0109); the RFC-0204 Black Grid mode local actions; show honest connectivity (“ANZU desktop is unreachable — answering on this phone”).
+
+**Must not:** start HexStrike / RFC-0105 tools; mutate Leader filesystem; claim Black Grid media generation (RFC-0096 / RFC-0109) is running on the phone; become a swarm Node / RFC-0032 ephemeral worker (that remains a separate enrollment); treat abliterated weights as permission to invent tool results. Desktop tool-using work **queues for the Leader** and is not reported as done on the phone. A placeholder catalog row for an unnamed abliterated model is also a must-not (empty `url` stays a fail).
 
 Pairing, Keystore identity, TLS pins, and revocation (RFC-0059 / 0074) stay required for **online** mode. Offline mode does not weaken pairing when the Leader returns.
 
@@ -112,7 +115,7 @@ Pairing, Keystore identity, TLS pins, and revocation (RFC-0059 / 0074) stay requ
 
 **Architect’s initial recommendation:** `partial` — on-device runtime inside the existing companion, Leader orchestrator online. Taco can override pack size / engine, not the online-orchestrator rule.
 
-**Will not:** second Jarvis on the phone; vendor weights; P3 swarm phone role; rewrite RFC-0092; persona merge; HexStrike-on-device; invented LE gates.
+**Will not:** second Jarvis / a second memory authority on the phone; vendor weights committed to git; P3 swarm phone role; rewrite RFC-0092; persona merge; HexStrike-on-device; invented LE gates; picking the abliterated model name inside this RFC (that decision stays RFC-0204 §8 until the project lead names it).
 
 ## Acceptance criteria
 
@@ -128,6 +131,7 @@ Pairing, Keystore identity, TLS pins, and revocation (RFC-0059 / 0074) stay requ
 - [ ] After pairing completes, phone **popup** offers offline-pack download with **size in MB**; Download starts a real fetch (Leader cache or pinned URL)
 - [ ] Not a swarm `PHONE` node; not HexStrike-on-phone
 - [ ] RFC-0092 / host TTS defaults not rewritten here; fine-tune out of scope
+- [ ] **2026-10-08 amendment (RFC-0204):** Instruct packs stay the fallback; an abliterated GGUF is permitted only as a fully pinned allowlist row; unnamed/empty-url rows stay a fail; §3 must-not list still blocks HexStrike, Leader filesystem mutation, on-device media-gen claims, and swarm enrollment
 - [ ] Light §59 Decision Log line only; RFC-0123 is the security sibling (do not invent LE/Red/Purple gates)
 - [ ] Implement follow-up (D2 after this land): fill catalog URLs + Leader cache job + post-pair popup; Android unit tests + `python3 -m pytest` for catalog-not-empty-url / cache status / sync; live token generation remains **device sign-off** (cloud VM cannot)
 
@@ -148,6 +152,7 @@ Product implementation in this PR. RFC-0032 phone-as-swarm-worker. Host TTS/SAPI
 ## Notes
 
 - Source: Taco high-impact add 2026-09-17. Number **0108** (after 0107 Obsidian). Amend 2026-09-18: Taco via CoS HOLD lift for allowlisted pack + Leader cache + first-up download + post-pair size popup.
+- Amend 2026-10-08: Taco authorized CoS to revise the Instruct-only stance and the offline must-not list so [RFC-0204](0204-android-anzu-standalone-upgrade.md) can ship an abliterated on-device GGUF (name pending) with these Instruct packs as the clean fallback. Grid-down voice success path moves to Whisper + Pocket TTS (RFC-0140 Mode B / RFC-0204). #309 contract unchanged.
 - D1 [#309](https://github.com/Daan298261/Jarvis/pull/309) landed the runtime/routing/Outbox/sync contract on `development`. This amend is the **next D2 ticket after land** — do not reopen #309 to weaken it.
 - Linux cloud cannot sign off on-device GGUF load. Implement unit-tests the routing/sync/catalog URL/cache job; physical Android is sign-off.
 - Cross-link: companion port listen / pairing keys / anti-impersonation live in [RFC-0123](0123-companion-reachability-and-anti-impersonation.md) (`:4781`). Offline model does not change those rules.

@@ -7,7 +7,7 @@
 
 **Aligns with:** [`ANZU_PRODUCT_NORTH_STAR.md`](../../ANZU_PRODUCT_NORTH_STAR.md) — one assistant, local-first, fast when the request is simple, honest when optional providers are absent, no stubbed dual brains.  
 **Amends the behaviour of (does not edit those files):** [0116](0116-typesafe-jev-optional-decision-tier.md), [0117](0117-tiny-front-chat-responder.md), [0171](0171-system-one-reflex-lane-jev-laya-priority.md), [0203](0203-fast-path-lane-consolidation.md) §3.  
-**Numbering:** `0200`–`0203` are on `development`. `0204` and `0205` are unused. This ticket is **0206**.
+**Numbering:** `0204` (Android) and `0205` (DeepHat) are real RFCs. This ticket is **0206**.
 
 Product name in owner-facing answers is **ANZU Superassistant**. The engineering tree stays Jarvis.
 
