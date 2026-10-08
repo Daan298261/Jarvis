@@ -85,13 +85,6 @@ _ALTERNATIVES: dict[str, tuple[Alternative, ...]] = {
         Alternative("python", "do the work in a script instead of a shell one-liner"),
         Alternative("filesystem", "use direct file operations for file work"),
     ),
-    "python": (
-        Alternative("filesystem", "copy, list, or search with absolute paths instead of a script"),
-        Alternative("terminal", "run the interpreter, robocopy, or git directly and read stderr"),
-        Alternative("screenshot", "look at Explorer only when the files are not reachable by path"),
-        Alternative("desktop", "drive Explorer or the app with UI Automation as a last resort"),
-        Alternative("cua", "computer-use worker with vision when accessibility lookup fails"),
-    ),
     "open_interpreter": (
         Alternative("python", "write and run the script with the native python tool"),
         Alternative("terminal", "run the commands directly"),
@@ -121,6 +114,8 @@ _ALTERNATIVES: dict[str, tuple[Alternative, ...]] = {
         Alternative("mcp_call", "use a connected MCP tool (Gmail, WhatsApp, or other listed mcp_* schema) instead of python"),
         Alternative("terminal", "run a one-liner when a CLI already exists"),
         Alternative("screenshot", "confirm the result visually only if a GUI is the only remaining path"),
+        Alternative("desktop", "drive Explorer or the app with UI Automation as a last resort"),
+        Alternative("cua", "computer-use worker with vision when accessibility lookup fails"),
     ),
     "screenshot": (
         Alternative("desktop", "query the UI Automation tree instead of pixels"),

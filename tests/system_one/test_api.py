@@ -53,3 +53,19 @@ def test_reflex_metrics_and_laya_api(jarvis_env, monkeypatch):
     disabled = client.post("/api/decision/laya/disable")
     assert disabled.status_code == 200
     assert disabled.json()["enabled"] is False
+
+
+def test_laya_enable_refuses_fixture_outside_pytest(jarvis_env, monkeypatch):
+    tmp = jarvis_env["tmp"]
+    monkeypatch.setattr("app.config.data_dir", lambda: tmp)
+    monkeypatch.setattr("app.decision.laya.pins.data_dir", lambda: tmp)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    reset_licensing_store()
+    laya_runtime.reset_runtime()
+    laya_pins.clear_install()
+    laya_pins.write_test_install()
+
+    client = TestClient(app)
+    refused = client.post("/api/decision/laya/enable", json={"warm": True})
+    assert refused.status_code == 400
+    assert refused.json()["detail"] == "Laya fixture install is not production-ready"

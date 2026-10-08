@@ -189,14 +189,27 @@ def validate_generated_comment(
     return True, "ok"
 
 
+def _address_suffix(intent: dict[str, Any]) -> str:
+    """Vocative suffix from the same address_vocative helper as speech."""
+    from ..config import SocialCommentarySettings
+    from ..tts.persona_speech import address_vocative
+
+    style = str(intent.get("address_style") or "neutral")
+    name = str(intent.get("configured_address_name") or intent.get("address_name") or "").strip()
+    if style not in {"neutral", "sir_maam", "first_name", "configured"}:
+        style = "neutral"
+    if style in {"first_name", "configured"} and not name:
+        style = "neutral"
+    commentary = SocialCommentarySettings(address_style=style, configured_address_name=name)
+    vocative = address_vocative(commentary)
+    return f", {vocative}" if vocative else ""
+
+
 def template_comment_for_intent(intent: dict[str, Any]) -> str | None:
     topic = str(intent.get("topic") or "")
     value = str(intent.get("value") or "")
     tone = str(intent.get("tone") or "light")
-    address = str(intent.get("address_style") or "neutral")
-    suffix = ""
-    if address == "sir_maam":
-        suffix = ", sir"
+    suffix = _address_suffix(intent)
 
     if topic == "appearance.hair_state" and value == "dishevelled":
         if tone in {"dry", "sharp"}:

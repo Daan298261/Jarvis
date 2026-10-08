@@ -51,10 +51,17 @@ def test_jarvis_iss_next_runs_force_stop_on_install_method_page():
     lower = next_fn.lower()
     assert "forcestopjarvisunder" in lower.replace("_", "")
     assert "rfc-0136" in lower
-    assert "still running and could not be stopped" in lower
-    assert "installer-stop.log" in lower
+    assert "anzufilesstilllockedmessage" in lower.replace("_", "")
+    assert "still running and could not be stopped" not in lower
+    assert "installer-stop.log" not in lower
     # Clean confirm cancel must not reach force-stop (early exit when Result false).
     assert "if not result then" in lower
+    message_at = text.index("function AnzuFilesStillLockedMessage")
+    message = text[message_at : message_at + text[message_at:].index("\nfunction ")]
+    message_lower = message.lower()
+    assert "quit anzu from the tray, then try again." in message_lower
+    assert "jarvis-installer-stop.log" in message_lower
+    assert "desktop\\jarvis.exe" in message_lower
 
 
 def test_start_jarvis_probes_health_before_uvicorn_spawn():

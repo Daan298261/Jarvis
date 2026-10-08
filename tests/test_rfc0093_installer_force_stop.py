@@ -51,13 +51,25 @@ def test_force_stop_binds_ciminstance_not_managementobject():
 def test_jarvis_iss_wires_force_stop_before_prepare():
     text = _read(ISS)
     lower = text.lower()
+    compact = lower.replace("_", "")
     assert "force-stop-jarvis.ps1" in lower
-    assert "stopjarvisprocessesforprepare" in lower.replace("_", "")
-    assert "close jarvis and try again" in lower
+    assert "stopjarvisprocessesforprepare" in compact
+    assert "anzufilesstilllockedmessage" in compact
+    assert "quit anzu from the tray, then try again" in lower
+    assert "desktop\\jarvis.exe" in lower
+    assert "jarvis-installer-stop.log" in lower
     assert "installer-stop.log" in lower
-    assert "getbootstraprunparameters" in lower.replace("_", "")
+    assert "close jarvis and try again" not in lower
+    assert "getbootstraprunparameters" in compact
     assert "run-installer-bootstrap.ps1" in lower
-    assert "bootstrapskipheavy" in lower.replace("_", "")
+    assert "bootstrapskipheavy" in compact
+    start = text.index("function PrepareToInstall")
+    rest = text[start:]
+    next_fn = rest.find("\nfunction ")
+    prepare = rest if next_fn < 0 else rest[:next_fn]
+    prepare_compact = prepare.lower().replace("_", "")
+    assert "anzufilesstilllockedmessage" in prepare_compact
+    assert "stopjarvisprocessesforprepare" in prepare_compact
 
 
 def test_jarvis_iss_uninstall_uses_force_stop():

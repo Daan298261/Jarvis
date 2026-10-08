@@ -2,23 +2,16 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
+
+from tests.presence_node import run_presence_node_suite
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
 
 
 def _run_node(*files: str) -> None:
-    result = subprocess.run(
-        ["node", "--experimental-strip-types", "--test", *files],
-        cwd=FRONTEND,
-        capture_output=True,
-        text=True,
-        timeout=180,
-        check=False,
-    )
-    assert result.returncode == 0, result.stdout + "\n" + result.stderr
+    run_presence_node_suite(*files, timeout=180)
 
 
 def test_presence_silhouette_unit_suite():

@@ -47,6 +47,7 @@ class ChatTtsItem:
 
 _pending_tts: deque[ChatTtsItem] = deque(maxlen=32)
 _stream_spoken_through: dict[str, int] = {}
+_stream_spoken_prefix: dict[str, str] = {}
 
 
 async def publish_owner_text(
@@ -58,6 +59,7 @@ async def publish_owner_text(
     speak: bool | None = None,
     user_prompt: str | None = None,
     tts_char_offset: int = 0,
+    spoken_prefix: str = "",
     lane: str = "worker",
     model: str = "",
 ) -> dict[str, Any]:
@@ -77,9 +79,14 @@ async def publish_owner_text(
     settings = load_settings()
     want_speech = should_speak_chat_reply(settings) if speak is None else bool(speak)
     tts_id = None
-    # Offset is the already-spoken front length. Continuation text follows a blank
-    # line. A legacy section heading, if an older transcript still has one, is stripped.
-    remainder = speakable_worker_remainder(cleaned, tts_char_offset)
+    # Skip the already-spoken quick answer only when this reply still begins
+    # with it. A correction that replaces that answer is spoken in full.
+    offset = tts_char_offset_for_reply(
+        cleaned,
+        spoken_through=tts_char_offset,
+        spoken_prefix=spoken_prefix,
+    )
+    remainder = speakable_worker_remainder(cleaned, offset)
     if want_speech and remainder:
         tts_id = enqueue_chat_tts(
             remainder,
@@ -144,11 +151,33 @@ def enqueue_chat_tts(
     return item.id
 
 
+def tts_char_offset_for_reply(reply: str, *, spoken_through: int, spoken_prefix: str = "") -> int:
+    """Skip already-spoken characters only when ``reply`` still begins with them.
+
+    A correction that repeats the quick answer and then continues keeps the
+    offset. A correction that replaces the quick answer does not start with
+    that answer, so the whole correction is spoken.
+    """
+    if spoken_through <= 0:
+        return 0
+    prefix = spoken_prefix or ""
+    text = reply or ""
+    if not prefix:
+        return spoken_through
+    if text.startswith(prefix):
+        return len(prefix)
+    return 0
+
+
 def stream_speak_offset(stream_key: str) -> int:
     return _stream_spoken_through.get(stream_key, 0)
 
 
-def mark_stream_spoken(stream_key: str, through: int) -> None:
+def stream_spoken_prefix(stream_key: str) -> str:
+    return _stream_spoken_prefix.get((stream_key or "").strip(), "")
+
+
+def mark_stream_spoken(stream_key: str, through: int, *, prefix: str | None = None) -> None:
     """Advance the speak cursor so later TTS skips an already-spoken prefix."""
     key = (stream_key or "").strip()
     if not key or through <= 0:
@@ -156,13 +185,25 @@ def mark_stream_spoken(stream_key: str, through: int) -> None:
     current = _stream_spoken_through.get(key, 0)
     if through > current:
         _stream_spoken_through[key] = through
+    if prefix is None:
+        return
+    spoken = prefix or ""
+    cursor = _stream_spoken_through.get(key, through)
+    if spoken and cursor > 0 and len(spoken) >= cursor:
+        slice_ = spoken[:cursor].strip()
+        _stream_spoken_prefix[key] = slice_ or spoken[:cursor]
+    elif spoken.strip():
+        _stream_spoken_prefix[key] = spoken.strip()
 
 
 def clear_stream_speak_state(stream_key: str | None = None) -> None:
     if stream_key is None:
         _stream_spoken_through.clear()
+        _stream_spoken_prefix.clear()
         return
-    _stream_spoken_through.pop(stream_key, None)
+    key = (stream_key or "").strip()
+    _stream_spoken_through.pop(key, None)
+    _stream_spoken_prefix.pop(key, None)
 
 
 def _first_stable_sentence(text: str) -> tuple[str, int] | None:
@@ -244,6 +285,7 @@ def maybe_enqueue_streaming_social_tts(
         return None
 
     _stream_spoken_through[stream_key] = already + rel_end
+    _stream_spoken_prefix[stream_key] = sentence.strip() or sentence
     return item_id
 
 
@@ -271,3 +313,4 @@ def pop_chat_tts(item_id: str) -> dict[str, Any] | None:
 def reset_chat_delivery() -> None:
     _pending_tts.clear()
     _stream_spoken_through.clear()
+    _stream_spoken_prefix.clear()

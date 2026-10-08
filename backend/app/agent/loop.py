@@ -131,6 +131,7 @@ from ..persona.chat_delivery import (
     pending_chat_tts_text,
     publish_owner_text,
     stream_speak_offset,
+    stream_spoken_prefix,
 )
 from ..persona.acknowledgements import task_acknowledgement
 from ..persona.narrator import forget_task, plain_failure, speak_outcome, speak_progress
@@ -148,6 +149,7 @@ from .front_responder import (
     generate_front_reply,
     is_safe_front_speech,
     last_front_timing,
+    live_text_update,
     note_front_audio,
     note_worker_first_sentence,
     open_worker_sentence_watch,
@@ -977,7 +979,7 @@ class AgentRuntime:
         if delivery.get("tts_id"):
             # Advance the stream cursor so the final merged reply cannot re-speak
             # this front prefix (publish_owner_text does not do it itself).
-            mark_stream_spoken(stream_key, len(front.text or ""))
+            mark_stream_spoken(stream_key, len(front.text or ""), prefix=front.text or "")
             await BUS.publish(task_id, "chat_tts", "Speak reply", front.text, stage="chat")
             note_front_audio(None, audio_ms)
             front.first_audio_ms = audio_ms
@@ -1797,17 +1799,14 @@ class AgentRuntime:
             return
         if not ack_suppressed:
             front_line = (front_text or "").strip()
-            novel = content
-            if front_line and content.startswith(front_line):
-                novel = content[len(front_line) :].strip()
-            elif content == front_line:
-                novel = ""
-            if novel and novel != content:
+            update = live_text_update(front_line, content) if front_line else None
+            if update:
+                mode, payload = update
                 await BUS.publish(
                     task_id,
-                    "assistant_delta",
+                    "replace_previous_text" if mode == "replace" else "assistant_delta",
                     "Reply",
-                    novel,
+                    payload,
                     stage="chat",
                     persist=False,
                 )
@@ -1817,6 +1816,7 @@ class AgentRuntime:
             speak=True,
             user_prompt=prompt,
             tts_char_offset=stream_speak_offset(stream_key),
+            spoken_prefix=stream_spoken_prefix(stream_key),
             lane="worker",
             model=str(getattr(MANAGER.provider, "model", "") or ""),
         )
@@ -1964,6 +1964,7 @@ class AgentRuntime:
             speak=True,
             user_prompt=prompt,
             tts_char_offset=stream_speak_offset(stream_key),
+            spoken_prefix=stream_spoken_prefix(stream_key),
             lane="worker",
             model=str(getattr(MANAGER.provider, "model", "") or ""),
         )

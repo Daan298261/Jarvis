@@ -2,23 +2,16 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
+
+from tests.presence_node import run_presence_node_suite
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
 
 
 def test_presence_lifecycle_unit_suite():
-    result = subprocess.run(
-        ["node", "--experimental-strip-types", "--test", "presence-lifecycle.test.mjs"],
-        cwd=FRONTEND,
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
-    assert result.returncode == 0, result.stdout + "\n" + result.stderr
+    run_presence_node_suite("presence-lifecycle.test.mjs", timeout=120)
 
 
 def test_lifecycle_is_not_galaxy_gated_in_the_host():

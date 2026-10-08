@@ -145,7 +145,38 @@ def test_web_fetch_spoken_prompt_asks_to_grant_internet(permission_store):
     )
     assert payload["permission_id"] == "network.internet"
     assert "search the internet" in payload["spoken_prompt"].lower()
-    assert "sir" in payload["spoken_prompt"].lower()
+    assert "sir" not in payload["spoken_prompt"].lower()
+    assert payload["spoken_prompt"].startswith("I need your permission")
+
+
+def test_spoken_permission_prompt_uses_address_style(permission_store, monkeypatch):
+    from app.config import AppSettings, SocialCommentarySettings
+
+    apply_grant("network.internet", "ask")
+    sir = AppSettings(social_commentary=SocialCommentarySettings(address_style="sir_maam"))
+    named = AppSettings(
+        social_commentary=SocialCommentarySettings(
+            address_style="configured",
+            configured_address_name="Alex",
+        )
+    )
+    monkeypatch.setattr("app.tts.persona_speech.load_settings", lambda: sir)
+    sir_prompt = confirmation_payload_for_tool(
+        call_id="call-web-sir",
+        name="web_fetch",
+        arguments={"url": "https://example.com"},
+    )["spoken_prompt"]
+    assert sir_prompt.startswith("Sir, ")
+    assert "search the internet" in sir_prompt.lower()
+
+    monkeypatch.setattr("app.tts.persona_speech.load_settings", lambda: named)
+    named_prompt = confirmation_payload_for_tool(
+        call_id="call-web-alex",
+        name="web_fetch",
+        arguments={"url": "https://example.com"},
+    )["spoken_prompt"]
+    assert named_prompt.startswith("Alex, ")
+    assert "sir" not in named_prompt.lower()
 
 
 def test_interpret_spoken_grant_maps_yes_always_no():

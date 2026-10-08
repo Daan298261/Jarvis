@@ -37,7 +37,7 @@ export function useShowWorkPreference(): [boolean, (showWork: boolean) => void] 
 }
 
 const HIDDEN_WORK_TITLES = new Set(["Model is thinking", "Reasoning complete", "Thinking"])
-const HIDDEN_WORK_KINDS = new Set(["assistant_delta", "chat_tts"])
+const HIDDEN_WORK_KINDS = new Set(["assistant_delta", "chat_tts", "replace_previous_text"])
 
 export type ModelLaneLine = {
   lane: string
@@ -72,82 +72,6 @@ export function filterModelLaneEvents(events: OwnerChatEvent[]): ModelLaneLine[]
   }
   return lines
 }
-const COMPARE_STOP = new Set(
-  "a an the of to and or if it is are was were be been being just my your you youre seeing those that this them they me i we our sir please will ill its for on in at with".split(
-    " ",
-  ),
-)
-
-function normalizeCompare(value: string): string {
-  return (value || "")
-    .toLowerCase()
-    .replace(/['’]/g, "")
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-}
-
-function contentTokens(value: string): string[] {
-  return normalizeCompare(value)
-    .split(" ")
-    .filter((token) => token.length > 2 && !COMPARE_STOP.has(token))
-}
-
-function sequenceRatio(left: string, right: string): number {
-  const a = normalizeCompare(left)
-  const b = normalizeCompare(right)
-  if (!a || !b) return 0
-  if (a === b) return 1
-  const bigrams = (text: string) => {
-    const grams = new Map<string, number>()
-    const padded = ` ${text} `
-    for (let index = 0; index < padded.length - 1; index += 1) {
-      const gram = padded.slice(index, index + 2)
-      grams.set(gram, (grams.get(gram) || 0) + 1)
-    }
-    return grams
-  }
-  const leftGrams = bigrams(a)
-  const rightGrams = bigrams(b)
-  let overlap = 0
-  for (const [gram, count] of leftGrams) {
-    overlap += Math.min(count, rightGrams.get(gram) || 0)
-  }
-  return (2 * overlap) / (a.length + b.length + 2)
-}
-
-function sentenceRestates(sentence: string, front: string): boolean {
-  const best = sequenceRatio(sentence, front)
-  const novel = contentTokens(sentence).filter((token) => !contentTokens(front).includes(token))
-  const workerTokens = contentTokens(sentence)
-  const coverage = workerTokens.length ? 1 - novel.length / workerTokens.length : 1
-  if (best >= 0.72) return true
-  if (best >= 0.58 && novel.length <= 2) return true
-  if (coverage >= 0.72 && novel.length <= 2) return true
-  const left = normalizeCompare(front)
-  const right = normalizeCompare(sentence)
-  return Boolean(left && right && (left === right || left.includes(right) || right.includes(left)))
-}
-
-/** Join a front line and a worker continuation without a section heading. */
-export function mergeAssistantTexts(front: string, worker: string): string {
-  const left = (front || "").trim()
-  const right = (worker || "").trim()
-  if (!left) return right
-  if (!right || left === right || left.startsWith(right) || left.includes(right)) return left
-  if (right.startsWith(left)) {
-    const tail = right.slice(left.length).trim()
-    if (!tail || sentenceRestates(tail, left)) return left
-    return right
-  }
-  const sentences = right.split(/(?<=[.!?])\s+/).map((part) => part.trim()).filter(Boolean)
-  const novel = sentences.filter((sentence) => !sentenceRestates(sentence, left))
-  if (!novel.length) return left
-  const novelText = novel.join(" ")
-  if (novelText === right) return `${left}\n\n${right}`
-  return `${left}\n\n${novelText}`
-}
-
 /** Events suitable for the work / details panel (drops noisy model heartbeat). */
 export function filterWorkEvents(events: OwnerChatEvent[]): OwnerChatEvent[] {
   return events.filter(
@@ -274,6 +198,7 @@ export function visibleChatTurns(input: {
   messages?: { role: string; content: string }[] | null
   pending?: string[]
   liveAssistant?: string | null
+  liveReplaced?: boolean
 }): ChatTurn[] {
   const turns: ChatTurn[] = []
   const fromApi = (input.messages || []).filter((item) => item.role === "user" || item.role === "assistant")
@@ -289,10 +214,12 @@ export function visibleChatTurns(input: {
         if (!publicText && !split.internal) continue
         if (last && last.role === role) {
           if (last.content === publicText && last.internal === split.internal) continue
-          last.content = mergeAssistantTexts(last.content, publicText)
-          last.public = last.content
-          last.internal = [last.internal, split.internal].filter(Boolean).join("\n") || undefined
-          continue
+          // chat_turns.merge_consecutive_assistant_turns is the only merge.
+          // A second client algorithm dropped corrections the server keeps.
+          if (last.content === publicText) {
+            last.internal = [last.internal, split.internal].filter(Boolean).join("\n") || undefined
+            continue
+          }
         }
         turns.push({ role, content: publicText, public: publicText, internal: split.internal || undefined })
         continue
@@ -316,9 +243,11 @@ export function visibleChatTurns(input: {
     const last = turns[turns.length - 1]
     if (!last || last.role === "user") {
       turns.push({ role: "assistant", content: live, public: live })
-    } else if (last.role === "assistant" && live.startsWith(last.content) && live !== last.content) {
-      last.content = live
-      last.public = live
+    } else if (last.role === "assistant" && live !== last.content) {
+      if (input.liveReplaced || live.startsWith(last.content)) {
+        last.content = live
+        last.public = live
+      }
     }
   }
   const knownUsers = new Set(turns.filter((item) => item.role === "user").map((item) => item.content))
@@ -395,31 +324,58 @@ function frontEventText(event: { kind?: string; detail?: string }): string {
   return ""
 }
 
+export function applyLiveAssistantEvent(
+  acc: string,
+  event: { kind?: string; detail?: string },
+): { text: string; replaced: boolean } {
+  if ((event.kind || "") === "replace_previous_text") {
+    return { text: event.detail || "", replaced: true }
+  }
+  const chunk = frontEventText(event)
+  if (!chunk) return { text: acc, replaced: false }
+  if (event.kind === "front_response_completed") return { text: chunk, replaced: false }
+  return { text: acc + chunk, replaced: false }
+}
+
+export function reduceLiveAssistantEvents(
+  events: { kind?: string; detail?: string }[],
+): { text: string; replaced: boolean } {
+  let text = ""
+  let replaced = false
+  for (const event of events) {
+    const next = applyLiveAssistantEvent(text, event)
+    text = next.text
+    replaced = replaced || next.replaced
+  }
+  return { text, replaced }
+}
+
 /** Live first-token preview from the task event stream (front lane + worker). */
-export function useLiveAssistantPreview(taskId: string, running: boolean): string {
-  const [text, setText] = useState("")
+export function useLiveAssistantPreview(
+  taskId: string,
+  running: boolean,
+): { text: string; replaced: boolean } {
+  const [preview, setPreview] = useState<{ text: string; replaced: boolean }>({ text: "", replaced: false })
   useEffect(() => {
     if (!taskId || !running) {
       return
     }
     let acc = ""
+    let replaced = false
     const stream = new EventSource(getAuthUrl(`/api/tasks/${encodeURIComponent(taskId)}/events`))
     stream.onmessage = (message) => {
       try {
         const event = JSON.parse(message.data) as { kind?: string; detail?: string }
-        const chunk = frontEventText(event)
-        if (!chunk) return
-        if (event.kind === "front_response_completed") {
-          acc = chunk
-        } else {
-          acc += chunk
-        }
-        setText(acc)
+        const next = applyLiveAssistantEvent(acc, event)
+        if (next.text === acc && !next.replaced) return
+        acc = next.text
+        replaced = replaced || next.replaced
+        setPreview({ text: acc, replaced })
       } catch {
         // Keep the last good preview.
       }
     }
     return () => stream.close()
   }, [taskId, running])
-  return running ? text : ""
+  return running ? preview : { text: "", replaced: false }
 }

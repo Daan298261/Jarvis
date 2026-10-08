@@ -63,6 +63,26 @@ def compute_chat_stream_deadlines(
     )
 
 
+def compute_chat_call_deadline_ms(
+    settings: InferenceSettings,
+    *,
+    prompt_tokens: int,
+    prompt_tps: float | None,
+) -> float:
+    """Non-stream chat returns one body, so the budget is first-token plus idle.
+
+    Scaled with the same prompt-size rules as streaming. Callers pass the
+    result into ``ModelProvider.chat``; this function does not invent a
+    timeout when settings are absent.
+    """
+    first_ms, idle_ms = compute_chat_stream_deadlines(
+        settings,
+        prompt_tokens=prompt_tokens,
+        prompt_tps=prompt_tps,
+    )
+    return first_ms + idle_ms
+
+
 def record_stream_stall(
     stall: Any,
     *,
