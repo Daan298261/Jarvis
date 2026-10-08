@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 import json
+import asyncio
+import threading
 
 import pytest
 
@@ -83,6 +85,52 @@ async def test_remote_resize_never_invokes_local_cli(monkeypatch, jarvis_env):
     settings.inference.host = '192.0.2.5'
     monkeypatch.setattr(module.shutil, 'which', lambda name: pytest.fail('must not run CLI'))
     assert await module.grow_local_instance(settings, 65536, 'owner') is None
+
+
+@pytest.mark.asyncio
+async def test_voice_probe_cannot_block_event_loop(jarvis_env, monkeypatch):
+    from app.systems import self_check
+    entered, release = threading.Event(), threading.Event()
+    async def model(*args):
+        return {'loaded': True, 'active_model': 'fixture'}
+    def slow_probe():
+        entered.set()
+        release.wait(2)
+        return {'kokoro': True, 'kokoro_weights': True}
+    monkeypatch.setattr(self_check.MANAGER, 'snapshot', model)
+    monkeypatch.setattr(self_check, 'engine_availability', slow_probe)
+    monkeypatch.setattr(self_check, 'voice_status', lambda: {'stt_ready': True})
+    pending = asyncio.create_task(self_check.run_self_check())
+    try:
+        await asyncio.wait_for(asyncio.to_thread(entered.wait), .5)
+        # This heartbeat runs while the deliberately stalled synchronous probe is pending.
+        await asyncio.wait_for(asyncio.sleep(.01), .1)
+        assert not pending.done()
+    finally:
+        release.set()
+        await pending
+
+
+def test_voicestudio_probe_has_shared_deadline_and_negative_cache(monkeypatch):
+    from app.tts import voicestudio_adapter as module
+    module._probe_cache.clear()
+    monkeypatch.delenv('JARVIS_DISABLE_VOICESTUDIO', raising=False)
+    monkeypatch.setattr(module, 'voicestudio_base_url', lambda: 'http://127.0.0.1:9999')
+    monkeypatch.setattr(module, 'voicestudio_auth_headers', lambda: {})
+    monkeypatch.setattr('app.policy.network_http.require_http_url_allowed', lambda *a, **kw: None)
+    elapsed = [100.0]
+    monkeypatch.setattr(module.time, 'monotonic', lambda: elapsed[0])
+    calls = []
+    def fail(request, timeout):
+        calls.append(timeout)
+        elapsed[0] += timeout
+        raise TimeoutError('offline')
+    monkeypatch.setattr(module.urllib.request, 'urlopen', fail)
+    assert not module.voicestudio_probe_endpoint(timeout=1.5)
+    assert len(calls) == 1 and calls[0] <= 1.5
+    assert not module.voicestudio_probe_endpoint(timeout=1.5)
+    assert len(calls) == 1
+    module._probe_cache.clear()
 
 
 @pytest.mark.asyncio
