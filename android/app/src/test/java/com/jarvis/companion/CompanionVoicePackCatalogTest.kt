@@ -32,7 +32,7 @@ class CompanionVoicePackCatalogTest {
         assertTrue(tts.sizeBytes <= 150_000_000L)
         assertTrue(stt.sizeBytes + tts.sizeBytes <= 250_000_000L)
         assertTrue(CompanionVoicePackCatalog.builtIn.any { it.id == "whisper-base-en-cpp" })
-        assertTrue(CompanionVoicePackCatalog.builtIn.any { it.id == "piper-en-lessac-medium" })
+        assertFalse(CompanionVoicePackCatalog.builtIn.any { it.id == "piper-en-lessac-medium" })
     }
 
     @Test
@@ -46,13 +46,13 @@ class CompanionVoicePackCatalogTest {
     }
 
     @Test
-    fun pocketIsDefaultTtsAndPiperIsFallbackOnly() {
+    fun pocketIsTheOnlyOnDeviceTtsAndEveryTtsEngineCanSynthesize() {
         val tts = CompanionVoicePackCatalog.builtIn.filter { it.role == "tts" }
-        assertEquals("pocket-tts-en", tts.first { it.recommended }.id)
-        assertEquals("pocket-tts-onnx", tts.first { it.recommended }.engine)
-        val piper = tts.first { it.id == "piper-en-lessac-medium" }
-        assertFalse(piper.recommended)
-        assertEquals("piper-onnx", piper.engine)
+        assertEquals(listOf("pocket-tts-en"), tts.map { it.id })
+        assertEquals("pocket-tts-onnx", tts.first().engine)
+        CompanionVoicePackCatalog.builtIn.forEach { pack ->
+            assertTrue("engine ${pack.engine} on ${pack.id} cannot synthesize", CompanionVoicePackCatalog.canSynthesize(pack))
+        }
         tts.forEach { pack ->
             assertTrue(pack.url.startsWith("https://"))
             pack.artifacts.forEach { art ->
@@ -135,15 +135,15 @@ class CompanionVoiceRoutingTest {
     }
 }
 
-class PocketOrPiperTtsEngineTest {
+class PocketTtsEngineTest {
     @Test
     fun nearSilentWavIsRejected() {
         val header = ByteArray(44)
         val silent = ByteArray(44 + 200) { 0 }
-        assertTrue(PocketOrPiperTtsEngine.isNearSilentPcmWav(silent))
-        assertTrue(PocketOrPiperTtsEngine.isNearSilentPcmWav(header))
+        assertTrue(PocketTtsEngine.isNearSilentPcmWav(silent))
+        assertTrue(PocketTtsEngine.isNearSilentPcmWav(header))
         val loud = ByteArray(44 + 200) { i -> if (i < 44) 0 else 40 }
-        assertFalse(PocketOrPiperTtsEngine.isNearSilentPcmWav(loud))
+        assertFalse(PocketTtsEngine.isNearSilentPcmWav(loud))
     }
 }
 

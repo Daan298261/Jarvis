@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicReference
 class CompanionVoicePackManager(
     context: Context,
     val sttEngine: OnDeviceSttEngine = WhisperCppSttEngine(),
-    val ttsEngine: OnDeviceTtsEngine = PocketOrPiperTtsEngine(),
+    val ttsEngine: OnDeviceTtsEngine = PocketTtsEngine(),
     digestCache: VerifiedDigestCache? = null,
 ) {
     private val app = context.applicationContext
@@ -39,21 +39,29 @@ class CompanionVoicePackManager(
 
     init {
         CompanionVoicePackCatalog.validateBuiltIn()
+        migrateTtsSelection()
     }
 
     fun selectedSttPackId(): String =
         prefs.getString("selected_stt_pack_id", CompanionVoicePackCatalog.builtIn.first { it.role == "stt" && it.recommended }.id)
             ?: "whisper-tiny-en-cpp"
 
-    fun selectedTtsPackId(): String =
-        prefs.getString("selected_tts_pack_id", CompanionVoicePackCatalog.builtIn.first { it.role == "tts" && it.recommended }.id)
-            ?: "pocket-tts-en"
+    fun selectedTtsPackId(): String {
+        migrateTtsSelection()
+        return prefs.getString("selected_tts_pack_id", CompanionVoicePackCatalog.POCKET_TTS_ID)
+            ?: CompanionVoicePackCatalog.POCKET_TTS_ID
+    }
 
     fun selectSttPack(id: String) {
         prefs.edit().putString("selected_stt_pack_id", id).apply()
     }
 
     fun selectTtsPack(id: String) {
+        val pack = catalog.firstOrNull { it.id == id && it.role == "tts" }
+        if (pack == null || !CompanionVoicePackCatalog.canSynthesize(pack)) {
+            prefs.edit().putString("selected_tts_pack_id", CompanionVoicePackCatalog.POCKET_TTS_ID).apply()
+            return
+        }
         prefs.edit().putString("selected_tts_pack_id", id).apply()
     }
 
@@ -228,6 +236,14 @@ class CompanionVoicePackManager(
     fun deleteSelectedStt() = deletePack(selectedSttPackId())
     fun deleteSelectedTts() = deletePack(selectedTtsPackId())
 
+    private fun migrateTtsSelection() {
+        val stored = prefs.getString("selected_tts_pack_id", null) ?: return
+        val valid = catalog.any { it.id == stored && it.role == "tts" && CompanionVoicePackCatalog.canSynthesize(it) }
+        if (!valid) {
+            prefs.edit().putString("selected_tts_pack_id", CompanionVoicePackCatalog.POCKET_TTS_ID).apply()
+        }
+    }
+
     suspend fun transcribePcm16le(pcm: ByteArray, sampleRate: Int = 16_000): String = withContext(Dispatchers.IO) {
         val pack = selectedSttPack() ?: error("No STT pack selected")
         DeviceVoiceGuard.blockReason(app, pack)?.let { error(it) }
@@ -287,7 +303,7 @@ class CompanionVoicePackManager(
         }
         val audio = result.getOrNull()
         if (audio == null || audio.isEmpty()) error("On-device TTS produced no audio — retry or reinstall the pack")
-        if (PocketOrPiperTtsEngine.isNearSilentPcmWav(audio)) {
+        if (PocketTtsEngine.isNearSilentPcmWav(audio)) {
             ttsStatusRef.set(CompanionVoicePackStatus.ERROR)
             errorRef.set("On-device TTS returned near-silent audio — refusing soft-fail")
             error("On-device TTS returned near-silent audio — refusing soft-fail")

@@ -1,5 +1,13 @@
 package com.jarvis.companion
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+
 /**
  * On-device STT engine contract (RFC-0140).
  * Implementations must never invent transcripts — failures are explicit errors.
@@ -67,11 +75,11 @@ class WhisperCppSttEngine : OnDeviceSttEngine {
 }
 
 /**
- * Pocket TTS (preferred) with Piper ONNX fallback.
- * Requires native ONNX voice bridge; honest error when unavailable.
+ * Pocket TTS (the only on-device TTS). Requires native ONNX voice bridge;
+ * honest error when unavailable.
  */
-class PocketOrPiperTtsEngine : OnDeviceTtsEngine {
-    override val runtimeName: String = "pocket-tts-onnx|piper-onnx"
+class PocketTtsEngine : OnDeviceTtsEngine {
+    override val runtimeName: String = CompanionVoicePackCatalog.POCKET_TTS_ENGINE
     private var loadedDir: String? = null
     private var engineId: String = ""
 
@@ -79,7 +87,10 @@ class PocketOrPiperTtsEngine : OnDeviceTtsEngine {
 
     override fun load(packDirectory: String, engineId: String): String? {
         if (!isRuntimeAvailable()) {
-            return "On-device TTS runtime is missing from this APK build (need Pocket TTS / Piper ONNX native)"
+            return "On-device TTS runtime is missing from this APK build (need Pocket TTS native)"
+        }
+        if (engineId != CompanionVoicePackCatalog.POCKET_TTS_ENGINE) {
+            return "Unknown on-device TTS engine id"
         }
         val err = VoiceNativeBridge.nativeTtsLoad(packDirectory, engineId)
         if (err.isNotBlank()) return err
@@ -195,6 +206,89 @@ object SpeakableTtsChunker {
     private val MD_EMPHASIS = Regex("[*_~]{1,2}([^*_~]+)[*_~]{1,2}")
     private val WHITESPACE = Regex("\\s+")
     private val SENTENCE = Regex("(?<=[.!?])\\s+")
+}
+
+/**
+ * Plays speakable chunks in order, prefetching the next synth on the caller's
+ * dispatcher while the current clip plays. Cancel the parent job to abort.
+ */
+object ChunkedTtsPlayer {
+    suspend fun speak(
+        chunks: List<String>,
+        synthesize: suspend (String) -> ByteArray,
+        play: suspend (ByteArray) -> Unit,
+        isActive: () -> Boolean = { true },
+    ): Int {
+        if (chunks.isEmpty()) return 0
+        return coroutineScope {
+            var played = 0
+            var pending: Deferred<ByteArray>? = async { synthesize(chunks.first()) }
+            try {
+                for (index in chunks.indices) {
+                    if (!isActive()) break
+                    val audio = pending?.await() ?: break
+                    pending = null
+                    if (!isActive()) break
+                    if (index + 1 < chunks.size) {
+                        val next = chunks[index + 1]
+                        pending = async { synthesize(next) }
+                    }
+                    if (!isActive()) break
+                    play(audio)
+                    played++
+                }
+            } finally {
+                pending?.cancel()
+            }
+            played
+        }
+    }
+}
+
+/**
+ * Owns the on-device speak [Job] so stop/toggle and a new speak cancel the prior
+ * session instead of overlapping it. [start] returns immediately (does not hold
+ * a UI `busy` flag).
+ */
+class ChunkedTtsSession(
+    private val scope: CoroutineScope,
+    private val synthesize: suspend (String) -> ByteArray,
+    private val play: suspend (ByteArray) -> Unit,
+    private val onStopPlayback: () -> Unit = {},
+    private val onIdle: () -> Unit = {},
+) {
+    var job: Job? = null
+        private set
+
+    fun isRunning(): Boolean = job?.isActive == true
+
+    fun start(chunks: List<String>): Job {
+        stop()
+        val launched = scope.launch {
+            try {
+                ChunkedTtsPlayer.speak(
+                    chunks = chunks,
+                    synthesize = synthesize,
+                    play = play,
+                    isActive = { isActive },
+                )
+            } finally {
+                if (job == coroutineContext[Job]) {
+                    job = null
+                    onIdle()
+                }
+            }
+        }
+        job = launched
+        return launched
+    }
+
+    fun stop() {
+        val running = job
+        job = null
+        running?.cancel()
+        onStopPlayback()
+    }
 }
 
 object VoiceNativeBridge {

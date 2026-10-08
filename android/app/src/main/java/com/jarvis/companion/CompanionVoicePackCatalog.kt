@@ -50,14 +50,15 @@ object CompanionVoicePackCatalog {
         "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin"
     private const val URL_WHISPER_BASE =
         "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
-    private const val URL_PIPER_ONNX =
-        "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx"
-    private const val URL_PIPER_JSON =
-        "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json"
     private const val POCKET_BASE =
         "https://huggingface.co/soniqo/Pocket-TTS-100M-ONNX-INT8/resolve/v1.0.0"
+    const val POCKET_TTS_ID = "pocket-tts-en"
+    const val POCKET_TTS_ENGINE = "pocket-tts-onnx"
     const val POCKET_VOICE_ATTRIBUTION =
         "Voice: Alba MacKenna (CC BY 4.0). https://huggingface.co/kyutai/tts-voices#alba-mackenna — Kyutai Pocket TTS checkpoint (CC BY 4.0)."
+
+    fun canSynthesize(pack: CompanionVoicePack): Boolean =
+        pack.role != "tts" || pack.engine == POCKET_TTS_ENGINE
 
     val builtIn: List<CompanionVoicePack> = listOf(
         CompanionVoicePack(
@@ -93,10 +94,10 @@ object CompanionVoicePackCatalog {
             ),
         ),
         CompanionVoicePack(
-            id = "pocket-tts-en",
+            id = POCKET_TTS_ID,
             role = "tts",
             label = "Pocket TTS English (ONNX INT8 / Alba)",
-            engine = "pocket-tts-onnx",
+            engine = POCKET_TTS_ENGINE,
             filename = "pocket-tts-en",
             sizeBytes = 126_155_593L,
             minRamMb = 768,
@@ -125,24 +126,6 @@ object CompanionVoicePackCatalog {
             ),
             attribution = POCKET_VOICE_ATTRIBUTION,
         ),
-        CompanionVoicePack(
-            id = "piper-en-lessac-medium",
-            role = "tts",
-            label = "Piper en_US lessac medium",
-            engine = "piper-onnx",
-            filename = "en_US-lessac-medium.onnx",
-            sizeBytes = 63_206_179L,
-            minRamMb = 384,
-            sha256 = "5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f",
-            url = URL_PIPER_ONNX,
-            recommended = false,
-            artifacts = listOf(
-                CompanionVoiceArtifact("en_US-lessac-medium.onnx", URL_PIPER_ONNX,
-                    "5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f", 63_201_294L),
-                CompanionVoiceArtifact("en_US-lessac-medium.onnx.json", URL_PIPER_JSON,
-                    "efe19c417bed055f2d69908248c6ba650fa135bc868b0e6abb3da181dab690a0", 4_885L),
-            ),
-        ),
     )
 
     fun validateBuiltIn() {
@@ -155,6 +138,7 @@ object CompanionVoicePackCatalog {
                 require(art.url.isNotBlank()) { "Voice pack ${pack.id} artifact ${art.filename} has empty url" }
                 require(art.sha256.length == 64) { "Voice pack ${pack.id} artifact ${art.filename} bad sha256" }
             }
+            require(canSynthesize(pack)) { "TTS pack ${pack.id} engine ${pack.engine} cannot synthesize" }
         }
     }
 
@@ -165,6 +149,9 @@ object CompanionVoicePackCatalog {
             val item = remote.optJSONObject(index) ?: continue
             val id = item.optString("id")
             if (id.isBlank()) continue
+            val role = item.optString("role", byId[id]?.role ?: "stt")
+            val engine = item.optString("engine", byId[id]?.engine ?: "")
+            if (role == "tts" && engine != POCKET_TTS_ENGINE) continue
             val base = byId[id]
             val artsRemote = item.optJSONArray("artifacts")
             val artifacts = if (artsRemote != null && artsRemote.length() > 0) {

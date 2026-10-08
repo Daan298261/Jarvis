@@ -53,16 +53,6 @@ Java_com_jarvis_companion_VoiceNativeBridge_nativeTtsLoad(
     g_pack_dir.clear();
     g_engine.clear();
 
-    if (engine == "piper-onnx") {
-        const std::string onnx = dir + "/en_US-lessac-medium.onnx";
-        const std::string json = dir + "/en_US-lessac-medium.onnx.json";
-        if (!file_nonempty(onnx) || !file_nonempty(json)) {
-            return to_jstring(env, "Piper pack files missing — reinstall piper-en-lessac-medium");
-        }
-        g_pack_dir = dir;
-        g_engine = engine;
-        return to_jstring(env, "");
-    }
     if (engine != "pocket-tts-onnx") {
         return to_jstring(env, "Unknown on-device TTS engine id");
     }
@@ -123,11 +113,6 @@ Java_com_jarvis_companion_VoiceNativeBridge_nativeTtsSynthesize(JNIEnv *env, jcl
             LOGE("Pocket TTS synthesize failed: %s", ex.what());
             return nullptr;
         }
-    }
-    if (g_engine == "piper-onnx") {
-        // Piper is a documented fallback pack, not the grid-down success path.
-        LOGE("Piper synthesis is not the RFC-0204 grid-down voice; Pocket TTS is required");
-        return nullptr;
     }
     return nullptr;
 #else

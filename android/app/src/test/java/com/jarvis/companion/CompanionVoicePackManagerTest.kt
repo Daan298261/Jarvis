@@ -59,7 +59,7 @@ class CompanionVoicePackManagerTest {
         assertTrue(sttErr!!.contains("missing"))
         assertTrue(stt.transcribe(ByteArray(3200), 16_000).isFailure)
 
-        val tts = PocketOrPiperTtsEngine()
+        val tts = PocketTtsEngine()
         assertFalse(tts.isRuntimeAvailable())
         val ttsErr = tts.load("/missing-pack", "pocket-tts-onnx")
         assertNotNull(ttsErr)
@@ -114,6 +114,22 @@ class CompanionVoicePackManagerTest {
         }.exceptionOrNull()
         assertNotNull(thrown)
         assertTrue(thrown!!.message, thrown.message!!.contains("near-silent"))
+    }
+
+    @Test
+    fun persistedPiperSelectionMigratesToPocket() {
+        context.getSharedPreferences("companion_voice_pack", Context.MODE_PRIVATE)
+            .edit()
+            .putString("selected_tts_pack_id", "piper-en-lessac-medium")
+            .apply()
+        val migrated = CompanionVoicePackManager(context)
+        assertEquals(CompanionVoicePackCatalog.POCKET_TTS_ID, migrated.selectedTtsPackId())
+        assertEquals(
+            CompanionVoicePackCatalog.POCKET_TTS_ID,
+            context.getSharedPreferences("companion_voice_pack", Context.MODE_PRIVATE)
+                .getString("selected_tts_pack_id", ""),
+        )
+        assertTrue(CompanionVoicePackCatalog.canSynthesize(migrated.selectedTtsPack()!!))
     }
 
     private fun sha256Hex(bytes: ByteArray): String =
