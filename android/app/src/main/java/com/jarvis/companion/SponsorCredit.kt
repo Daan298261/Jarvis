@@ -1,5 +1,6 @@
 package com.jarvis.companion
 
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -36,9 +37,13 @@ object SponsorCredit {
         Intent(Intent.ACTION_VIEW, Uri.parse(AnzuBranding.SPONSOR_URL))
 
     fun openInBrowser(context: Context): Boolean {
+        // Do not pre-check with resolveActivity: on API 30+ (package visibility) it
+        // returns null for browsers unless <queries> is declared. Manifest edits for
+        // this slice stay at label/theme only, so startActivity and catch instead.
         val intent = browserIntent()
-        val canOpen = intent.resolveActivity(context.packageManager) != null
-        if (!canOpen) return false
+        if (context !is Activity) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
         return try {
             context.startActivity(intent)
             true

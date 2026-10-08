@@ -61,7 +61,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         latestIntent = intent
         setContent {
-            var showSplash by remember { mutableStateOf(true) }
+            var showSplash by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
             if (showSplash) {
                 AnzuSplash(onFinished = { showSplash = false })
                 return@setContent
