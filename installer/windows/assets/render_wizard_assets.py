@@ -83,6 +83,19 @@ LARGE_SIZES = (
 # WizardSmallImageFile areas, same two generations. 58 is 100% on both.
 SMALL_SIZES = (58, 71, 77, 85, 97, 103, 112, 116, 124, 129, 143, 147, 159)
 
+# Official mark is Logo_black.png (1254×1254, gold on black). The wizard shows
+# the downscale: 28px at 100% DPI and 42px at 150% (ScaleY(28)).
+# Two lines replace the em dash so the credit does not depend on that glyph.
+SPONSOR_LINES = (
+    "Made in the Netherlands",
+    "Sponsored by Black Grid Publishing",
+)
+SPONSOR_URL = "https://blackgridpublishing.com"
+LOGO_100 = 28
+LOGO_150 = 42
+# Design pixels. Matches ScaleX(16) in Jarvis.iss, the clear gap before Back.
+SPONSOR_GAP_BEFORE_BACK = 16
+
 
 def app_version() -> str:
     text = ISS.read_text(encoding="utf-8")
@@ -289,12 +302,163 @@ def glow_strip(frames: list[Image.Image]) -> Image.Image:
     return image
 
 
+def key_black(source: Image.Image) -> Image.Image:
+    """Turn the official logo's black field transparent and keep the gold art."""
+    src = source.convert("RGBA")
+    out = Image.new("RGBA", src.size, (0, 0, 0, 0))
+    sp = src.load()
+    dp = out.load()
+    width, height = src.size
+    for y in range(height):
+        for x in range(width):
+            r, g, b, _a = sp[x, y]
+            peak = max(r, g, b)
+            if peak < 24:
+                continue
+            alpha = min(255, int((peak - 24) / 36.0 * 255))
+            dp[x, y] = (r, g, b, alpha)
+    return out
+
+
+def flatten_logo(source: Image.Image, size: int) -> Image.Image:
+    keyed = key_black(source)
+    big = keyed.resize((size * 4, size * 4), Image.Resampling.LANCZOS)
+    small = big.resize((size, size), Image.Resampling.LANCZOS)
+    plate = Image.new("RGBA", (size, size), BG)
+    plate.alpha_composite(small)
+    return plate
+
+
+def find_logo_source(explicit: Path | None) -> Path | None:
+    candidates: list[Path] = []
+    if explicit is not None:
+        candidates.append(explicit)
+    candidates.append(ROOT / "sponsor" / "Logo_black.png")
+    candidates.append(Path("/tmp/bgp-logo/Logo_black.png"))
+    for path in candidates:
+        if path.is_file():
+            return path
+    return None
+
+
+def render_sponsor_logos(source: Path, out_dir: Path) -> dict[int, Image.Image]:
+    official = Image.open(source)
+    logos = {
+        LOGO_100: flatten_logo(official, LOGO_100),
+        LOGO_150: flatten_logo(official, LOGO_150),
+    }
+    sponsor_dir = out_dir / "sponsor"
+    write_png(sponsor_dir / "bgp-logo-100.png", logos[LOGO_100])
+    write_png(sponsor_dir / "bgp-logo-150.png", logos[LOGO_150])
+    return logos
+
+
+def render_wizard_page(
+    kind: str,
+    scale: float,
+    sidebar: Image.Image,
+    glow: Image.Image,
+    logo: Image.Image,
+) -> Image.Image:
+    """Welcome or Finished client, plus a title bar, at 100% (scale=1) or 150%."""
+    client_w = round(497 * scale)
+    client_h = round(360 * scale)
+    title_h = round(28 * scale)
+    image = Image.new("RGBA", (client_w, title_h + client_h), BG)
+    draw = ImageDraw.Draw(image)
+    title_font = _font(SEMI, max(11, round(12 * scale)))
+    draw.text((round(12 * scale), round(6 * scale)), "Setup - ANZU", font=title_font, fill=WORD)
+
+    side_w = round(164 * scale)
+    side_h = round(314 * scale)
+    side = sidebar.resize((side_w, side_h), Image.Resampling.LANCZOS)
+    image.alpha_composite(side, (0, title_h))
+
+    content_x = round(176 * scale)
+    glow_size = round(64 * scale)
+    glow_sprite = glow.resize((glow_size, glow_size), Image.Resampling.LANCZOS)
+    image.alpha_composite(glow_sprite, (content_x, title_h + round(16 * scale)))
+
+    heading_font = _font(SEMI, max(13, round(16 * scale)))
+    body_font = _font(REGULAR, max(11, round(12 * scale)))
+    heading_y = title_h + round(84 * scale)
+    if kind == "welcome":
+        heading = "Welcome to ANZU"
+        body = "This will install ANZU on your computer.\nClick Next to continue, or Cancel to exit Setup."
+    else:
+        heading = "ANZU setup is complete"
+        body = "Setup has finished installing ANZU on your computer.\nClick Finish to exit Setup."
+    draw.text((content_x, heading_y), heading, font=heading_font, fill=WORD)
+    body_y = heading_y + round(36 * scale)
+    for line in body.split("\n"):
+        draw.text((content_x, body_y), line, font=body_font, fill=(*MUTED[:3], 230))
+        body_y += round(18 * scale)
+
+    # Button strip under the sidebar. Credit sits left of Back.
+    button_w = round(75 * scale)
+    button_h = round(23 * scale)
+    button_top = title_h + round(327 * scale)
+    gap = round(10 * scale)
+    cancel_left = client_w - gap - button_w
+    next_left = cancel_left - gap - button_w
+    back_left = next_left - button_w
+    button_font = _font(REGULAR, max(10, round(11 * scale)))
+    for left, caption, enabled in (
+        (back_left, "Back", False),
+        (next_left, "Next" if kind == "welcome" else "Finish", True),
+        (cancel_left, "Cancel", True),
+    ):
+        draw.rounded_rectangle(
+            (left, button_top, left + button_w, button_top + button_h),
+            radius=max(2, round(3 * scale)),
+            fill=PANEL,
+            outline=(*MUTED[:3], 80 if enabled else 40),
+        )
+        fill = (*WORD[:3], 230) if enabled else (*MUTED[:3], 120)
+        caption_w = button_font.getlength(caption)
+        draw.text(
+            (left + (button_w - caption_w) / 2, button_top + round(4 * scale)),
+            caption,
+            font=button_font,
+            fill=fill,
+        )
+
+    logo_size = round(LOGO_100 * scale)
+    logo_sprite = logo.resize((logo_size, logo_size), Image.Resampling.LANCZOS)
+    logo_left = round(10 * scale)
+    logo_top = button_top + (button_h - logo_size) // 2
+    image.alpha_composite(logo_sprite, (logo_left, logo_top))
+
+    credit_font = _font(REGULAR, max(9, round(11 * scale)))
+    text_left = logo_left + logo_size + round(8 * scale)
+    gap_before_back = round(SPONSOR_GAP_BEFORE_BACK * scale)
+    text_right_limit = back_left - gap_before_back
+    # ScaleY(14) in the installer: two lines match the 28px logo and stay centered.
+    line_h = round(14 * scale)
+    block_h = line_h * len(SPONSOR_LINES)
+    text_top = logo_top + (logo_size - block_h) // 2
+    for index, line in enumerate(SPONSOR_LINES):
+        line_width = credit_font.getlength(line)
+        if text_left + line_width > text_right_limit:
+            raise SystemExit(
+                f"Sponsor line does not fit before Back at {scale:.0%} DPI: {line!r} "
+                f"({line_width:.0f}px, limit {text_right_limit - text_left:.0f}px)"
+            )
+        draw.text(
+            (text_left, text_top + index * line_h),
+            line,
+            font=credit_font,
+            fill=(*MUTED[:3], 230),
+        )
+    return image
+
+
 def write_png(path: Path, image: Image.Image) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     image.save(path, format="PNG", optimize=True)
 
 
-def render_all(out_dir: Path, preview_dir: Path | None = None) -> None:
+def render_all(out_dir: Path, preview_dir: Path | None = None, logo_source: Path | None = None) -> None:
     version = app_version()
     frames = [render_glow_frame(index) for index in range(FRAME_COUNT)]
     glow_dir = out_dir / "glow"
@@ -307,6 +471,16 @@ def render_all(out_dir: Path, preview_dir: Path | None = None) -> None:
     for size in SMALL_SIZES:
         write_png(out_dir / f"wizard-small-{size}.png", render_small(size, peak))
 
+    source = find_logo_source(logo_source)
+    logos: dict[int, Image.Image] = {}
+    if source is not None:
+        logos = render_sponsor_logos(source, out_dir)
+    elif (out_dir / "sponsor" / "bgp-logo-100.png").is_file():
+        logos = {
+            LOGO_100: Image.open(out_dir / "sponsor" / "bgp-logo-100.png").convert("RGBA"),
+            LOGO_150: Image.open(out_dir / "sponsor" / "bgp-logo-150.png").convert("RGBA"),
+        }
+
     if preview_dir is not None:
         preview_dir.mkdir(parents=True, exist_ok=True)
         write_png(preview_dir / "wizard-large-100.png", render_large(202, 386, peak, version))
@@ -315,14 +489,34 @@ def render_all(out_dir: Path, preview_dir: Path | None = None) -> None:
         write_png(preview_dir / "wizard-small-150.png", render_small(97, peak))
         write_png(preview_dir / "glow-strip.png", glow_strip(frames))
         write_png(preview_dir / "glow-peak.png", peak)
+        if logos:
+            side_100 = render_large(164, 314, peak, version)
+            side_150 = render_large(246, 471, peak, version)
+            write_png(
+                preview_dir / "welcome-100.png",
+                render_wizard_page("welcome", 1.0, side_100, peak, logos[LOGO_100]),
+            )
+            write_png(
+                preview_dir / "welcome-150.png",
+                render_wizard_page("welcome", 1.5, side_150, peak, logos[LOGO_150]),
+            )
+            write_png(
+                preview_dir / "finished-100.png",
+                render_wizard_page("finished", 1.0, side_100, peak, logos[LOGO_100]),
+            )
+            write_png(
+                preview_dir / "finished-150.png",
+                render_wizard_page("finished", 1.5, side_150, peak, logos[LOGO_150]),
+            )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, default=ROOT, help="Directory for wizard PNGs")
     parser.add_argument("--preview-dir", type=Path, default=None, help="Optional preview sheet directory")
+    parser.add_argument("--logo", type=Path, default=None, help="Official Logo_black.png (not written into the asset tree)")
     args = parser.parse_args()
-    render_all(args.out, args.preview_dir)
+    render_all(args.out, args.preview_dir, args.logo)
 
 
 if __name__ == "__main__":

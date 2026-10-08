@@ -80,7 +80,7 @@ Name: "dl_expert27b"; Description: "Qwen3.5-27B Expert weights (high VRAM/RAM re
 [Files]
 ; Copy application tree from repo root (two levels up from this .iss file).
 ; Exclude heavy or machine-local dirs — bootstrap recreates them on first run.
-Source: "..\..\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*,.git\**,.venv\*,.venv\**,.vendor\*,.vendor\**,.pytest_cache\*,.pytest_cache\**,tests\*,tests\**,__pycache__\*,__pycache__\**,*\__pycache__\*,*\__pycache__\**,node_modules\*,node_modules\**,frontend\node_modules\*,frontend\node_modules\**,frontend\dist\*,frontend\dist\**,mcp\node_modules\*,mcp\node_modules\**,models\*,models\**,runtime\*,runtime\**,data\*,data\**,logs\*,logs\**,release\*,release\**,Releases\*,Releases\**,_release_upload\*,_release_upload\**,installer-build*.log,stage-desktop*.log,build-*.log,android\app\.cxx\*,android\app\.cxx\**,android\build\*,android\build\**,frontend\src-tauri\target\*,frontend\src-tauri\target\**,frontend\src-tauri\gen\*,frontend\src-tauri\sidecars\*,frontend\src-tauri\sidecars\**,frontend\src-tauri\gen\**,android\.gradle\*,android\.gradle\**,android\app\build\*,android\app\build\**,.codex-remote-attachments\*,.codex-remote-attachments\**,installer\windows\payload\*,installer\windows\payload\**,installer\windows\dist\*,installer\windows\dist\**,tools\license_manager\*,tools\license_manager\**,backend\app\licensing\manager_app.py,JarvisLicenseManager.exe,*.jarvis-license,issuer.key,issuer.pub,issuer.sqlite,Jarvis\*,Jarvis\**,*\Jarvis\*,*\Jarvis\**"
+Source: "..\..\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*,.git\**,.venv\*,.venv\**,.vendor\*,.vendor\**,.pytest_cache\*,.pytest_cache\**,tests\*,tests\**,__pycache__\*,__pycache__\**,*\__pycache__\*,*\__pycache__\**,node_modules\*,node_modules\**,frontend\node_modules\*,frontend\node_modules\**,frontend\dist\*,frontend\dist\**,mcp\node_modules\*,mcp\node_modules\**,models\*,models\**,runtime\*,runtime\**,data\*,data\**,logs\*,logs\**,release\*,release\**,Releases\*,Releases\**,_release_upload\*,_release_upload\**,installer-build*.log,stage-desktop*.log,build-*.log,android\app\.cxx\*,android\app\.cxx\**,android\build\*,android\build\**,frontend\src-tauri\target\*,frontend\src-tauri\target\**,frontend\src-tauri\gen\*,frontend\src-tauri\sidecars\*,frontend\src-tauri\sidecars\**,frontend\src-tauri\gen\**,android\.gradle\*,android\.gradle\**,android\app\build\*,android\app\build\**,.codex-remote-attachments\*,.codex-remote-attachments\**,installer\windows\payload\*,installer\windows\payload\**,installer\windows\dist\*,installer\windows\dist\**,tools\license_manager\*,tools\license_manager\**,backend\app\licensing\manager_app.py,JarvisLicenseManager.exe,*.jarvis-license,issuer.key,issuer.pub,issuer.sqlite,Logo_black.png,Logo_white.png,Jarvis\*,Jarvis\**,*\Jarvis\*,*\Jarvis\**"
 ; The broad runtime/dist exclusions above also match nested first-party packages.
 ; Include these explicitly: 1.5.0 omitted app.runtime and kept a stale portal build.
 Source: "..\..\backend\app\runtime\*"; DestDir: "{app}\backend\app\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__\*,__pycache__\**,*\__pycache__\*,*\__pycache__\**"
@@ -116,6 +116,10 @@ Source: "assets\glow\glow-12.png"; DestDir: "{tmp}"; Flags: dontcopy
 Source: "assets\glow\glow-13.png"; DestDir: "{tmp}"; Flags: dontcopy
 Source: "assets\glow\glow-14.png"; DestDir: "{tmp}"; Flags: dontcopy
 Source: "assets\glow\glow-15.png"; DestDir: "{tmp}"; Flags: dontcopy
+; Black Grid Publishing mark for the wizard corner. These are the downscaled
+; renders (about 28px and 42px). The 1.1 MB original is not part of Setup.
+Source: "assets\sponsor\bgp-logo-100.png"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "assets\sponsor\bgp-logo-150.png"; DestDir: "{tmp}"; Flags: dontcopy
 #ifndef SkipBootstrapModel
 ; Release distributions carry a local bootstrap brain. The multi-GB file is staged
 ; by build-installer.ps1 and is not committed to the repository.
@@ -218,6 +222,9 @@ var
   GlowTimerID: UINT_PTR;
   GlowCallback: NativeInt;
   GlowTicking: Boolean;
+  SponsorLogo: TBitmapImage;
+  SponsorLine1: TNewStaticText;
+  SponsorLine2: TNewStaticText;
 
 function SetTimer(hWnd: HWND; nIDEvent: UINT_PTR; uElapse: UINT; lpTimerFunc: NativeInt): UINT_PTR;
   external 'SetTimer@user32.dll stdcall';
@@ -603,10 +610,110 @@ begin
     GlowFinished.Visible := (CurPageID = wpFinished);
 end;
 
+procedure SponsorCreditClick(Sender: TObject);
+var
+  ErrorCode: Integer;
+begin
+  if not ShellExec('open', 'https://blackgridpublishing.com', '', '', SW_SHOWNORMAL, ewNoWait, ErrorCode) then
+    Log('Could not open https://blackgridpublishing.com (' + IntToStr(ErrorCode) + ').');
+end;
+
+function SponsorLogoFileName: String;
+begin
+  { 28px at 100% DPI, 42px at 150%. The larger file is 1:1 at 150%. }
+  if ScaleY(28) >= 40 then
+    Result := 'bgp-logo-150.png'
+  else
+    Result := 'bgp-logo-100.png';
+end;
+
+procedure PlaceSponsorLine(var Line: TNewStaticText; CaptionText: String;
+  LineLeft, LineTop, LineWidth, LineHeight: Integer);
+begin
+  Line := TNewStaticText.Create(WizardForm);
+  Line.Parent := WizardForm;
+  Line.Caption := CaptionText;
+  Line.Font.Name := 'Segoe UI';
+  Line.Font.Size := 8;
+  Line.Font.Color := AnzuMuted;
+  Line.StyleElements := [];
+  Line.ShowAccelChar := False;
+  { Width is the corner up to the gap before Back. WordWrap stays off so a
+    phrase cannot break in the middle at 100% or 150% DPI. }
+  Line.AutoSize := False;
+  Line.WordWrap := False;
+  Line.Left := LineLeft;
+  Line.Top := LineTop;
+  Line.Width := LineWidth;
+  Line.Height := LineHeight;
+  Line.Cursor := crHand;
+  Line.OnClick := @SponsorCreditClick;
+  Line.Hint := 'https://blackgridpublishing.com';
+  Line.ShowHint := True;
+  Line.Anchors := [akLeft, akBottom];
+end;
+
+procedure PlaceSponsorCredit;
+var
+  LogoSize, TextLeft, TextLimit, LineWidth, LineHeight, BlockTop: Integer;
+begin
+  { Bottom-left corner, in the strip under the sidebar art and left of Back.
+    Welcome, Finished, and the other pages share that corner. Select all and
+    the glow stay at the top of their pages. }
+  if SponsorLogo <> nil then
+    Exit;
+  try
+    ExtractTemporaryFile(SponsorLogoFileName);
+  except
+    Log('Black Grid Publishing mark missing; continuing without the sponsor credit.');
+    Exit;
+  end;
+
+  LogoSize := ScaleY(28);
+  SponsorLogo := TBitmapImage.Create(WizardForm);
+  SponsorLogo.Parent := WizardForm;
+  SponsorLogo.Stretch := True;
+  SponsorLogo.BackColor := AnzuBg;
+  SponsorLogo.Left := ScaleX(10);
+  SponsorLogo.Width := LogoSize;
+  SponsorLogo.Height := LogoSize;
+  SponsorLogo.Top := WizardForm.CancelButton.Top + (WizardForm.CancelButton.Height - LogoSize) div 2;
+  try
+    SponsorLogo.PngImage.LoadFromFile(ExpandConstant('{tmp}\') + SponsorLogoFileName);
+  except
+    Log('Black Grid Publishing mark failed to load; continuing without the sponsor credit.');
+    SponsorLogo.Visible := False;
+    Exit;
+  end;
+  SponsorLogo.Cursor := crHand;
+  SponsorLogo.OnClick := @SponsorCreditClick;
+  SponsorLogo.Hint := 'https://blackgridpublishing.com';
+  SponsorLogo.ShowHint := True;
+  SponsorLogo.Anchors := [akLeft, akBottom];
+
+  TextLeft := SponsorLogo.Left + LogoSize + ScaleX(8);
+  { 16 design pixels of clear space before Back. The line break replaces the
+    em dash, so the credit does not depend on that glyph. }
+  TextLimit := WizardForm.BackButton.Left - ScaleX(16);
+  if TextLimit > TextLeft then
+    LineWidth := TextLimit - TextLeft
+  else
+    LineWidth := ScaleX(180);
+  LineHeight := ScaleY(14);
+  BlockTop := SponsorLogo.Top + (LogoSize - (LineHeight * 2)) div 2;
+  PlaceSponsorLine(SponsorLine1, 'Made in the Netherlands',
+    TextLeft, BlockTop, LineWidth, LineHeight);
+  PlaceSponsorLine(SponsorLine2, 'Sponsored by Black Grid Publishing',
+    TextLeft, BlockTop + LineHeight, LineWidth, LineHeight);
+  SponsorLogo.BringToFront;
+  SponsorLine1.BringToFront;
+  SponsorLine2.BringToFront;
+end;
+
 procedure PrepareAnzuWizard;
 begin
   { Silent and very-silent installs keep /TASKS and /COMPONENTS exactly as
-    Inno parsed them. No checkbox, no theme writes, no timer. }
+    Inno parsed them. No checkbox, no theme writes, no timer, no sponsor link. }
   if WizardSilent then
     Exit;
 
@@ -618,6 +725,7 @@ begin
   if WizardForm.ComponentsList.Items.Count > 0 then
     CreateSelectAll(WizardForm.ComponentsList, ComponentsSelectAll);
   StartAnzuGlow;
+  PlaceSponsorCredit;
 end;
 
 procedure CurPageChanged(CurPageID: Integer);

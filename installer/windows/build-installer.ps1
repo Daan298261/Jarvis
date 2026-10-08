@@ -148,6 +148,19 @@ foreach ($asset in [regex]::Matches($portalHtml, '/assets/[^" ]+\.(?:js|css)')) 
     if (-not (Test-Path $assetPath)) { throw "Portal asset missing: $assetPath" }
 }
 
+$sponsor100 = Join-Path $ScriptDir "assets\sponsor\bgp-logo-100.png"
+$sponsor150 = Join-Path $ScriptDir "assets\sponsor\bgp-logo-150.png"
+foreach ($asset in @($sponsor100, $sponsor150)) {
+    if (-not (Test-Path -LiteralPath $asset)) { throw "Sponsor logo missing: $asset" }
+    $bytes = (Get-Item -LiteralPath $asset).Length
+    if ($bytes -gt 65536) { throw "Sponsor logo is too large to ship ($bytes bytes): $asset" }
+}
+foreach ($original in @("Logo_black.png", "Logo_white.png")) {
+    if (Test-Path -LiteralPath (Join-Path $ScriptDir "assets\sponsor\$original")) {
+        throw "Full-size $original must stay out of the installer asset tree."
+    }
+}
+
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 Write-Host "Compiling $Iss ..."
 $defines = @()
