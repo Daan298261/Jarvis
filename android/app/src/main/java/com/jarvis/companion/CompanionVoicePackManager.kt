@@ -122,8 +122,21 @@ class CompanionVoicePackManager(
     }
 
     suspend fun refreshStatus() = withContext(Dispatchers.IO) {
+        migrateTtsSelection()
+        pruneUnknownPackDirs()
         refreshOne(selectedSttPack(), sttStatusRef)
         refreshOne(selectedTtsPack(), ttsStatusRef)
+    }
+
+    fun pruneUnknownPackDirs() {
+        val known = catalog.map { it.id }.toHashSet()
+        val dirs = packRoot.listFiles() ?: return
+        for (dir in dirs) {
+            if (!dir.isDirectory) continue
+            if (dir.name in known) continue
+            dir.walkTopDown().filter { it.isFile }.forEach { digestCache.invalidate(it) }
+            dir.deleteRecursively()
+        }
     }
 
     private fun refreshOne(pack: CompanionVoicePack?, statusRef: AtomicReference<String>) {

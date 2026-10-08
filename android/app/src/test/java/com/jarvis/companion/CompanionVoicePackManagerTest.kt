@@ -14,6 +14,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(RobolectricTestRunner::class)
 class CompanionVoicePackManagerTest {
@@ -130,6 +131,84 @@ class CompanionVoicePackManagerTest {
                 .getString("selected_tts_pack_id", ""),
         )
         assertTrue(CompanionVoicePackCatalog.canSynthesize(migrated.selectedTtsPack()!!))
+    }
+
+    @Test
+    fun refreshPrunesStrandedPiperDirAndDropsStorage() {
+        val piper = File(context.filesDir, "voice-packs/piper-en-lessac-medium")
+        piper.mkdirs()
+        val leftover = File(piper, "en_US-lessac-medium.onnx")
+        leftover.writeBytes(ByteArray(2048) { 1 })
+        val digest = "ab".repeat(32)
+        manager.digestCache.remember(leftover, digest)
+        val digestPrefs = context.getSharedPreferences("companion_voice_digest", Context.MODE_PRIVATE)
+        val persistKey = "digest:${leftover.absolutePath}"
+        assertTrue(digestPrefs.contains(persistKey))
+        val before = manager.storageBytes()
+        assertTrue(before >= leftover.length())
+        kotlinx.coroutines.runBlocking { manager.refreshStatus() }
+        assertFalse(piper.exists())
+        assertTrue(manager.storageBytes() < before)
+        assertFalse(digestPrefs.contains(persistKey))
+    }
+
+    @Test
+    fun synthesizeLoadsEngineOnceAcrossChunks() {
+        val loads = AtomicInteger(0)
+        val engine = PocketTtsEngine(
+            runtimeAvailable = { true },
+            nativeLoad = { _, _ ->
+                loads.incrementAndGet()
+                ""
+            },
+            nativeSynthesize = { audibleWav() },
+        )
+        val local = CompanionVoicePackManager(context, ttsEngine = engine)
+        seedReadyTts(local)
+        val chunks = SpeakableTtsChunker.chunk(
+            "First sentence for the load-once check. Second sentence still in the same pack. Third sentence closes it.",
+        )
+        assertTrue(chunks.size >= 2)
+        kotlinx.coroutines.runBlocking {
+            chunks.forEach { local.synthesize(it) }
+        }
+        assertEquals(1, loads.get())
+    }
+
+    private fun seedReadyTts(target: CompanionVoicePackManager) {
+        val pack = target.selectedTtsPack()!!
+        val arts = JSONArray()
+        pack.artifacts.forEach { art ->
+            val bytes = "fixture-${art.filename}".toByteArray()
+            val file = target.artifactFile(pack, art)
+            file.parentFile?.mkdirs()
+            file.writeBytes(bytes)
+            arts.put(
+                JSONObject()
+                    .put("filename", art.filename)
+                    .put("url", art.url)
+                    .put("sha256", sha256Hex(bytes))
+                    .put("size_bytes", bytes.size.toLong()),
+            )
+        }
+        target.updateCatalog(
+            JSONObject().put(
+                "packs",
+                JSONArray().put(pack.toJson().put("artifacts", arts).put("sha256", sha256Hex(byteArrayOf(1)))),
+            ),
+        )
+    }
+
+    private fun audibleWav(): ByteArray {
+        val samples = 240
+        val wav = ByteArray(44 + samples * 2)
+        var i = 44
+        while (i + 1 < wav.size) {
+            wav[i] = 0
+            wav[i + 1] = 40
+            i += 2
+        }
+        return wav
     }
 
     private fun sha256Hex(bytes: ByteArray): String =
