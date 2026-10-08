@@ -77,8 +77,8 @@ async def publish_owner_text(
     settings = load_settings()
     want_speech = should_speak_chat_reply(settings) if speak is None else bool(speak)
     tts_id = None
-    # Offset is raw front length into a merged `{front}\n\nDeeper result\n{worker}`
-    # string; always strip the merge label so TTS never speaks "Deeper result".
+    # Offset is the already-spoken front length. Continuation text follows a blank
+    # line. A legacy section heading, if an older transcript still has one, is stripped.
     remainder = speakable_worker_remainder(cleaned, tts_char_offset)
     if want_speech and remainder:
         tts_id = enqueue_chat_tts(

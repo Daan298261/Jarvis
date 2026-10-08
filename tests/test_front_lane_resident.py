@@ -261,7 +261,8 @@ async def test_worker_starts_during_front_reply_and_speaks_after_it(jarvis_env, 
 
     async def worker_chat_stream(*_args, **_kwargs):
         worker_started.set()
-        await asyncio.sleep(0.02)
+        # Sentence lands after the ack hold, so the front line is still spoken first.
+        await asyncio.sleep(0.25)
         yield "It will be mild."
 
     async def no_messages(*_args, **_kwargs):
@@ -280,6 +281,7 @@ async def test_worker_starts_during_front_reply_and_speaks_after_it(jarvis_env, 
         spoken.append(text)
         return f"tts-{len(spoken)}"
 
+    monkeypatch.setattr("app.agent.front_responder.ACK_HOLD_SECONDS", 0.05)
     FRONT_RUNTIME.mark_for_tests(distinct=True, provider=front)
     MANAGER.state.loaded = True
     MANAGER.provider = front

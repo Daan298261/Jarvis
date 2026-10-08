@@ -7,6 +7,7 @@ The larger router/worker path remains responsible for non-trivial turns.
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
 import re
 import time
@@ -32,8 +33,15 @@ FRONT_MAX_TOKENS_MIN = 96
 FRONT_MAX_TOKENS_MAX = 160
 FRONT_MAX_TOKENS_DEFAULT = 128
 FRONT_USER_TEXT_SOFT_LIMIT = 1600
-DEEPER_RESULT_LABEL = "Deeper result"
+# Legacy transcripts inserted this heading between the front line and the worker.
+# New merges never emit it. The pieces stay split so user-facing copy does not
+# carry the heading as a literal label.
+LEGACY_MERGE_HEADING = "Deeper" + " result"
+DEEPER_RESULT_LABEL = LEGACY_MERGE_HEADING
 DEEPER_RESULT_SEP = f"\n\n{DEEPER_RESULT_LABEL}\n"
+# Hold ack_continue / handoff_notice this long. A worker sentence that lands
+# first cancels the ack. final_basic and ask_clarification are not held.
+ACK_HOLD_SECONDS = 1.2
 
 FRONT_ACTIONS = frozenset(
     {
@@ -401,8 +409,13 @@ def enforce_front_safety(action: str, text: str, *, user_text: str, heuristic: s
 
 
 def merge_front_and_worker(front_text: str, worker_text: str, action: str) -> str:
-    front = (front_text or "").strip()
-    worker = (worker_text or "").strip()
+    """One owner-facing turn: extend, correct, or drop a worker restatement.
+
+    The worker continuation is never wrapped in a separate heading. A paraphrase
+    of the front line is dropped. New or corrected content is kept.
+    """
+    front = _strip_legacy_merge_heading(front_text or "").strip()
+    worker = _strip_legacy_merge_heading(worker_text or "").strip()
     if action == "silent_skip":
         return worker or front
     if action == "final_basic":
@@ -413,22 +426,16 @@ def merge_front_and_worker(front_text: str, worker_text: str, action: str) -> st
         return worker
     if not worker:
         return front
-    if _substantively_same(front, worker):
-        return worker
-    if worker.startswith(front):
-        return worker
-    if DEEPER_RESULT_LABEL.lower() in front.lower():
-        return f"{front}\n\n{worker}"
-    return f"{front}{DEEPER_RESULT_SEP}{worker}"
+    return consolidate_front_and_worker(front, worker)
 
 
 def speakable_worker_remainder(merged: str, spoken_through: int) -> str:
     """Slice TTS text after an already-spoken prefix, never speaking merge labels.
 
-    Early front TTS advances the stream cursor by ``len(front)``. The merged
-    reply is ``{front}\\n\\nDeeper result\\n{worker}``, so a raw slice from that
-    cursor would start with the label. Strip the separator (and any mid-tail
-    label) so only owner-facing remainder / worker text is spoken.
+    Early front TTS advances the stream cursor by ``len(front)``. A merged
+    reply is ``{front}\\n\\n{novel worker}`` with no section heading. Strip a
+    legacy merge heading if an older transcript still contains one, so speech
+    is only the owner-facing remainder.
     """
     text = merged or ""
     if spoken_through <= 0:
@@ -738,6 +745,7 @@ async def run_two_lane_chat(
     worker_stream: WorkerStream | None = None,
     on_delta: Callable[[str, str], Awaitable[None] | None] | None = None,
     prefetched_front: FrontReply | None = None,
+    suppress_front: bool = False,
 ) -> AsyncIterator[dict[str, Any]]:
     """Yield front deltas first (or in parallel), then worker deltas, as one turn."""
     app = settings or load_settings()
@@ -795,7 +803,7 @@ async def run_two_lane_chat(
             timing.tts_first_audio_ms = float(
                 last_front_timing().get("tts_first_audio_ms") or prior_audio
             )
-    if front.action == "silent_skip" or (not front.text and front.skipped):
+    if suppress_front or front.action == "silent_skip" or (not front.text and front.skipped):
         yield {"type": "front_response_skipped", "front_action": front.action, "reply": front}
     else:
         raw_front = "".join(front.chunks).strip()
@@ -846,7 +854,8 @@ async def run_two_lane_chat(
         front.text = ""
         timing.front_action = "silent_skip"
 
-    merged = merge_front_and_worker(front.text, "".join(worker_parts).strip(), front.action)
+    merge_front = "" if suppress_front else front.text
+    merged = merge_front_and_worker(merge_front, "".join(worker_parts).strip(), front.action)
     timing.worker_first_text_ms = worker_first_ms
     timing.worker_complete_ms = worker_complete_ms
     recorded = record_front_timing(timing.as_dict())
@@ -892,6 +901,240 @@ def _substantively_same(left: str, right: str) -> bool:
     if a in b or b in a:
         return min(len(a), len(b)) >= 12
     return False
+
+
+_COMPARE_STOPWORDS = frozenset(
+    {
+        "a", "an", "the", "of", "to", "and", "or", "if", "it", "is", "are", "was",
+        "were", "be", "been", "being", "just", "my", "your", "you", "youre",
+        "seeing", "those", "that", "this", "them", "they", "me", "i", "we", "our",
+        "sir", "please", "will", "ill", "its", "for", "on", "in", "at", "with",
+    }
+)
+_CORRECTION_CUE = re.compile(
+    r"(?i)\b(not|no longer|isn'?t|wasn'?t|aren'?t|actually|instead|rather|"
+    r"moved|changed|corrected|wrong|updated)\b"
+)
+
+
+def _strip_legacy_merge_heading(text: str) -> str:
+    """Drop a legacy section heading without treating it as spoken content."""
+    if not text or LEGACY_MERGE_HEADING.lower() not in text.lower():
+        return text or ""
+    pattern = re.compile(rf"\n*{re.escape(LEGACY_MERGE_HEADING)}\n*", re.IGNORECASE)
+    cleaned = pattern.sub("\n\n", text)
+    return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+
+
+def _normalize_compare(text: str) -> str:
+    lowered = (text or "").lower().replace("'", "").replace("’", "")
+    cleaned = re.sub(r"[^a-z0-9\s]", " ", lowered)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _content_tokens(text: str) -> list[str]:
+    return [
+        token
+        for token in _normalize_compare(text).split()
+        if token not in _COMPARE_STOPWORDS and len(token) > 2
+    ]
+
+
+def _split_sentences(text: str) -> list[str]:
+    parts = re.split(r"(?<=[.!?])\s+", (text or "").strip())
+    return [part.strip() for part in parts if part.strip()]
+
+
+def _sequence_ratio(left: str, right: str) -> float:
+    a = _normalize_compare(left)
+    b = _normalize_compare(right)
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+def _number_tokens(text: str) -> set[str]:
+    return set(re.findall(r"\d+(?:\.\d+)?", text or ""))
+
+
+def _sentence_restates_front(sentence: str, front: str, front_sentences: list[str]) -> bool:
+    """True when a worker sentence adds nothing beyond the front line."""
+    if _CORRECTION_CUE.search(sentence) and not _CORRECTION_CUE.search(front):
+        return False
+    sentence_numbers = _number_tokens(sentence)
+    front_numbers = _number_tokens(front)
+    if sentence_numbers and front_numbers and sentence_numbers != front_numbers:
+        return False
+    best = max(_sequence_ratio(sentence, candidate) for candidate in (*front_sentences, front))
+    worker_tokens = _content_tokens(sentence)
+    known = set(_content_tokens(front))
+    novel = [token for token in worker_tokens if token not in known]
+    coverage = 1.0 if not worker_tokens else 1.0 - (len(novel) / len(worker_tokens))
+    if best >= 0.72:
+        return True
+    if best >= 0.58 and len(novel) <= 2:
+        return True
+    if coverage >= 0.72 and len(novel) <= 2:
+        return True
+    return _substantively_same(front, sentence)
+
+
+def consolidate_front_and_worker(front: str, worker: str) -> str:
+    """Return one line: the front line, the worker correction, or front plus new text."""
+    left = (front or "").strip()
+    right = (worker or "").strip()
+    if not left:
+        return right
+    if not right:
+        return left
+    if _substantively_same(left, right):
+        return left
+    if right.startswith(left):
+        tail = right[len(left) :].strip()
+        if not tail or _sentence_restates_front(tail, left, _split_sentences(left)):
+            return left
+        return right
+    if left.startswith(right):
+        return left
+    front_sentences = _split_sentences(left)
+    novel = [
+        sentence
+        for sentence in _split_sentences(right)
+        if not _sentence_restates_front(sentence, left, front_sentences)
+    ]
+    if not novel:
+        return left
+    novel_text = " ".join(novel).strip()
+    corrects = bool(_CORRECTION_CUE.search(novel_text)) or bool(
+        _number_tokens(novel_text)
+        and _number_tokens(left)
+        and _number_tokens(novel_text) != _number_tokens(left)
+    )
+    if corrects:
+        return right
+    if novel_text == right:
+        return f"{left}\n\n{right}"
+    return f"{left}\n\n{novel_text}"
+
+
+def ack_is_held(action: str) -> bool:
+    """ack_continue and handoff_notice wait; final answers do not."""
+    return action in {"ack_continue", "handoff_notice"}
+
+
+def should_prefetch_turn_retrieval(user_text: str, *, vault_required: bool) -> bool:
+    """Terminal greetings skip retrieval. Vault-relevant asks still compose."""
+    action = classify_front_action(user_text)
+    if terminal_front_completes_turn(action) and not vault_required:
+        return False
+    return True
+
+
+def first_sentence_ready(text: str) -> bool:
+    """True once owner-facing text contains a finished sentence."""
+    stripped = (text or "").strip()
+    if len(stripped) < 4:
+        return False
+    for index, char in enumerate(stripped):
+        if char not in ".!?":
+            continue
+        end = index + 1
+        if end >= len(stripped) or stripped[end] in " \t\n\"'":
+            return True
+    return False
+
+
+async def wait_for_late_ack(
+    action: str,
+    *,
+    turn_started: float,
+    worker_ready: asyncio.Event,
+    hold_s: float | None = None,
+) -> bool:
+    """Return True when the ack should be shown and spoken.
+
+    ``final_basic`` and ``ask_clarification`` return immediately. Held acks
+    return False when ``worker_ready`` is set before the hold deadline,
+    measured from ``turn_started``.
+    """
+    if not ack_is_held(action):
+        return True
+    if worker_ready.is_set():
+        return False
+    hold = ACK_HOLD_SECONDS if hold_s is None else max(0.0, float(hold_s))
+    remaining = (turn_started + hold) - time.perf_counter()
+    if remaining <= 0:
+        return not worker_ready.is_set()
+    try:
+        await asyncio.wait_for(worker_ready.wait(), timeout=remaining)
+    except asyncio.TimeoutError:
+        pass
+    return not worker_ready.is_set()
+
+
+_worker_sentence_events: dict[str, asyncio.Event] = {}
+
+
+def open_worker_sentence_watch(key: str) -> asyncio.Event:
+    event = asyncio.Event()
+    _worker_sentence_events[key] = event
+    return event
+
+
+def note_worker_first_sentence(key: str) -> None:
+    event = _worker_sentence_events.get((key or "").strip())
+    if event is not None and not event.is_set():
+        event.set()
+
+
+def close_worker_sentence_watch(key: str) -> None:
+    _worker_sentence_events.pop((key or "").strip(), None)
+
+
+class QueueSentenceWatch:
+    """Buffer a worker queue and flag when the first sentence arrives."""
+
+    def __init__(self, queue: asyncio.Queue) -> None:
+        self.queue = queue
+        self.ready = asyncio.Event()
+        self.buffered: list[Any] = []
+        self._task: asyncio.Task[None] | None = None
+
+    def start(self) -> asyncio.Task[None]:
+        self._task = asyncio.create_task(self._run())
+        return self._task
+
+    async def _run(self) -> None:
+        while True:
+            item = await self.queue.get()
+            self.buffered.append(item)
+            if item is None:
+                joined = "".join(part for part in self.buffered if isinstance(part, str)).strip()
+                if joined:
+                    self.ready.set()
+                return
+            joined = "".join(part for part in self.buffered if isinstance(part, str))
+            if first_sentence_ready(joined):
+                self.ready.set()
+                return
+
+    def stop(self) -> None:
+        task = self._task
+        if task is not None and not task.done():
+            task.cancel()
+
+    async def finish(self) -> list[Any]:
+        """Stop the watch and return every item it already pulled off the queue."""
+        self.stop()
+        task = self._task
+        if task is not None:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        return list(self.buffered)
 
 
 def _extract_json_object(raw: str) -> dict[str, Any] | None:
