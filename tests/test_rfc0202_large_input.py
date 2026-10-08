@@ -5,6 +5,7 @@ import pytest
 
 from app.inference.context_window import extract_loaded_n_ctx
 from app.inference.large_input import reduce_user_text, retain_input
+from app.inference.large_input import sections
 from app.inference.lmstudio_context import admitted
 from app.inference.profiles import PROFILES
 from app.providers.base import ChatMessage, ChatResult
@@ -12,6 +13,15 @@ from app.providers.base import ChatMessage, ChatResult
 
 def test_quick_profile_16k():
     assert PROFILES['fast'].context_size == 16384
+
+
+def test_unicode_sections_are_lossless_and_byte_bounded():
+    from app.inference.prompt_budget import estimate_text_tokens
+    text = '🦅世界abc' * 2000
+    parts = sections(text, 1365)
+    assert ''.join(parts) == text
+    assert all(len(part.encode('utf-8')) <= 1365 for part in parts)
+    assert estimate_text_tokens(text) >= 10000
 
 
 def test_live_config_and_unloaded_catalog():

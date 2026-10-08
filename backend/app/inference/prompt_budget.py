@@ -98,7 +98,9 @@ def estimate_text_tokens(text: str, *, chars_per_token: int = CHARS_PER_TOKEN) -
     """Conservative fallback when no backend tokenizer is available."""
     if not text:
         return 0
-    return max(1, len(text) // max(1, chars_per_token))
+    ascii_count = len(text.encode("ascii", errors="ignore"))
+    non_ascii_bytes = len(text.encode("utf-8")) - ascii_count
+    return max(1, ascii_count // max(1, chars_per_token) + non_ascii_bytes)
 
 
 def estimate_messages_tokens(messages: Iterable[ChatMessage]) -> int:

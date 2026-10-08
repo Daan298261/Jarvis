@@ -39,7 +39,13 @@ async def grow_local_instance(settings, target: int, identifier: str) -> int | N
             if result.returncode:
                 raise RuntimeError(result.stderr or result.stdout)
             return result.stdout
-        return await asyncio.to_thread(execute)
+        pending = asyncio.create_task(asyncio.to_thread(execute))
+        try:
+            return await asyncio.shield(pending)
+        except asyncio.CancelledError:
+            # A CLI load can outlive cancellation. Finish it before restoring the slot.
+            await pending
+            raise
 
     async with _resize_lock:
         try:
@@ -86,8 +92,8 @@ async def grow_local_instance(settings, target: int, identifier: str) -> int | N
             check = next((r for r in json.loads(await run("ps", "--json")) if r.get("identifier") == identifier), {})
             if check.get("status") != "idle" or check.get("queued", 0):
                 return None
-            await run("unload", identifier)
             try:
+                await run("unload", identifier)
                 await run("load", key, "--identifier", identifier, "--gpu", "max", "--parallel", 1,
                           "--context-length", chosen, "--yes")
                 loaded = next(r for r in json.loads(await run("ps", "--json")) if r.get("identifier") == identifier)
