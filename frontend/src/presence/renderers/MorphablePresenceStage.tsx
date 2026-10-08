@@ -131,7 +131,7 @@ export function MorphablePresenceStage({
       canvas, alpha: true, antialias: false,
       powerPreference: efficient ? "low-power" : "high-performance",
     })
-    renderer.setClearColor(0x000000, 1)
+    renderer.setClearColor(0x000000, 0)
     renderer.toneMapping = THREE.ReinhardToneMapping
     renderer.toneMappingExposure = 0.82
     const scene = new THREE.Scene()
@@ -373,8 +373,9 @@ export function MorphablePresenceStage({
       uniforms.uLattice.value = system.morphValue()
       system.setGalaxy(galaxyOn)
       system.syncStars(animationTime, reduced ? 0 : 1)
-      const clear = galaxyOn || current.transparentBackdrop
-      renderer.setClearColor(0x000000, clear ? 0 : 1)
+      // Alpha stays 0 now that the canvas is unmasked and chat chrome no longer
+      // backdrop-filters it. An opaque black clear is what failed WebView2 tiles paint.
+      renderer.setClearColor(0x000000, 0)
       const meterNow = galaxyOn && (phase === "speaking" || phase === "listening") ? readVoiceMeter() : null
       const speechLevel = !reduced && meterNow && meterNow.attached && meterNow.kind === "tts" && phase === "speaking"
         ? THREE.MathUtils.clamp(meterNow.level, 0, 1)
