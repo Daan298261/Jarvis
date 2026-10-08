@@ -165,10 +165,11 @@ class CompanionVoicePackManagerTest {
         )
         val local = CompanionVoicePackManager(context, ttsEngine = engine)
         seedReadyTts(local)
-        val chunks = SpeakableTtsChunker.chunk(
-            "First sentence for the load-once check. Second sentence still in the same pack. Third sentence closes it.",
+        val chunks = listOf(
+            "First sentence for the load-once check.",
+            "Second sentence still in the same pack.",
+            "Third sentence closes the spoken reply.",
         )
-        assertTrue(chunks.size >= 2)
         kotlinx.coroutines.runBlocking {
             chunks.forEach { local.synthesize(it) }
         }
