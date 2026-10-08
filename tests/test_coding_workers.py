@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from app.agent.coding_workers import (
     coding_worker_catalog,
     format_route_prompt,
+    format_routing_block,
     list_coding_routes,
     record_coding_route,
     route_software_task,
@@ -160,3 +161,20 @@ def test_coding_workers_endpoint(jarvis_env):
     assert routed.status_code == 200
     assert routed.json()["route"]["independent_verification_required"] is True
     assert routed.json()["route"]["selected_worker"] in {"local-jarvis-coding", "native-tools"}
+
+
+def test_format_routing_block_is_empty_without_a_route():
+    assert format_routing_block(None) == ""
+    assert format_routing_block({}) == ""
+    block = format_routing_block(
+        {
+            "complexity": 12,
+            "tier": 0,
+            "tier_name": "native",
+            "intended_worker": "native-tools",
+            "execute_worker": "native-tools",
+            "reason": "deterministic",
+        }
+    )
+    assert block.startswith("Software-development routing:")
+    assert "native-tools" in block

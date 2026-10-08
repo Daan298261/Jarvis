@@ -575,17 +575,17 @@ def tool_permission_error(tool_name: str, arguments: dict[str, Any] | None = Non
 
 
 _SPOKEN_ASKS: dict[str, str] = {
-    "network.internet": "Sir, I need your permission to search the internet. Do you grant it?",
-    "network.local": "Sir, I need your permission to use the local network. Do you grant it?",
-    "computer.this_device": "Sir, I need your permission to use this computer. Do you grant it?",
-    "computer.worker_nodes": "Sir, I need your permission to use a worker-node computer. Do you grant it?",
-    "computer.rdp": "Sir, I need your permission to open Remote Desktop. Do you grant it?",
-    "cyber.hexstrike": "Sir, I need your permission to use the HexStrike suite. Do you grant it?",
-    "blue.static_rules": "Sir, I need your permission to apply blue-team static rules. Do you grant it?",
-    "blue.active_response": "Sir, I need your permission for blue-team active response. Do you grant it?",
-    "blue.isolate_device": "Sir, I need your permission to plan isolating a device. Do you grant it?",
-    "red.entry": "Sir, red-team entry is a permission flag only. Do you grant it?",
-    "red.exploration": "Sir, red-team exploration is a permission flag only. Do you grant it?",
+    "network.internet": "I need your permission to search the internet. Do you grant it?",
+    "network.local": "I need your permission to use the local network. Do you grant it?",
+    "computer.this_device": "I need your permission to use this computer. Do you grant it?",
+    "computer.worker_nodes": "I need your permission to use a worker-node computer. Do you grant it?",
+    "computer.rdp": "I need your permission to open Remote Desktop. Do you grant it?",
+    "cyber.hexstrike": "I need your permission to use the HexStrike suite. Do you grant it?",
+    "blue.static_rules": "I need your permission to apply blue-team static rules. Do you grant it?",
+    "blue.active_response": "I need your permission for blue-team active response. Do you grant it?",
+    "blue.isolate_device": "I need your permission to plan isolating a device. Do you grant it?",
+    "red.entry": "red-team entry is a permission flag only. Do you grant it?",
+    "red.exploration": "red-team exploration is a permission flag only. Do you grant it?",
 }
 
 _DENY_RE = re.compile(
@@ -604,9 +604,12 @@ _ALLOW_RE = re.compile(
 
 def spoken_prompt_for_permission(permission_id: str, pending: list[str] | None = None) -> str:
     """Original household-aide ask. Not a copyrighted character line."""
-    primary = _SPOKEN_ASKS.get(permission_id) or (
-        f"Sir, I need your permission for {permission_id.replace('.', ' ')}. Do you grant it?"
+    from ..tts.persona_speech import apply_leading_vocative
+
+    body = _SPOKEN_ASKS.get(permission_id) or (
+        f"I need your permission for {permission_id.replace('.', ' ')}. Do you grant it?"
     )
+    primary = apply_leading_vocative(body)
     extra = [item for item in (pending or []) if item != permission_id]
     if extra:
         return primary.replace(" Do you grant it?", " Further permissions are listed on screen. Do you grant it?")
@@ -666,12 +669,16 @@ def confirmation_payload_for_tool(
         payload["kind"] = "destructive" if irreversible else "confirm"
         payload["title"] = "Approve this action"
         payload["detail"] = f"Jarvis wants to run {name}."
+        from ..tts.persona_speech import apply_leading_vocative
+
         if irreversible:
-            payload["spoken_prompt"] = (
-                "Sir, this can delete or irreversibly change files. Do you approve?"
+            payload["spoken_prompt"] = apply_leading_vocative(
+                "this can delete or irreversibly change files. Do you approve?"
             )
         else:
-            payload["spoken_prompt"] = f"Sir, I need your permission to run {name}. Do you grant it?"
+            payload["spoken_prompt"] = apply_leading_vocative(
+                f"I need your permission to run {name}. Do you grant it?"
+            )
         payload["voice_reply_hint"] = "Say yes or no."
     return payload
 

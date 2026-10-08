@@ -49,7 +49,7 @@ from .prompt_budget import (
     recover_context_after_overflow,
 )
 from .request_lease import RequestLease
-from .stream_deadlines import compute_chat_stream_deadlines
+from .stream_deadlines import compute_chat_call_deadline_ms, compute_chat_stream_deadlines
 
 
 def resolve_vision(settings: AppSettings, requested: bool | None = None) -> bool:
@@ -506,6 +506,7 @@ class InferenceManager:
                     max_tokens=max_tokens,
                     thinking=thinking,
                     extra=extra_payload,
+                    **self._chat_call_budget(app_settings, prepared),
                 )
             except APIStatusError as exc:
                 if is_n_keep_overflow(getattr(exc, "body", None)) or is_n_keep_overflow(exc):
@@ -536,6 +537,7 @@ class InferenceManager:
                         max_tokens=max_tokens,
                         thinking=thinking,
                         extra=extra_payload,
+                        **self._chat_call_budget(app_settings, prepared),
                     )
                 if is_context_overflow(exc) and overflow_retries < 1:
                     overflow_retries += 1
@@ -551,6 +553,19 @@ class InferenceManager:
                     if recovered:
                         continue
                 raise
+
+    def _chat_call_budget(self, settings: AppSettings, messages: list[ChatMessage]) -> dict[str, Any]:
+        """Deadline for one non-streaming completion, scaled like the stream budgets."""
+        prompt_tokens = estimate_prompt_tokens(messages)
+        return {
+            "call_deadline_ms": compute_chat_call_deadline_ms(
+                settings.inference,
+                prompt_tokens=prompt_tokens,
+                prompt_tps=self.state.prompt_tps,
+            ),
+            "stream_lane": "worker",
+            "prompt_token_estimate": prompt_tokens,
+        }
 
     def _chat_stream_deadlines(self, settings: AppSettings, messages: list[ChatMessage]) -> dict[str, Any]:
         prompt_tokens = estimate_prompt_tokens(messages)

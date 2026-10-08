@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
@@ -107,7 +108,9 @@ async def laya_status() -> dict[str, Any]:
 async def laya_enable(body: LayaEnableIn | None = None) -> dict[str, Any]:
     warm = True if body is None else bool(body.warm)
     try:
-        return laya_runtime.enable(warm=warm, allow_fixture=True)
+        # Fixture installs exist for tests. A production enable must refuse them.
+        allow_fixture = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+        return laya_runtime.enable(warm=warm, allow_fixture=allow_fixture)
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -82,6 +82,7 @@ def test_python_failure_prefers_filesystem_copy():
     assert options[0] == "filesystem"
     assert options[1] == "mcp_call"
     assert "screenshot" in options
+    assert options.index("screenshot") < options.index("desktop") < options.index("cua")
     hint = recovery_hint("python", "ERROR: Unknown action run_code>\nimport os")
     assert "filesystem action=copy" in hint
 

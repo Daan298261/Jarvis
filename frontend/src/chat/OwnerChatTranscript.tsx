@@ -67,7 +67,7 @@ export function OwnerChatTranscript({
   const [thoughtOpen, setThoughtOpen] = useState(false)
   const [internalOpen, setInternalOpen] = useState(false)
   const running = isTaskRunning(status)
-  const liveAssistant = useLiveAssistantPreview(taskId, running)
+  const livePreview = useLiveAssistantPreview(taskId, running)
   const confirmation = useMemo(() => parseConfirmationPayload(confirmation_payload), [confirmation_payload])
   const workEvents = useMemo(() => filterWorkEvents(events), [events])
   const thoughtEvents = useMemo(() => filterThoughtEvents(events), [events])
@@ -81,11 +81,19 @@ export function OwnerChatTranscript({
   const turns = useMemo(
     () =>
       attachThreadTimestamps(
-        visibleChatTurns({ prompt, result, error, messages, pending, liveAssistant }),
+        visibleChatTurns({
+          prompt,
+          result,
+          error,
+          messages,
+          pending,
+          liveAssistant: livePreview.text,
+          liveReplaced: livePreview.replaced,
+        }),
         createdAt,
         updatedAt,
       ),
-    [prompt, result, error, messages, pending, liveAssistant, createdAt, updatedAt],
+    [prompt, result, error, messages, pending, livePreview, createdAt, updatedAt],
   )
   const assistantName = personalityDisplayName(personalityLabel)
   const internalBlocks = useMemo(() => {

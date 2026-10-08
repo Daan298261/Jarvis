@@ -20,7 +20,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from ..config import AppSettings, load_settings
+from ..config import AppSettings, SocialCommentarySettings, load_settings
 from ..persona.named_persona import CATALOG, _appearance_for
 from ..voice_profiles.catalog import WINDOWS_NATURAL_VOICE_PROFILE_ID, get_catalog
 from ..voice_profiles.ip_guard import contains_forbidden_ip_term
@@ -279,12 +279,15 @@ async def speak_text(
     return result
 
 
-def address_vocative(settings: AppSettings | None = None) -> str:
+def address_vocative(settings: AppSettings | SocialCommentarySettings | None = None) -> str:
     """Return the vocative from the address-style resolver, or empty for neutral."""
     from ..persona.social import resolve_address_style
 
-    current = settings or load_settings()
-    commentary = current.social_commentary
+    if isinstance(settings, SocialCommentarySettings):
+        commentary = settings
+    else:
+        current = settings or load_settings()
+        commentary = current.social_commentary
     style = resolve_address_style(commentary)
     name = (commentary.configured_address_name or "").strip()
     if style == "neutral":
@@ -294,6 +297,18 @@ def address_vocative(settings: AppSettings | None = None) -> str:
     if style == "sir_maam":
         return name or "sir"
     return ""
+
+
+def apply_leading_vocative(body: str, settings: AppSettings | SocialCommentarySettings | None = None) -> str:
+    """Open a sentence with the address-style vocative. Neutral stays unaddressed."""
+    text = (body or "").strip()
+    if not text:
+        return ""
+    vocative = address_vocative(settings)
+    if not vocative:
+        return text[0].upper() + text[1:]
+    shown = vocative[0].upper() + vocative[1:]
+    return f"{shown}, {text}"
 
 
 def with_address(sentence: str, settings: AppSettings | None = None) -> str:
@@ -316,6 +331,8 @@ def stall_spoken_line(stall: Any, settings: AppSettings | None = None) -> str:
     deadline = str(getattr(stall, "deadline", "") or "")
     if deadline == "idle":
         sentence = "The model stalled in the middle of the reply."
+    elif deadline == "call":
+        sentence = "The model stalled before it answered."
     else:
         sentence = "The model stalled before the first token."
     return with_address(sentence, settings)

@@ -12,12 +12,13 @@ import pytest
 from app.config import AppSettings, FrontResponderSettings, InferenceSettings, SocialCommentarySettings
 from app.inference.manager import InferenceManager
 from app.inference.stream_deadlines import (
+    compute_chat_call_deadline_ms,
     compute_chat_stream_deadlines,
     compute_first_token_deadline_ms,
     record_stream_stall,
 )
 from app.tts.persona_speech import announce_stream_stall, stall_spoken_line, with_address
-from app.providers.base import ChatMessage, ModelProvider, StreamStallError
+from app.providers.base import ChatMessage, ChatResult, ModelProvider, StreamStallError, is_local_inference_url
 
 
 class _FakeDelta:
@@ -386,3 +387,91 @@ async def test_spoken_failure_path_goes_through_speak_text(monkeypatch):
     skipped = await announce_stream_stall(RuntimeError("other"), settings=settings)
     assert skipped is False
     assert len(spoken) == 1
+
+
+def test_local_providers_do_not_retry_and_remote_providers_do():
+    local = ModelProvider("http://127.0.0.1:8088/v1")
+    lan = ModelProvider("http://192.168.1.20:8088/v1")
+    remote = ModelProvider("https://api.openai.com/v1")
+    assert is_local_inference_url(local.base_url) is True
+    assert is_local_inference_url(lan.base_url) is True
+    assert is_local_inference_url(remote.base_url) is False
+    assert local.client.max_retries == 0
+    assert lan.client.max_retries == 0
+    assert remote.client.max_retries == 2
+
+
+def test_call_stall_speech_names_the_missing_answer():
+    stall = StreamStallError(
+        deadline="call",
+        elapsed_ms=16000,
+        budget_ms=15000,
+        provider="openai-compat",
+        model="qwen",
+    )
+    neutral = AppSettings(social_commentary=SocialCommentarySettings(address_style="neutral"))
+    line = stall_spoken_line(stall, neutral)
+    assert "before it answered" in line.lower()
+    assert "sir" not in line.lower()
+
+
+@pytest.mark.asyncio
+async def test_chat_call_deadline_aborts_a_hung_completion():
+    provider = ModelProvider("http://127.0.0.1:8088/v1", model="local-test")
+
+    class _Completions:
+        async def create(self, **kwargs):
+            del kwargs
+            await asyncio.sleep(2)
+            raise AssertionError("hung chat completion must not return")
+
+    class _Chat:
+        completions = _Completions()
+
+    provider.client.chat = _Chat()
+    with pytest.raises(StreamStallError) as caught:
+        await provider.chat(
+            [ChatMessage(role="user", content="hello")],
+            call_deadline_ms=50,
+            stream_lane="worker",
+            prompt_token_estimate=4,
+        )
+    assert caught.value.deadline == "call"
+    assert "call" in str(caught.value)
+    assert caught.value.budget_ms == 50
+
+
+@pytest.mark.asyncio
+async def test_manager_chat_passes_scaled_call_deadline():
+    mgr = InferenceManager()
+    mgr.state.context_size = 16384
+    mgr.state.prompt_tps = 50.0
+    captured: dict[str, object] = {}
+
+    class Capture:
+        async def chat(self, messages, **kwargs):
+            captured.update(kwargs)
+            return ChatResult(content="Answered.")
+
+    mgr.provider = Capture()
+    prompt = "x" * 400
+    result = await mgr.chat(
+        [ChatMessage(role="user", content=prompt)],
+        max_tokens=64,
+        settings=AppSettings(),
+    )
+    assert result.content == "Answered."
+    expected = compute_chat_call_deadline_ms(
+        AppSettings().inference,
+        prompt_tokens=int(captured["prompt_token_estimate"]),
+        prompt_tps=50.0,
+    )
+    assert captured["call_deadline_ms"] == expected
+    assert captured["stream_lane"] == "worker"
+    assert int(captured["prompt_token_estimate"]) >= 1
+    first_ms, idle_ms = compute_chat_stream_deadlines(
+        AppSettings().inference,
+        prompt_tokens=int(captured["prompt_token_estimate"]),
+        prompt_tps=50.0,
+    )
+    assert expected == first_ms + idle_ms

@@ -56,7 +56,18 @@ FRONT_ACTIONS = frozenset(
 SAFE_ACK = "I can start with the short version while I check the details."
 SAFE_HANDOFF = "A stronger model is taking this from here."
 SAFE_CLARIFY = "Could you clarify what you need?"
-SAFE_HELLO = "Hello, sir."
+def safe_hello(settings: AppSettings | None = None) -> str:
+    """Greeting fallback that follows the address-style setting, including neutral."""
+    from ..tts.persona_speech import address_vocative
+
+    vocative = address_vocative(settings)
+    if not vocative:
+        return "Hello."
+    return f"Hello, {vocative}."
+
+
+# Neutral default. Spoken greetings go through safe_hello() so sir/name/neutral stay in one place.
+SAFE_HELLO = "Hello."
 CONTEXT_SWITCH_KEEP_BUSY = "Switching to a larger context model…"
 CONTEXT_EXPAND_KEEP_BUSY = "One moment — expanding context for a fuller answer."
 
@@ -358,9 +369,9 @@ def classify_front_action(user_text: str, *, route: RequestRoute | None = None) 
     return "ack_continue"
 
 
-def fallback_text_for_action(action: str) -> str:
+def fallback_text_for_action(action: str, settings: AppSettings | None = None) -> str:
     if action == "final_basic":
-        return SAFE_HELLO
+        return safe_hello(settings)
     if action == "ask_clarification":
         return SAFE_CLARIFY
     if action == "handoff_notice":
@@ -386,7 +397,14 @@ def parse_front_payload(raw: str, *, fallback_action: str) -> tuple[str, str]:
     return action, text
 
 
-def enforce_front_safety(action: str, text: str, *, user_text: str, heuristic: str) -> tuple[str, str, bool]:
+def enforce_front_safety(
+    action: str,
+    text: str,
+    *,
+    user_text: str,
+    heuristic: str,
+    settings: AppSettings | None = None,
+) -> tuple[str, str, bool]:
     cleaned = (text or "").strip()
     resolved = action if action in FRONT_ACTIONS else heuristic
     rejected = False
@@ -397,15 +415,38 @@ def enforce_front_safety(action: str, text: str, *, user_text: str, heuristic: s
         rejected = True
         if heuristic == "final_basic" and _is_trivial_chat(user_text.lower()):
             resolved = "final_basic"
-            cleaned = SAFE_HELLO
+            cleaned = safe_hello(settings)
         else:
             resolved = heuristic if heuristic in FRONT_ACTIONS else "ack_continue"
             if resolved == "final_basic":
                 resolved = "ack_continue"
-            cleaned = fallback_text_for_action(resolved)
+            cleaned = fallback_text_for_action(resolved, settings)
     if rejected and not cleaned and resolved != "silent_skip":
-        cleaned = fallback_text_for_action(resolved)
+        cleaned = fallback_text_for_action(resolved, settings)
     return resolved, cleaned, rejected
+
+
+def live_text_update(shown: str, reply: str) -> tuple[str, str] | None:
+    """How a consolidated reply should update a quick line already on screen.
+
+    ``append`` is the new tail when the reply still starts with that line.
+    ``replace`` is the full reply when a correction replaces it. ``None`` means
+    nothing new to show. An empty ``shown`` is a first line, returned as append.
+    """
+    previous = (shown or "").strip()
+    text = (reply or "").strip()
+    if not text:
+        return None
+    if previous and text.startswith(previous):
+        tail = text[len(previous) :].strip()
+        if not tail:
+            return None
+        return ("append", tail)
+    if previous and text != previous:
+        return ("replace", text)
+    if not previous:
+        return ("append", text)
+    return None
 
 
 def merge_front_and_worker(front_text: str, worker_text: str, action: str) -> str:
@@ -579,7 +620,13 @@ async def generate_front_reply(
         return FrontReply(action="silent_skip", text="", model=model_id, skipped=True, max_tokens=cfg.max_tokens)
     chat = provider or front_provider(app)
     if chat is None or not hasattr(chat, "chat_stream"):
-        action, text, rejected = enforce_front_safety(heuristic, fallback_text_for_action(heuristic), user_text=user_text, heuristic=heuristic)
+        action, text, rejected = enforce_front_safety(
+            heuristic,
+            fallback_text_for_action(heuristic, app),
+            user_text=user_text,
+            heuristic=heuristic,
+            settings=app,
+        )
         if heuristic == "silent_skip":
             return FrontReply(
                 action="silent_skip",
@@ -648,8 +695,10 @@ async def generate_front_reply(
                 skipped=True,
                 max_tokens=cfg.max_tokens,
             )
-        fb = fallback_text_for_action(heuristic)
-        action, text, rejected = enforce_front_safety(heuristic, fb, user_text=user_text, heuristic=heuristic)
+        fb = fallback_text_for_action(heuristic, app)
+        action, text, rejected = enforce_front_safety(
+            heuristic, fb, user_text=user_text, heuristic=heuristic, settings=app
+        )
         return FrontReply(
             action=action,
             text=text,
@@ -666,6 +715,7 @@ async def generate_front_reply(
         parsed_text,
         user_text=user_text,
         heuristic=heuristic,
+        settings=app,
     )
     complete_ms = max(0.0, (time.perf_counter() - started) * 1000)
     skipped = action == "silent_skip" or not text

@@ -21,6 +21,7 @@ from .chat_delivery import (
     pending_chat_tts_text,
     publish_owner_text,
     stream_speak_offset,
+    stream_spoken_prefix,
 )
 from .weather import weather_system_message
 from ..events import BUS
@@ -35,6 +36,7 @@ from ..agent.front_responder import (
     last_front_timing,
     note_front_audio,
     record_front_timing,
+    live_text_update,
     resolve_front_model_id,
     run_two_lane_chat,
     should_prefetch_turn_retrieval,
@@ -496,7 +498,11 @@ async def stream_owner_chat(
                     early_tts_ids.append(str(delivery["tts_id"]))
                     # publish_owner_text does not advance the stream cursor;
                     # mark it so the final reply path cannot re-speak.
-                    mark_stream_spoken(stream_key, len(prefetched_front.text))
+                    mark_stream_spoken(
+                        stream_key,
+                        len(prefetched_front.text),
+                        prefix=prefetched_front.text,
+                    )
             else:
                 early_tts_ids.append(early_id)
                 await BUS.publish_ephemeral(
@@ -832,7 +838,11 @@ async def stream_owner_chat(
                         )
                         if delivery.get("tts_id"):
                             early_tts_ids.append(str(delivery["tts_id"]))
-                            mark_stream_spoken(stream_key, len(front.text or ""))
+                            mark_stream_spoken(
+                                stream_key,
+                                len(front.text or ""),
+                                prefix=front.text or "",
+                            )
                     elif early_id:
                         early_tts_ids.append(early_id)
                         await BUS.publish_ephemeral(
@@ -870,17 +880,14 @@ async def stream_owner_chat(
 
     reply = ((done or {}).get("text") or "".join(parts)).strip()
     if reply:
-        front_line = "" if ack_suppressed else (prefetched_front.text or "").strip()
-        novel = reply
-        if front_line and reply.startswith(front_line):
-            novel = reply[len(front_line) :].strip()
-        elif front_text_emitted and not ack_suppressed and reply == front_line:
-            novel = ""
-        if novel:
+        front_line = "" if ack_suppressed or not front_text_emitted else (prefetched_front.text or "").strip()
+        update = live_text_update(front_line, reply)
+        if update:
+            mode, payload = update
             yield {
-                "type": "delta",
+                "type": "replace_previous_text" if mode == "replace" else "delta",
                 "conversation_id": cid,
-                "text": novel,
+                "text": payload,
                 "lane": "worker",
             }
         # History keeps what the worker saw, so a compressed paste stays compressed next turn.
@@ -910,6 +917,7 @@ async def stream_owner_chat(
             speak=True,
             user_prompt=cleaned,
             tts_char_offset=stream_speak_offset(stream_key),
+            spoken_prefix=stream_spoken_prefix(stream_key),
             lane="worker",
             model=worker_model,
         )

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 import httpx
 from openai import AsyncOpenAI
@@ -41,13 +43,25 @@ class ChatResult:
     raw: dict[str, Any] = field(default_factory=dict)
 
 
+def is_local_inference_url(base_url: str) -> bool:
+    """True for loopback and private hosts. Cloud APIs keep SDK retries."""
+    host = (urlparse(base_url or "").hostname or "").strip("[]").lower()
+    if host in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}:
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return bool(address.is_private or address.is_loopback or address.is_link_local)
+
+
 class StreamStallError(Exception):
-    """Typed outcome when a caller-supplied first-token or idle deadline is exceeded."""
+    """Typed outcome when a caller-supplied first-token, idle, or call deadline is exceeded."""
 
     def __init__(
         self,
         *,
-        deadline: Literal["first_token", "idle"],
+        deadline: Literal["first_token", "idle", "call"],
         elapsed_ms: float,
         budget_ms: float,
         provider: str,
@@ -62,8 +76,9 @@ class StreamStallError(Exception):
         self.model = str(model or "")
         self.prompt_tokens = int(prompt_tokens) if prompt_tokens is not None else None
         self.lane = str(lane or "")
+        kind = "call" if self.deadline == "call" else "stream"
         super().__init__(
-            f"Model stream stalled ({self.deadline}): elapsed {self.elapsed_ms:.0f}ms "
+            f"Model {kind} stalled ({self.deadline}): elapsed {self.elapsed_ms:.0f}ms "
             f"exceeded budget {self.budget_ms:.0f}ms for {self.provider}/{self.model}"
         )
 
@@ -163,7 +178,15 @@ class ModelProvider:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key
-        self.client = AsyncOpenAI(base_url=self.base_url, api_key=api_key, timeout=timeout)
+        self.local_inference = is_local_inference_url(self.base_url)
+        # Local llama.cpp hangs are not transient. The SDK default of two retries
+        # turns one 600s timeout into many minutes. Cloud hosts keep that default.
+        self.client = AsyncOpenAI(
+            base_url=self.base_url,
+            api_key=api_key,
+            timeout=timeout,
+            max_retries=0 if self.local_inference else 2,
+        )
 
     async def health(self) -> bool:
         root = self.base_url[:-3] if self.base_url.endswith("/v1") else self.base_url
@@ -197,6 +220,9 @@ class ModelProvider:
         max_tokens: int | None = None,
         thinking: bool | None = None,
         extra: dict[str, Any] | None = None,
+        call_deadline_ms: float | None = None,
+        stream_lane: str | None = None,
+        prompt_token_estimate: int | None = None,
     ) -> ChatResult:
         extra_body: dict[str, Any] = dict(extra or {})
         extra_body.setdefault("chat_template_kwargs", {})
@@ -228,7 +254,12 @@ class ModelProvider:
             body = {key: value for key, value in kwargs.items() if key != "extra_body"}
             body.update(extra_body)
             body["parallel_tool_calls"] = False
-            raw = await self.client.post("/chat/completions", cast_to=dict[str, Any], body=body)
+            raw = await self._await_call_deadline(
+                self.client.post("/chat/completions", cast_to=dict[str, Any], body=body),
+                call_deadline_ms=call_deadline_ms,
+                stream_lane=stream_lane,
+                prompt_token_estimate=prompt_token_estimate,
+            )
             choices = raw.get("choices") if isinstance(raw, dict) else None
             if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
                 raise RuntimeError("Inference server returned no chat completion choice")
@@ -243,7 +274,12 @@ class ModelProvider:
             if tool_calls and "<tool_call>" in raw_content:
                 content = ""
         else:
-            response = await self.client.chat.completions.create(**kwargs)
+            response = await self._await_call_deadline(
+                self.client.chat.completions.create(**kwargs),
+                call_deadline_ms=call_deadline_ms,
+                stream_lane=stream_lane,
+                prompt_token_estimate=prompt_token_estimate,
+            )
             message = response.choices[0].message
             usage = response.usage.model_dump() if response.usage else {}
             raw = response.model_dump() if hasattr(response, "model_dump") else {}
@@ -266,10 +302,43 @@ class ModelProvider:
             raw=raw,
         )
 
+    async def _await_call_deadline(
+        self,
+        awaitable: Any,
+        *,
+        call_deadline_ms: float | None,
+        stream_lane: str | None,
+        prompt_token_estimate: int | None,
+    ) -> Any:
+        """Bound a non-streaming completion. ``None`` means no guard."""
+        timeout = _timeout_s(call_deadline_ms)
+        started = time.perf_counter()
+        try:
+            if timeout is None:
+                return await awaitable
+            return await asyncio.wait_for(awaitable, timeout=timeout)
+        except asyncio.TimeoutError as exc:
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            stall = self._stream_stall(
+                deadline="call",
+                elapsed_ms=elapsed_ms,
+                budget_ms=float(call_deadline_ms or 0.0),
+                prompt_tokens=prompt_token_estimate,
+                lane=stream_lane,
+            )
+            from ..inference.stream_deadlines import record_stream_stall
+
+            record_stream_stall(
+                stall,
+                lane=stream_lane or stall.lane,
+                prompt_token_estimate=prompt_token_estimate,
+            )
+            raise stall from exc
+
     def _stream_stall(
         self,
         *,
-        deadline: Literal["first_token", "idle"],
+        deadline: Literal["first_token", "idle", "call"],
         elapsed_ms: float,
         budget_ms: float,
         prompt_tokens: int | None,

@@ -30,6 +30,15 @@ jobs:
           grep -Ev '^(pywinauto|pywin32|comtypes)' backend/requirements.txt > /tmp/requirements-linux.txt
           python -m pip install -r /tmp/requirements-linux.txt
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies for presence suites
+        run: npm --prefix frontend ci
+
       - name: Run model and security regression tests
         run: |
           python -m pytest -q \

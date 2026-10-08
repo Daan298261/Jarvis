@@ -10,23 +10,17 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from ..config import SocialCommentarySettings, data_dir, load_settings
+from ..config import SocialCommentarySettings, data_dir
 from ..providers.base import ChatMessage
 
 _announced: dict[str, float] = {}
 
 
 def address_suffix(settings: SocialCommentarySettings | None = None) -> str:
-    from ..persona.social import resolve_address_style
-    social = settings or load_settings().social_commentary
-    style = resolve_address_style(social)
-    if style == "sir_maam":
-        return ", sir"
-    if style in {"first_name", "configured"}:
-        name = (social.configured_address_name or "").strip()
-        if name:
-            return f", {name}"
-    return ""
+    from ..tts.persona_speech import address_vocative
+
+    vocative = address_vocative(settings)
+    return f", {vocative}" if vocative else ""
 
 
 def acknowledgment_line(settings: SocialCommentarySettings | None = None) -> str:
