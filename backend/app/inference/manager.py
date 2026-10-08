@@ -908,13 +908,21 @@ class InferenceManager:
     async def apply_context(self, settings: AppSettings, context_size: int, *, allow_shrink: bool = False) -> int:
         """Set the live context window. Mid-task callers pass allow_shrink=False so we only grow.
 
-        External servers cannot grow past the loaded slot. Never inflate context_size
-        above server_n_ctx (the 4k LM Studio / llama.cpp case).
+        Local LM Studio may reload an idle instance after resource admission.
+        Other external servers stay capped at their actual loaded slot.
         """
         target = int(context_size or 0)
         if target <= 0:
             return int(self.state.context_size or 0)
         live_cap = int(self.state.server_n_ctx or 0)
+        if target > live_cap and self.state.backend in LMSTUDIO_ALIASES:
+            from .lmstudio_context import grow_local_instance
+            identifier = getattr(self.provider, "model", "")
+            grown = await grow_local_instance(settings, target, identifier)
+            if grown:
+                self.state.server_n_ctx = grown
+                self.state.context_size = grown
+                live_cap = grown
         if live_cap > 0:
             target = min(target, live_cap)
         current = int(self.state.context_size or 0)

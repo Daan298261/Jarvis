@@ -49,7 +49,7 @@ STOCK_PORTS = set(DEFAULT_PORTS.values())
 
 PROBE_PATHS = ("/health", "/v1/models", "/models", "/api/tags")
 # Live n_ctx lives here — not on the OpenAI /v1/models name listing.
-CONTEXT_PROBE_PATHS = ("/props", "/api/v0/models")
+CONTEXT_PROBE_PATHS = ("/props", "/api/v1/models", "/api/v0/models")
 
 
 def _message_text(content: str | list[dict[str, Any]]) -> str:
