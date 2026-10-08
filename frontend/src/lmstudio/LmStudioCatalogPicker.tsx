@@ -2,11 +2,13 @@ import { useCallback, useEffect, useId, useState } from "react"
 import {
   getLmStudioCatalog,
   pinLmStudioProfile,
+  selectDiscoveredGguf,
   selectLmStudioProfile,
   setSelectedRuntimeProfileId,
   sortLmStudioProfiles,
   type LmStudioCatalogResponse,
   type LmStudioGradedProfile,
+  type LmStudioUngradedModel,
 } from "../api"
 import { GradedProfileHoverCard } from "./GradedProfileHoverCard"
 
@@ -83,6 +85,29 @@ export function LmStudioCatalogPicker({
       await load()
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Could not select this profile.")
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function onSelectUngraded(item: LmStudioUngradedModel) {
+    setBusyId(item.path)
+    setError("")
+    try {
+      const runtime = await selectDiscoveredGguf(item.path)
+      const id = runtime.id || runtime.name
+      setSelectedRuntimeProfileId(id)
+      window.dispatchEvent(new CustomEvent("jarvis:runtime-profile-changed", { detail: { id } }))
+      onSelected?.(id)
+      const active = runtime.load?.active_model
+      setMsg(
+        active
+          ? `Selected ${item.filename} (${String(active)}).`
+          : `Selected ${item.filename}.`,
+      )
+      await load()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not load this GGUF.")
     } finally {
       setBusyId(null)
     }
@@ -195,6 +220,14 @@ export function LmStudioCatalogPicker({
               <li key={item.path}>
                 <span>{item.filename}</span>
                 <span>{item.weight_gb.toFixed(1)} GB · {item.quantization || "—"}</span>
+                <button
+                  type="button"
+                  className={variant === "hud" ? "hud-icon-btn" : "btn"}
+                  disabled={busyId === item.path}
+                  onClick={() => void onSelectUngraded(item)}
+                >
+                  Play
+                </button>
               </li>
             ))}
           </ul>

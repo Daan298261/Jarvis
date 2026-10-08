@@ -16,9 +16,9 @@ import zipfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable
-from urllib.request import urlopen
 
 from .config import models_dir, repo_root, runtime_dir
+from .inference.lmstudio_catalog import extra_volume_file_named, preferred_gguf_install_dir
 from .inference.profiles import (
     EXPERT_DIR,
     EXPERT_GGUF_REPO,
@@ -30,6 +30,7 @@ from .inference.profiles import (
     PRIMARY_GGUF_REPO,
     PRIMARY_MMPROJ,
     PROFILES,
+    mmproj_path,
     profile_gguf,
 )
 from .setup_state import load_setup_state, save_setup_state
@@ -95,8 +96,12 @@ def _expert_profile():
     return PROFILES["expert"]
 
 
+_PRIMARY_NEED_BYTES = 8 * 1024**3
+_EXPERT_NEED_BYTES = 24 * 1024**3
+
+
 def _mmproj_primary() -> Path:
-    return models_dir() / PRIMARY_DIR / PRIMARY_MMPROJ
+    return mmproj_path(_primary_profile())
 
 
 def discover_component_states(*, include_optional_expert: bool | None = None) -> dict[str, ComponentState]:
@@ -152,7 +157,9 @@ def discover_component_states(*, include_optional_expert: bool | None = None) ->
             optional=True,
             detail="Optional — not selected",
         )
-    heretic = models_dir() / HERETIC_27B_DIR / HERETIC_27B_FILENAME
+    heretic = extra_volume_file_named(HERETIC_27B_FILENAME) or (
+        models_dir() / HERETIC_27B_DIR / HERETIC_27B_FILENAME
+    )
     states["heretic_27b_model"] = ComponentState(
         id="heretic_27b_model",
         label=_label("heretic_27b_model"),
@@ -163,11 +170,15 @@ def discover_component_states(*, include_optional_expert: bool | None = None) ->
     )
     marker = repo_root() / ".venv" / ".playwright-chromium-ready"
     if want_playwright:
+        from .config import _playwright_chromium_present, playwright_browsers_dir
+
+        browsers = playwright_browsers_dir()
+        ready = marker.exists() or _playwright_chromium_present(browsers)
         states["playwright_chromium"] = ComponentState(
             id="playwright_chromium",
             label=_label("playwright_chromium"),
-            status="ready" if marker.exists() else "pending",
-            path=str(marker),
+            status="ready" if ready else "pending",
+            path=str(browsers),
             optional=True,
         )
     else:
@@ -209,22 +220,15 @@ def _set_state(component_id: str, **kwargs: Any) -> ComponentState:
 
 
 def _download_file(url: str, dest: Path, component_id: str) -> None:
+    from .policy.network_http import gated_download_to
+
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(dest.suffix + ".partial")
     _set_state(component_id, status="downloading", error="", bytes_done=0, bytes_total=0)
-    with urlopen(url, timeout=120) as resp:  # noqa: S310 — fixed release URLs
-        total = int(resp.headers.get("Content-Length") or 0)
-        _set_state(component_id, bytes_total=total)
-        done = 0
-        with open(tmp, "wb") as out:
-            while True:
-                chunk = resp.read(1024 * 256)
-                if not chunk:
-                    break
-                out.write(chunk)
-                done += len(chunk)
-                _set_state(component_id, bytes_done=done, bytes_total=total or done)
-    tmp.replace(dest)
+
+    def progress(done: int, total: int) -> None:
+        _set_state(component_id, status="downloading", error="", bytes_done=done, bytes_total=total)
+
+    gated_download_to(url, dest, tool="web_fetch", timeout=120.0, on_progress=progress)
     _set_state(component_id, status="verifying", path=str(dest))
 
 
@@ -272,10 +276,20 @@ def _hf_download(repo_id: str, filename: str, local_dir: Path, component_id: str
         _set_state(component_id, status="ready", path=str(target), error="")
         return target
     _set_state(component_id, status="downloading", error="", path=str(target))
+    from .policy.network_http import require_http_url_allowed
+
+    require_http_url_allowed(
+        f"https://huggingface.co/{repo_id}/resolve/main/{filename}",
+        tool="web_fetch",
+    )
     try:
         from huggingface_hub import hf_hub_download
     except Exception as exc:  # pragma: no cover - optional dep failure path
         raise RuntimeError(f"huggingface_hub unavailable: {exc}") from exc
+
+    from .inference.lmstudio_catalog import apply_huggingface_home
+
+    hub = str(apply_huggingface_home() / "hub")
 
     def _hook(progress: Any) -> None:
         try:
@@ -290,7 +304,7 @@ def _hf_download(repo_id: str, filename: str, local_dir: Path, component_id: str
         repo_id=repo_id,
         filename=filename,
         local_dir=str(local_dir),
-        local_dir_use_symlinks=False,
+        cache_dir=hub,
     )
     resolved = Path(path)
     if not resolved.exists():
@@ -316,12 +330,21 @@ def _hf_download(repo_id: str, filename: str, local_dir: Path, component_id: str
 def _install_primary() -> None:
     profile = _primary_profile()
     fast = PROFILES["fast"]
-    local = models_dir() / PRIMARY_DIR
-    _hf_download(PRIMARY_GGUF_REPO, profile.filename, local, "primary_model")
-    # Also fetch Q6_K when missing (fast profile) — skip if already present.
+    existing = profile_gguf(profile)
+    if existing.exists():
+        _set_state("primary_model", status="ready", path=str(existing), error="")
+        if not profile_gguf(fast).exists():
+            dest = preferred_gguf_install_dir(PRIMARY_DIR, need_bytes=_PRIMARY_NEED_BYTES)
+            try:
+                _hf_download(PRIMARY_GGUF_REPO, fast.filename, dest, "primary_model")
+            except Exception as exc:
+                logger.warning("Optional fast quant download skipped: %s", exc)
+        return
+    dest = preferred_gguf_install_dir(PRIMARY_DIR, need_bytes=_PRIMARY_NEED_BYTES)
+    _hf_download(PRIMARY_GGUF_REPO, profile.filename, dest, "primary_model")
     if not profile_gguf(fast).exists():
         try:
-            _hf_download(PRIMARY_GGUF_REPO, fast.filename, local, "primary_model")
+            _hf_download(PRIMARY_GGUF_REPO, fast.filename, dest, "primary_model")
         except Exception as exc:
             logger.warning("Optional fast quant download skipped: %s", exc)
 
@@ -331,7 +354,8 @@ def _install_mmproj() -> None:
     if path.exists():
         _set_state("vision_projector", status="ready", path=str(path), error="")
         return
-    _hf_download(PRIMARY_GGUF_REPO, PRIMARY_MMPROJ, models_dir() / PRIMARY_DIR, "vision_projector")
+    dest = preferred_gguf_install_dir(PRIMARY_DIR, need_bytes=_PRIMARY_NEED_BYTES)
+    _hf_download(PRIMARY_GGUF_REPO, PRIMARY_MMPROJ, dest, "vision_projector")
 
 
 def _install_expert() -> None:
@@ -340,16 +364,22 @@ def _install_expert() -> None:
     if target.exists():
         _set_state("expert_model", status="ready", path=str(target), error="")
         return
-    _hf_download(EXPERT_GGUF_REPO, profile.filename, models_dir() / EXPERT_DIR, "expert_model")
+    dest = preferred_gguf_install_dir(EXPERT_DIR, need_bytes=_EXPERT_NEED_BYTES)
+    _hf_download(EXPERT_GGUF_REPO, profile.filename, dest, "expert_model")
 
 
 def _install_heretic_27b() -> None:
-    target = _hf_download(
-        HERETIC_27B_GGUF_REPO,
-        HERETIC_27B_FILENAME,
-        models_dir() / HERETIC_27B_DIR,
-        "heretic_27b_model",
-    )
+    existing = extra_volume_file_named(HERETIC_27B_FILENAME)
+    if existing is not None and existing.exists():
+        target = existing
+    else:
+        dest = preferred_gguf_install_dir(HERETIC_27B_DIR, need_bytes=_EXPERT_NEED_BYTES)
+        target = _hf_download(
+            HERETIC_27B_GGUF_REPO,
+            HERETIC_27B_FILENAME,
+            dest,
+            "heretic_27b_model",
+        )
     digest = _sha256(target).lower()
     if digest != HERETIC_27B_SHA256:
         raise ValueError("Downloaded Qwen3.8 27B Heretic file failed SHA-256 verification")
@@ -357,11 +387,16 @@ def _install_heretic_27b() -> None:
 
 
 def _install_playwright() -> None:
+    from .config import _playwright_chromium_present, apply_playwright_browsers_path
+
+    browsers = apply_playwright_browsers_path()
     marker = repo_root() / ".venv" / ".playwright-chromium-ready"
-    if marker.exists():
-        _set_state("playwright_chromium", status="ready", path=str(marker), error="")
+    if _playwright_chromium_present(browsers):
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("ok\n", encoding="utf-8")
+        _set_state("playwright_chromium", status="ready", path=str(browsers), error="")
         return
-    _set_state("playwright_chromium", status="downloading", error="")
+    _set_state("playwright_chromium", status="downloading", error="", path=str(browsers))
     try:
         import subprocess
         import sys
@@ -377,7 +412,7 @@ def _install_playwright() -> None:
             raise RuntimeError(result.stderr or result.stdout or "playwright install failed")
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("ok\n", encoding="utf-8")
-        _set_state("playwright_chromium", status="ready", path=str(marker), error="")
+        _set_state("playwright_chromium", status="ready", path=str(browsers), error="")
     except Exception as exc:
         # Optional capability — do not crash Jarvis.
         _set_state(

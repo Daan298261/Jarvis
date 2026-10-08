@@ -54,6 +54,8 @@ async def ingest_url(
                 if browser_use_tool is None:
                     continue
                 artifact = await extract_with_browser_use(ctx, browser_use_tool)
+        except PermissionError:
+            raise
         except Exception:
             artifact = None
         if artifact is not None:

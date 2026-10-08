@@ -11,7 +11,7 @@ from app.tools.registry import REGISTRY
 from app.workers.browser import BrowserUseBackend, playwright_is_default
 from app.workers.code import OpenHandsBackend
 from app.workers.interpreter import OpenInterpreterBackend
-from app.workers.local_llm import local_openai_env
+from app.workers.local_llm import local_openai_env, merge_local_env
 from app.config import AppSettings
 
 
@@ -44,6 +44,16 @@ def test_local_worker_llm_stays_on_jarvis_endpoint():
     assert env["OPENAI_BASE_URL"].startswith("http://127.0.0.1:8088")
     assert "openai.com" not in env["OPENAI_BASE_URL"]
     assert env["LLM_API_KEY"] == "local"
+
+
+def test_merge_local_env_drops_http_proxy_so_workers_use_os_route(monkeypatch):
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setenv("https_proxy", "http://10.8.0.1:3128")
+    env = merge_local_env(AppSettings())
+    assert "HTTP_PROXY" not in env
+    assert "https_proxy" not in env
+    assert env["OPENAI_API_KEY"] == "local"
+    assert env["OPENAI_BASE_URL"].startswith("http://127.0.0.1:8088")
 
 
 def test_browser_use_model_uses_browser_settings():
@@ -270,3 +280,47 @@ async def test_voice_command_and_listen(jarvis_env, monkeypatch):
     assert "stt_ready" in status
     assert "engines" in status
     assert "backend" in status["tts"]
+
+
+async def _assert_worker_uses_documents_and_extra_drive(tool, monkeypatch, tmp_path, backend_attr: str) -> None:
+    from app.tools.base import ToolResult
+
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    extra = tmp_path / "E" / "proj"
+    extra.mkdir(parents=True)
+    monkeypatch.setattr("app.tools.owner_paths.Path.home", classmethod(lambda cls: tmp_path))
+    seen: list[Path] = []
+
+    async def fake_run(goal, path, settings):
+        seen.append(Path(path).resolve())
+        return ToolResult(True, f"ok {path}", data={"path": str(path)})
+
+    monkeypatch.setattr(backend_attr, fake_run)
+    omitted = await tool.execute(action="delegate", goal="fix the tests")
+    assert omitted.success, omitted.error
+    assert seen[-1] == docs.resolve()
+    usb = await tool.execute(action="delegate", goal="fix the tests", path=str(extra))
+    assert usb.success, usb.error
+    assert seen[-1] == extra.resolve()
+    denied = await tool.execute(action="delegate", goal="fix the tests", path="/etc")
+    assert denied.success is False
+    assert "outside allowed" in (denied.error or "").lower()
+
+
+async def test_code_worker_defaults_to_documents_and_extra_drive(tmp_path, monkeypatch):
+    from app.tools.code_worker import CodeWorkerTool
+
+    tool = CodeWorkerTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    await _assert_worker_uses_documents_and_extra_drive(
+        tool, monkeypatch, tmp_path, "app.tools.code_worker._BACKEND.run"
+    )
+
+
+async def test_open_interpreter_defaults_to_documents_and_extra_drive(tmp_path, monkeypatch):
+    from app.tools.interpreter import OpenInterpreterTool
+
+    tool = OpenInterpreterTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    await _assert_worker_uses_documents_and_extra_drive(
+        tool, monkeypatch, tmp_path, "app.tools.interpreter._BACKEND.run"
+    )

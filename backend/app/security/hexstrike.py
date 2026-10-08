@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from ..config import data_dir, load_settings, logs_dir, repo_root, save_settings
+from ..config import data_dir, extra_volume_named_runtime_dirs, load_settings, logs_dir, repo_root, save_settings
 from ..inference.runtime_profiles import RuntimeProfile
 
 log = logging.getLogger(__name__)
@@ -67,6 +67,36 @@ _BLOCKED_TOKENS = (
     "hack-back",
     "hackback",
 )
+def hexstrike_child_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Environment for the managed HexStrike suite process.
+
+    Same proxy-free child env as terminal so nuclei/suite HTTP use the OS default
+    route (not a leftover VPN HTTP_PROXY). nmap binds the home NIC via ``-S``/``-e``.
+    gobuster/ffuf/dirsearch get a loopback LAN proxy instead. Python LAN tools
+    (smbmap, enum4linux-ng, netexec, impacket) have no source-bind CLI: sitecustomize
+    pins RFC1918 ``connect``/``sendto`` without setting HTTP_PROXY.
+    """
+    from ..tools.owner_paths import direct_child_env, with_lan_socket_pythonpath
+
+    return with_lan_socket_pythonpath(direct_child_env(base))
+
+
+def is_hexstrike_mcp_server(server: dict[str, Any] | None) -> bool:
+    """True when this MCP entry is HexStrike upstream (stdio or loopback HTTP).
+
+    The stdio client ``hexstrike_mcp.py`` talks to ``127.0.0.1:8888``. If it
+    inherits HTTP_PROXY, those loopback calls (and later LAN tool HTTP) go
+    through the VPN proxy instead of the home NIC.
+    """
+    if not isinstance(server, dict):
+        return False
+    name = str(server.get("name") or server.get("id") or "").strip().lower()
+    if "hexstrike" in name:
+        return True
+    parts = [str(server.get("command") or ""), str(server.get("url") or "")]
+    parts.extend(str(item) for item in (server.get("args") or []))
+    blob = " ".join(parts).lower()
+    return "hexstrike_mcp" in blob or "hexstrike-ai" in blob
 
 
 @dataclass
@@ -237,6 +267,7 @@ def candidate_install_roots(explicit: str = "") -> list[Path]:
             Path.home() / "hexstrike-ai",
         ]
     )
+    roots.extend(extra_volume_named_runtime_dirs("hexstrike-ai"))
     seen: set[Path] = set()
     out: list[Path] = []
     for root in roots:
@@ -470,7 +501,8 @@ class HexStrikeManager:
             if not current.installed:
                 self.last_error = (
                     "HexStrike AI is not installed. Clone https://github.com/0x4m4/hexstrike-ai "
-                    "into runtime/hexstrike-ai or set the install path in the suite HUD."
+                    "into runtime/hexstrike-ai (or Jarvis/runtime on an extra drive) or set the "
+                    "install path in the suite HUD."
                 )
                 current.last_error = self.last_error
                 audit_hexstrike("start_skipped", reason="not_installed")
@@ -584,7 +616,7 @@ class HexStrikeManager:
         logs_dir().mkdir(parents=True, exist_ok=True)
         log_file = logs_dir() / "hexstrike-server.log"
         self._log_handle = open(log_file, "ab", buffering=0)
-        env = os.environ.copy()
+        env = hexstrike_child_env()
         env["PYTHONUNBUFFERED"] = "1"
         env["HEXSTRIKE_HOST"] = "127.0.0.1"
         env["HEXSTRIKE_PORT"] = str(current.port)

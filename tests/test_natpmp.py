@@ -23,6 +23,8 @@ def test_natpmp_packets_are_tcp_4781_only():
     assert lifetime == 3600
     with pytest.raises(ValueError):
         require_private_gateway("8.8.8.8")
+    with pytest.raises(ValueError):
+        require_private_gateway("100.64.0.1")
     assert require_private_gateway("192.168.1.1") == "192.168.1.1"
 
 
@@ -30,6 +32,8 @@ def test_natpmp_decodes_public_ip_and_rejects_cgnat():
     packed = int.from_bytes(bytes(int(p) for p in "8.8.4.4".split(".")), "big")
     public = struct.pack("!BBHII", 0, 128, 0, 1, packed)
     assert decode_public_ip(public) == "8.8.4.4"
+    testnet = struct.pack("!BBHII", 0, 128, 0, 1, int.from_bytes(bytes([203, 0, 113, 9]), "big"))
+    assert decode_public_ip(testnet) == "203.0.113.9"
     cgnat = struct.pack("!BBHII", 0, 128, 0, 1, int.from_bytes(bytes([10, 8, 0, 2]), "big"))
     with pytest.raises(ValueError, match="no public IPv4"):
         decode_public_ip(cgnat)

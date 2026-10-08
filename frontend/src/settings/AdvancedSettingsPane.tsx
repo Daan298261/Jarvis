@@ -138,12 +138,14 @@ export function AdvancedSettingsPane({ settings, queueStatus, save }: AdvancedSe
         </label>
         <label>Allowed directories (one per line)
           <p className="lede" style={{ margin: "0 0 8px" }}>
-            Default is every local drive or mount plus private LAN shares. Leave this list empty to keep
-            that full-machine workspace. Narrow it only when you want a smaller sandbox.
+            Default is every local drive or mount plus private LAN shares. Extra folders you add stay
+            allowed. On a live install this list cannot shrink below that default — use Computer use
+            permissions to deny network, and OS account ACLs still apply.
           </p>
           <textarea
             className="field"
             rows={4}
+            key={allowedDirs.join("\n")}
             defaultValue={allowedDirs.join("\n")}
             onBlur={(e) =>
               save({

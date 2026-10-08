@@ -6,7 +6,6 @@ Blue isolate is a containment playbook, not a kick/deauth executor.
 """
 from __future__ import annotations
 
-import ipaddress
 import json
 import re
 import threading
@@ -26,18 +25,23 @@ GRANT_MODES = frozenset({"ask", "allow_once", "allow_session", "always", "deny"}
 PROMPT_OPTIONS = ("allow_once", "allow_session", "always", "deny")
 
 COMPUTER_TOOLS = frozenset({"desktop", "apps", "ufo", "cua", "reflex_computer_use"})
-INTERNET_TOOLS = frozenset({"browser", "browser_use", "web_fetch"})
+INTERNET_TOOLS = frozenset({"browser", "browser_use", "web_fetch", "external_ingest"})
+SHELL_NETWORK_TOOLS = frozenset({"python", "terminal", "open_interpreter"})
 RDP_MARKERS = ("rdp", "mstsc", "remote desktop", "xfreerdp")
 NODE_KEYS = ("node_id", "hostname", "worker_node", "target_node", "rdp_host")
 
-_PRIVATE_NETS = (
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-    ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("::1/128"),
-    ipaddress.ip_network("fc00::/7"),
-    ipaddress.ip_network("fe80::/10"),
+_OUTBOUND_RE = re.compile(
+    r"https?://|"
+    r"\b(?:curl|wget|invoke-webrequest|invoke-restmethod)\b|"
+    r"\b(?:iwr|irm)\b|"
+    r"\burllib(?:\.request)?\b|\bhttpx\b|\brequests\b|\baiohttp\b|"
+    r"\bpip(?:3)?\s+install\b|"
+    r"\bnpm\s+(?:i|install)\b|"
+    r"\bgit\s+(?:clone|fetch|pull|push|ls-remote)\b|"
+    r"\bdocker\s+pull\b|"
+    r"\bwinget\s+install\b|"
+    r"\bhuggingface-cli\b|\bhf\s+download\b",
+    re.I,
 )
 
 @dataclass(frozen=True)
@@ -393,6 +397,8 @@ def _blob(arguments: dict[str, Any] | None) -> str:
 
 
 def _host_is_local(value: str) -> bool:
+    from ..tools.safety import is_owner_local_host
+
     text = (value or "").strip().lower()
     if not text:
         return False
@@ -400,22 +406,43 @@ def _host_is_local(value: str) -> bool:
     parsed = urlparse(text if "://" in text else f"//{text}", scheme="http")
     if parsed.hostname:
         host = parsed.hostname
-    host = host.split("%")[0]
-    try:
-        addr = ipaddress.ip_address(host)
-    except ValueError:
-        return host.endswith((".local", ".home.arpa", ".lan")) or host in {"localhost", "host.docker.internal"} or (bool(host) and "." not in host)
-    return any(addr in net for net in _PRIVATE_NETS)
+    return is_owner_local_host(host.split("%")[0])
 
 
 def looks_local_network(arguments: dict[str, Any] | None) -> bool:
     if not arguments:
         return False
+    args = arguments
     for key in ("url", "uri", "host", "hostname", "address", "target"):
-        value = (arguments or {}).get(key)
+        value = args.get(key)
         if isinstance(value, str) and _host_is_local(value):
             return True
+    texts: list[str] = []
+    for key in ("goal", "command", "code"):
+        value = args.get(key)
+        if isinstance(value, str) and value.strip():
+            texts.append(value)
+    for text in texts:
+        for match in re.finditer(r"https?://[^\s\"']+", text, flags=re.I):
+            if _host_is_local(match.group(0)):
+                return True
+        stripped = re.sub(r"https?://[^\s\"']+", " ", text, flags=re.I)
+        for token in re.findall(
+            r"\b(?:\d{1,3}\.){3}\d{1,3}\b|\b[A-Za-z0-9._-]+\.(?:local|lan|home\.arpa|localhost)\b",
+            stripped,
+            flags=re.I,
+        ):
+            if _host_is_local(token):
+                return True
     return False
+
+
+def looks_outbound_network(arguments: dict[str, Any] | None) -> bool:
+    args = arguments or {}
+    if str(args.get("action") or "").strip().lower() == "install":
+        return True
+    blob = _blob(args)
+    return bool(_OUTBOUND_RE.search(blob))
 
 
 def looks_remote_node(arguments: dict[str, Any] | None) -> bool:
@@ -434,6 +461,21 @@ def looks_rdp(arguments: dict[str, Any] | None) -> bool:
     return bool(args.get("rdp") or args.get("rdp_host"))
 
 
+def looks_remote_git_source(source: str) -> bool:
+    """True for http(s)/ssh/git remotes and scp-style host:path, not local folders."""
+    text = (source or "").strip()
+    if not text:
+        return False
+    lowered = text.lower()
+    if lowered.startswith(("http://", "https://", "ssh://", "git://", "git@")):
+        return True
+    if "://" in text:
+        return False
+    if re.match(r"^[a-zA-Z]:[\\/]", text):
+        return False
+    return bool(re.match(r"^[\w.-]+:[^/\\]", text))
+
+
 def permission_ids_for_tool(tool_name: str, arguments: dict[str, Any] | None = None) -> list[str]:
     name = (tool_name or "").strip().lower()
     pending: list[str] = []
@@ -445,7 +487,22 @@ def permission_ids_for_tool(tool_name: str, arguments: dict[str, Any] | None = N
         else:
             pending.append("computer.this_device")
     if name in INTERNET_TOOLS:
+        url = str((arguments or {}).get("url") or "").strip()
+        scheme = (urlparse(url).scheme or "").lower() if url else ""
+        if scheme != "file":
+            pending.append("network.local" if looks_local_network(arguments) else "network.internet")
+    if name in SHELL_NETWORK_TOOLS and looks_outbound_network(arguments):
         pending.append("network.local" if looks_local_network(arguments) else "network.internet")
+    if name == "git":
+        action = str((arguments or {}).get("action") or "").strip().lower()
+        source = str((arguments or {}).get("url") or (arguments or {}).get("query") or "").strip()
+        needs_net = action in {"fetch", "pull", "push"}
+        if action == "clone" and (not source or looks_remote_git_source(source)):
+            needs_net = True
+        elif looks_remote_git_source(source):
+            needs_net = True
+        if needs_net:
+            pending.append("network.local" if looks_local_network(arguments) else "network.internet")
     if any(
         isinstance((arguments or {}).get(key), str)
         and (str((arguments or {})[key]).startswith("\\\\") or str((arguments or {})[key]).startswith("//"))
@@ -453,7 +510,12 @@ def permission_ids_for_tool(tool_name: str, arguments: dict[str, Any] | None = N
     ):
         pending.append("network.local")
     if name in {"hexstrike", "hexstrike_suite", "hexstrike_operator"}:
-        pending.append("cyber.hexstrike")
+        operation = str((arguments or {}).get("operation") or "").strip().lower()
+        capability_id = str((arguments or {}).get("capability_id") or "")
+        if name == "hexstrike_operator" and operation == "operate" and capability_id == "defensive:lan_inventory":
+            pending.append("network.local")
+        else:
+            pending.append("cyber.hexstrike")
     if name == "hexstrike_defensive":
         action = str((arguments or {}).get("action") or "")
         if action != "lan_inventory":
@@ -503,6 +565,13 @@ def evaluate_tool_permissions(tool_name: str, arguments: dict[str, Any] | None =
         pending=[],
         decisions=decisions,
     )
+
+
+def tool_permission_error(tool_name: str, arguments: dict[str, Any] | None = None) -> str | None:
+    decision = evaluate_tool_permissions(tool_name, arguments)
+    if decision.status == "allow":
+        return None
+    return decision.reason or "Permission required before using the network."
 
 
 _SPOKEN_ASKS: dict[str, str] = {

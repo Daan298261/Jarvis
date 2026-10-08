@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import logging
 import os
 import re
@@ -7,12 +8,70 @@ from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from .base import RiskLevel, Tool, ToolResult
 
 log = logging.getLogger(__name__)
 
 _SAFE_NAME = re.compile(r"[^a-zA-Z0-9_-]+")
+
+
+def _looks_like_fs_path(arg: str) -> bool:
+    text = str(arg or "")
+    if not text or text.startswith(("@", "-", "http:", "https:")):
+        return False
+    if text.startswith("/") or text.startswith("\\\\") or text.startswith("./") or text.startswith("../"):
+        return True
+    if len(text) >= 3 and text[1] == ":" and text[0].isalpha():
+        return True
+    return "\\" in text
+
+
+def mcp_filesystem_directories(allowed: list[str] | None = None) -> list[str]:
+    """Directories to pass to MCP ``server-filesystem``.
+
+    The official server only sees argv roots. Documents-only meant a plugged-in
+    USB or ``D:`` was invisible to MCP file tools. Extra volumes plus the
+    owner's Documents folder; never the OS volume root or the LAN UNC sentinel.
+    """
+    from ..config import LOCAL_NETWORK_SCOPE, extra_volume_roots, live_allowed_directories
+    from .filesystem import _root_key, _system_volume_keys
+    from .owner_paths import default_workspace_dir
+    from .safety import resolve_allowed_path
+
+    roots = list(allowed if allowed is not None else live_allowed_directories())
+    skip = _system_volume_keys()
+    found: list[str] = []
+    seen: set[str] = set()
+
+    def _take(raw: str) -> None:
+        text = str(raw or "").strip()
+        if not text or text == LOCAL_NETWORK_SCOPE:
+            return
+        try:
+            path = resolve_allowed_path(text, roots)
+        except (PermissionError, OSError, ValueError):
+            return
+        try:
+            if not path.is_dir():
+                return
+            resolved = path.resolve()
+        except OSError:
+            return
+        key = _root_key(resolved)
+        if key in seen or key in skip:
+            return
+        seen.add(key)
+        found.append(str(resolved))
+
+    for extra in extra_volume_roots():
+        _take(str(extra))
+    try:
+        _take(str(default_workspace_dir(roots)))
+    except (PermissionError, OSError, ValueError):
+        pass
+    return found[:16]
 
 
 def mcp_prefix_dir() -> Path:
@@ -29,7 +88,8 @@ def mcp_tool_key(server_name: str, tool_name: str) -> str:
 
 def prepare_stdio_launch(server: dict[str, Any]) -> dict[str, Any]:
     """Make stdio MCP launches independent of process CWD."""
-    from ..config import repo_root
+    from ..config import live_allowed_directories, repo_root
+    from .safety import resolve_allowed_path
 
     root = repo_root()
     prefix = mcp_prefix_dir()
@@ -38,18 +98,106 @@ def prepare_stdio_launch(server: dict[str, Any]) -> dict[str, Any]:
     for index, arg in enumerate(args):
         if arg in {"mcp", "./mcp"} and index > 0 and args[index - 1] == "--prefix":
             args[index] = str(prefix)
+    allowed = live_allowed_directories()
+    cwd = str(root)
+    raw_cwd = str(server.get("cwd") or "").strip()
+    if raw_cwd and allowed:
+        try:
+            resolved_cwd = resolve_allowed_path(raw_cwd, allowed)
+            if resolved_cwd.is_dir():
+                cwd = str(resolved_cwd)
+        except (PermissionError, OSError):
+            cwd = str(root)
+    if _looks_like_fs_path(command) and allowed:
+        try:
+            command = str(resolve_allowed_path(command, allowed))
+        except (PermissionError, OSError):
+            pass
+    if allowed:
+        rewritten: list[str] = []
+        for arg in args:
+            if not _looks_like_fs_path(arg):
+                rewritten.append(arg)
+                continue
+            try:
+                rewritten.append(str(resolve_allowed_path(arg, allowed)))
+            except (PermissionError, OSError):
+                rewritten.append(arg)
+        args = rewritten
+        if any("server-filesystem" in arg for arg in args) and not any(_looks_like_fs_path(arg) for arg in args):
+            args.extend(mcp_filesystem_directories(allowed))
     env_in = server.get("env") or {}
     env = {str(key): str(value) for key, value in os.environ.items() if value is not None}
     for key, value in env_in.items():
         if value is None:
             continue
         env[str(key)] = str(value)
+    from ..security.hexstrike import hexstrike_child_env, is_hexstrike_mcp_server
+
+    if is_hexstrike_mcp_server(server):
+        env = hexstrike_child_env(env)
     return {
         "command": command,
         "args": args,
-        "cwd": str(root),
+        "cwd": cwd,
         "env": env,
     }
+
+
+def mcp_url_bypasses_env_proxy(url: str) -> bool:
+    """Loopback / RFC1918 MCP HTTP must not follow HTTP_PROXY (VPN steal-default)."""
+    from .safety import is_owner_local_host
+
+    host = (urlparse(str(url or "")).hostname or "").strip()
+    return bool(host) and is_owner_local_host(host)
+
+
+def _mcp_direct_http_client(**kwargs: Any):
+    """httpx/httpx2 client that ignores process proxy env (HexStrike loopback)."""
+    options = dict(kwargs)
+    options["trust_env"] = False
+    try:
+        from mcp.shared._httpx_utils import MCP_DEFAULT_SSE_READ_TIMEOUT, MCP_DEFAULT_TIMEOUT
+
+        import httpx2
+
+        options.setdefault("timeout", httpx2.Timeout(MCP_DEFAULT_TIMEOUT, read=MCP_DEFAULT_SSE_READ_TIMEOUT))
+        return httpx2.AsyncClient(**options)
+    except Exception:
+        import httpx
+
+        options.setdefault("timeout", 30.0)
+        return httpx.AsyncClient(**options)
+
+
+def _streamable_http_opener():
+    from mcp.client import streamable_http as module
+
+    return getattr(module, "streamablehttp_client", None) or getattr(module, "streamable_http_client")
+
+
+def streamable_http_proxy_bypass_param(server: dict[str, Any], opener: Any | None = None) -> str | None:
+    """Which opener kwarg binds a trust_env=False client for owner-local MCP HTTP."""
+    from ..security.hexstrike import is_hexstrike_mcp_server
+
+    url = str(server.get("url") or "")
+    if not mcp_url_bypasses_env_proxy(url) and not is_hexstrike_mcp_server(server):
+        return None
+    target = opener
+    if target is None:
+        try:
+            target = _streamable_http_opener()
+        except Exception:
+            return None
+    try:
+        names = set(inspect.signature(target).parameters)
+    except (TypeError, ValueError):
+        return None
+    if "http_client" in names:
+        return "http_client"
+    if "httpx_client_factory" in names:
+        return "httpx_client_factory"
+    return None
 
 
 @dataclass
@@ -159,10 +307,18 @@ class MCPRuntime:
                 )
                 read, write = await stack.enter_async_context(stdio_client(params))
             elif transport in {"http", "sse", "streamable-http"}:
-                from mcp.client.streamable_http import streamablehttp_client
-
-                url = server.get("url")
-                read, write, _ = await stack.enter_async_context(streamablehttp_client(url))
+                opener = _streamable_http_opener()
+                url = str(server.get("url") or "")
+                kwargs: dict[str, Any] = {}
+                param = streamable_http_proxy_bypass_param(server, opener)
+                if param == "http_client":
+                    client = _mcp_direct_http_client()
+                    await stack.enter_async_context(client)
+                    kwargs["http_client"] = client
+                elif param == "httpx_client_factory":
+                    kwargs["httpx_client_factory"] = lambda **factory_kw: _mcp_direct_http_client(**factory_kw)
+                streams = await stack.enter_async_context(opener(url, **kwargs))
+                read, write = streams[0], streams[1]
             else:
                 await stack.aclose()
                 raise RuntimeError(f"Unsupported MCP transport {transport}")
@@ -195,11 +351,142 @@ class MCPRuntime:
             return ToolResult(False, "", error=f"Unknown MCP tool {tool_key}")
         server = spec["server"]
         name = spec.get("remote_name") or spec["tool"]["name"]
+        args = dict(arguments or {})
+        from ..security.hexstrike_defensive import (
+            bind_hexstrike_lan_payload,
+            looks_like_nmap_tool,
+            looks_like_snmp_tool,
+            looks_like_iface_host_tool,
+            looks_like_smb_tool,
+            looks_like_smb_python_tool,
+            looks_like_hydra_tool,
+            looks_like_ldap_tool,
+            lan_inventory_uses_host_nmap,
+            nmap_target_from_payload,
+            lan_bind_target,
+            lan_bind_nic,
+            hexstrike_lan_tool_id,
+            preferred_lan_bind_target,
+            _host_nmap_lan_scan,
+            _host_snmp_lan,
+            _host_iface_lan,
+            _host_smb_lan,
+            _host_smb_python_lan,
+            _host_hydra_lan,
+            _host_ldap_lan,
+            _smb_host_binary,
+            _smb_payload_host,
+            _smb_python_binary,
+            _smb_lan_python_fallback_stem,
+            _hydra_host_binary,
+            _ldap_host_binary,
+            _iface_lan_target,
+            should_host_exec_iface,
+            should_host_exec_nmap_scan_fallback,
+            should_fail_closed_scan_host,
+            scan_host_unavailable_error,
+            nmap_scan_fallback_payload,
+        )
+
+        args = bind_hexstrike_lan_payload(str(tool_key or name), args)
+        if looks_like_nmap_tool(tool_key) or looks_like_nmap_tool(str(name)):
+            target = nmap_target_from_payload(args)
+            if lan_inventory_uses_host_nmap(target):
+                data = await _host_nmap_lan_scan({**args, "target": target})
+                return ToolResult(True, str(data.get("stdout") or data), data=data)
+        if looks_like_snmp_tool(tool_key) or looks_like_snmp_tool(str(name)):
+            target = lan_bind_target(args) or nmap_target_from_payload(args)
+            if lan_bind_nic(target)[1]:
+                data = await _host_snmp_lan(str(tool_key or name), args)
+                return ToolResult(True, str(data.get("stdout") or data), data=data)
+        if looks_like_smb_tool(tool_key) or looks_like_smb_tool(str(name)):
+            target = _smb_payload_host(args)
+            ident = hexstrike_lan_tool_id(str(tool_key or name))
+            if ident == "smbtree" and not lan_bind_nic(target)[1]:
+                target = preferred_lan_bind_target()
+                args = {**args, "target": target}
+            if lan_bind_nic(target)[1] and _smb_host_binary(ident):
+                data = await _host_smb_lan(str(tool_key or name), args)
+                return ToolResult(True, str(data.get("stdout") or data), data=data)
+            if lan_bind_nic(target)[1]:
+                fallback = _smb_lan_python_fallback_stem()
+                if fallback:
+                    data = await _host_smb_python_lan(fallback, args)
+                    return ToolResult(True, str(data.get("stdout") or data), data=data)
+                return ToolResult(
+                    False,
+                    "",
+                    error=(
+                        f"{ident} is not on PATH (and no smbmap/netexec/impacket-smbclient fallback). "
+                        "Install Samba or a Python SMB client so HexStrike LAN SMB can bind the home NIC."
+                    ),
+                )
+        if looks_like_smb_python_tool(tool_key) or looks_like_smb_python_tool(str(name)):
+            target = lan_bind_target(args) or nmap_target_from_payload(args)
+            ident = hexstrike_lan_tool_id(str(tool_key or name))
+            if lan_bind_nic(target)[1] and _smb_python_binary(ident):
+                data = await _host_smb_python_lan(str(tool_key or name), args)
+                return ToolResult(True, str(data.get("stdout") or data), data=data)
+            if lan_bind_nic(target)[1]:
+                fallback = _smb_lan_python_fallback_stem()
+                if fallback:
+                    data = await _host_smb_python_lan(fallback, args)
+                    return ToolResult(True, str(data.get("stdout") or data), data=data)
+                return ToolResult(
+                    False,
+                    "",
+                    error=(
+                        f"{ident} is not on PATH (and no smbmap/netexec/impacket-smbclient fallback). "
+                        "Install a Python SMB client so HexStrike LAN SMB can bind the home NIC."
+                    ),
+                )
+        if looks_like_hydra_tool(tool_key) or looks_like_hydra_tool(str(name)):
+            target = lan_bind_target(args) or nmap_target_from_payload(args)
+            if lan_bind_nic(target)[1] and _hydra_host_binary():
+                data = await _host_hydra_lan(str(tool_key or name), args)
+                return ToolResult(True, str(data.get("stdout") or data), data=data)
+            if lan_bind_nic(target)[1]:
+                return ToolResult(
+                    False,
+                    "",
+                    error="hydra is not on PATH. Install THC-Hydra so HexStrike LAN hydra can bind the home NIC.",
+                )
+        if looks_like_ldap_tool(tool_key) or looks_like_ldap_tool(str(name)):
+            target = lan_bind_target(args) or nmap_target_from_payload(args)
+            ident = hexstrike_lan_tool_id(str(tool_key or name))
+            if lan_bind_nic(target)[1] and _ldap_host_binary(ident):
+                data = await _host_ldap_lan(str(tool_key or name), args)
+                return ToolResult(True, str(data.get("stdout") or data), data=data)
+            if lan_bind_nic(target)[1]:
+                return ToolResult(
+                    False,
+                    "",
+                    error=(
+                        f"{ident or 'ldapsearch'} is not on PATH. Install OpenLDAP clients "
+                        "so HexStrike LAN LDAP can bind the home NIC."
+                    ),
+                )
+        if looks_like_iface_host_tool(tool_key) or looks_like_iface_host_tool(str(name)):
+            target = _iface_lan_target(args)
+            if should_host_exec_iface(str(tool_key or name), target):
+                data = await _host_iface_lan(str(tool_key or name), args)
+                return ToolResult(True, str(data.get("stdout") or data), data=data)
+            if should_host_exec_nmap_scan_fallback(str(tool_key or name), target):
+                data = await _host_nmap_lan_scan(nmap_scan_fallback_payload(args, target))
+                return ToolResult(True, str(data.get("stdout") or data), data=data)
+            if should_fail_closed_scan_host(str(tool_key or name), target):
+                return ToolResult(
+                    False,
+                    "",
+                    error=scan_host_unavailable_error(str(tool_key or name)),
+                )
         server_id = self._server_id(server)
         last_error = ""
         from ..security.rea_paths import PathNotAllowed, is_rea_mcp_server, sanitize_rea_mcp_arguments
 
-        call_args = arguments or {}
+        # Preserve the LAN-safe payload normalization above before applying the
+        # development branch's REA path validation.
+        call_args = args
         if is_rea_mcp_server(server):
             try:
                 call_args = sanitize_rea_mcp_arguments(call_args)

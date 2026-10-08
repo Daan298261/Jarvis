@@ -3,6 +3,7 @@ import {
   api,
   getRuntimeProfile,
   selectLmStudioProfile,
+  selectDiscoveredGguf,
   setSelectedRuntimeMode,
   setSelectedRuntimeProfileId,
   startHexStrike,
@@ -93,6 +94,14 @@ export async function applyRuntimeProfile(profileId: string): Promise<RuntimePro
 /** RFC-0077 — bind LM Studio catalog row then force route/load (conversation stays client-side). */
 export async function playLmStudioCatalogProfile(catalogProfileId: string): Promise<RuntimeProfile> {
   const runtime = await selectLmStudioProfile(catalogProfileId)
+  const id = runtime.id || runtime.name
+  await finishModelActivation(runtime.load)
+  syncRuntimeSelection(id)
+  return runtime
+}
+
+export async function playDiscoveredGguf(path: string): Promise<RuntimeProfile> {
+  const runtime = await selectDiscoveredGguf(path)
   const id = runtime.id || runtime.name
   await finishModelActivation(runtime.load)
   syncRuntimeSelection(id)

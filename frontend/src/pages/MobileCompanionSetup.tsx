@@ -31,6 +31,7 @@ type Connection = {
   remote_verified?: boolean
   wan_path?: string
   wan?: Record<string, unknown>
+  remote?: boolean
   updated_at?: number
 }
 
@@ -60,7 +61,7 @@ export function MobileCompanionSetup() {
   const [devices, setDevices] = useState<Device[]>([])
   const [endpoint, setEndpoint] = useState("")
   const [connection, setConnection] = useState<Connection | null>(null)
-  const [remote, setRemote] = useState(false)
+  const [remote, setRemote] = useState(true)
   const [wanForm, setWanForm] = useState<WanForm>(EMPTY_WAN_FORM)
   const [build, setBuild] = useState<CompanionBuildJob | null>(null)
   const [error, setError] = useState("")
@@ -71,6 +72,7 @@ export function MobileCompanionSetup() {
 
   function applyConnection(next: Connection) {
     setConnection(next)
+    if (typeof next.remote === "boolean") setRemote(next.remote)
     setWanForm((current) => {
       const dirty = Boolean(
         current.ssh_host ||
@@ -83,7 +85,7 @@ export function MobileCompanionSetup() {
       )
       if (dirty) return current
       const hydrated = wanFormFromSnapshot(next)
-      return { ...hydrated, gateway_password: current.gateway_password }
+      return { ...hydrated, gateway_password: current.gateway_password, ssh_password: current.ssh_password }
     })
   }
 
@@ -164,7 +166,7 @@ export function MobileCompanionSetup() {
       </p>
       <label>
         <input type="checkbox" checked={remote} onChange={(event) => setRemote(event.target.checked)} /> Enable
-        encrypted internet access when supported
+        encrypted internet access (TCP 4781 via UPnP, NAT-PMP, PCP, gateway SSH, or reverse tunnel)
       </label>
       {remote && (
         <div className="grid" style={{ marginTop: 12, gap: 8 }}>
@@ -190,7 +192,7 @@ export function MobileCompanionSetup() {
             <>
               {(wanForm.wan_method === "auto" || wanForm.wan_method === "upnp") && (
               <label>
-                Router IGD username (optional)
+                Router IGD username (optional; blank uses admin if you set a password)
                 <input
                   className="command"
                   value={wanForm.gateway_username}
@@ -291,12 +293,22 @@ export function MobileCompanionSetup() {
                 />
               </label>
               <label>
-                Reverse-tunnel identity file
+                Reverse-tunnel identity file (optional if you set the SSH password)
                 <input
                   className="command"
                   value={wanForm.ssh_identity_file}
                   placeholder="C:\\Users\\you\\.ssh\\id_ed25519"
                   onChange={(event) => patchWan("ssh_identity_file", event.target.value)}
+                />
+              </label>
+              <label>
+                Reverse-tunnel SSH password (optional if you set an identity file; never shown after save)
+                <input
+                  className="command"
+                  type="password"
+                  value={wanForm.ssh_password}
+                  autoComplete="current-password"
+                  onChange={(event) => patchWan("ssh_password", event.target.value)}
                 />
               </label>
             </>

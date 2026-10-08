@@ -115,6 +115,36 @@ def needs_confirmation(
     return risk == RiskLevel.IRREVERSIBLE or is_destructive_operation(tool_name, arguments, command)
 
 
+_OWNER_LOOPBACK_NAMES = frozenset({"localhost", "host.docker.internal", "router", "gateway"})
+_OWNER_LOCAL_NAME_SUFFIXES = (".local", ".home.arpa", ".lan", ".localhost")
+_OWNER_PRIVATE_NETS = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+)
+
+
+def is_owner_local_host(host: str) -> bool:
+    """True for this PC or the private LAN — not a public internet hostname.
+
+    Includes RFC1918, loopback, link-local, single-label LAN names, mDNS
+    (.local / .lan / .home.arpa), and RFC 6761 ``*.localhost`` (Win11 WSL is
+    ``wsl.localhost``; Docker Desktop is ``host.docker.internal``).
+    """
+    text = (host or "").strip().lower().rstrip(".").split("%", 1)[0]
+    if not text or "/" in text or "\\" in text or "@" in text:
+        return False
+    if text in _OWNER_LOOPBACK_NAMES:
+        return True
+    try:
+        ip = ipaddress.ip_address(text)
+    except ValueError:
+        return text.endswith(_OWNER_LOCAL_NAME_SUFFIXES) or "." not in text
+    return bool(ip.is_loopback or ip.is_link_local or any(ip in net for net in _OWNER_PRIVATE_NETS))
+
+
 def _unc_host(path: str) -> str | None:
     text = str(path or "").replace("/", "\\")
     if not text.startswith("\\\\"):
@@ -126,22 +156,11 @@ def _unc_host(path: str) -> str | None:
 
 
 def _private_lan_unc(path: str) -> bool:
-    """Only named LAN shares; never silently send credentials to WAN UNC hosts."""
+    """Owner-local shares (LAN NAS, WSL, Docker); never silently send credentials to WAN UNC hosts."""
     host = _unc_host(path)
     if not host:
         return False
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return host == "localhost" or host.endswith((".local", ".home.arpa", ".lan")) or "." not in host
-    return (
-        ip.is_loopback
-        or ip.is_link_local
-        or ip in ipaddress.ip_network("10.0.0.0/8")
-        or ip in ipaddress.ip_network("172.16.0.0/12")
-        or ip in ipaddress.ip_network("192.168.0.0/16")
-        or ip in ipaddress.ip_network("fc00::/7")
-    )
+    return is_owner_local_host(host)
 
 
 def _is_unc_path(path: str) -> bool:

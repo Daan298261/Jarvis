@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from ..tools.base import ToolResult
+from ..tools.owner_paths import direct_child_env
 
 UFO_TIMEOUT_SECONDS = 180
 CUA_TIMEOUT_SECONDS = 180
@@ -150,6 +151,7 @@ class ComputerUseBackend:
     async def _invoke(self, command: list[str], timeout: int) -> tuple[str, str, int]:
         proc = await asyncio.create_subprocess_exec(
             *command,
+            env=direct_child_env(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -210,8 +212,9 @@ class NativeWindowsBackend(ComputerUseBackend):
             )
         del timeout_seconds
         from ..tools.desktop import DesktopTool, parse_desktop_goal
+        from ..tools.registry import REGISTRY
 
-        tool = DesktopTool()
+        tool = DesktopTool(lambda: getattr(REGISTRY, "_context", None))
         data: dict[str, Any] = {"backend": self.id, "goal": goal, "app": app, "actions": []}
         parts: list[str] = []
         executed = False
@@ -382,7 +385,7 @@ class UFOBackend(ComputerUseBackend):
 
     def _openai_env(self) -> dict[str, str]:
         """Point UFO² at the local OpenAI-compatible llama.cpp endpoint (>=20k ctx)."""
-        env = os.environ.copy()
+        env = direct_child_env()
         try:
             from ..config import load_settings
 
@@ -406,7 +409,7 @@ class UFOBackend(ComputerUseBackend):
             *command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=env,
+            env=env or direct_child_env(),
             cwd=cwd or None,
         )
         try:
@@ -516,6 +519,7 @@ class CuaBackend(ComputerUseBackend):
     async def _invoke(self, command: list[str], timeout: int) -> tuple[str, str, int]:
         proc = await asyncio.create_subprocess_exec(
             *command,
+            env=direct_child_env(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -572,10 +576,13 @@ async def run_reflex_computer_use(
                 ),
             )
         from ..tools.desktop import DesktopTool
+        from ..tools.registry import REGISTRY
         from ..reflex_loop.runtime import run_reflex_live_desktop
 
         if app:
-            focused = await DesktopTool().execute(action="focus", title=app)
+            focused = await DesktopTool(lambda: getattr(REGISTRY, "_context", None)).execute(
+                action="focus", title=app
+            )
             if not focused.success:
                 return ToolResult(False, focused.output or "", error=focused.error or "focus failed")
         return await run_reflex_live_desktop(text, app=str(app or ""))

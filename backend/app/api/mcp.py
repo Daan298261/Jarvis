@@ -18,6 +18,7 @@ class MCPServerIn(BaseModel):
     transport: str = "stdio"
     command: str | None = None
     args: list[str] = []
+    cwd: str | None = None
     url: str | None = None
     env: dict[str, str] = {}
     enabled: bool = True
@@ -55,6 +56,8 @@ async def add_mcp(body: MCPServerIn):
     settings = load_settings()
     item = body.model_dump()
     item["id"] = str(uuid.uuid4())
+    if not str(item.get("cwd") or "").strip():
+        item.pop("cwd", None)
     settings.mcp_servers.append(item)
     save_settings(settings)
     status = await MCP.refresh(settings.mcp_servers)

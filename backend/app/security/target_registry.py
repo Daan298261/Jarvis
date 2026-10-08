@@ -14,12 +14,20 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from ..config import data_dir, default_allowed_directories, load_settings
+from ..config import data_dir, live_allowed_directories, load_settings
 from .security_audit import audit_security_event
 
 _LOCK = threading.RLock()
 _REGISTRY_NAME = "security-targets.json"
-_CONTAINER_RE = re.compile(r"^[a-z0-9][a-z0-9._/-]*(?::[a-zA-Z0-9._-]+|@sha256:[a-f0-9]{64})?$", re.I)
+# Hub names (`alpine:3.20`) and LAN registries (`192.168.1.50:5000/app:tag`).
+# The repository must contain a letter so a CIDR (`192.168.1.0/24`) is not an image.
+_CONTAINER_RE = re.compile(
+    r"^(?:(?:localhost|\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)"
+    r"(?::\d{1,5})?/)?"
+    r"[a-z0-9]*[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*"
+    r"(?::[a-zA-Z0-9._-]+|@sha256:[a-f0-9]{64})?$",
+    re.I,
+)
 _HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))*$", re.I)
 
 TARGET_KINDS = frozenset({"hostname", "ipv4", "ipv6", "cidr", "local_path", "container_image"})
@@ -96,7 +104,7 @@ def _normalize_local_path(value: str) -> str:
         raise TargetRegistryError("local_path targets must be absolute")
     resolved = candidate.resolve(strict=False)
     settings = load_settings()
-    roots = settings.allowed_directories or default_allowed_directories()
+    roots = live_allowed_directories(settings.allowed_directories)
     from ..config import LOCAL_NETWORK_SCOPE
 
     allowed = [Path(root).expanduser().resolve(strict=False) for root in roots if root != LOCAL_NETWORK_SCOPE]
@@ -298,9 +306,10 @@ def extract_target_candidates(arguments: dict[str, Any] | None) -> list[dict[str
             continue
         if key == "scope_id":
             try:
-                from .hexstrike_defensive import get_scope
+                from .hexstrike_defensive import _mirror_scope_to_target_registry, get_scope
 
                 scope = get_scope(text)
+                _mirror_scope_to_target_registry(scope)
                 _add(str(scope.get("kind") or "scope"), str(scope.get("value") or ""))
             except Exception:
                 _add("scope_id", text)

@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from ..config import data_dir
+from ..config import data_dir, resolved_data_sidecar_dir
 
 _lock = threading.RLock()
 _DB_PATH: Path | None = None
@@ -15,7 +15,12 @@ _DB_PATH: Path | None = None
 def recovery_db_path() -> Path:
     global _DB_PATH
     if _DB_PATH is None:
-        root = data_dir() / "recovery"
+        root = resolved_data_sidecar_dir(
+            "recovery",
+            local=data_dir() / "recovery",
+            markers=("journal.db", "journal.db-wal", "journal.db-shm"),
+            need_bytes=256 * 1024**2,
+        )
         root.mkdir(parents=True, exist_ok=True)
         _DB_PATH = root / "journal.db"
     return _DB_PATH

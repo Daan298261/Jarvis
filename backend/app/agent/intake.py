@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..config import data_dir
+from ..config import data_dir, resolved_data_sidecar_dir
 from ..decision.intake import estimate_tokens, split_segments
 from ..inference.prompt_budget import estimate_text_tokens
 from .segmented_input import SEGMENT_CHARS as SEGMENT_MIN_CHARS
@@ -134,7 +134,12 @@ def _decide_strategy(text: str) -> tuple[str, str, str]:
 
 
 def _save_original(text: str) -> Path:
-    root = data_dir() / "intake"
+    root = resolved_data_sidecar_dir(
+        "intake",
+        local=data_dir() / "intake",
+        markers=(),
+        need_bytes=256 * 1024**2,
+    )
     root.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     path = root / f"owner_paste_{stamp}_{uuid.uuid4().hex[:8]}.txt"
@@ -180,7 +185,12 @@ def plan_owner_intake(text: str, *, context_tokens: int) -> IntakePlan:
 
 
 def _chains_root() -> Path:
-    root = data_dir() / "intake_chains"
+    root = resolved_data_sidecar_dir(
+        "intake-chains",
+        local=data_dir() / "intake_chains",
+        markers=(),
+        need_bytes=256 * 1024**2,
+    )
     root.mkdir(parents=True, exist_ok=True)
     return root
 

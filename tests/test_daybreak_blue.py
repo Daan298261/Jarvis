@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import inspect
@@ -50,6 +52,13 @@ def test_scope_validation_accepts_owner_local_assets_and_rejects_public(blue_sto
     assert local["attested_owned"] is True
     assert normalize_scope("private_cidr", "192.168.20.0/24") == "192.168.20.0/24"
     assert normalize_scope("container_image", "alpine:3.20") == "alpine:3.20"
+    assert normalize_scope("container_image", "192.168.1.50:5000/app:latest") == "192.168.1.50:5000/app:latest"
+    assert normalize_scope("container_image", "nas.local:5000/org/img:v1") == "nas.local:5000/org/img:v1"
+    from app.security.target_registry import normalize_target
+
+    assert normalize_target("container_image", "192.168.1.50:5000/app:latest") == "192.168.1.50:5000/app:latest"
+    with pytest.raises(ValueError, match="invalid container"):
+        normalize_scope("container_image", "192.168.1.0/24")
     with pytest.raises(PermissionError):
         upsert_scope("no-attestation", kind="private_host", value="10.0.0.4", label="", attested_owned=False)
     with pytest.raises(ValueError, match="public"):
@@ -183,6 +192,30 @@ def test_defensive_permission_mapping_requires_cyber_and_blue():
     ]
 
 
+async def test_threat_intel_lookup_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+    from app.security.hexstrike_defensive import _lookup_cve
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    seen = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["n"] += 1
+        return httpx.Response(200, json={"vulnerabilities": [{"cve": {"id": "CVE-2024-0001"}}]})
+
+    class Client(httpx.AsyncClient):
+        def __init__(self, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr("app.policy.network_http.httpx.AsyncClient", Client)
+    with pytest.raises(PermissionError):
+        await _lookup_cve("CVE-2024-0001")
+    assert seen["n"] == 0
+
+
 @pytest.mark.asyncio
 async def test_lan_inventory_does_not_require_hexstrike_suite_grant(monkeypatch):
     context = {"security_role": "blue-team"}
@@ -205,6 +238,2300 @@ async def test_lan_inventory_does_not_require_hexstrike_suite_grant(monkeypatch)
     blocked = await tool.execute(action="host_baseline", scope_id="host")
     assert blocked.success is False
     assert "cyber.hexstrike" in (blocked.error or "")
+
+
+@pytest.mark.asyncio
+async def test_lan_inventory_starts_suite_without_hexstrike_grant(blue_store, monkeypatch):
+    upsert_scope("lan", kind="private_cidr", value="192.168.20.0/24", label="Home", attested_owned=True)
+    started = {"count": 0}
+
+    async def fake_status(*, enrich=False):
+        return SimpleNamespace(running=False, last_error="")
+
+    async def fake_start():
+        started["count"] += 1
+        return SimpleNamespace(running=True, last_error="")
+
+    async def fake_post(path, payload):
+        assert path == "api/tools/nmap"
+        assert payload["target"] == "192.168.20.0/24"
+        return {"hosts": []}
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    monkeypatch.setattr(HEXSTRIKE, "ensure_started", fake_start)
+    monkeypatch.setattr(HEXSTRIKE, "post_defensive", fake_post)
+    job = await execute_defensive("lan_inventory", "lan")
+    assert job["status"] == "completed"
+    assert started["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_lan_inventory_accepts_legacy_scope_missing_from_target_registry(blue_store, monkeypatch):
+    """HexStrike scopes saved before RFC-0197 have no security-targets.json row."""
+    from app.security.target_registry import is_registered_value
+
+    monkeypatch.setattr("app.security.target_registry.data_dir", lambda: blue_store)
+    monkeypatch.setattr("app.security.security_audit.data_dir", lambda: blue_store)
+    (blue_store / "hexstrike-scopes.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "scopes": [
+                    {
+                        "id": "legacy-lan",
+                        "kind": "private_cidr",
+                        "value": "192.168.20.0/24",
+                        "label": "Home",
+                        "attested_owned": True,
+                        "enabled": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert is_registered_value("192.168.20.0/24") is False
+
+    async def fake_status(*, enrich=False):
+        return SimpleNamespace(running=True, last_error="")
+
+    async def fake_post(path, payload):
+        assert payload["target"] == "192.168.20.0/24"
+        return {"hosts": [{"ip": "192.168.20.10"}]}
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    monkeypatch.setattr(HEXSTRIKE, "post_defensive", fake_post)
+    job = await execute_defensive("lan_inventory", "legacy-lan")
+    assert job["status"] == "completed"
+    assert is_registered_value("192.168.20.0/24") is True
+
+
+def test_discover_private_lan_cidrs_skips_cgnat_and_public(monkeypatch):
+    from types import SimpleNamespace
+
+    import socket
+
+    from app.security.hexstrike_defensive import discover_private_lan_cidrs
+
+    def fake_addrs():
+        return {
+            "wlan0": [
+                SimpleNamespace(family=socket.AF_INET, address="192.168.20.12", netmask="255.255.255.0"),
+            ],
+            "wwan0": [
+                SimpleNamespace(family=socket.AF_INET, address="100.64.1.8", netmask="255.192.0.0"),
+            ],
+            "eth0": [
+                SimpleNamespace(family=socket.AF_INET, address="8.8.8.8", netmask="255.255.255.0"),
+            ],
+        }
+
+    monkeypatch.setattr("psutil.net_if_addrs", fake_addrs)
+    assert discover_private_lan_cidrs() == ["192.168.20.0/24"]
+
+
+def test_preferred_lan_cidrs_put_gateway_subnet_before_vpn(monkeypatch):
+    from app.security.hexstrike_defensive import preferred_lan_cidrs
+
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.discover_private_lan_cidrs",
+        lambda: ["10.8.0.0/24", "192.168.1.0/24"],
+    )
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
+    assert preferred_lan_cidrs() == ["192.168.1.0/24", "10.8.0.0/24"]
+
+
+def _home_vpn_addrs():
+    import socket
+
+    return {
+        "eth0": [
+            SimpleNamespace(family=socket.AF_INET, address="192.168.1.12", netmask="255.255.255.0"),
+        ],
+        "wg0": [
+            SimpleNamespace(family=socket.AF_INET, address="10.8.0.2", netmask="255.255.255.0"),
+        ],
+        "wwan0": [
+            SimpleNamespace(family=socket.AF_INET, address="100.64.1.8", netmask="255.192.0.0"),
+        ],
+        "Ethernet 2": [
+            SimpleNamespace(family=socket.AF_INET, address="192.168.50.8", netmask="255.255.255.0"),
+        ],
+    }
+
+
+def test_lan_scan_bind_pins_home_nic_not_vpn_or_cgnat(monkeypatch):
+    from app.security.hexstrike_defensive import lan_scan_bind, nmap_lan_additional_args, nmap_lan_bind_args
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    assert lan_scan_bind("192.168.1.0/24") == ("eth0", "192.168.1.12")
+    assert lan_scan_bind("192.168.1.50") == ("eth0", "192.168.1.12")
+    assert lan_scan_bind("10.8.0.0/24") == ("wg0", "10.8.0.2")
+    assert lan_scan_bind("8.8.8.0/24") == ("", "")
+    assert lan_scan_bind("100.64.0.0/10") == ("", "")
+    assert nmap_lan_bind_args("192.168.1.0/24") == ["-S", "192.168.1.12", "-e", "eth0"]
+    assert nmap_lan_additional_args("192.168.1.0/24") == "-T3 -S 192.168.1.12 -e eth0"
+    # Windows "Ethernet 2" has a space: host argv keeps -e; suite string omits it so HexStrike cannot split the name.
+    assert nmap_lan_bind_args("192.168.50.0/24") == ["-S", "192.168.50.8", "-e", "Ethernet 2"]
+    assert nmap_lan_additional_args("192.168.50.0/24") == "-T3 -S 192.168.50.8"
+
+
+def test_lan_bind_nic_resolves_mdns_host_to_home_nic(monkeypatch):
+    import socket
+
+    from app.security.hexstrike_defensive import lan_bind_nic
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        if host in {"nas.local", "router.lan"}:
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.40", 0))]
+        raise socket.gaierror("no")
+
+    monkeypatch.setattr("app.mobile.wan_forward.socket.getaddrinfo", fake_getaddrinfo)
+    assert lan_bind_nic("nas.local") == ("eth0", "192.168.1.12")
+    assert lan_bind_nic("http://router.lan/admin") == ("eth0", "192.168.1.12")
+    assert lan_bind_nic("192.168.1.50") == ("eth0", "192.168.1.12")
+
+
+def test_lan_uses_host_iface_argv_for_mdns_on_spaced_windows_nic(monkeypatch):
+    import socket
+
+    from app.security.hexstrike_defensive import lan_inventory_uses_host_nmap, lan_uses_host_iface_argv
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        if host == "cam.local":
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.50.12", 0))]
+        raise socket.gaierror("no")
+
+    monkeypatch.setattr("app.mobile.wan_forward.socket.getaddrinfo", fake_getaddrinfo)
+    assert lan_uses_host_iface_argv("cam.local") is True
+    assert lan_inventory_uses_host_nmap("cam.local") is True
+    assert lan_uses_host_iface_argv("192.168.1.50") is False
+
+
+@pytest.mark.asyncio
+async def test_lan_inventory_uses_host_nmap_when_windows_nic_name_has_space(blue_store, monkeypatch):
+    from app.security.hexstrike_defensive import lan_inventory_uses_host_nmap
+
+    upsert_scope("wifi", kind="private_cidr", value="192.168.50.0/24", label="Wi-Fi", attested_owned=True)
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    assert lan_inventory_uses_host_nmap("192.168.50.0/24") is True
+    assert lan_inventory_uses_host_nmap("192.168.1.0/24") is False
+
+    async def fake_status(*, enrich=False):
+        return SimpleNamespace(running=True, last_error="")
+
+    async def fake_post(path, payload):
+        raise AssertionError(f"HexStrike nmap must not receive a spaced NIC name: {payload}")
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    monkeypatch.setattr(HEXSTRIKE, "post_defensive", fake_post)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/nmap" if str(name).lower() == "nmap" else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"Nmap scan report for nas (192.168.50.12)\nHost is up.\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        assert args[0] == "/usr/bin/nmap"
+        assert args[args.index("-S") + 1] == "192.168.50.8"
+        assert args[args.index("-e") + 1] == "Ethernet 2"
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    job = await execute_defensive("lan_inventory", "wifi")
+    assert job["status"] == "completed"
+    assert job["result"]["source"] == "host-nmap"
+    assert job["result"]["hosts"][0]["address"] == "192.168.50.12"
+    assert seen
+
+
+def test_default_lan_scope_prefers_home_lan_and_registers_vpn_cidr(blue_store, monkeypatch):
+    from app.security.hexstrike_defensive import (
+        extra_lan_scope_id,
+        ensure_default_lan_scope,
+        lan_inventory_targets,
+        list_scopes,
+        upsert_scope,
+    )
+
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.discover_private_lan_cidrs",
+        lambda: ["10.8.0.0/24", "192.168.1.0/24"],
+    )
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
+    upsert_scope("lan", kind="private_cidr", value="10.8.0.0/24", label="VPN", attested_owned=True)
+    refreshed = ensure_default_lan_scope()
+    assert refreshed["value"] == "192.168.1.0/24"
+    extra_id = extra_lan_scope_id("10.8.0.0/24")
+    extras = {row["id"]: row["value"] for row in list_scopes()}
+    assert extras[extra_id] == "10.8.0.0/24"
+    assert lan_inventory_targets(refreshed) == ["192.168.1.0/24", "10.8.0.0/24"]
+
+
+@pytest.mark.asyncio
+async def test_lan_inventory_uses_nic_cidr_when_scope_missing(blue_store, monkeypatch):
+    from types import SimpleNamespace
+
+    import socket
+
+    from app.security.hexstrike_defensive import discover_private_lan_cidrs, execute_defensive
+
+    def fake_addrs():
+        return {
+            "wlan0": [
+                SimpleNamespace(family=socket.AF_INET, address="10.2.0.5", netmask="255.255.0.0"),
+            ],
+        }
+
+    monkeypatch.setattr("psutil.net_if_addrs", fake_addrs)
+    assert discover_private_lan_cidrs() == ["10.2.0.0/16"]
+
+    async def fake_status(*, enrich=False):
+        return SimpleNamespace(running=True, last_error="")
+
+    async def fake_post(path, payload):
+        assert path == "api/tools/nmap"
+        assert payload["target"] == "10.2.0.0/16"
+        return {"hosts": []}
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    monkeypatch.setattr(HEXSTRIKE, "post_defensive", fake_post)
+    job = await execute_defensive("lan_inventory", "")
+    assert job["status"] == "completed"
+    assert job["scope_id"] == "lan"
+
+
+def test_default_lan_scope_refreshes_stale_or_public_cidr(blue_store, monkeypatch):
+    from app.security.hexstrike_defensive import ensure_default_lan_scope, upsert_scope
+
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.discover_private_lan_cidrs",
+        lambda: ["192.168.20.0/24"],
+    )
+    upsert_scope("lan", kind="private_cidr", value="10.0.0.0/24", label="Old house", attested_owned=True)
+    refreshed = ensure_default_lan_scope()
+    assert refreshed["value"] == "192.168.20.0/24"
+    (blue_store / "hexstrike-scopes.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "scopes": [
+                    {
+                        "id": "lan",
+                        "kind": "private_cidr",
+                        "value": "8.8.8.0/24",
+                        "label": "Poisoned",
+                        "attested_owned": True,
+                        "enabled": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    repaired = ensure_default_lan_scope()
+    assert repaired["value"] == "192.168.20.0/24"
+    kept = ensure_default_lan_scope()
+    assert kept["value"] == "192.168.20.0/24"
+
+
+def test_parse_nmap_ping_hosts():
+    from app.security.hexstrike_defensive import parse_nmap_ping_hosts
+
+    hosts = parse_nmap_ping_hosts(
+        "Nmap scan report for nas (192.168.20.12)\nHost is up.\n"
+        "Nmap scan report for 192.168.20.1\n"
+    )
+    assert hosts == [
+        {"address": "192.168.20.12", "hostname": "nas"},
+        {"address": "192.168.20.1", "hostname": ""},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_host_nmap_refuses_public_and_hostname_targets(monkeypatch):
+    from app.security.hexstrike_defensive import _host_nmap_ping_scan
+
+    called = {"n": 0}
+
+    async def fake_exec(*args, **kwargs):
+        called["n"] += 1
+        raise AssertionError("nmap must not run for a public target")
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
+    with pytest.raises(ValueError, match="public"):
+        await _host_nmap_ping_scan("8.8.8.0/24")
+    with pytest.raises(ValueError):
+        await _host_nmap_ping_scan("scanme.nmap.org")
+    assert called["n"] == 0
+
+
+@pytest.mark.asyncio
+async def test_lan_inventory_refuses_tampered_public_scope(blue_store, monkeypatch):
+    (blue_store / "hexstrike-scopes.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "scopes": [
+                    {
+                        "id": "evil",
+                        "kind": "private_cidr",
+                        "value": "8.8.8.0/24",
+                        "label": "Not LAN",
+                        "attested_owned": True,
+                        "enabled": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    called = {"n": 0}
+
+    async def fake_exec(*args, **kwargs):
+        called["n"] += 1
+        raise AssertionError("nmap must not run")
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
+    with pytest.raises(PermissionError, match="public"):
+        await execute_defensive("lan_inventory", "evil")
+    assert called["n"] == 0
+
+
+@pytest.mark.asyncio
+async def test_lan_inventory_uses_host_nmap_when_suite_unavailable(blue_store, monkeypatch):
+    upsert_scope("lan", kind="private_cidr", value="192.168.20.0/24", label="Home", attested_owned=True)
+
+    async def fake_status(*, enrich=False):
+        return SimpleNamespace(running=False, last_error="HexStrike AI is not installed.")
+
+    async def fake_start():
+        return SimpleNamespace(running=False, last_error="HexStrike AI is not installed.")
+
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    monkeypatch.setattr(HEXSTRIKE, "ensure_started", fake_start)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/nmap" if str(name).lower() == "nmap" else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"Nmap scan report for nas (192.168.20.12)\nHost is up.\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    async def fake_exec(*args, **kwargs):
+        assert args[0] == "/usr/bin/nmap"
+        assert "-sn" in args
+        assert args[-1] == "192.168.20.0/24"
+        assert "--" in args
+        assert args[args.index("-S") + 1] == "192.168.20.5"
+        assert args[args.index("-e") + 1] == "wlan0"
+        return FakeProc()
+
+    monkeypatch.setattr(
+        "psutil.net_if_addrs",
+        lambda: {
+            "wlan0": [
+                SimpleNamespace(family=__import__("socket").AF_INET, address="192.168.20.5", netmask="255.255.255.0"),
+            ],
+            "wg0": [
+                SimpleNamespace(family=__import__("socket").AF_INET, address="10.8.0.2", netmask="255.255.255.0"),
+            ],
+        },
+    )
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    job = await execute_defensive("lan_inventory", "lan")
+    assert job["status"] == "completed"
+    assert job["result"]["source"] == "host-nmap"
+    assert job["result"]["hosts"][0]["address"] == "192.168.20.12"
+
+
+@pytest.mark.asyncio
+async def test_lan_inventory_suite_nmap_binds_home_nic(blue_store, monkeypatch):
+    upsert_scope("lan", kind="private_cidr", value="192.168.1.0/24", label="Home", attested_owned=True)
+
+    async def fake_status(*, enrich=False):
+        return SimpleNamespace(running=True, last_error="")
+
+    seen: list[dict] = []
+
+    async def fake_post(path, payload):
+        assert path == "api/tools/nmap"
+        seen.append(payload)
+        return {"hosts": []}
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.security.hexstrike_defensive.discover_private_lan_cidrs", lambda: ["192.168.1.0/24", "10.8.0.0/24"])
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
+    monkeypatch.setattr(HEXSTRIKE, "status", fake_status)
+    monkeypatch.setattr(HEXSTRIKE, "post_defensive", fake_post)
+    job = await execute_defensive("lan_inventory", "lan")
+    assert job["status"] == "completed"
+    assert [item["target"] for item in seen] == ["192.168.1.0/24", "10.8.0.0/24"]
+    assert seen[0]["additional_args"] == "-T3 -S 192.168.1.12 -e eth0"
+    assert seen[1]["additional_args"] == "-T3 -S 10.8.0.2 -e wg0"
+
+
+def test_bind_hexstrike_nmap_payload_pins_lan_and_skips_public(monkeypatch):
+    from app.security.hexstrike_defensive import bind_hexstrike_nmap_payload
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    lan = bind_hexstrike_nmap_payload({"target": "192.168.1.0/24", "scan_type": "-sV"})
+    assert lan["additional_args"] == "-T3 -S 192.168.1.12 -e eth0"
+    assert lan["scan_type"] == "-sV"
+    spaced = bind_hexstrike_nmap_payload({"target": "192.168.50.12", "additional_args": "-T4"})
+    assert spaced["additional_args"] == "-T4 -S 192.168.50.8"
+    public = bind_hexstrike_nmap_payload({"target": "8.8.8.8", "additional_args": "-T3"})
+    assert public["additional_args"] == "-T3"
+    host_alias = bind_hexstrike_nmap_payload({"host": "192.168.1.40", "additional_args": "-T4"})
+    assert host_alias["additional_args"] == "-T4 -S 192.168.1.12 -e eth0"
+
+
+def test_bind_hexstrike_lan_payload_pins_nuclei_httpx_naabu(monkeypatch):
+    from app.security.hexstrike_defensive import bind_hexstrike_lan_payload, bindable_lan_host
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.mobile.wan_forward.default_gateway_ipv4", lambda: "192.168.1.1")
+    assert bindable_lan_host("http://192.168.1.40:8080/login") == "192.168.1.40"
+    nuclei = bind_hexstrike_lan_payload(
+        "http:nuclei",
+        {"url": "http://192.168.1.40:8080/login", "additional_args": "-t http/"},
+    )
+    assert nuclei["additional_args"] == "-t http/ -source-ip 192.168.1.12 -interface eth0"
+    assert nuclei["url"] == "http://192.168.1.40:8080/login"
+    httpx = bind_hexstrike_lan_payload("mcp_hexstrike_ai_httpx", {"target": "192.168.1.0/24"})
+    assert httpx["additional_args"] == "-source-ip 192.168.1.12 -interface eth0"
+    naabu = bind_hexstrike_lan_payload("api/tools/naabu", {"host": "192.168.50.12", "extra_args": "-p 80"})
+    assert naabu["extra_args"] == "-p 80 -source-ip 192.168.50.8"
+    masscan = bind_hexstrike_lan_payload("masscan", {"target": "192.168.1.0/24"})
+    assert masscan["additional_args"] == "--source-ip 192.168.1.12 -e eth0"
+    curl = bind_hexstrike_lan_payload("curl", {"url": "http://192.168.1.1/"})
+    assert curl["additional_args"] == "--interface eth0"
+    public = bind_hexstrike_lan_payload("nuclei", {"target": "https://example.com", "additional_args": "-t cves/"})
+    assert public["additional_args"] == "-t cves/"
+    gobuster = bind_hexstrike_lan_payload("http:gobuster", {"url": "http://192.168.1.40/", "additional_args": "-w wordlist.txt"})
+    assert gobuster["additional_args"].startswith("-w wordlist.txt --proxy http://127.0.0.1:")
+    ffuf = bind_hexstrike_lan_payload("ffuf", {"url": "http://192.168.1.40/FUZZ", "additional_args": "-w wordlist.txt -p POST"})
+    assert ffuf["additional_args"].startswith("-w wordlist.txt -p POST -x http://127.0.0.1:")
+    dirsearch = bind_hexstrike_lan_payload("api/tools/dirsearch", {"url": "http://192.168.1.1/"})
+    assert dirsearch["additional_args"].startswith("--proxy http://127.0.0.1:")
+    already_proxy = bind_hexstrike_lan_payload(
+        "gobuster",
+        {"url": "http://192.168.1.40/", "additional_args": "-w w.txt --proxy http://127.0.0.1:9"},
+    )
+    assert already_proxy["additional_args"] == "-w w.txt --proxy http://127.0.0.1:9"
+    public_bust = bind_hexstrike_lan_payload("gobuster", {"url": "https://example.com/", "additional_args": "-w w.txt"})
+    assert public_bust["additional_args"] == "-w w.txt"
+    already = bind_hexstrike_lan_payload(
+        "nuclei",
+        {"target": "192.168.1.40", "additional_args": "-source-ip 192.168.1.12"},
+    )
+    assert already["additional_args"] == "-source-ip 192.168.1.12"
+    wget = bind_hexstrike_lan_payload("wget", {"url": "ftp://192.168.1.40/backup.tar"})
+    assert wget["additional_args"] == "--bind-address=192.168.1.12"
+    wget2 = bind_hexstrike_lan_payload("wget2", {"url": "http://192.168.1.40/pkg.tgz"})
+    assert wget2["additional_args"] == "--bind-address=192.168.1.12"
+    aria = bind_hexstrike_lan_payload("aria2c", {"url": "http://192.168.1.40/pkg.tgz", "additional_args": "-x 16"})
+    assert aria["additional_args"] == "-x 16 --interface=192.168.1.12"
+    axel = bind_hexstrike_lan_payload("axel", {"url": "http://192.168.1.40/pkg.tgz", "additional_args": "-n 4"})
+    assert axel["additional_args"] == "-n 4 --bind-address=192.168.1.12"
+    rustscan = bind_hexstrike_lan_payload("rustscan", {"target": "192.168.1.0/24", "additional_args": "-a 192.168.1.0/24"})
+    assert rustscan["additional_args"] == "-a 192.168.1.0/24 -- -S 192.168.1.12 -e eth0"
+    katana = bind_hexstrike_lan_payload("http:katana", {"url": "http://192.168.1.40/", "additional_args": "-jc"})
+    assert katana["additional_args"].startswith("-jc -proxy http://127.0.0.1:")
+    whatweb = bind_hexstrike_lan_payload("whatweb", {"url": "http://192.168.1.1/"})
+    assert whatweb["additional_args"].startswith("--proxy 127.0.0.1:")
+    wpscan = bind_hexstrike_lan_payload("wpscan", {"url": "http://192.168.1.40/"})
+    assert wpscan["additional_args"].startswith("--proxy http://127.0.0.1:")
+    ncrack = bind_hexstrike_lan_payload(
+        "http:ncrack",
+        {"target": "192.168.1.50", "additional_args": "-p 22 --user admin -P p.txt"},
+    )
+    assert ncrack["additional_args"].startswith("-p 22 --user admin -P p.txt --proxy http://127.0.0.1:")
+    public_ncrack = bind_hexstrike_lan_payload("ncrack", {"target": "8.8.8.8", "additional_args": "-p 22"})
+    assert public_ncrack["additional_args"] == "-p 22"
+    already_ncrack = bind_hexstrike_lan_payload(
+        "ncrack",
+        {"target": "192.168.1.50", "additional_args": "--proxy http://127.0.0.1:9 -p 22"},
+    )
+    assert already_ncrack["additional_args"] == "--proxy http://127.0.0.1:9 -p 22"
+    public_katana = bind_hexstrike_lan_payload("katana", {"url": "https://example.com/"})
+    assert public_katana.get("additional_args", "") == ""
+    arp = bind_hexstrike_lan_payload("http:arp-scan", {"target": "192.168.1.0/24"})
+    assert arp["additional_args"] == "--arpspa 192.168.1.12 -I eth0"
+    mcp_arp = bind_hexstrike_lan_payload("mcp_hexstrike_ai_arp_scan", {"target": "192.168.1.0/24"})
+    assert mcp_arp["additional_args"] == "--arpspa 192.168.1.12 -I eth0"
+    arping = bind_hexstrike_lan_payload("arping", {"host": "192.168.1.40"})
+    assert arping["additional_args"] == "-s 192.168.1.12 -I eth0"
+    fping = bind_hexstrike_lan_payload("api/tools/fping", {"target": "192.168.1.0/24"})
+    assert fping["additional_args"] == "-S 192.168.1.12 -I eth0"
+    spaced = bind_hexstrike_lan_payload("arp-scan", {"target": "192.168.50.12"})
+    assert spaced["additional_args"] == "--arpspa 192.168.50.8"
+    public_arp = bind_hexstrike_lan_payload("arp-scan", {"target": "8.8.8.8"})
+    assert public_arp.get("additional_args", "") == ""
+    iperf = bind_hexstrike_lan_payload("iperf3", {"target": "192.168.1.50", "additional_args": "-c 192.168.1.50"})
+    assert iperf["additional_args"] == "-c 192.168.1.50 -B 192.168.1.12"
+    public_iperf = bind_hexstrike_lan_payload("iperf3", {"target": "8.8.8.8"})
+    assert public_iperf.get("additional_args", "") == ""
+    mtr = bind_hexstrike_lan_payload("mtr", {"target": "192.168.1.1", "additional_args": "-c 3"})
+    assert mtr["additional_args"] == "-c 3 -a 192.168.1.12"
+    public_mtr = bind_hexstrike_lan_payload("mtr", {"target": "8.8.8.8"})
+    assert public_mtr.get("additional_args", "") == ""
+    nmb = bind_hexstrike_lan_payload("http:nmblookup", {"target": "192.168.1.50"})
+    assert nmb["additional_args"] == "-B 192.168.1.255 -i eth0"
+    mcp_nmb = bind_hexstrike_lan_payload("mcp_hexstrike_ai_nmblookup", {"host": "192.168.1.40"})
+    assert mcp_nmb["additional_args"] == "-B 192.168.1.255 -i eth0"
+    spaced_nmb = bind_hexstrike_lan_payload("nmblookup", {"target": "192.168.50.12"})
+    assert spaced_nmb["additional_args"] == "-B 192.168.50.255"
+    public_nmb = bind_hexstrike_lan_payload("nmblookup", {"target": "8.8.8.8"})
+    assert public_nmb.get("additional_args", "") == ""
+    star = bind_hexstrike_lan_payload("nmblookup", {"target": "*"})
+    assert star["additional_args"] == "-B 192.168.1.255 -i eth0"
+    tcpdump = bind_hexstrike_lan_payload("tcpdump", {"target": "192.168.1.50", "additional_args": "-n -c 20"})
+    assert tcpdump["additional_args"] == "-n -c 20 -i eth0"
+    tshark = bind_hexstrike_lan_payload("http:tshark", {"additional_args": "host 192.168.1.1"})
+    assert tshark["additional_args"] == "host 192.168.1.1 -i eth0"
+    spaced_cap = bind_hexstrike_lan_payload("dumpcap", {"target": "192.168.50.12"})
+    assert spaced_cap.get("additional_args", "") == ""
+    public_cap = bind_hexstrike_lan_payload("tcpdump", {"target": "8.8.8.8"})
+    assert public_cap.get("additional_args", "") == ""
+    snmp = bind_hexstrike_lan_payload("snmpwalk", {"target": "192.168.1.1"})
+    assert snmp.get("additional_args", "") == ""
+    hping = bind_hexstrike_lan_payload("hping3", {"target": "192.168.1.50", "additional_args": "-S -p 80"})
+    assert hping["additional_args"] == "-S -p 80 -I eth0"
+    spaced_hping = bind_hexstrike_lan_payload("hping3", {"target": "192.168.50.12"})
+    assert spaced_hping.get("additional_args", "") == ""
+    trivy = bind_hexstrike_lan_payload("api/tools/trivy", {"target": "192.168.1.50:5000/app:latest"})
+    assert trivy["additional_args"].startswith("--proxy http://127.0.0.1:")
+    assert trivy["target"] == "192.168.1.50:5000/app:latest"
+    grype = bind_hexstrike_lan_payload("http:grype", {"image": "192.168.1.1/org/img:v1"})
+    assert grype["additional_args"].startswith("--proxy http://127.0.0.1:")
+    public_trivy = bind_hexstrike_lan_payload("trivy", {"target": "alpine:3.20"})
+    assert public_trivy.get("additional_args", "") == ""
+
+
+def test_looks_like_nmap_tool_matches_hexstrike_mcp_ids():
+    from app.security.hexstrike_defensive import looks_like_nmap_tool, looks_like_snmp_tool
+
+    assert looks_like_nmap_tool("nmap")
+    assert looks_like_nmap_tool("http:nmap")
+    assert looks_like_nmap_tool("mcp_hexstrike_ai_nmap")
+    assert looks_like_nmap_tool("mcp_hexstrike-ai_nmap")
+    assert not looks_like_nmap_tool("mcp_hexstrike_ai_trivy")
+    assert not looks_like_nmap_tool("container_scan")
+    assert looks_like_snmp_tool("snmpwalk")
+    assert looks_like_snmp_tool("http:snmpget")
+    assert looks_like_snmp_tool("mcp_hexstrike_ai_snmpwalk")
+    assert looks_like_snmp_tool("api/tools/snmpbulkwalk")
+    assert not looks_like_snmp_tool("mcp_hexstrike_ai_nmap")
+    assert not looks_like_snmp_tool("nuclei")
+    from app.security.hexstrike_defensive import looks_like_iface_host_tool
+
+    assert looks_like_iface_host_tool("tcpdump")
+    assert looks_like_iface_host_tool("http:tshark")
+    assert looks_like_iface_host_tool("mcp_hexstrike_ai_dumpcap")
+    assert looks_like_iface_host_tool("hping3")
+    assert looks_like_iface_host_tool("http:arp-scan")
+    assert looks_like_iface_host_tool("mcp_hexstrike_ai_arp_scan")
+    assert looks_like_iface_host_tool("arping")
+    assert looks_like_iface_host_tool("api/tools/fping")
+    assert looks_like_iface_host_tool("mcp_hexstrike_ai_nmblookup")
+    assert looks_like_iface_host_tool("http:nuclei")
+    assert looks_like_iface_host_tool("mcp_hexstrike_ai_httpx")
+    assert looks_like_iface_host_tool("api/tools/naabu")
+    assert looks_like_iface_host_tool("masscan")
+    assert looks_like_iface_host_tool("rustscan")
+    assert not looks_like_iface_host_tool("nmap")
+    from app.security.hexstrike_defensive import looks_like_smb_tool
+
+    assert looks_like_smb_tool("smbclient")
+    assert looks_like_smb_tool("http:smbget")
+    assert looks_like_smb_tool("mcp_hexstrike_ai_rpcclient")
+    assert looks_like_smb_tool("api/tools/smbtree")
+    assert not looks_like_smb_tool("nmap")
+    assert not looks_like_smb_tool("nuclei")
+    from app.security.hexstrike_defensive import looks_like_hydra_tool
+
+    assert looks_like_hydra_tool("hydra")
+    assert looks_like_hydra_tool("http:hydra")
+    assert looks_like_hydra_tool("mcp_hexstrike_ai_hydra")
+    assert looks_like_hydra_tool("api/tools/thc-hydra")
+    assert not looks_like_hydra_tool("nmap")
+    assert not looks_like_hydra_tool("smbclient")
+    from app.security.hexstrike_defensive import looks_like_ldap_tool
+
+    assert looks_like_ldap_tool("ldapsearch")
+    assert looks_like_ldap_tool("http:ldapwhoami")
+    assert looks_like_ldap_tool("mcp_hexstrike_ai_ldapsearch")
+    assert looks_like_ldap_tool("api/tools/ldapmodify")
+    assert not looks_like_ldap_tool("nmap")
+    assert not looks_like_ldap_tool("hydra")
+    from app.security.hexstrike_defensive import looks_like_smb_python_tool
+
+    assert looks_like_smb_python_tool("smbmap")
+    assert looks_like_smb_python_tool("http:nxc")
+    assert looks_like_smb_python_tool("mcp_hexstrike_ai_netexec")
+    assert looks_like_smb_python_tool("api/tools/enum4linux-ng")
+    assert looks_like_smb_python_tool("impacket-smbclient")
+    assert not looks_like_smb_python_tool("smbclient")
+    assert not looks_like_smb_python_tool("nuclei")
+    assert not looks_like_smb_tool("impacket-smbclient")
+
+
+def test_hexstrike_child_env_drops_proxy_so_lan_scans_are_not_stolen(monkeypatch):
+    from app.security.hexstrike import hexstrike_child_env
+
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:8080")
+    monkeypatch.setenv("https_proxy", "http://10.8.0.1:3128")
+    monkeypatch.setenv("ALL_PROXY", "socks5://10.8.0.1:1080")
+    monkeypatch.setenv("NO_PROXY", "*")
+    monkeypatch.setenv("JARVIS_HEXSTRIKE_HOME", "/opt/hexstrike")
+    env = hexstrike_child_env()
+    assert "HTTP_PROXY" not in env
+    assert "https_proxy" not in env
+    assert "ALL_PROXY" not in env
+    assert "NO_PROXY" not in env
+    assert env["JARVIS_HEXSTRIKE_HOME"] == "/opt/hexstrike"
+    assert "lan_python_site" in env["PYTHONPATH"]
+    from app.config import repo_root
+
+    assert str(repo_root() / "backend") in env["PYTHONPATH"].split(os.pathsep)
+    kept = hexstrike_child_env({"PATH": "/usr/bin", "http_proxy": "http://proxy.example:8080", "HEXSTRIKE_PORT": "8888"})
+    assert "http_proxy" not in kept
+    assert kept["PATH"] == "/usr/bin"
+    assert kept["HEXSTRIKE_PORT"] == "8888"
+    assert "HTTP_PROXY" not in kept
+
+
+def test_is_hexstrike_mcp_server_matches_upstream_and_script():
+    from app.security.hexstrike import is_hexstrike_mcp_server
+
+    assert is_hexstrike_mcp_server({"name": "hexstrike-upstream"})
+    assert is_hexstrike_mcp_server({"name": "hexstrike-upstream-http"})
+    assert is_hexstrike_mcp_server({"id": "hexstrike-ai"})
+    assert is_hexstrike_mcp_server({"command": "python", "args": ["/opt/hexstrike-ai/hexstrike_mcp.py", "--stdio"]})
+    assert not is_hexstrike_mcp_server({"name": "email", "command": "npx", "args": ["email-mcp"]})
+    assert not is_hexstrike_mcp_server(None)
+
+
+@pytest.mark.asyncio
+async def test_mcp_nmap_call_binds_home_nic(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    seen: list[dict] = []
+
+    class FakeSession:
+        async def call_tool(self, name, arguments):
+            seen.append({"name": name, "arguments": dict(arguments)})
+            return SimpleNamespace(content="ok", is_error=False)
+
+    async def fake_connect(server):
+        return FakeSession()
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_nmap"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "nmap"},
+        "remote_name": "nmap",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    try:
+        result = await MCP.call("mcp_hexstrike_ai_nmap", {"target": "192.168.1.0/24"})
+        assert result.success, result.error
+        assert seen[0]["name"] == "nmap"
+        assert seen[0]["arguments"]["additional_args"] == "-T3 -S 192.168.1.12 -e eth0"
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_mcp_nuclei_call_binds_home_nic(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    seen: list[dict] = []
+
+    class FakeSession:
+        async def call_tool(self, name, arguments):
+            seen.append({"name": name, "arguments": dict(arguments)})
+            return SimpleNamespace(content="ok", is_error=False)
+
+    async def fake_connect(server):
+        return FakeSession()
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_nuclei"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "nuclei"},
+        "remote_name": "nuclei",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_nuclei",
+            {"url": "http://192.168.1.40/", "additional_args": "-t http/"},
+        )
+        assert result.success, result.error
+        assert seen[0]["name"] == "nuclei"
+        assert seen[0]["arguments"]["additional_args"] == "-t http/ -source-ip 192.168.1.12 -interface eth0"
+        assert seen[0]["arguments"]["url"] == "http://192.168.1.40/"
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_mcp_nmap_uses_host_argv_when_windows_nic_name_has_space(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("MCP nmap must not be used when HexStrike would split -e")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_nmap"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "nmap"},
+        "remote_name": "nmap",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/nmap" if str(name).lower() == "nmap" else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"Nmap scan report for nas (192.168.50.12)\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    try:
+        result = await MCP.call("mcp_hexstrike_ai_nmap", {"target": "192.168.50.0/24"})
+        assert result.success, result.error
+        assert result.data["source"] == "host-nmap"
+        argv = seen[0]
+        assert argv[argv.index("-e") + 1] == "Ethernet 2"
+        assert argv[argv.index("-S") + 1] == "192.168.50.8"
+        assert argv[-1] == "192.168.50.0/24"
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_operator_nmap_binds_home_nic(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_nmap
+
+    seen: list[dict] = []
+
+    async def fake_post(path, payload):
+        assert path == "api/tools/nmap"
+        seen.append(payload)
+        return {"hosts": []}
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    result = await execute_operator_nmap({"target": "192.168.1.40", "scan_type": "-sV", "ports": "22,80"})
+    assert result == {"hosts": []}
+    assert seen[0]["target"] == "192.168.1.40"
+    assert seen[0]["additional_args"] == "-T3 -S 192.168.1.12 -e eth0"
+    assert seen[0]["scan_type"] == "-sV"
+
+
+@pytest.mark.asyncio
+async def test_operator_snmpwalk_hosts_lan_with_clientaddr(monkeypatch):
+    from pathlib import Path
+
+    from app.security.hexstrike_defensive import execute_operator_snmp, snmp_host_argv
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: f"/usr/bin/{name}" if str(name).lower() in {"snmpwalk", "snmpget"} else None,
+    )
+    argv = snmp_host_argv("http:snmpwalk", {"target": "192.168.1.1", "community": "public", "additional_args": "-v2c"})
+    assert argv[0] == "/usr/bin/snmpwalk"
+    assert argv[1:] == ["-v2c", "-c", "public", "192.168.1.1"]
+
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"SNMPv2-MIB::sysName.0 = STRING: gateway\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append((args, kwargs.get("env") or {}))
+        return FakeProc()
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    result = await execute_operator_snmp(
+        "api/tools/snmpwalk",
+        {"target": "192.168.1.1", "community": "public", "additional_args": "-v2c"},
+    )
+    assert posted == []
+    assert result["source"] == "host-snmp"
+    assert result["target"] == "192.168.1.1"
+    assert "sysName" in result["stdout"]
+    env = seen[0][1]
+    conf = Path(env["SNMPCONFPATH"]) / "snmp.conf"
+    assert "clientaddr 192.168.1.12" in conf.read_text(encoding="utf-8")
+    public = await execute_operator_snmp("api/tools/snmpwalk", {"target": "8.8.8.8", "community": "public"})
+    assert public == {"ok": True}
+    assert posted[0][0] == "api/tools/snmpwalk"
+    assert posted[0][1]["target"] == "8.8.8.8"
+
+
+@pytest.mark.asyncio
+async def test_mcp_snmpwalk_hosts_lan_with_clientaddr(monkeypatch):
+    from pathlib import Path
+
+    from app.tools.mcp_runtime import MCP
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/snmpwalk" if str(name).lower() == "snmpwalk" else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"iso.3.6.1.2.1.1.5.0 = STRING: nas\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append((args, kwargs.get("env") or {}))
+        return FakeProc()
+
+    async def fake_connect(server):
+        raise AssertionError("LAN snmpwalk must not go through HexStrike MCP")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_snmpwalk"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "snmpwalk"},
+        "remote_name": "snmpwalk",
+    }
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_snmpwalk",
+            {"target": "192.168.1.40", "community": "public", "additional_args": "-v2c"},
+        )
+        assert result.success, result.error
+        assert result.data["source"] == "host-snmp"
+        argv = seen[0][0]
+        assert argv[0] == "/usr/bin/snmpwalk"
+        assert "192.168.1.40" in argv
+        env = seen[0][1]
+        assert "clientaddr 192.168.1.12" in (Path(env["SNMPCONFPATH"]) / "snmp.conf").read_text(encoding="utf-8")
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_operator_tcpdump_hosts_spaced_windows_nic(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_iface_tool, iface_host_argv
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: f"/usr/bin/{name}"
+        if str(name).lower() in {"tcpdump", "tshark", "hping3"}
+        else None,
+    )
+    argv = iface_host_argv(
+        "http:tcpdump",
+        {"target": "192.168.50.12", "additional_args": "-n -c 20"},
+    )
+    assert argv[0] == "/usr/bin/tcpdump"
+    assert argv[1:3] == ["-i", "Ethernet 2"]
+    assert argv[-2:] == ["host", "192.168.50.12"]
+
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"20 packets captured\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    hosted = await execute_operator_iface_tool(
+        "api/tools/tcpdump",
+        {"target": "192.168.50.12", "additional_args": "-n -c 20"},
+    )
+    assert posted == []
+    assert hosted["source"] == "host-iface"
+    assert seen[0][seen[0].index("-i") + 1] == "Ethernet 2"
+    simple = await execute_operator_iface_tool(
+        "api/tools/tcpdump",
+        {"target": "192.168.1.50", "additional_args": "-n"},
+    )
+    assert simple == {"ok": True}
+    assert posted[0][0] == "api/tools/tcpdump"
+    assert "-i eth0" in posted[0][1]["additional_args"]
+
+
+@pytest.mark.asyncio
+async def test_operator_arp_scan_hosts_spaced_windows_nic(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_iface_tool, iface_host_argv
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: f"/usr/bin/{name}"
+        if str(name).lower() in {"arp-scan", "arping", "fping", "nmblookup"}
+        else None,
+    )
+    arp = iface_host_argv(
+        "http:arp-scan",
+        {"target": "192.168.50.0/24", "additional_args": "--arpspa 192.168.50.8 --retry=2"},
+    )
+    assert arp[0] == "/usr/bin/arp-scan"
+    assert arp[1:5] == ["--arpspa", "192.168.50.8", "-I", "Ethernet 2"]
+    assert "--retry=2" in arp
+    assert arp[-1] == "192.168.50.0/24"
+    arping = iface_host_argv("arping", {"host": "192.168.50.12", "additional_args": "-s 192.168.50.8 -c 3"})
+    assert arping[0] == "/usr/bin/arping"
+    assert arping[1:5] == ["-s", "192.168.50.8", "-I", "Ethernet 2"]
+    assert "-c" in arping and "3" in arping
+    assert arping[-1] == "192.168.50.12"
+    fping = iface_host_argv("api/tools/fping", {"target": "192.168.50.0/24"})
+    assert fping[0] == "/usr/bin/fping"
+    assert fping[1:5] == ["-S", "192.168.50.8", "-I", "Ethernet 2"]
+    nmb = iface_host_argv("mcp_hexstrike_ai_nmblookup", {"target": "192.168.50.12"})
+    assert nmb[0] == "/usr/bin/nmblookup"
+    assert nmb[1:5] == ["-B", "192.168.50.255", "-i", "Ethernet 2"]
+    assert nmb[-1] == "192.168.50.12"
+
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"192.168.50.12 printer\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    hosted = await execute_operator_iface_tool(
+        "api/tools/arp-scan",
+        {"target": "192.168.50.0/24"},
+    )
+    assert posted == []
+    assert hosted["source"] == "host-iface"
+    argv = seen[0]
+    assert argv[0] == "/usr/bin/arp-scan"
+    assert argv[argv.index("-I") + 1] == "Ethernet 2"
+    assert argv[argv.index("--arpspa") + 1] == "192.168.50.8"
+    assert argv[-1] == "192.168.50.0/24"
+    simple = await execute_operator_iface_tool(
+        "api/tools/arp-scan",
+        {"target": "192.168.1.0/24"},
+    )
+    assert simple == {"ok": True}
+    assert posted[0][0] == "api/tools/arp-scan"
+    assert "--arpspa 192.168.1.12 -I eth0" in posted[0][1]["additional_args"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_arp_scan_uses_host_argv_when_windows_nic_name_has_space(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN arp-scan must not go through HexStrike MCP when -I would split")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_arp_scan"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "arp_scan"},
+        "remote_name": "arp_scan",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/arp-scan" if str(name).lower() == "arp-scan" else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"192.168.50.20 printer\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_arp_scan",
+            {"target": "192.168.50.0/24"},
+        )
+        assert result.success, result.error
+        assert result.data["source"] == "host-iface"
+        argv = seen[0]
+        assert argv[0] == "/usr/bin/arp-scan"
+        assert argv[argv.index("-I") + 1] == "Ethernet 2"
+        assert argv[-1] == "192.168.50.0/24"
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_operator_nuclei_hosts_spaced_windows_nic(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_iface_tool, iface_host_argv
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.security.hexstrike.resolve_install", lambda explicit="": None)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: f"/usr/bin/{name}"
+        if str(name).lower() in {"nuclei", "httpx", "naabu", "masscan", "rustscan"}
+        else None,
+    )
+    nuclei = iface_host_argv(
+        "http:nuclei",
+        {
+            "url": "http://192.168.50.12:8080/login",
+            "additional_args": "-t http/ -source-ip 192.168.50.8",
+        },
+    )
+    assert nuclei[0] == "/usr/bin/nuclei"
+    assert nuclei[1:5] == ["-source-ip", "192.168.50.8", "-interface", "Ethernet 2"]
+    assert "-t" in nuclei and "http/" in nuclei
+    assert nuclei[-2:] == ["-u", "http://192.168.50.12:8080/login"]
+    httpx = iface_host_argv("mcp_hexstrike_ai_httpx", {"target": "192.168.50.0/24"})
+    assert httpx[0] == "/usr/bin/httpx"
+    assert httpx[1:5] == ["-source-ip", "192.168.50.8", "-interface", "Ethernet 2"]
+    assert httpx[-2:] == ["-u", "192.168.50.0/24"]
+    naabu = iface_host_argv("api/tools/naabu", {"host": "192.168.50.12", "extra_args": "-p 80"})
+    assert naabu[0] == "/usr/bin/naabu"
+    assert naabu[1:5] == ["-source-ip", "192.168.50.8", "-interface", "Ethernet 2"]
+    assert "-p" in naabu and "80" in naabu
+    assert naabu[-2:] == ["-host", "192.168.50.12"]
+    masscan = iface_host_argv("masscan", {"target": "192.168.50.0/24", "additional_args": "-p 80"})
+    assert masscan[0] == "/usr/bin/masscan"
+    assert masscan[1:5] == ["--source-ip", "192.168.50.8", "-e", "Ethernet 2"]
+    assert masscan[-1] == "192.168.50.0/24"
+    rust = iface_host_argv(
+        "rustscan",
+        {"target": "192.168.50.0/24", "additional_args": "-a 192.168.50.0/24 -- -S 192.168.50.8"},
+    )
+    assert rust[0] == "/usr/bin/rustscan"
+    assert rust[1:3] == ["-a", "192.168.50.0/24"]
+    assert "--" in rust
+    assert rust[rust.index("-S") + 1] == "192.168.50.8"
+    assert rust[rust.index("-e") + 1] == "Ethernet 2"
+
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"[http] http://192.168.50.12:8080/login\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    hosted = await execute_operator_iface_tool(
+        "api/tools/nuclei",
+        {"url": "http://192.168.50.12:8080/login", "additional_args": "-t http/"},
+    )
+    assert posted == []
+    assert hosted["source"] == "host-iface"
+    argv = seen[0]
+    assert argv[0] == "/usr/bin/nuclei"
+    assert argv[argv.index("-interface") + 1] == "Ethernet 2"
+    assert argv[-2:] == ("-u", "http://192.168.50.12:8080/login")
+    simple = await execute_operator_iface_tool(
+        "api/tools/nuclei",
+        {"url": "http://192.168.1.40:8080/", "additional_args": "-t http/"},
+    )
+    assert simple == {"ok": True}
+    assert posted[0][0] == "api/tools/nuclei"
+    assert "-source-ip 192.168.1.12 -interface eth0" in posted[0][1]["additional_args"]
+
+
+@pytest.mark.asyncio
+async def test_operator_nuclei_fails_closed_when_scanner_and_nmap_missing(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_iface_tool
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.security.hexstrike.resolve_install", lambda explicit="": None)
+    monkeypatch.setattr("app.security.hexstrike_defensive.shutil.which", lambda *args, **kwargs: None)
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    with pytest.raises(RuntimeError, match="nmap is not on PATH"):
+        await execute_operator_iface_tool(
+            "api/tools/nuclei",
+            {"url": "http://192.168.50.12:8080/login", "additional_args": "-t http/"},
+        )
+    assert posted == []
+    simple = await execute_operator_iface_tool(
+        "api/tools/nuclei",
+        {"url": "http://192.168.1.40:8080/", "additional_args": "-t http/"},
+    )
+    assert simple == {"ok": True}
+    assert posted[0][0] == "api/tools/nuclei"
+    assert "-interface eth0" in posted[0][1]["additional_args"]
+
+
+@pytest.mark.asyncio
+async def test_operator_nuclei_uses_nmap_when_nuclei_missing(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_iface_tool
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.security.hexstrike.resolve_install", lambda explicit="": None)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/nmap"
+        if str(name).lower() in {"nmap", "nmap.exe"}
+        else None,
+    )
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"Nmap scan report for 192.168.50.12\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    hosted = await execute_operator_iface_tool(
+        "api/tools/nuclei",
+        {"url": "http://192.168.50.12:8080/login", "additional_args": "-t http/"},
+    )
+    assert posted == []
+    assert hosted["source"] == "host-nmap"
+    argv = seen[0]
+    assert argv[0] == "/usr/bin/nmap"
+    assert "-sV" in argv
+    assert argv[argv.index("-S") + 1] == "192.168.50.8"
+    assert argv[argv.index("-e") + 1] == "Ethernet 2"
+    assert argv[argv.index("-p") + 1] == "8080"
+    assert argv[-1] == "192.168.50.12"
+    assert "-t" not in argv
+
+
+@pytest.mark.asyncio
+async def test_mcp_nuclei_uses_host_argv_when_windows_nic_name_has_space(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN nuclei must not go through HexStrike MCP when -interface would split")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_nuclei"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "nuclei"},
+        "remote_name": "nuclei",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.security.hexstrike.resolve_install", lambda explicit="": None)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/nuclei" if str(name).lower() == "nuclei" else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"[http] http://192.168.50.12/\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_nuclei",
+            {"url": "http://192.168.50.12/", "additional_args": "-t http/"},
+        )
+        assert result.success, result.error
+        assert result.data["source"] == "host-iface"
+        argv = seen[0]
+        assert argv[0] == "/usr/bin/nuclei"
+        assert argv[argv.index("-interface") + 1] == "Ethernet 2"
+        assert argv[-2:] == ("-u", "http://192.168.50.12/")
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_mcp_nuclei_uses_nmap_when_nuclei_missing(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN nuclei must not go through HexStrike MCP when nmap can bind the NIC")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_nuclei"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "nuclei"},
+        "remote_name": "nuclei",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.security.hexstrike.resolve_install", lambda explicit="": None)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/nmap"
+        if str(name).lower() in {"nmap", "nmap.exe"}
+        else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"Nmap scan report for 192.168.50.12\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_nuclei",
+            {"url": "http://192.168.50.12:8080/login", "additional_args": "-t http/"},
+        )
+        assert result.success, result.error
+        assert result.data["source"] == "host-nmap"
+        argv = seen[0]
+        assert argv[0] == "/usr/bin/nmap"
+        assert argv[argv.index("-e") + 1] == "Ethernet 2"
+        assert argv[argv.index("-p") + 1] == "8080"
+        assert argv[-1] == "192.168.50.12"
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_mcp_nuclei_fails_closed_when_scanner_and_nmap_missing(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN nuclei must not go through HexStrike MCP when nmap cannot bind the NIC")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_nuclei"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "nuclei"},
+        "remote_name": "nuclei",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.security.hexstrike.resolve_install", lambda explicit="": None)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr("app.security.hexstrike_defensive.shutil.which", lambda *args, **kwargs: None)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_nuclei",
+            {"url": "http://192.168.50.12:8080/login", "additional_args": "-t http/"},
+        )
+        assert not result.success
+        assert "nmap is not on PATH" in (result.error or "")
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_operator_smbclient_hosts_lan_client_addr(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_smb, smb_host_argv
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: f"/usr/bin/{name}"
+        if str(name).lower() in {"smbclient", "smbget", "rpcclient", "smbtree"}
+        else None,
+    )
+    argv = smb_host_argv("http:smbclient", {"target": "192.168.1.50", "additional_args": "-L -N"})
+    assert argv[0] == "/usr/bin/smbclient"
+    assert argv[1] == "--option=client addr=192.168.1.12"
+    assert argv[argv.index("-L") + 1] == "192.168.1.50"
+    assert "-N" in argv
+    share = smb_host_argv("smbclient", {"share": "//192.168.50.12/media"})
+    assert share[1] == "--option=client addr=192.168.50.8"
+    assert share[-1] == "//192.168.50.12/media"
+
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"Sharename\nmedia\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    hosted = await execute_operator_smb("api/tools/smbclient", {"target": "192.168.1.50", "additional_args": "-L"})
+    assert posted == []
+    assert hosted["source"] == "host-smb"
+    assert seen[0][1] == "--option=client addr=192.168.1.12"
+    public = await execute_operator_smb("api/tools/smbclient", {"target": "8.8.8.8"})
+    assert public == {"ok": True}
+    assert posted[0][0] == "api/tools/smbclient"
+
+
+@pytest.mark.asyncio
+async def test_operator_smbclient_fails_closed_when_not_on_path(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_smb
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.security.hexstrike_defensive.shutil.which", lambda *args, **kwargs: None)
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    with pytest.raises(RuntimeError, match="not on PATH"):
+        await execute_operator_smb("api/tools/smbclient", {"target": "192.168.1.50"})
+    assert posted == []
+    public = await execute_operator_smb("api/tools/smbclient", {"target": "8.8.8.8"})
+    assert public == {"ok": True}
+    assert posted[0][0] == "api/tools/smbclient"
+
+
+@pytest.mark.asyncio
+async def test_operator_smbclient_uses_impacket_when_samba_missing(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_smb
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/impacket-smbclient"
+        if str(name).lower() in {"impacket-smbclient", "impacket-smbclient.exe"}
+        else None,
+    )
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"# shares\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append((args, kwargs.get("env") or {}))
+        return FakeProc()
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    hosted = await execute_operator_smb(
+        "api/tools/smbclient",
+        {"target": "192.168.1.50", "additional_args": "-L -N"},
+    )
+    assert posted == []
+    assert hosted["source"] == "host-smb-python"
+    assert seen[0][0][0] == "/usr/bin/impacket-smbclient"
+    assert "192.168.1.50" in seen[0][0]
+    env = seen[0][1]
+    assert "lan_python_site" in (env.get("PYTHONPATH") or "")
+    assert "HTTP_PROXY" not in env
+    assert "10.8.0.1" not in (env.get("HTTPS_PROXY") or "")
+
+
+@pytest.mark.asyncio
+async def test_operator_hydra_hosts_lan_with_hydra_proxy(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_hydra, hydra_host_argv
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: f"/usr/bin/{name}"
+        if str(name).lower() in {"hydra", "thc-hydra"}
+        else None,
+    )
+    argv = hydra_host_argv(
+        "http:hydra",
+        {"target": "192.168.1.50", "service": "ssh", "additional_args": "-l admin -P p.txt"},
+    )
+    assert argv[0] == "/usr/bin/hydra"
+    assert argv[1:] == ["-l", "admin", "-P", "p.txt", "192.168.1.50", "ssh"]
+
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"[22][ssh] host: 192.168.1.50   login: admin   password: x\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append((args, kwargs.get("env") or {}))
+        return FakeProc()
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    hosted = await execute_operator_hydra(
+        "api/tools/hydra",
+        {"target": "192.168.1.50", "service": "ssh", "additional_args": "-l admin -P p.txt"},
+    )
+    assert posted == []
+    assert hosted["source"] == "host-hydra"
+    assert hosted["target"] == "192.168.1.50"
+    env = seen[0][1]
+    assert env["HYDRA_PROXY"].startswith("http://127.0.0.1:")
+    assert env["HYDRA_PROXY_HTTP"] == env["HYDRA_PROXY"]
+    assert "10.8.0.1" not in env["HYDRA_PROXY"]
+    public = await execute_operator_hydra("api/tools/hydra", {"target": "8.8.8.8", "service": "ssh"})
+    assert public == {"ok": True}
+    assert posted[0][0] == "api/tools/hydra"
+
+
+@pytest.mark.asyncio
+async def test_operator_smbmap_hosts_lan_with_sitecustomize(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_smb_python, smb_python_host_argv
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: f"/usr/bin/{name}"
+        if str(name).lower() in {"smbmap", "nxc", "enum4linux-ng"}
+        else None,
+    )
+    argv = smb_python_host_argv("http:smbmap", {"target": "192.168.1.50", "additional_args": "-u guest"})
+    assert argv[0] == "/usr/bin/smbmap"
+    assert argv[1:] == ["-u", "guest", "-H", "192.168.1.50"]
+    nxc = smb_python_host_argv("api/tools/nxc", {"target": "192.168.1.40"})
+    assert nxc[0] == "/usr/bin/nxc"
+    assert nxc[1:] == ["smb", "192.168.1.40"]
+
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"[+] 192.168.1.50:445 guest\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append((args, kwargs.get("env") or {}))
+        return FakeProc()
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    hosted = await execute_operator_smb_python(
+        "api/tools/smbmap",
+        {"target": "192.168.1.50", "additional_args": "-u guest"},
+    )
+    assert posted == []
+    assert hosted["source"] == "host-smb-python"
+    assert hosted["target"] == "192.168.1.50"
+    env = seen[0][1]
+    assert "lan_python_site" in (env.get("PYTHONPATH") or "")
+    assert "HTTP_PROXY" not in env
+    public = await execute_operator_smb_python("api/tools/smbmap", {"target": "8.8.8.8"})
+    assert public == {"ok": True}
+    assert posted[0][0] == "api/tools/smbmap"
+
+
+@pytest.mark.asyncio
+async def test_operator_smbmap_fails_closed_when_not_on_path(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_smb_python
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.security.hexstrike_defensive.shutil.which", lambda *args, **kwargs: None)
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    with pytest.raises(RuntimeError, match="not on PATH"):
+        await execute_operator_smb_python("api/tools/smbmap", {"target": "192.168.1.50"})
+    assert posted == []
+    public = await execute_operator_smb_python("api/tools/smbmap", {"target": "8.8.8.8"})
+    assert public == {"ok": True}
+    assert posted[0][0] == "api/tools/smbmap"
+
+
+@pytest.mark.asyncio
+async def test_operator_hydra_fails_closed_when_not_on_path(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_hydra
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.security.hexstrike_defensive.shutil.which", lambda *args, **kwargs: None)
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    with pytest.raises(RuntimeError, match="not on PATH"):
+        await execute_operator_hydra("api/tools/hydra", {"target": "192.168.1.50", "service": "ssh"})
+    assert posted == []
+    public = await execute_operator_hydra("api/tools/hydra", {"target": "8.8.8.8", "service": "ssh"})
+    assert public == {"ok": True}
+    assert posted[0][0] == "api/tools/hydra"
+
+
+@pytest.mark.asyncio
+async def test_mcp_hydra_uses_host_argv_for_lan(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN hydra must not go through HexStrike MCP; HYDRA_PROXY would be unset")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_hydra"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "hydra"},
+        "remote_name": "hydra",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/hydra" if str(name).lower() == "hydra" else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"login: admin\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append((args, kwargs.get("env") or {}))
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_hydra",
+            {"target": "192.168.1.50", "service": "http-get", "additional_args": "-l admin -P p.txt"},
+        )
+        assert result.success, result.error
+        assert result.data["source"] == "host-hydra"
+        assert seen[0][0][0] == "/usr/bin/hydra"
+        assert seen[0][0][-2:] == ("192.168.1.50", "http-get")
+        assert seen[0][1]["HYDRA_PROXY"].startswith("http://127.0.0.1:")
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_mcp_hydra_fails_closed_when_not_on_path(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN hydra must not go through HexStrike MCP; HYDRA_PROXY would be unset")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_hydra"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "hydra"},
+        "remote_name": "hydra",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr("app.security.hexstrike_defensive.shutil.which", lambda *args, **kwargs: None)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_hydra",
+            {"target": "192.168.1.50", "service": "ssh"},
+        )
+        assert not result.success
+        assert "not on PATH" in (result.error or "")
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_operator_ldapsearch_hosts_lan_with_tcp_bind(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_ldap, ldap_host_argv
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: f"/usr/bin/{name}"
+        if str(name).lower() in {"ldapsearch", "ldapwhoami"}
+        else None,
+    )
+    argv = ldap_host_argv(
+        "http:ldapsearch",
+        {"target": "192.168.1.50", "additional_args": "-x -b dc=corp,dc=local"},
+    )
+    assert argv[1].endswith("lan_tcp_bind.py")
+    assert argv[2:6] == ["ldap", "192.168.1.12", "192.168.1.50", "389"]
+    child = argv[argv.index("--") + 1 :]
+    assert child[0] == "/usr/bin/ldapsearch"
+    assert child[1:] == ["-x", "-b", "dc=corp,dc=local", "-h", "192.168.1.50"]
+    uri = ldap_host_argv(
+        "api/tools/ldapsearch",
+        {"additional_args": "-H ldap://192.168.1.40:3268 -x"},
+    )
+    assert uri[2:6] == ["ldap", "192.168.1.12", "192.168.1.40", "3268"]
+    assert "-h" not in uri[uri.index("--") + 1 :]
+    tls = ldap_host_argv("ldapwhoami", {"url": "ldaps://192.168.1.50"})
+    assert tls[2:6] == ["ldap", "192.168.1.12", "192.168.1.50", "636"]
+    assert tls[tls.index("--") + 1] == "/usr/bin/ldapwhoami"
+    assert tls[tls.index("-H") + 1] == "ldaps://192.168.1.50"
+
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"dn: dc=corp,dc=local\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append((args, kwargs.get("env") or {}))
+        return FakeProc()
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    hosted = await execute_operator_ldap(
+        "api/tools/ldapsearch",
+        {"target": "192.168.1.50", "additional_args": "-x -b dc=corp,dc=local"},
+    )
+    assert posted == []
+    assert hosted["source"] == "host-ldap"
+    assert hosted["target"] == "192.168.1.50"
+    assert seen[0][0][1].endswith("lan_tcp_bind.py")
+    assert seen[0][0][2:6] == ("ldap", "192.168.1.12", "192.168.1.50", "389")
+    assert "HTTP_PROXY" not in seen[0][1]
+    public = await execute_operator_ldap("api/tools/ldapsearch", {"target": "8.8.8.8"})
+    assert public == {"ok": True}
+    assert posted[0][0] == "api/tools/ldapsearch"
+
+
+@pytest.mark.asyncio
+async def test_operator_ldapsearch_fails_closed_when_not_on_path(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_ldap
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr("app.security.hexstrike_defensive.shutil.which", lambda *args, **kwargs: None)
+    posted: list[tuple] = []
+
+    async def fake_post(path, payload):
+        posted.append((path, payload))
+        return {"ok": True}
+
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    with pytest.raises(RuntimeError, match="not on PATH"):
+        await execute_operator_ldap("api/tools/ldapsearch", {"target": "192.168.1.50"})
+    assert posted == []
+
+
+@pytest.mark.asyncio
+async def test_mcp_ldapsearch_uses_host_argv_for_lan(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN ldapsearch must not go through HexStrike MCP; VPN would steal LDAP")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_ldapsearch"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "ldapsearch"},
+        "remote_name": "ldapsearch",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/ldapsearch"
+        if str(name).lower() == "ldapsearch"
+        else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"dn: dc=corp,dc=local\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_ldapsearch",
+            {"target": "192.168.1.50", "additional_args": "-x -b dc=corp,dc=local"},
+        )
+        assert result.success, result.error
+        assert result.data["source"] == "host-ldap"
+        assert seen[0][1].endswith("lan_tcp_bind.py")
+        assert seen[0][2:6] == ("ldap", "192.168.1.12", "192.168.1.50", "389")
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_mcp_ldapsearch_fails_closed_when_not_on_path(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN ldapsearch must not fall back to HexStrike MCP when ldapsearch is missing")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_ldapsearch"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "ldapsearch"},
+        "remote_name": "ldapsearch",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr("app.security.hexstrike_defensive.shutil.which", lambda *args, **kwargs: None)
+    try:
+        result = await MCP.call("mcp_hexstrike_ai_ldapsearch", {"target": "192.168.1.50"})
+        assert not result.success
+        assert "not on PATH" in (result.error or "")
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_mcp_smbclient_uses_host_argv_for_lan(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN smbclient must not go through HexStrike MCP; client addr would split")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_smbclient"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "smbclient"},
+        "remote_name": "smbclient",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/smbclient" if str(name).lower() == "smbclient" else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"Sharename\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_smbclient",
+            {"target": "192.168.1.50", "additional_args": "-L -N"},
+        )
+        assert result.success, result.error
+        assert result.data["source"] == "host-smb"
+        argv = seen[0]
+        assert argv[0] == "/usr/bin/smbclient"
+        assert argv[1] == "--option=client addr=192.168.1.12"
+        assert argv[argv.index("-L") + 1] == "192.168.1.50"
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_mcp_smbclient_uses_impacket_when_samba_missing(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN smbclient must not go through HexStrike MCP when Samba is missing")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_smbclient"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "smbclient"},
+        "remote_name": "smbclient",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setenv("HTTP_PROXY", "http://10.8.0.1:8080")
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/impacket-smbclient"
+        if str(name).lower() in {"impacket-smbclient", "impacket-smbclient.exe"}
+        else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"# shares\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append((args, kwargs.get("env") or {}))
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_smbclient",
+            {"target": "192.168.1.50", "additional_args": "-L -N"},
+        )
+        assert result.success, result.error
+        assert result.data["source"] == "host-smb-python"
+        argv, env = seen[0]
+        assert argv[0] == "/usr/bin/impacket-smbclient"
+        assert "192.168.1.50" in argv
+        assert "lan_python_site" in (env.get("PYTHONPATH") or "")
+        assert "HTTP_PROXY" not in env
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_mcp_smbclient_fails_closed_when_not_on_path(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN smbclient must not go through HexStrike MCP when no SMB client can bind")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_smbclient"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "smbclient"},
+        "remote_name": "smbclient",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr("app.security.hexstrike_defensive.shutil.which", lambda *args, **kwargs: None)
+    try:
+        result = await MCP.call("mcp_hexstrike_ai_smbclient", {"target": "192.168.1.50"})
+        assert not result.success
+        assert "not on PATH" in (result.error or "")
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_mcp_smbmap_fails_closed_when_not_on_path(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN smbmap must not go through HexStrike MCP; sitecustomize would be unset")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_smbmap"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "smbmap"},
+        "remote_name": "smbmap",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr("app.security.hexstrike_defensive.shutil.which", lambda *args, **kwargs: None)
+    try:
+        result = await MCP.call("mcp_hexstrike_ai_smbmap", {"target": "192.168.1.50"})
+        assert not result.success
+        assert "not on PATH" in (result.error or "")
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_mcp_tcpdump_uses_host_argv_when_windows_nic_name_has_space(monkeypatch):
+    from app.tools.mcp_runtime import MCP
+
+    async def fake_connect(server):
+        raise AssertionError("LAN tcpdump must not go through HexStrike MCP when -i would split")
+
+    MCP.reset_for_tests()
+    MCP._tools["mcp_hexstrike_ai_tcpdump"] = {
+        "server": {"id": "hex", "name": "hexstrike-ai"},
+        "tool": {"name": "tcpdump"},
+        "remote_name": "tcpdump",
+    }
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(MCP, "_connect", fake_connect)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/tcpdump" if str(name).lower() == "tcpdump" else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"captured\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    try:
+        result = await MCP.call(
+            "mcp_hexstrike_ai_tcpdump",
+            {"target": "192.168.50.0/24", "additional_args": "-c 5"},
+        )
+        assert result.success, result.error
+        assert result.data["source"] == "host-iface"
+        argv = seen[0]
+        assert argv[argv.index("-i") + 1] == "Ethernet 2"
+        assert argv[-2:] == ("net", "192.168.50.0/24")
+    finally:
+        MCP.reset_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_operator_nmap_uses_host_argv_when_windows_nic_name_has_space(monkeypatch):
+    from app.security.hexstrike_defensive import execute_operator_nmap
+
+    async def fake_post(path, payload):
+        raise AssertionError(f"HexStrike nmap must not receive a spaced NIC name: {payload}")
+
+    monkeypatch.setattr("psutil.net_if_addrs", _home_vpn_addrs)
+    monkeypatch.setattr(HEXSTRIKE, "post_operator", fake_post)
+    monkeypatch.setattr(
+        "app.security.hexstrike_defensive.shutil.which",
+        lambda name, *args, **kwargs: "/usr/bin/nmap" if str(name).lower() == "nmap" else None,
+    )
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return (b"Nmap scan report for printer (192.168.50.20)\nHost is up.\n", b"")
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    seen: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        seen.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr("app.security.hexstrike_defensive.asyncio.create_subprocess_exec", fake_exec)
+    result = await execute_operator_nmap(
+        {"target": "192.168.50.0/24", "scan_type": "-sT", "ports": "80,443", "additional_args": "-T4"}
+    )
+    assert result["source"] == "host-nmap"
+    assert result["hosts"][0]["address"] == "192.168.50.20"
+    argv = seen[0]
+    assert argv[0] == "/usr/bin/nmap"
+    assert "-sT" in argv
+    assert "-T4" in argv
+    assert argv[argv.index("-S") + 1] == "192.168.50.8"
+    assert argv[argv.index("-e") + 1] == "Ethernet 2"
+    assert argv[argv.index("-p") + 1] == "80,443"
+    assert argv[-1] == "192.168.50.0/24"
+
+
+@pytest.mark.asyncio
+async def test_operator_tool_lan_inventory_skips_suite_grant(jarvis_env, monkeypatch):
+    from app.policy.computer_permissions import reset_computer_permission_state
+    from app.tools.hexstrike_operator import HexStrikeOperatorTool
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: jarvis_env["tmp"])
+    reset_computer_permission_state()
+    monkeypatch.setattr("app.licensing.entitlements.hexstrike_access_mode", lambda now=None: "full")
+
+    def eval_perm(permission):
+        if permission == "cyber.hexstrike":
+            return SimpleNamespace(status="ask", reason="HexStrike suite permission required")
+        return SimpleNamespace(status="allow", reason="")
+
+    monkeypatch.setattr("app.tools.hexstrike_operator.evaluate_permission", eval_perm)
+    monkeypatch.setattr("app.policy.approval_pending.evaluate_permission", eval_perm)
+
+    async def fake_operate(capability_id, arguments):
+        return {"id": "job", "capability_id": capability_id, "status": "succeeded"}
+
+    monkeypatch.setattr("app.tools.hexstrike_operator.operate", fake_operate)
+    tool = HexStrikeOperatorTool(lambda: {})
+    allowed = await tool.execute(
+        operation="operate",
+        capability_id="defensive:lan_inventory",
+        arguments={"scope_id": "lan"},
+    )
+    assert allowed.success is True
+    blocked = await tool.execute(operation="start")
+    assert blocked.success is False
+    assert blocked.error == "pending_approval"
 
 
 @pytest.mark.asyncio
@@ -249,6 +2576,27 @@ def test_installer_reports_ready_only_for_reviewed_complete_install(tmp_path, mo
     status = installer.status()
     assert status.state == "ready"
     assert status.approved_commit == APPROVED_HEXSTRIKE_COMMIT
+
+
+@pytest.mark.asyncio
+async def test_hexstrike_bootstrap_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    ran = {"n": 0}
+
+    async def boom(*_args, **_kwargs):
+        ran["n"] += 1
+        raise AssertionError("must not launch HexStrike bootstrap when internet is denied")
+
+    monkeypatch.setattr("app.security.hexstrike_install.asyncio.create_subprocess_exec", boom)
+    installer = HexStrikeInstaller()
+    await installer._run(tmp_path / "hexstrike")
+    assert ran["n"] == 0
+    assert installer._status.state == "failed"
+    assert installer._status.error
 
 
 def test_bootstrapper_pins_source_commit_and_loopback():

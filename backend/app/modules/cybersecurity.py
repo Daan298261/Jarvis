@@ -19,6 +19,7 @@ from .catalog_download import (
     desktop_projects_root,
     le_gated_roots,
     library_projects_path,
+    owner_project_roots,
     recorded_local_path,
     register_allowlisted_source,
 )
@@ -168,6 +169,9 @@ def _candidate_paths(member: MemberDef, state: dict[str, Any]) -> list[Path]:
     paths.append(repo_root() / "projects" / member.slug)
     paths.append(desktop_projects_root() / member.slug)
     paths.append(desktop_projects_root() / member.id)
+    for root in owner_project_roots():
+        paths.append(root / member.slug)
+        paths.append(root / member.id)
     seen: set[str] = set()
     ordered: list[Path] = []
     for path in paths:

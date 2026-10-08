@@ -3,8 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 from ..agent.verify_code import format_report, verify_software
+from ..config import live_workspace_roots_from_context
 from .base import RiskLevel, Tool, ToolResult
-from .safety import resolve_allowed_path
+from .owner_paths import resolve_project_dir
 
 
 class VerifyCodeTool(Tool):
@@ -12,29 +13,29 @@ class VerifyCodeTool(Tool):
     description = (
         "Independently verify software changes in a repository. Inspects git status/diff and "
         "runs pytest when a Python test layout exists. A worker or model saying 'tests pass' "
-        "is not enough — call this before completing software tasks."
+        "is not enough — call this before completing software tasks. Omit path to verify "
+        "Documents; a folder on USB/`D:` is accepted."
     )
     risk = RiskLevel.LOW
     parameters = {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Repository or project root to verify"},
+            "path": {
+                "type": "string",
+                "description": "Repository or project root (USB/`D:` allowed; omit for Documents)",
+            },
             "run_tests": {"type": "boolean", "default": True},
             "timeout_seconds": {"type": "integer", "default": 120},
         },
-        "required": ["path"],
     }
 
     def __init__(self, context_getter=None) -> None:
         self.context_getter = context_getter or (lambda: {})
 
     async def execute(self, **kwargs: Any) -> ToolResult:
-        raw = kwargs.get("path") or ""
-        if not raw:
-            return ToolResult(False, "", error="path is required")
         try:
-            allowed = list((self.context_getter() or {}).get("allowed_directories") or [])
-            root = resolve_allowed_path(raw, allowed) if allowed else raw
+            allowed = live_workspace_roots_from_context(self.context_getter() or {})
+            root = resolve_project_dir(kwargs.get("path"), allowed)
         except PermissionError as exc:
             return ToolResult(False, "", error=str(exc))
         timeout = int(kwargs.get("timeout_seconds") or 120)

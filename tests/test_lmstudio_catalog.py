@@ -255,6 +255,8 @@ def test_lmstudio_catalog_sources_exclude_hardcoded_usernames():
         repo / "backend" / "app" / "api" / "model.py",
         repo / "backend" / "app" / "inference" / "hotswap.py",
         repo / "backend" / "app" / "persona" / "owner_chat.py",
+        repo / "frontend" / "src" / "pages" / "Mcp.tsx",
+        repo / "backend" / "app" / "modules" / "catalog_download.py",
     ]
     banned_username = "daanv"
     for path in targets:
@@ -274,3 +276,102 @@ def test_catalog_profiles_marked_local(catalog_env):
     assert profile["catalog_kind"] == "graded"
     if catalog["ungraded"]:
         assert catalog["ungraded"][0]["is_local"] is True
+
+
+def test_extra_volume_roots_skip_os_volume(monkeypatch):
+    from app.config import extra_volume_roots, os_volume_root
+
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    roots = extra_volume_roots()
+    os_root = os_volume_root().resolve()
+    assert all(path.resolve() != os_root for path in roots)
+    assert Path("/") not in {path.resolve() for path in roots}
+
+
+def test_discover_includes_named_folder_and_loose_gguf_on_extra_volume(catalog_env, monkeypatch, tmp_path):
+    from app.inference import lmstudio_catalog as catalog
+
+    extra = tmp_path / "USB"
+    models = extra / "Models"
+    models.mkdir(parents=True)
+    named = _write_gguf(models, "usb-qwen-Q4_K_M.gguf")
+    loose = _write_gguf(extra, "loose-on-stick-Q4.gguf")
+    clutter = extra / "Photos"
+    clutter.mkdir()
+    hidden = _write_gguf(clutter, "vacation-not-a-model-Q4.gguf")
+    lm_root = catalog_env["models_root"]
+    home = _write_gguf(lm_root, "home-model-Q4.gguf")
+    monkeypatch.setattr(catalog, "resolve_models_root", lambda: lm_root)
+    monkeypatch.setattr("app.config.extra_volume_roots", lambda: [extra])
+
+    found = {Path(item.path) for item in catalog.discover_ggufs()}
+    assert named in found
+    assert loose in found
+    assert home in found
+    assert hidden not in found
+
+    explicit = {Path(item.path) for item in catalog.discover_ggufs(lm_root)}
+    assert home in explicit
+    assert named not in explicit
+    assert loose not in explicit
+
+    payload = catalog.discovery_payload()
+    assert str(models) in payload["extra_roots"]
+    names = {item["filename"] for item in payload["models"]}
+    assert "usb-qwen-Q4_K_M.gguf" in names
+    assert "loose-on-stick-Q4.gguf" in names
+    assert "vacation-not-a-model-Q4.gguf" not in names
+
+    merged = catalog.build_catalog(show_hidden=True)
+    ungraded = {item["filename"] for item in merged["ungraded"]}
+    assert "usb-qwen-Q4_K_M.gguf" in ungraded
+    assert merged["models_root"] == str(lm_root)
+
+    runtime = catalog.select_discovered_gguf(str(named))
+    assert runtime.gguf_path == str(named)
+    assert runtime.provider == "local-llama"
+    clutter = extra / "Photos" / "vacation-not-a-model-Q4.gguf"
+    with pytest.raises(KeyError):
+        catalog.select_discovered_gguf(str(clutter))
+
+    async def fake_activate(profile, *, force=True):
+        from app.inference.manager import MANAGER
+
+        MANAGER.state.loaded = True
+        return MANAGER.state
+
+    monkeypatch.setattr("app.api.lmstudio.activate_runtime_profile", fake_activate)
+    client = TestClient(app)
+    select = client.post("/api/lmstudio/discovery/select", json={"path": str(named)})
+    assert select.status_code == 200
+    body = select.json()
+    assert body["gguf_path"] == str(named)
+    assert body.get("load", {}).get("loaded") is True
+    denied = client.post("/api/lmstudio/discovery/select", json={"path": str(clutter)})
+    assert denied.status_code == 404
+
+
+def test_preferred_gguf_install_dir_uses_extra_volume_when_models_full(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from app.inference import lmstudio_catalog as catalog
+
+    models = tmp_path / "models"
+    extra = tmp_path / "USB"
+    models.mkdir()
+    extra.mkdir()
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setattr("app.config.models_dir", lambda: models)
+    monkeypatch.setattr("app.config.extra_volume_roots", lambda: [extra])
+
+    def fake_usage(path):
+        text = str(path)
+        if str(extra) in text:
+            return SimpleNamespace(free=200 * 1024**3, total=500 * 1024**3, used=0)
+        return SimpleNamespace(free=1 * 1024**3, total=50 * 1024**3, used=49 * 1024**3)
+
+    monkeypatch.setattr("app.inference.lmstudio_catalog.shutil.disk_usage", fake_usage)
+    dest = catalog.preferred_gguf_install_dir("Qwen3.5-27B-GGUF", need_bytes=20 * 1024**3)
+    assert dest == extra / "Jarvis" / "models" / "Qwen3.5-27B-GGUF"
+    local = catalog.preferred_gguf_install_dir("bootstrap", need_bytes=512)
+    assert local == models / "bootstrap"

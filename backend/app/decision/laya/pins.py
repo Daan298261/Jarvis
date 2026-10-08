@@ -121,10 +121,22 @@ def pins() -> list[PinRecord]:
     ]
 
 
+_LAYA_NEED_BYTES = 2 * 1024**3
+
+
 def install_root() -> Path:
-    path = data_dir() / "system_one" / "laya"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    """`data/system_one/laya`, or extra-drive `Jarvis/models/laya` when C: cannot fit the pin."""
+    from ...inference.lmstudio_catalog import resolved_cache_dir
+
+    local = data_dir() / "system_one" / "laya"
+    dest = resolved_cache_dir(
+        "laya",
+        local=local,
+        markers=("install_manifest.json",),
+        need_bytes=_LAYA_NEED_BYTES,
+    )
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest
 
 
 def manifest_path() -> Path:
@@ -199,6 +211,9 @@ def ensure_package() -> str:
     hint = f"pip install laya=={LAYA_PACKAGE_VERSION}"
     if os.environ.get("PYTEST_CURRENT_TEST"):
         raise RuntimeError(f"The 'laya' package is not installed ({hint})")
+    from ...policy.network_http import require_http_url_allowed
+
+    require_http_url_allowed("https://pypi.org/simple/laya/", tool="web_fetch")
     cmd = [sys.executable, "-m", "pip", "install", f"laya=={LAYA_PACKAGE_VERSION}"]
     try:
         subprocess.check_call(cmd)
@@ -260,6 +275,9 @@ def install_managed(*, token: str | None = None) -> dict[str, Any]:
     version = ensure_package()
     from huggingface_hub import snapshot_download
 
+    from ...policy.network_http import require_http_url_allowed
+
+    require_http_url_allowed(f"https://huggingface.co/{LAYA_REPO}", tool="web_fetch")
     snapshot = Path(
         snapshot_download(
             LAYA_REPO,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any, Callable
 
-from ..config import AppSettings, default_allowed_directories
+from ..config import AppSettings, live_allowed_directories
 from .apps import AppsTool
 from .base import Tool, ToolResult
 from .browser import BrowserTool
@@ -45,25 +45,33 @@ class ToolRegistry:
         self.tools: dict[str, Tool] = {}
         self._init_tools()
 
+    def _live_context(self) -> dict[str, Any]:
+        """Re-union mounted drives on each tool call so a USB disk is usable without a settings save."""
+        ctx = self._context
+        allowed = live_allowed_directories(ctx.get("allowed_directories"))
+        if allowed != ctx.get("allowed_directories"):
+            ctx["allowed_directories"] = allowed
+        return ctx
+
     def _init_tools(self) -> None:
-        getter: Callable[[], dict[str, Any]] = lambda: self._context
+        getter: Callable[[], dict[str, Any]] = self._live_context
         items = [
             FilesystemTool(getter),
-            TerminalTool(),
-            PythonTool(),
+            TerminalTool(getter),
+            PythonTool(getter),
             BrowserTool(getter),
-            BrowserUseTool(),
+            BrowserUseTool(getter),
             CodeWorkerTool(getter),
             OpenInterpreterTool(getter),
-            DesktopTool(),
+            DesktopTool(getter),
             AppsTool(),
             OfficeTool(getter),
             GitTool(getter),
-            DockerTool(),
+            DockerTool(getter),
             WebFetchTool(getter),
             ExternalIngestTool(getter),
             InternalReferencesTool(),
-            ScreenshotTool(),
+            ScreenshotTool(getter),
             VerifyCodeTool(getter),
             RequestToolsTool(),
             ReadIngressTool(),
@@ -90,7 +98,7 @@ class ToolRegistry:
         self._context["exposure"] = exposure
 
     def apply_settings(self, settings: AppSettings) -> None:
-        allowed = settings.allowed_directories or default_allowed_directories()
+        allowed = live_allowed_directories(settings.allowed_directories)
         exposure = self._context.get("exposure")
         security_role = self._context.get("security_role")
         self._context = {

@@ -92,3 +92,33 @@ def test_discovers_rvn_27b_from_parent_folder_and_resolves_internal_profile(tmp_
     assert resolved.name == "qwen38_27b_heretic"
     assert resolved.context_size == 8192
     assert resolved.thinking is True
+
+
+def test_discovers_qwen38_from_extra_volume_models_folder(tmp_path, monkeypatch):
+    from app.inference import qwen38_local as local_mod
+
+    models = tmp_path / "models"
+    lm = tmp_path / "lmstudio"
+    extra = tmp_path / "D"
+    named = extra / "Models"
+    models.mkdir()
+    lm.mkdir()
+    named.mkdir(parents=True)
+    usb = named / "Qwen3.8-9B-Uncensored-Q4_K_M.gguf"
+    usb.write_bytes(b"gguf")
+    clutter = extra / "Photos"
+    clutter.mkdir()
+    (clutter / "Qwen3.8-9B-Uncensored-Q8_0.gguf").write_bytes(b"gguf")
+    monkeypatch.setattr(local_mod, "models_dir", lambda: models)
+    monkeypatch.setattr(local_mod, "_lmstudio_root", lambda: lm)
+    monkeypatch.setattr("app.config.extra_volume_roots", lambda: [extra])
+
+    found = discover_qwen38_9b_uncensored()
+    assert found is not None
+    assert found.path == usb
+
+    loose = extra / "Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF-RVN-Q3_K_S-multilingual.gguf"
+    loose.write_bytes(b"gguf")
+    heretic = discover_qwen38_27b_heretic()
+    assert heretic is not None
+    assert heretic.path == loose

@@ -52,9 +52,17 @@ class WorkerEnvironment:
 
 
 def environments_root() -> Path:
-    path = data_dir() / "worker-environments"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    """`data/worker-environments`, or extra-drive `Jarvis/runtime/worker-environments` when C: cannot fit."""
+    from ..config import resolved_data_sidecar_dir
+
+    dest = resolved_data_sidecar_dir(
+        "worker-environments",
+        local=data_dir() / "worker-environments",
+        markers=(REGISTRY_NAME,),
+        need_bytes=2 * 1024**3,
+    )
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest
 
 
 def _registry_path() -> Path:

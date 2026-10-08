@@ -9,7 +9,7 @@ import ipaddress
 import socket
 import struct
 
-from .wan_forward import PORT, default_gateway_ipv4
+from .wan_forward import PORT, default_gateway_ipv4, is_literal_public_ipv4, is_rfc1918_ipv4
 
 NATPMP_PORT = 5351
 LEASE_SECONDS = 3600
@@ -19,10 +19,10 @@ _UNSUPPORTED_VERSION = 1
 
 
 def require_private_gateway(host: str) -> str:
-    address = ipaddress.ip_address((host or "").strip())
-    if address.version != 4 or not address.is_private or address.is_loopback:
+    text = (host or "").strip()
+    if not is_rfc1918_ipv4(text):
         raise ValueError("NAT-PMP gateway must be a private LAN IPv4 address")
-    return str(address)
+    return text
 
 
 def encode_public_ip_request() -> bytes:
@@ -44,7 +44,7 @@ def decode_public_ip(payload: bytes) -> str:
     if result != 0:
         raise RuntimeError(f"NAT-PMP public IP refused ({result})")
     address = ipaddress.IPv4Address(raw_ip)
-    if not address.is_global:
+    if not is_literal_public_ipv4(str(address)):
         raise ValueError("Router has no public IPv4 address")
     return str(address)
 
@@ -79,10 +79,8 @@ def udp_exchange(
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.settimeout(delay)
         try:
-            if lan_ip:
-                dest = ipaddress.ip_address(lan_ip)
-                if dest.version == 4 and dest.is_private and not dest.is_loopback:
-                    sock.bind((str(dest), 0))
+            if lan_ip and is_rfc1918_ipv4(lan_ip):
+                sock.bind((lan_ip.strip(), 0))
             sock.sendto(packet, (gw, NATPMP_PORT))
             data, addr = sock.recvfrom(512)
             peer = ipaddress.ip_address(addr[0])
@@ -105,6 +103,12 @@ def udp_exchange(
 
 def _exchange(gateway: str, packet: bytes, expected: int, lan_ip: str = "") -> bytes:
     return udp_exchange(gateway, packet, expected, lan_ip)
+
+
+def query_public_ip(gateway: str = "", lan_ip: str = "") -> str:
+    """Read the gateway's public IPv4 without creating or renewing a mapping."""
+    gw = require_private_gateway(gateway or default_gateway_ipv4())
+    return decode_public_ip(udp_exchange(gw, encode_public_ip_request(), 12, lan_ip, attempts=1))
 
 
 def apply_natpmp(gateway: str = "", lan_ip: str = "") -> str:

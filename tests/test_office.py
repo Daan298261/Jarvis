@@ -97,3 +97,36 @@ async def test_office_com_backend_errors_without_windows(tmp_path, monkeypatch):
     result = await tool.execute(app="word", action="info", path=str(tmp_path / "n.docx"), backend="com")
     assert result.success is False
     assert "COM is not available" in result.error
+
+
+async def test_word_create_without_path_uses_documents(tmp_path, monkeypatch):
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    monkeypatch.setattr("app.tools.owner_paths.Path.home", classmethod(lambda cls: tmp_path))
+    tool = _tool(tmp_path)
+    created = await tool.execute(app="word", action="create", content="Hello owner", backend="library")
+    assert created.success, created.error
+    dest = docs / "Jarvis-word.docx"
+    assert dest.exists()
+    assert dest == Path(created.data["path"])
+    read = await tool.execute(app="word", action="read", path=str(dest), backend="library")
+    assert "Hello owner" in read.output
+
+
+async def test_excel_create_into_extra_drive_folder(tmp_path):
+    extra = tmp_path / "E" / "Sheets"
+    extra.mkdir(parents=True)
+    tool = _tool(tmp_path)
+    created = await tool.execute(
+        app="excel",
+        action="create",
+        path=str(extra),
+        content="a\tb\n1\t2",
+        backend="library",
+    )
+    assert created.success, created.error
+    dest = extra / "Jarvis-excel.xlsx"
+    assert dest.exists()
+    read = await tool.execute(app="excel", action="read", path=str(dest), backend="library")
+    assert "1" in read.output
+

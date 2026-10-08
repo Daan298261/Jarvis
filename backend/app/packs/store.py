@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..config import data_dir
+from ..config import data_dir, resolved_data_sidecar_dir
 from .schema import InstalledPack, ResourceRecord
 
 _lock = threading.RLock()
@@ -16,7 +16,12 @@ TRUSTED_KEYS_FILE = "trusted_keys.json"
 
 
 def packs_root() -> Path:
-    path = data_dir() / "packs"
+    path = resolved_data_sidecar_dir(
+        "packs",
+        local=data_dir() / "packs",
+        markers=("state.json", "resources", "snapshots"),
+        need_bytes=512 * 1024**2,
+    )
     path.mkdir(parents=True, exist_ok=True)
     return path
 

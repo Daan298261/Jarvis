@@ -15,7 +15,7 @@ from typing import Any, Literal
 
 import yaml
 
-from ..config import data_dir
+from ..config import data_dir, resolved_data_sidecar_dir
 
 WIKI_LINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]")
 MD_LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
@@ -138,7 +138,12 @@ def _vault_meta_path() -> Path:
 
 
 def _index_path() -> Path:
-    path = data_dir() / "obsidian-index"
+    path = resolved_data_sidecar_dir(
+        "obsidian-index",
+        local=data_dir() / "obsidian-index",
+        markers=("lexical.json",),
+        need_bytes=256 * 1024**2,
+    )
     path.mkdir(parents=True, exist_ok=True)
     return path / "lexical.json"
 
@@ -464,7 +469,13 @@ def _init_managed_layout(root: Path) -> None:
 
 
 def default_vault_path() -> Path:
-    return data_dir() / "vault"
+    """`data/vault`, or extra-drive `Jarvis/runtime/vault` when C: cannot fit."""
+    return resolved_data_sidecar_dir(
+        "vault",
+        local=data_dir() / "vault",
+        markers=(".obsidian", "Home", "Projects", "_Config"),
+        need_bytes=1024**3,
+    )
 
 
 def ensure_default_vault(*, configured_path: str = "", init_layout: bool = True) -> dict[str, Any]:

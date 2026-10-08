@@ -14,6 +14,12 @@ router = APIRouter(prefix="/api/mobile", tags=["mobile"])
 def _lan_hosts() -> list[str]:
     found: set[str] = set()
     try:
+        from ..mobile.wan_forward import interface_ipv4_addresses
+
+        found.update(interface_ipv4_addresses())
+    except Exception:
+        pass
+    try:
         hostname = socket.gethostname()
         for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
             ip = info[4][0]
@@ -37,7 +43,17 @@ def _lan_hosts() -> list[str]:
 def mobile_snapshot() -> dict[str, Any]:
     settings = load_settings()
     port = settings.bind_port
-    hosts = _lan_hosts()
+    from ..mobile.wan_forward import default_gateway_ipv4, is_rfc1918_ipv4, mapping_lan_ipv4
+
+    hosts = [host for host in _lan_hosts() if is_rfc1918_ipv4(host)]
+    gw = ""
+    try:
+        gw = default_gateway_ipv4()
+    except Exception:
+        pass
+    preferred = mapping_lan_ipv4(hosts, gw)
+    if preferred:
+        hosts = [preferred, *[host for host in hosts if host != preferred]]
     lan_urls = [f"http://{host}:{port}" for host in hosts]
     return {
         "app": "Jarvis",

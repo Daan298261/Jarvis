@@ -45,12 +45,121 @@ def desktop_projects_root() -> Path:
     return Path.home() / "Desktop" / "projects"
 
 
+def documents_projects_root() -> Path:
+    return Path.home() / "Documents" / "projects"
+
+
+_LE_GATED_RELATIVES = (
+    Path("le-gated"),
+    Path("projects") / "le-gated",
+    Path("Jarvis") / "le-gated",
+    Path("jarvis-ig") / "le-gated",
+    Path("Jarvis") / "projects" / "le-gated",
+)
+
+
+def extra_projects_root() -> Path | None:
+    """`projects` or `Jarvis/projects` on the extra volume with the most space."""
+    from ..config import extra_volume_roots
+
+    existing: list[Path] = []
+    best: Path | None = None
+    best_free = 0
+    for volume in extra_volume_roots():
+        for rel in (Path("projects"), Path("Jarvis") / "projects"):
+            candidate = volume / rel
+            try:
+                if candidate.is_dir():
+                    existing.append(candidate)
+            except OSError:
+                continue
+        try:
+            free = int(shutil.disk_usage(volume).free)
+        except OSError:
+            continue
+        if free > best_free:
+            best_free = free
+            best = volume / "Jarvis" / "projects"
+    if existing:
+        return existing[0]
+    return best
+
+
+_CATALOG_NEED_BYTES = 2 * 1024**3
+
+
+def preferred_catalog_dest(*, need_bytes: int = _CATALOG_NEED_BYTES) -> str:
+    """`extra` when the repo volume cannot fit a clone and an extra drive can."""
+    try:
+        local_free = int(shutil.disk_usage(catalog_library_root()).free)
+    except OSError:
+        local_free = 0
+    extra = extra_projects_root()
+    extra_free = 0
+    if extra is not None:
+        probe = extra
+        while not probe.exists() and probe != probe.parent:
+            probe = probe.parent
+        try:
+            extra_free = int(shutil.disk_usage(probe).free)
+        except OSError:
+            extra_free = 0
+    required = int(need_bytes or 0)
+    if extra is not None and extra_free >= required and local_free < required:
+        return "extra"
+    return "library"
+
+
+def owner_project_roots() -> list[Path]:
+    """Places the owner keeps clones: Documents, Desktop, extra drives, repo library."""
+    roots: list[Path] = [
+        library_projects_path(),
+        documents_projects_root(),
+        desktop_projects_root(),
+        Path.home() / "projects",
+        repo_root() / "projects",
+    ]
+    extra = extra_projects_root()
+    if extra is not None:
+        roots.append(extra)
+    from ..config import extra_volume_roots
+
+    for volume in extra_volume_roots():
+        roots.append(volume / "projects")
+        roots.append(volume / "Jarvis" / "projects")
+    seen: set[str] = set()
+    ordered: list[Path] = []
+    for path in roots:
+        key = str(path).replace("\\", "/").lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(path)
+    return ordered
+
+
 def le_gated_roots() -> list[Path]:
+    """Owner LE-gated folders — Documents, Desktop, extra drives — never a username path."""
+    candidates = [
+        documents_projects_root() / "le-gated",
+        Path.home() / "projects" / "le-gated",
+        desktop_projects_root() / "le-gated",
+        repo_root() / "projects" / "le-gated",
+        _library_projects_root() / "le-gated",
+    ]
+    from ..config import extra_volume_roots
+
+    for volume in extra_volume_roots():
+        for rel in _LE_GATED_RELATIVES:
+            candidates.append(volume / rel)
+    seen: set[str] = set()
     roots: list[Path] = []
-    win = Path(r"C:\Users\daanv\projects\jarvis-ig\le-gated")
-    roots.append(win)
-    roots.append(repo_root() / "projects" / "le-gated")
-    roots.append(_library_projects_root() / "le-gated")
+    for path in candidates:
+        key = str(path).replace("\\", "/").lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append(path)
     return roots
 
 
@@ -137,9 +246,27 @@ def _set_job(job_id: str, **kwargs: Any) -> DownloadJob:
         return job
 
 
-def _dest_root(dest: str) -> Path:
-    if dest == "desktop_projects":
+def _dest_root(dest: str, dest_path: str = "") -> Path:
+    raw = str(dest_path or "").strip()
+    if raw:
+        from ..config import live_allowed_directories
+        from ..tools.safety import resolve_allowed_path
+
+        allowed = live_allowed_directories()
+        resolved = resolve_allowed_path(raw, allowed)
+        if resolved.is_file():
+            raise ValueError("dest_path must be a folder")
+        resolved.mkdir(parents=True, exist_ok=True)
+        return resolved
+    key = str(dest or "auto").strip().lower() or "auto"
+    if key in {"auto", ""}:
+        key = preferred_catalog_dest()
+    if key == "desktop_projects":
         root = desktop_projects_root()
+    elif key == "documents_projects":
+        root = documents_projects_root()
+    elif key == "extra":
+        root = extra_projects_root() or documents_projects_root()
     else:
         root = catalog_library_root()
     root.mkdir(parents=True, exist_ok=True)
@@ -155,6 +282,9 @@ def _safe_dest_dir(root: Path, slug: str) -> Path:
 
 
 def _run_git_clone(url: str, dest: Path) -> None:
+    from ..policy.network_http import require_http_url_allowed
+
+    require_http_url_allowed(url, tool="web_fetch")
     if dest.exists():
         shutil.rmtree(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -175,12 +305,12 @@ def _run_zip_download(url: str, dest: Path) -> None:
         raise ValueError("zip download requires a GitHub source_url")
     owner, repo = parsed
     archive_url = f"https://github.com/{owner}/{repo}/archive/refs/heads/main.zip"
-    import urllib.request
+    from ..policy.network_http import gated_download_to
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     zip_path = dest.parent / f"{repo}-download.zip"
     try:
-        urllib.request.urlretrieve(archive_url, zip_path)
+        gated_download_to(archive_url, zip_path, tool="web_fetch", timeout=120.0)
         extract_root = dest.parent / f"{repo}-extract"
         if extract_root.exists():
             shutil.rmtree(extract_root)
@@ -237,7 +367,13 @@ def recorded_local_path(entry_id: str) -> str | None:
     return None
 
 
-async def start_download(entry_id: str, *, mode: str = "clone", dest: str = "library") -> DownloadJob:
+async def start_download(
+    entry_id: str,
+    *,
+    mode: str = "clone",
+    dest: str = "auto",
+    dest_path: str = "",
+) -> DownloadJob:
     source = allowlisted_source(entry_id)
     if source is None:
         raise ValueError("catalog entry is not allowlisted for download")
@@ -253,7 +389,7 @@ async def start_download(entry_id: str, *, mode: str = "clone", dest: str = "lib
 
     async def _runner() -> None:
         try:
-            root = _dest_root(dest)
+            root = _dest_root(dest, dest_path)
             target = _safe_dest_dir(root, source.slug)
             if mode == "zip":
                 await asyncio.to_thread(_run_zip_download, source.source_url, target)

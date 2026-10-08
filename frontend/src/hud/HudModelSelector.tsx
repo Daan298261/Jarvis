@@ -10,7 +10,7 @@ import {
   type LmStudioUngradedModel,
   type RuntimeProfile,
 } from "../api"
-import { applyRuntimeProfile, playLmStudioCatalogProfile } from "./applyRuntimeProfile"
+import { applyRuntimeProfile, playDiscoveredGguf, playLmStudioCatalogProfile } from "./applyRuntimeProfile"
 import {
   clearSlot,
   HUD_MODEL_SLOT_COUNT,
@@ -306,7 +306,25 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
     persistSlots(moveSlot(slotsState, index, to))
   }
 
+  async function onPlayUngraded(item: LmStudioUngradedModel) {
+    setBusyLocalId(item.path)
+    setMsg("")
+    try {
+      const applied = await playDiscoveredGguf(item.path)
+      setSelectedId(applied.id || applied.name)
+      setMsg(`Loaded ${item.filename}.`)
+      void refreshProfiles()
+      void refreshCatalog()
+    } catch (err: unknown) {
+      const text = err instanceof Error ? err.message : "Could not load model."
+      setMsg(text.length > 96 ? `${text.slice(0, 93)}…` : text)
+    } finally {
+      setBusyLocalId(null)
+    }
+  }
+
   function renderUngradedRow(item: LmStudioUngradedModel) {
+    const busy = busyLocalId === item.path
     return (
       <li key={item.path} className="hud-model-local-row ungraded">
         <div className="hud-model-local-text">
@@ -317,6 +335,18 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
           <span className="hud-model-local-meta">
             {item.weight_gb.toFixed(1)} GB · {item.quantization || "—"}
           </span>
+        </div>
+        <div className="hud-model-local-actions">
+          <button
+            type="button"
+            className="hud-icon-btn hud-model-play-btn"
+            disabled={transferring || busy}
+            onClick={() => void onPlayUngraded(item)}
+            title={`Play ${item.filename}`}
+            aria-label={`Play ${item.filename}`}
+          >
+            ▶
+          </button>
         </div>
       </li>
     )

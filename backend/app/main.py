@@ -257,6 +257,14 @@ async def startup() -> None:
         logging.exception("License sidecar pending apply failed")
     install_rolling_log(loop=asyncio.get_running_loop())
     record_event("startup", message="Jarvis backend started", startup_id=app.state.startup_id)
+    try:
+        from .config import apply_playwright_browsers_path
+        from .inference.lmstudio_catalog import apply_huggingface_home
+
+        apply_huggingface_home()
+        apply_playwright_browsers_path()
+    except Exception:
+        logging.debug("Extra-drive cache dest apply on startup skipped", exc_info=True)
     Path(repo_root() / "data" / "hardware.json").write_text(json.dumps(hardware_dict(), indent=2), encoding="utf-8")
     try:
         from .licensing.clock_log import record_clock_sample

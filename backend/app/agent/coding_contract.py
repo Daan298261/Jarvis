@@ -11,7 +11,7 @@ from typing import Any
 from .coding_workers import is_software_task, start_coding_task
 from .worktrees import WorktreeError, get_coding_task, update_coding_task
 
-_EDIT_ACTIONS = frozenset({"write", "edit", "copy", "move", "rename", "delete"})
+_EDIT_ACTIONS = frozenset({"write", "edit", "copy", "move", "rename", "delete", "extract"})
 _EDIT_TOOLS = frozenset({"filesystem", "git", "code_worker"})
 _RUN_TOOLS = frozenset({"terminal", "python", "code_worker"})
 _VERIFY_TOOLS = frozenset({"verify_code"})
@@ -241,13 +241,13 @@ def ensure_coding_worktree(task_id: str, source: str | Path | None = None) -> st
         pass
     if not shutil.which("git"):
         return None
-    from ..config import load_settings, repo_root
+    from ..config import live_allowed_directories, load_settings, repo_root
 
     candidates: list[Path] = []
     if source:
         candidates.append(Path(source))
     settings = load_settings()
-    for item in settings.allowed_directories or []:
+    for item in live_allowed_directories(settings.allowed_directories):
         candidates.append(Path(item))
     trusted_dev = repo_root().resolve()
     for root in candidates:

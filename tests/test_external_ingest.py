@@ -83,8 +83,7 @@ async def test_instagram_carousel_http_parsing(monkeypatch):
             kwargs["transport"] = _InstagramHandler()
             super().__init__(**kwargs)
 
-    monkeypatch.setattr("app.ingest.adapters.generic.httpx.AsyncClient", Client)
-    monkeypatch.setattr("app.ingest.adapters.instagram.httpx.AsyncClient", Client)
+    monkeypatch.setattr("app.policy.network_http.httpx.AsyncClient", Client)
 
     adapter = InstagramAdapter()
     ctx = IngestContext(url="https://www.instagram.com/p/ABC123/", platform="instagram")
@@ -113,8 +112,7 @@ async def test_fallback_to_provider_when_http_fails(monkeypatch):
                 return httpx.Response(200, json=payload)
             return httpx.Response(500, text="fail")
 
-    monkeypatch.setattr("app.ingest.adapters.generic.httpx.AsyncClient", FailClient)
-    monkeypatch.setattr("app.ingest.adapters.instagram.httpx.AsyncClient", FailClient)
+    monkeypatch.setattr("app.policy.network_http.httpx.AsyncClient", FailClient)
     monkeypatch.setenv("JARVIS_INGEST_PROVIDER_INSTAGRAM", "https://resolver.test/resolve")
 
     result = await ingest_url("https://www.instagram.com/p/XYZ/")
@@ -129,7 +127,7 @@ async def test_fallback_to_browser_when_http_and_provider_fail(monkeypatch):
         def __init__(self, **kwargs):
             super().__init__(transport=httpx.MockTransport(lambda r: httpx.Response(500, text="fail")), **kwargs)
 
-    monkeypatch.setattr("app.ingest.adapters.generic.httpx.AsyncClient", FailClient)
+    monkeypatch.setattr("app.policy.network_http.httpx.AsyncClient", FailClient)
     monkeypatch.delenv("JARVIS_INGEST_PROVIDER_URL", raising=False)
     monkeypatch.delenv("JARVIS_INGEST_PROVIDER_INSTAGRAM", raising=False)
 
@@ -165,7 +163,7 @@ async def test_fallback_to_browser_use_last(monkeypatch):
         def __init__(self, **kwargs):
             super().__init__(transport=httpx.MockTransport(lambda r: httpx.Response(500, text="fail")), **kwargs)
 
-    monkeypatch.setattr("app.ingest.adapters.generic.httpx.AsyncClient", FailClient)
+    monkeypatch.setattr("app.policy.network_http.httpx.AsyncClient", FailClient)
 
     browser = AsyncMock()
     browser.execute = AsyncMock(return_value=MagicMock(success=False, error="browser down"))
@@ -208,12 +206,63 @@ async def test_external_ingest_tool_wraps_orchestrator(monkeypatch):
     assert result.data["title"] == "Hello"
 
 
+async def test_external_ingest_tool_honors_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    called = {"n": 0}
+
+    async def _fake_ingest(url, **kwargs):
+        called["n"] += 1
+        return {"title": "should not run"}
+
+    monkeypatch.setattr("app.ingest.orchestrator.ingest_url", _fake_ingest)
+    tool = ExternalIngestTool(lambda: {})
+    result = await tool.execute(url="https://example.com")
+    assert result.success is False
+    assert called["n"] == 0
+    assert "don't allow" in (result.error or "").lower() or "internet" in (result.error or "").lower()
+
+
+async def test_ingest_http_hop_does_not_follow_denied_wan(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        host = request.url.host or ""
+        if host.startswith("192.168."):
+            return httpx.Response(302, headers={"location": "https://evil.example/leak"})
+        return httpx.Response(200, text="<html>wan</html>")
+
+    class RedirectClient(httpx.AsyncClient):
+        def __init__(self, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr("app.policy.network_http.httpx.AsyncClient", RedirectClient)
+    tool = ExternalIngestTool(lambda: {})
+    result = await tool.execute(url="http://192.168.1.10/home")
+    assert result.success is False
+    assert "evil.example" not in str(result.data or "")
+    assert called_error_mentions_permission(result.error)
+
+
+def called_error_mentions_permission(error: str | None) -> bool:
+    text = (error or "").lower()
+    return "don't allow" in text or "permission" in text or "internet" in text
+
+
 async def test_ingest_raises_when_all_tiers_fail(monkeypatch):
     class FailClient(httpx.AsyncClient):
         def __init__(self, **kwargs):
             super().__init__(transport=httpx.MockTransport(lambda r: httpx.Response(500, text="fail")), **kwargs)
 
-    monkeypatch.setattr("app.ingest.adapters.generic.httpx.AsyncClient", FailClient)
+    monkeypatch.setattr("app.policy.network_http.httpx.AsyncClient", FailClient)
 
     browser = AsyncMock()
     browser.execute = AsyncMock(return_value=MagicMock(success=False))
@@ -226,3 +275,41 @@ async def test_ingest_raises_when_all_tiers_fail(monkeypatch):
         await ingest_url("https://example.com/none", browser_tool=browser, browser_use_tool=browser_use)
     assert "http" in exc.value.tiers_attempted
     assert "browser_use" in exc.value.tiers_attempted
+
+
+async def test_ingest_provider_hop_does_not_follow_denied_wan(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    apply_grant("network.local", "always")
+    monkeypatch.setenv("JARVIS_INGEST_PROVIDER_URL", "http://192.168.1.10/resolve")
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        host = request.url.host or ""
+        if host.startswith("192.168."):
+            return httpx.Response(302, headers={"location": "https://evil.example/provider"})
+        return httpx.Response(200, json={"title": "leaked"})
+
+    class RedirectClient(httpx.AsyncClient):
+        def __init__(self, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr("app.policy.network_http.httpx.AsyncClient", RedirectClient)
+
+    from app.ingest.adapters.generic import GenericWebAdapter
+    from app.ingest.adapters.base import IngestContext
+
+    adapter = GenericWebAdapter()
+    ctx = IngestContext(
+        url="http://192.168.1.10/post",
+        platform="web",
+        provider_url="http://192.168.1.10/resolve",
+    )
+    with pytest.raises(PermissionError):
+        await adapter.resolve_provider(ctx)
+    assert not any("evil.example" in item for item in seen)

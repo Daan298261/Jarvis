@@ -23,6 +23,7 @@ from app.workers.browser import (
     playwright_is_default,
     reset_browser_use_session,
     structured_payload_from_history,
+    visited_urls_from_history,
 )
 from app.workers.local_llm import local_browser_use_model
 from app.config import AppSettings
@@ -47,6 +48,7 @@ def test_browser_use_maps_to_internet_permission(permission_store):
     assert permission_ids_for_tool("browser_use", {"url": "http://192.168.0.10", "goal": "read"}) == [
         "network.local"
     ]
+    assert permission_ids_for_tool("browser_use", {"url": "file:///home/owner/Documents/notes.html", "goal": "read"}) == []
 
 
 @pytest.mark.asyncio
@@ -81,6 +83,111 @@ async def test_browser_use_runs_when_network_allowed(permission_store, monkeypat
     assert result.data["backend"] == "browser-use"
     assert result.data["url"] == "https://example.com"
     assert "done reading" in result.output
+
+
+@pytest.mark.asyncio
+async def test_browser_use_opens_local_file_on_extra_drive(tmp_path, monkeypatch, permission_store):
+    from app.tools.browser import resolve_browser_open_url
+    from app.tools.browser_use import BrowserUseTool
+    from app.tools import browser_use as browser_use_mod
+
+    html = tmp_path / "E" / "notes.html"
+    html.parent.mkdir(parents=True)
+    html.write_text("<html><body>usb</body></html>", encoding="utf-8")
+    expected = resolve_browser_open_url(str(html), [str(tmp_path)])
+    seen: dict[str, str | None] = {}
+
+    async def fake_run(goal, url, settings):
+        seen["url"] = url
+        seen["goal"] = goal
+        return ToolResult(True, f"opened {url}", data={"url": url})
+
+    monkeypatch.setattr(browser_use_mod._BACKEND, "run", fake_run)
+    apply_grant("network.internet", "deny")
+    tool = BrowserUseTool(lambda: {"allowed_directories": [str(tmp_path)]})
+    result = await tool.execute(goal="summarize this page", url=str(html))
+    assert result.success, result.error
+    assert seen["url"] == expected
+    blocked = await tool.execute(goal="read passwd", url="file:///etc/passwd")
+    assert blocked.success is False
+    assert "outside allowed" in (blocked.error or "").lower() or "workspace" in (blocked.error or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_browser_use_opens_plugged_in_drive_without_settings_save(tmp_path, monkeypatch, permission_store):
+    from app.tools.browser import resolve_browser_open_url
+    from app.tools.browser_use import BrowserUseTool
+    from app.tools import browser_use as browser_use_mod
+
+    home = tmp_path / "home"
+    extra = tmp_path / "E"
+    home.mkdir()
+    extra.mkdir()
+    html = extra / "notes.html"
+    html.write_text("<html><body>usb</body></html>", encoding="utf-8")
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setattr("app.config.is_ephemeral_workspace_path", lambda path: False)
+    monkeypatch.setattr("app.config.default_allowed_directories", lambda: [str(home), str(extra)])
+    expected = resolve_browser_open_url(str(html), [str(home), str(extra)])
+    seen: dict[str, str | None] = {}
+
+    async def fake_run(goal, url, settings):
+        seen["url"] = url
+        return ToolResult(True, f"opened {url}", data={"url": url})
+
+    monkeypatch.setattr(browser_use_mod._BACKEND, "run", fake_run)
+    apply_grant("network.internet", "deny")
+    tool = BrowserUseTool(lambda: {"allowed_directories": [str(home)]})
+    result = await tool.execute(goal="summarize this page", url=str(html))
+    assert result.success, result.error
+    assert seen["url"] == expected
+
+
+@pytest.mark.asyncio
+async def test_browser_use_blocks_lan_to_wan_history_hops(permission_store, monkeypatch):
+    apply_grant("network.internet", "deny")
+    apply_grant("network.local", "always")
+    backend = BrowserUseBackend()
+    monkeypatch.setattr(backend, "available", lambda: True)
+
+    state = SimpleNamespace(url="https://example.test/leaked", title="Leaked", to_dict=lambda: {})
+    history = SimpleNamespace(
+        final_result=lambda: "should not leak",
+        history=[SimpleNamespace(state=state, model_output=None, result=[])],
+        structured_output=None,
+        agent_steps=lambda: [],
+    )
+
+    async def fake_invoke(task, settings, *, start_url=None):
+        assert start_url == "http://nas.local/status"
+        return history
+
+    monkeypatch.setattr(backend, "_invoke", fake_invoke)
+    reset = {"called": False}
+
+    async def fake_reset():
+        reset["called"] = True
+
+    monkeypatch.setattr("app.workers.browser.reset_browser_use_session_async", fake_reset)
+    result = await backend.run("read status", "http://nas.local/status")
+    assert result.success is False
+    assert "don't allow" in (result.error or "").lower()
+    assert "should not leak" not in (result.output or "")
+    assert reset["called"] is True
+
+
+def test_visited_urls_from_history_includes_navigate_actions():
+    action = SimpleNamespace(model_dump=lambda **_: {"navigate": {"url": "https://example.test/next"}})
+    item = SimpleNamespace(
+        state=SimpleNamespace(url="http://nas.local/a", title="", to_dict=lambda: {}),
+        model_output=SimpleNamespace(action=[action]),
+    )
+    history = SimpleNamespace(history=[item])
+    assert visited_urls_from_history(history, start_url="http://nas.local/") == [
+        "http://nas.local/",
+        "http://nas.local/a",
+        "https://example.test/next",
+    ]
 
 
 def test_structured_payload_from_history_collects_trace():
@@ -172,6 +279,36 @@ async def test_shared_browser_session_reuses_single_instance(permission_store, m
     assert first is second
     assert len(created) == 1
     assert browser_mod._SESSION_REUSED is True
+
+
+@pytest.mark.asyncio
+async def test_shared_browser_session_installs_lan_intercept(permission_store, monkeypatch):
+    import app.workers.browser as browser_mod
+    from app.tools.browser import handle_browser_lan_route
+
+    await browser_mod.reset_browser_use_session_async()
+    apply_grant("network.internet", "always")
+    backend = BrowserUseBackend()
+
+    class FakeContext:
+        def __init__(self):
+            self.routes = []
+
+        async def route(self, pattern, handler):
+            self.routes.append((pattern, handler))
+
+    class FakeSession:
+        def __init__(self):
+            self.browser_context = FakeContext()
+
+        async def start(self):
+            return None
+
+    session = FakeSession()
+    monkeypatch.setattr(backend, "_build_browser_session", lambda _settings: session)
+    started = await backend._shared_browser_session(AppSettings())
+    assert started is session
+    assert session.browser_context.routes == [("**/*", handle_browser_lan_route)]
 
 
 @pytest.mark.asyncio
@@ -283,3 +420,38 @@ def test_optional_worker_catalog_installable_for_missing_browser_use():
 def test_local_browser_use_model_prefers_settings():
     settings = AppSettings(browser={"browser_use_model": "Qwen3.5-27B", "headless": True})
     assert local_browser_use_model(settings) == "Qwen3.5-27B"
+
+
+def test_browser_use_session_kwargs_download_to_owner_downloads(tmp_path, monkeypatch):
+    from app.workers.browser import browser_use_session_kwargs, _browser_profile_with_downloads
+
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    profile_dir = tmp_path / "browser-use-profile"
+    monkeypatch.setattr("app.tools.owner_paths.Path.home", classmethod(lambda cls: tmp_path))
+    kwargs = browser_use_session_kwargs(True, profile_dir)
+    assert kwargs["downloads_path"] == str(downloads)
+    assert kwargs["user_data_dir"] == str(profile_dir)
+    assert kwargs["keep_alive"] is True
+    assert kwargs["headless"] is True
+    assert "--no-proxy-server" in kwargs["args"]
+    assert kwargs["proxy"] == {"server": "direct://"}
+
+    captured: dict[str, object] = {}
+
+    class AcceptingProfile:
+        def __init__(self, **inner):
+            captured.update(inner)
+
+    profile = _browser_profile_with_downloads(AcceptingProfile, kwargs)
+    assert isinstance(profile, AcceptingProfile)
+    assert captured["downloads_path"] == str(downloads)
+
+    class StrictProfile:
+        def __init__(self, *, headless, keep_alive, user_data_dir):
+            captured.clear()
+            captured.update(headless=headless, keep_alive=keep_alive, user_data_dir=user_data_dir)
+
+    slim = _browser_profile_with_downloads(StrictProfile, kwargs)
+    assert isinstance(slim, StrictProfile)
+    assert "downloads_path" not in captured

@@ -46,9 +46,11 @@ class HexStrikeOperatorTool(Tool):
         action_kind: str,
         context: dict[str, Any],
         permission_id: str = "cyber.hexstrike",
+        require_suite: bool = True,
     ) -> ToolResult | None:
         asking: list[str] = []
-        for required in dict.fromkeys((permission_id, "cyber.hexstrike")):
+        required_ids = (permission_id, "cyber.hexstrike") if require_suite else (permission_id,)
+        for required in dict.fromkeys(required_ids):
             decision = evaluate_permission(required)
             if decision.status == "deny":
                 return ToolResult(False, "", error=decision.reason)
@@ -134,9 +136,12 @@ class HexStrikeOperatorTool(Tool):
             capability_id = str(kwargs.get("capability_id") or "").strip()
             if not capability_id:
                 return ToolResult(False, "", error="capability_id is required for operate")
+            lan_inventory = capability_id == "defensive:lan_inventory"
             blocked = self._permission_block(
                 action_kind="hexstrike.operate",
                 context={"capability_id": capability_id, "arguments": kwargs.get("arguments") or {}},
+                permission_id="network.local" if lan_inventory else "cyber.hexstrike",
+                require_suite=not lan_inventory,
             )
             if blocked:
                 return blocked

@@ -532,6 +532,7 @@ class ConnectionSetup(BaseModel):
     ssh_port: int | None = Field(default=None, ge=1, le=65535)
     ssh_user: str | None = Field(default=None, max_length=64)
     ssh_identity_file: str | None = Field(default=None, max_length=1024)
+    ssh_password: str | None = Field(default=None, max_length=256)
     gateway_host: str | None = Field(default=None, max_length=255)
     gateway_port: int | None = Field(default=None, ge=1, le=65535)
     gateway_user: str | None = Field(default=None, max_length=64)

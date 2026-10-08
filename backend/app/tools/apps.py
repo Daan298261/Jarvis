@@ -3,7 +3,8 @@
 The model asks for "steam" or "snipping tool"; this tool resolves that to what
 Windows would open from the Start menu, launches it the way a double-click does
 (ShellExecute), and confirms a matching process actually appeared. Resolution
-order: Start Menu shortcuts → App Paths registry → PATH → Store (UWP) apps.
+order: Start Menu shortcuts → App Paths registry → PATH → Desktop / extra-drive
+Program Files and PortableApps → Store (UWP) apps.
 """
 
 from __future__ import annotations
@@ -28,6 +29,24 @@ _NOISE_WORDS = {"the", "app", "application", "program", "please", "my", "a", "an
 _SKIP_SHORTCUT = re.compile(r"(?i)\b(uninstall|readme|help|support|website|manual|release notes|license)\b")
 _UWP_TIMEOUT_S = 20.0
 _UWP_CACHE: list[tuple[str, str]] | None = None
+_APP_FILE_SUFFIXES = {".lnk", ".url", ".exe", ".appimage", ".desktop"}
+_SKIP_DIR_NAMES = frozenset(
+    {
+        "windows",
+        "windows.old",
+        "windowsapps",
+        "winsxs",
+        "installer",
+        "$recycle.bin",
+        "recycle.bin",
+        "system volume information",
+        "node_modules",
+        ".git",
+    }
+)
+_POSIX_SKIP_MOUNTS = frozenset(
+    {"/", "/boot", "/boot/efi", "/snap", "/sys", "/proc", "/dev", "/run"}
+)
 
 
 @dataclass
@@ -88,6 +107,158 @@ def _shortcuts() -> list[Path]:
     return found
 
 
+def _portable_search_roots() -> list[tuple[Path, int]]:
+    """Desktop plus Program Files / PortableApps on extra mounted volumes.
+
+    The system-drive Program Files tree is already covered by Start Menu
+    shortcuts; walking it again would scan thousands of files on every miss.
+    Extra volumes (USB, D:, mapped drives) and Desktop shortcuts are not.
+    """
+    rows: list[tuple[Path, int]] = []
+    seen: set[str] = set()
+
+    def add(path: Path, depth: int) -> None:
+        try:
+            if not path.is_dir():
+                return
+        except OSError:
+            return
+        key = str(path).replace("\\", "/").lower().rstrip("/")
+        if key in seen:
+            return
+        seen.add(key)
+        rows.append((path, depth))
+
+    add(Path.home() / "Desktop", 2)
+    public = os.environ.get("PUBLIC")
+    if public:
+        add(Path(public) / "Desktop", 2)
+    if os.name == "nt":
+        from ..config import _windows_owner_drives
+
+        system = os.path.normcase(str(Path.home().anchor).rstrip("\\"))
+        for drive in _windows_owner_drives():
+            add(drive / "PortableApps", 3)
+            drive_key = os.path.normcase(str(drive).rstrip("\\"))
+            if drive_key == system:
+                continue
+            add(drive / "Program Files", 3)
+            add(drive / "Program Files (x86)", 3)
+            add(drive, 2)
+    else:
+        for volume in _posix_portable_volumes():
+            add(volume / "PortableApps", 3)
+            add(volume, 3)
+    return rows
+
+
+def _posix_portable_volumes() -> list[Path]:
+    """USB / extra mounts as volume roots, not `/media` or `/run/media` parents.
+
+    `extra_volume_roots()` expands the same parents, but returns [] under pytest.
+    Portable launch still needs the live USB label so `PortableApps/<App>/app`
+    is inside the depth-3 walk (walking `/media` itself stops at the label).
+    """
+    from ..config import _posix_owner_roots, _posix_volume_parent_children
+
+    posix_parents = {Path("/media"), Path("/mnt"), Path("/run/media")}
+    volumes: list[Path] = []
+    seen: set[str] = set()
+    for mount in _posix_owner_roots():
+        if str(mount) in _POSIX_SKIP_MOUNTS:
+            continue
+        children = (
+            _posix_volume_parent_children(mount)
+            if mount in posix_parents or mount.name in {"media", "mnt"}
+            else [mount]
+        )
+        for volume in children:
+            try:
+                key = str(volume.resolve()).replace("\\", "/").rstrip("/").lower()
+            except OSError:
+                key = str(volume).replace("\\", "/").rstrip("/").lower()
+            if not key or key in seen or key == "/":
+                continue
+            seen.add(key)
+            volumes.append(volume)
+    return volumes
+
+
+def _iter_app_files(root: Path, *, max_depth: int) -> list[Path]:
+    found: list[Path] = []
+    try:
+        if not root.is_dir():
+            return found
+    except OSError:
+        return found
+    root_s = str(root)
+    for dirpath, dirnames, files in os.walk(root, followlinks=False):
+        rel = os.path.relpath(dirpath, root_s)
+        depth = 0 if rel in (".", os.curdir) else rel.count(os.sep) + 1
+        dirnames[:] = [
+            name
+            for name in dirnames
+            if name.lower() not in _SKIP_DIR_NAMES and not name.startswith(".")
+        ]
+        if depth >= max_depth:
+            dirnames[:] = []
+        for filename in files:
+            if Path(filename).suffix.lower() in _APP_FILE_SUFFIXES:
+                found.append(Path(dirpath) / filename)
+    return found
+
+
+def _portable_kind(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix in {".lnk", ".url"}:
+        return "shortcut"
+    return "exe"
+
+
+def _looks_like_app_path(raw: str) -> bool:
+    text = str(raw or "").strip().strip('"')
+    if not text:
+        return False
+    lower = text.lower()
+    if any(lower.endswith(suffix) for suffix in _APP_FILE_SUFFIXES | {".bat", ".cmd", ".com", ".msi"}):
+        return True
+    return "/" in text or "\\" in text or (len(text) >= 2 and text[1] == ":")
+
+
+def resolve_direct_app_path(raw_name: str) -> AppTarget | None:
+    """Open an explicit extra-drive / USB executable path without Start Menu matching."""
+    text = str(raw_name or "").strip().strip('"')
+    if not _looks_like_app_path(text):
+        return None
+    path = Path(text).expanduser()
+    try:
+        if not path.is_file():
+            return None
+        resolved = path.resolve()
+    except OSError:
+        return None
+    kind = _portable_kind(resolved)
+    return AppTarget(resolved.stem, kind, str(resolved), [resolved.stem.lower()])
+
+
+def _best_portable(query: str) -> tuple[int, Path] | None:
+    best: tuple[int, Path] | None = None
+    for root, max_depth in _portable_search_roots():
+        for path in _iter_app_files(root, max_depth=max_depth):
+            if _SKIP_SHORTCUT.search(path.stem):
+                continue
+            score = _score(query, path.stem)
+            if score and path.suffix.lower() == ".url":
+                score -= 15
+            if score <= 0:
+                continue
+            if best is None or score > best[0]:
+                best = (score, path)
+            if score >= 100:
+                return best
+    return best
+
+
 def _app_paths(query: str) -> str | None:
     if platform.system() != "Windows":
         return None
@@ -128,6 +299,9 @@ def _uwp_apps() -> list[tuple[str, str]]:
 
 
 def resolve_app(raw_name: str) -> AppTarget | None:
+    direct = resolve_direct_app_path(raw_name)
+    if direct is not None:
+        return direct
     query = normalize_app_name(raw_name)
     if not query:
         return None
@@ -154,8 +328,15 @@ def resolve_app(raw_name: str) -> AppTarget | None:
     on_path = shutil.which(_compact(query)) or shutil.which(query)
     if on_path:
         return AppTarget(query, "exe", on_path, tokens + [Path(on_path).stem.lower()])
+    portable = _best_portable(query)
+    if portable is not None and portable[0] >= 70:
+        path = portable[1]
+        return AppTarget(path.stem, _portable_kind(path), str(path), tokens + [path.stem.lower()])
     if best is not None and best[0] >= 45:
         return AppTarget(best[1].stem, "shortcut", str(best[1]), tokens)
+    if portable is not None and portable[0] >= 45:
+        path = portable[1]
+        return AppTarget(path.stem, _portable_kind(path), str(path), tokens + [path.stem.lower()])
 
     uwp_best: tuple[int, str, str] | None = None
     for name, app_id in _uwp_apps():
@@ -207,7 +388,9 @@ async def launch_app(raw_name: str, *, elevated: bool = False, verify_seconds: f
             False,
             "",
             error=(
-                f"No installed app matches {raw_name!r} (searched Start Menu, App Paths, PATH and Store apps). "
+                f"No installed app matches {raw_name!r} (searched Start Menu, App Paths, PATH, "
+                "Desktop, extra-drive Program Files / PortableApps, and Store apps). "
+                "Pass the full path of an .exe on USB/`D:` if it is not in those catalogs. "
                 "Use apps action=find to see close names."
             ),
         )
@@ -347,6 +530,13 @@ def find_apps(raw_name: str, limit: int = 12) -> ToolResult:
         score = _score(query, shortcut.stem) if query else 1
         if score and not _SKIP_SHORTCUT.search(shortcut.stem):
             rows.append((score, shortcut.stem, "shortcut"))
+    for root, max_depth in _portable_search_roots():
+        for path in _iter_app_files(root, max_depth=max_depth):
+            if _SKIP_SHORTCUT.search(path.stem):
+                continue
+            score = _score(query, path.stem) if query else 1
+            if score:
+                rows.append((score, path.stem, _portable_kind(path)))
     for name, _app_id in _uwp_apps():
         score = _score(query, name) if query else 1
         if score:
@@ -367,9 +557,10 @@ class AppsTool(Tool):
     name = "apps"
     description = (
         "Open, find, or close desktop applications by their normal name (\"steam\", \"spotify\", "
-        "\"snipping tool\"). Resolves the name the way the Start menu does, launches it like a "
-        "double-click, and confirms the app's process started. Use this instead of shell commands "
-        "for opening or closing programs. elevated=true runs it as administrator."
+        "\"snipping tool\"). Resolves the name the way the Start menu does, then Desktop shortcuts "
+        "and Program Files / PortableApps on extra mounted drives, or a full path to an .exe "
+        "on USB/`D:`. Launches it like a double-click, and confirms the app's process started. "
+        "Use this instead of shell commands for opening or closing programs. elevated=true runs it as administrator."
     )
     risk = RiskLevel.MEDIUM
     effect_class = "external"
@@ -377,7 +568,10 @@ class AppsTool(Tool):
         "type": "object",
         "properties": {
             "action": {"type": "string", "enum": ["open", "close", "find", "running"], "default": "open"},
-            "name": {"type": "string", "description": "App name as the owner said it"},
+            "name": {
+                "type": "string",
+                "description": "App name as the owner said it, or a full path to an .exe/.lnk on an extra drive",
+            },
             "elevated": {"type": "boolean", "default": False, "description": "Run as administrator"},
             "force": {"type": "boolean", "default": False, "description": "close: kill instead of asking to exit"},
         },

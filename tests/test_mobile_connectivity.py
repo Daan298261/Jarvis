@@ -20,6 +20,7 @@ def network_env(tmp_path, monkeypatch):
 
 class Router:
     lanaddr = "192.168.1.12"
+    wan_ip = "8.8.8.8"
     def __init__(self, mapping=None):
         self.mapping = mapping
         self.added = []
@@ -33,9 +34,12 @@ class Router:
     def deleteportmapping(self, *args):
         self.deleted.append(args)
         self.mapping = None
+    def externalipaddress(self):
+        return self.wan_ip
 
 
-def test_router_mapping_never_overwrites_or_removes_foreign_entry():
+def test_router_mapping_never_overwrites_or_removes_foreign_entry(monkeypatch):
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
     router = Router(("192.168.1.99", 4781, "Other app"))
     with pytest.raises(ValueError):
         connectivity.map_router(router, "Jarvis-owned")
@@ -43,11 +47,23 @@ def test_router_mapping_never_overwrites_or_removes_foreign_entry():
     assert router.added == router.deleted == []
 
 
-def test_router_mapping_uses_only_tls_port_and_finite_lease():
+def test_router_mapping_uses_only_tls_port_and_finite_lease(monkeypatch):
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
     router = Router()
     connectivity.map_router(router, "Jarvis-owned")
     assert router.added == [(4781, "TCP", router.lanaddr, 4781, "Jarvis-owned", "", 3600)]
     connectivity.map_router(router, "Jarvis-owned")
+    connectivity.unmap_router(router, "Jarvis-owned")
+    assert router.deleted == [(4781, "TCP")]
+
+
+def test_map_router_replaces_cgnat_internal_client(monkeypatch):
+    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
+    monkeypatch.setattr(connectivity, "preferred_lan_ipv4", lambda gateway="": "192.168.1.12")
+    router = Router(("100.64.1.8", 4781, "Jarvis-owned"))
+    router.lanaddr = "100.64.1.8"
+    connectivity.map_router(router, "Jarvis-owned")
+    assert router.added == [(4781, "TCP", "192.168.1.12", 4781, "Jarvis-owned", "", 3600)]
     connectivity.unmap_router(router, "Jarvis-owned")
     assert router.deleted == [(4781, "TCP")]
 

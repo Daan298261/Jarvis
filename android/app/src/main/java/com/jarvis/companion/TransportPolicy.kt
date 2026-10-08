@@ -38,6 +38,36 @@ object TransportPolicy {
         return distinct.sortedWith(compareBy({ reachabilityRank(it) }, { it }))
     }
 
+    fun mergeConnectionEndpoints(existing: Iterable<String>, incoming: Iterable<String>): List<String> {
+        val live = incoming.mapNotNull { runCatching { origin(it) }.getOrNull() }
+        val known = existing.mapNotNull { runCatching { origin(it) }.getOrNull() }
+        val livePrivate = live.filter { isPrivateOrigin(it) }.toSet()
+        val retained = if (livePrivate.isEmpty()) {
+            known
+        } else {
+            known.filter { !isPrivateOrigin(it) || it in livePrivate }
+        }
+        val ranked = orderedForReachability(live + retained)
+        if (ranked.size <= 8) return ranked
+        val privateOrigins = ranked.filter { isPrivateOrigin(it) }
+        val keptPrivate = privateOrigins.takeLast(2)
+        val publicOrigins = ranked.filter { it !in keptPrivate }
+        return publicOrigins.take(8 - keptPrivate.size) + keptPrivate
+    }
+
+    fun absorbMatchingLanOrigin(
+        existing: Iterable<String>,
+        currentPin: String,
+        discoveredOrigin: String,
+        discoveredPin: String,
+    ): List<String>? {
+        val expected = currentPin.trim().lowercase()
+        val advertised = discoveredPin.trim().lowercase()
+        if (expected.length != 64 || advertised != expected) return null
+        val live = runCatching { origin(discoveredOrigin) }.getOrNull() ?: return null
+        return mergeConnectionEndpoints(existing, listOf(live))
+    }
+
     fun localIpv4Addresses(): List<String> = runCatching {
         NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
             .filter { nic ->
@@ -93,7 +123,6 @@ object TransportPolicy {
         val host = runCatching { URI(endpoint).host?.trim().orEmpty() }.getOrDefault("")
         val locals = localIpv4.mapNotNull { parseLocal(it) }
         if (locals.isEmpty()) return false
-        if (isLanHostname(host)) return true
         val target = parseV4(host) ?: return false
         if (!isRfc1918(target)) return false
         return locals.any { (ip, prefix) -> sameNetwork(ip, target, prefix) }
@@ -147,11 +176,13 @@ object TransportPolicy {
 
     internal fun sameSlash24(a: IntArray, b: IntArray): Boolean = sameNetwork(a, b, 24)
 
+    internal fun isPrivateOrigin(value: String): Boolean = reachabilityRank(value) >= 2
+
     internal fun reachabilityRank(value: String): Int {
         val host = runCatching { URI(value).host?.trim()?.lowercase().orEmpty() }.getOrDefault("")
         if (host.isEmpty()) return 2
         if (isLanHostname(host)) return 2
-        val numeric = host.matches(Regex("""^\d{1,3}(\.\d{1,3}){3}$""")) || host.contains(':')
+        val numeric = parseV4(host) != null || host.contains(':')
         if (!numeric) return 0
         val ip = runCatching { InetAddress.getByName(host) }.getOrNull() ?: return 1
         return if (ip.isLoopbackAddress || ip.isLinkLocalAddress || ip.isSiteLocalAddress) 2 else 1

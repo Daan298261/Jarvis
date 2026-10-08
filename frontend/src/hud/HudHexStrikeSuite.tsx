@@ -8,6 +8,7 @@ import {
   installHexStrikeTool,
   listHexStrikeOperatorJobs,
   listHexStrikeScopes,
+  ensureDefaultLanScope,
   operateHexStrike,
   refreshHexStrikeToolsCatalog,
   startHexStrike,
@@ -32,6 +33,11 @@ function isOperableCapability(item: HexStrikeCatalogItem): boolean {
   if (item.source === "dependency") return false
   if (item.id.startsWith("dep:")) return false
   return true
+}
+
+function canOperateWithoutLiveSuite(item: HexStrikeCatalogItem | null): boolean {
+  if (!item || item.available === false) return false
+  return item.id === "defensive:lan_inventory" || item.id === "defensive:threat_intel_lookup"
 }
 
 function installToolId(item: HexStrikeCatalogItem): string {
@@ -568,7 +574,7 @@ export function HudHexStrikeSuite() {
               <p className="hex-suite-hint">
                 {live
                   ? "Refresh the operator catalog to load MCP and HTTP capabilities."
-                  : "Start HexStrike before operating."}
+                  : "Start HexStrike for HTTP/MCP tools, or run LAN inventory from this tab."}
               </p>
             )}
             <div className="hex-form">
@@ -593,26 +599,46 @@ export function HudHexStrikeSuite() {
               {selectedCapability?.available === false && selectedCapability.guidance && (
                 <p className="hex-suite-error">{selectedCapability.guidance}</p>
               )}
-              {selectedCapability?.source === "defensive" && scopes.length > 0 && (
-                <select
-                  aria-label="Scope for defensive capability"
-                  onChange={(e) => {
-                    try {
-                      const parsed = JSON.parse(argsJson) as Record<string, unknown>
-                      parsed.scope_id = e.target.value
-                      setArgsJson(JSON.stringify(parsed, null, 2))
-                    } catch {
-                      setArgsJson(JSON.stringify({ scope_id: e.target.value, options: {} }, null, 2))
-                    }
-                  }}
-                >
-                  <option value="">Quick-fill scope_id</option>
-                  {scopes.map((scope) => (
-                    <option key={scope.id} value={scope.id}>
-                      {scope.label || scope.id}
-                    </option>
-                  ))}
-                </select>
+              {selectedCapability?.source === "defensive" &&
+                (scopes.length > 0 || selectedCapability.id === "defensive:lan_inventory") && (
+                <div className="hex-form">
+                  {scopes.length > 0 && (
+                    <select
+                      aria-label="Scope for defensive capability"
+                      onChange={(e) => {
+                        try {
+                          const parsed = JSON.parse(argsJson) as Record<string, unknown>
+                          parsed.scope_id = e.target.value
+                          setArgsJson(JSON.stringify(parsed, null, 2))
+                        } catch {
+                          setArgsJson(JSON.stringify({ scope_id: e.target.value, options: {} }, null, 2))
+                        }
+                      }}
+                    >
+                      <option value="">Quick-fill scope_id</option>
+                      {scopes.map((scope) => (
+                        <option key={scope.id} value={scope.id}>
+                          {scope.label || scope.id}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {selectedCapability.id === "defensive:lan_inventory" && (
+                    <button
+                      type="button"
+                      className="hex-suite-btn secondary"
+                      disabled={busy}
+                      onClick={() =>
+                        void run(async () => {
+                          const scope = await ensureDefaultLanScope()
+                          setArgsJson(JSON.stringify({ scope_id: scope.id, options: {} }, null, 2))
+                        }, "Using this PC's LAN.")
+                      }
+                    >
+                      Use this PC's LAN
+                    </button>
+                  )}
+                </div>
               )}
               <AdvancedDisclosure>
                 <label className="hex-args-label">
@@ -634,7 +660,12 @@ export function HudHexStrikeSuite() {
             <button
               type="button"
               className="hex-suite-btn"
-              disabled={busy || !live || !operateCapabilityId || selectedCapability?.available === false}
+              disabled={
+                busy ||
+                !operateCapabilityId ||
+                selectedCapability?.available === false ||
+                (!live && !canOperateWithoutLiveSuite(selectedCapability))
+              }
               onClick={() =>
                 void run(async () => {
                   let args: Record<string, unknown>

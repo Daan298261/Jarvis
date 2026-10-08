@@ -4,8 +4,6 @@ import re
 from html import unescape
 from typing import Any
 
-import httpx
-
 from ..links import extract_urls
 from ..schema import ExternalContentArtifact
 from .base import IngestContext
@@ -76,11 +74,16 @@ def _artifact_from_tags(
 
 
 async def _fetch_html(url: str, timeout: float = 20.0) -> str:
-    headers = {"User-Agent": "JarvisLocal/1.0"}
-    async with httpx.AsyncClient(follow_redirects=True, timeout=timeout, headers=headers) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        return response.text
+    from ...policy.network_http import gated_get
+
+    response = await gated_get(
+        url,
+        tool="external_ingest",
+        timeout=timeout,
+        headers={"User-Agent": "JarvisLocal/1.0"},
+    )
+    response.raise_for_status()
+    return response.text
 
 
 class GenericWebAdapter:
@@ -89,6 +92,8 @@ class GenericWebAdapter:
     async def resolve_http(self, ctx: IngestContext) -> ExternalContentArtifact | None:
         try:
             html = await _fetch_html(ctx.url)
+        except PermissionError:
+            raise
         except Exception:
             return None
         tags = _parse_og_tags(html)
@@ -100,10 +105,18 @@ class GenericWebAdapter:
         if not ctx.provider_url:
             return None
         try:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=20.0) as client:
-                response = await client.get(ctx.provider_url, params={"url": ctx.url})
-                response.raise_for_status()
-                payload = response.json()
+            from ...policy.network_http import gated_get
+
+            response = await gated_get(
+                ctx.provider_url,
+                tool="external_ingest",
+                timeout=20.0,
+                params={"url": ctx.url},
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except PermissionError:
+            raise
         except Exception:
             return None
         if not isinstance(payload, dict):

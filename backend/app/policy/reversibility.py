@@ -137,7 +137,7 @@ def model_attempted_self_confirm(arguments: dict[str, Any] | None) -> bool:
 _READ_ONLY_FS = frozenset(
     {"list", "search", "read", "hash", "stat", "compare", "recent", "snapshots"}
 )
-_REVERSIBLE_FS = frozenset({"write", "edit", "mkdir", "copy", "move", "rename"})
+_REVERSIBLE_FS = frozenset({"write", "edit", "mkdir", "copy", "move", "rename", "extract"})
 _COMPENSATABLE_FS = frozenset({"restore", "snapshot"})
 _IRREVERSIBLE_FS = frozenset({"delete"})
 

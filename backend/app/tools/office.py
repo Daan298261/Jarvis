@@ -9,7 +9,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable
 
+from ..config import live_workspace_roots_from_context
 from .base import RiskLevel, Tool, ToolResult
+from .owner_paths import resolve_owner_file_path
 from .safety import resolve_allowed_path
 
 
@@ -43,6 +45,7 @@ def _module_ok(name: str) -> bool:
 
     return importlib.util.find_spec(name) is not None
 
+_OFFICE_EXT = {"word": ".docx", "excel": ".xlsx", "powerpoint": ".pptx"}
 _PROGID = {
     "word": "Word.Application",
     "excel": "Excel.Application",
@@ -151,7 +154,8 @@ class OfficeTool(Tool):
         "Read, create, and edit Microsoft Word, Excel, and PowerPoint files. "
         "Uses Windows COM when Office is installed; otherwise uses python-docx / openpyxl / python-pptx. "
         "Actions: create, read, write, save_as, append, info. Always write to a new file unless the user "
-        "asked for in-place edits. Paths must be inside allowed directories."
+        "asked for in-place edits. Omit path on create to save in Documents (or Desktop/Downloads). "
+        "Paths must be inside allowed directories, including extra drives."
     )
     risk = RiskLevel.MEDIUM
     parameters = {
@@ -159,7 +163,10 @@ class OfficeTool(Tool):
         "properties": {
             "app": {"type": "string", "enum": ["word", "excel", "powerpoint"]},
             "action": {"type": "string", "enum": ["create", "read", "write", "save_as", "append", "info"]},
-            "path": {"type": "string"},
+            "path": {
+                "type": "string",
+                "description": "File path. Omit create to use Documents. A folder path is allowed.",
+            },
             "content": {"type": "string", "description": "Plain text, TSV/CSV/JSON table, or slides separated by ---"},
             "destination": {"type": "string"},
             "sheet": {"type": "string", "description": "Excel sheet name"},
@@ -170,6 +177,10 @@ class OfficeTool(Tool):
 
     def __init__(self, context_getter=None) -> None:
         self.context_getter = context_getter or (lambda: {})
+        self._app = "word"
+
+    def _allowed(self) -> list[str]:
+        return live_workspace_roots_from_context(self.context_getter() if callable(self.context_getter) else {})
 
     def _info(self, app: str, path: str | None) -> ToolResult:
         windows = platform.system() == "Windows"
@@ -216,6 +227,7 @@ class OfficeTool(Tool):
         app = (kwargs.get("app") or "").lower()
         action = (kwargs.get("action") or "").lower()
         backend = (kwargs.get("backend") or "auto").lower()
+        self._app = app
         if app not in {"word", "excel", "powerpoint"}:
             return ToolResult(False, "", error="app must be word, excel, or powerpoint")
         if action not in {"create", "read", "write", "save_as", "append", "info"}:
@@ -224,8 +236,7 @@ class OfficeTool(Tool):
             return ToolResult(False, "", error="Office COM is not available on this machine")
         if action == "info" and not (kwargs.get("path") or "").strip():
             return self._info(app, None)
-        ctx = self.context_getter() if callable(self.context_getter) else {}
-        allowed = list((ctx or {}).get("allowed_directories") or [])
+        allowed = self._allowed()
         if action in {"create", "write", "append", "save_as"} and not allowed:
             return ToolResult(False, "", error="Office write target is unavailable without allowed directories")
         try:
@@ -238,10 +249,23 @@ class OfficeTool(Tool):
                 return self._info(app, kwargs.get("path"))
             return ToolResult(False, "", error=str(exc))
 
-    def _resolve(self, path: str | None) -> Path:
-        ctx = self.context_getter() if callable(self.context_getter) else {}
-        allowed = ctx.get("allowed_directories") if isinstance(ctx, dict) else []
-        return resolve_allowed_path(path or "", allowed or [])
+    def _resolve(self, path: str | None, *, creating: bool = False) -> Path:
+        allowed = self._allowed()
+        raw = str(path or "").strip()
+        ext = _OFFICE_EXT.get(self._app, ".docx")
+        suggested = f"Jarvis-{self._app}{ext}"
+        if creating:
+            dest = resolve_owner_file_path(
+                raw or None,
+                suggested_name=suggested,
+                allowed=allowed,
+                fallback_dirs=("Documents", "Desktop", "Downloads"),
+            )
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            return dest
+        if not raw:
+            raise PermissionError("path is required")
+        return resolve_allowed_path(raw, allowed)
 
     def _choose_backend(self, app: str, backend: str) -> str:
         com_ok = office_com_available()
@@ -273,9 +297,7 @@ class OfficeTool(Tool):
     def _target(self, kwargs: dict[str, Any], *, creating: bool) -> Path:
         dest = kwargs.get("destination") or kwargs.get("path")
         if creating:
-            path = self._resolve(dest)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            return path
+            return self._resolve(dest, creating=True)
         return self._resolve(kwargs.get("path") or dest)
 
     def _word_lib(self, action: str, kwargs: dict[str, Any]) -> ToolResult:

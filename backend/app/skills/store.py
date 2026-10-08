@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..config import data_dir
+from ..config import data_dir, resolved_data_sidecar_dir
 from .schema import SkillCandidate, SkillRegistryEntry, SkillVersion
 
 _lock = threading.RLock()
@@ -21,7 +21,12 @@ QUARANTINE_DIR = "quarantine"
 
 
 def skills_root() -> Path:
-    path = data_dir() / "skills"
+    path = resolved_data_sidecar_dir(
+        "skills",
+        local=data_dir() / "skills",
+        markers=("index.json", "candidates", "versions"),
+        need_bytes=256 * 1024**2,
+    )
     path.mkdir(parents=True, exist_ok=True)
     (path / CANDIDATES_DIR).mkdir(parents=True, exist_ok=True)
     (path / VERSIONS_DIR).mkdir(parents=True, exist_ok=True)

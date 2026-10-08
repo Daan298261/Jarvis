@@ -183,7 +183,7 @@ def test_chatterbox_downloads_only_missing_model_files(monkeypatch):
     calls: list[tuple[str, bool]] = []
     cached = {"ve.safetensors", "tokenizer.json"}
 
-    def download(*, repo_id, filename, local_files_only=False):
+    def download(*, repo_id, filename, local_files_only=False, **_kwargs):
         assert repo_id == "ResembleAI/chatterbox"
         calls.append((filename, local_files_only))
         if local_files_only and filename not in cached:
@@ -196,3 +196,24 @@ def test_chatterbox_downloads_only_missing_model_files(monkeypatch):
     assert {name for name, _ in calls} == set(pack_install.CHATTERBOX_MODEL_FILES)
     assert {(name, False) for name in pack_install.CHATTERBOX_MODEL_FILES if name not in cached} <= set(calls)
     assert not any(name in cached and not local for name, local in calls)
+
+
+def test_chatterbox_weights_honor_internet_deny(tmp_path, monkeypatch):
+    from app.policy.computer_permissions import apply_grant, reset_computer_permission_state
+    from app.tts import pack_install
+
+    monkeypatch.setattr("app.policy.computer_permissions.data_dir", lambda: tmp_path)
+    reset_computer_permission_state()
+    apply_grant("network.internet", "deny")
+    ran = {"n": 0}
+
+    def missing(*, repo_id, filename, local_files_only=False, **_kwargs):
+        ran["n"] += 1
+        if local_files_only:
+            raise FileNotFoundError(filename)
+        raise AssertionError("must not download Chatterbox when internet is denied")
+
+    monkeypatch.setattr(pack_install, "hf_hub_download", missing)
+    with pytest.raises(PermissionError):
+        pack_install.ensure_chatterbox_weights()
+    assert ran["n"] == 1
