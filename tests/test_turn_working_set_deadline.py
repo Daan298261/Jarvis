@@ -5,6 +5,7 @@ and Supermemory, and must report timeout / source failure distinctly.
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from types import SimpleNamespace
 
@@ -28,7 +29,12 @@ from app.agent.turn_working_set import (
     VAULT_RETRIEVAL_TIMEOUT,
     _MemoryComposeResult,
     _ToolComposeResult,
+    _WS_POOL_THREAD_PREFIX,
+    _WS_POOL_WORKERS,
     _compose_memory_working_set,
+    _reset_working_set_pool_peak,
+    _working_set_pool_peak,
+    _working_set_pool_submitted,
     compose_turn_working_set,
 )
 from app.config import AppSettings
@@ -84,7 +90,7 @@ async def test_vault_and_supermemory_run_concurrently(monkeypatch):
         time.sleep(0.12)
         return "vault-block", [], VAULT_RETRIEVAL_IDLE, ""
 
-    async def slow_memory(_agent_id: str, _query: str) -> _MemoryComposeResult:
+    async def slow_memory(_agent_id: str, _query: str, **_k: object) -> _MemoryComposeResult:
         starts["memory"] = time.perf_counter()
         await asyncio.sleep(0.12)
         return _MemoryComposeResult("memory-block", MEMORY_RETRIEVAL_HITS, source="supermemory")
@@ -176,10 +182,10 @@ async def test_failing_memory_source_is_distinct_from_empty_miss(monkeypatch):
     monkeypatch.setattr("app.agent.turn_working_set._working_set_deadline_seconds", lambda: 2.0)
     monkeypatch.setattr("app.agent.turn_working_set._tools_job", _empty_tools)
 
-    async def boom_memory(_agent_id: str, _query: str) -> _MemoryComposeResult:
+    async def boom_memory(_agent_id: str, _query: str, **_k: object) -> _MemoryComposeResult:
         return _MemoryComposeResult("", MEMORY_RETRIEVAL_ERROR, error="sidecar refused")
 
-    async def empty_memory(_agent_id: str, _query: str) -> _MemoryComposeResult:
+    async def empty_memory(_agent_id: str, _query: str, **_k: object) -> _MemoryComposeResult:
         return _MemoryComposeResult("", MEMORY_RETRIEVAL_MISS)
 
     monkeypatch.setattr("app.agent.turn_working_set._compose_memory_working_set", boom_memory)
@@ -270,3 +276,70 @@ async def test_disabled_supermemory_empty_native_is_a_miss(monkeypatch):
     result = await _compose_memory_working_set("owner", "What are Taco response preferences?")
     assert result.status == MEMORY_RETRIEVAL_MISS
     assert result.error == ""
+
+
+async def _wait_working_set_pool_idle(timeout_s: float = 2.0) -> None:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if _working_set_pool_submitted() == 0:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(
+        f"working-set pool still occupied: submitted={_working_set_pool_submitted()}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_repeated_timeouts_do_not_starve_default_thread_pool(monkeypatch):
+    """Abandoned retrieve work stays on the dedicated pool, bounded, and never
+    occupies the shared asyncio default executor."""
+    await _wait_working_set_pool_idle()
+    _reset_working_set_pool_peak()
+    monkeypatch.setattr("app.agent.turn_working_set._working_set_deadline_seconds", lambda: 0.05)
+    monkeypatch.setattr("app.agent.turn_working_set._tools_job", _empty_tools)
+
+    vault_threads: list[str] = []
+    lock = threading.Lock()
+
+    def slow_vault(_prompt: str):
+        with lock:
+            vault_threads.append(threading.current_thread().name)
+        time.sleep(0.4)
+        return "late-vault-hit", [], VAULT_RETRIEVAL_HITS, ""
+
+    monkeypatch.setattr("app.agent.turn_working_set._vault_job", slow_vault)
+
+    burst = 12
+    results = await asyncio.gather(
+        *[
+            compose_turn_working_set(
+                f"ask-{index}",
+                include_vault=True,
+                include_memory=False,
+                needs_tools=False,
+            )
+            for index in range(burst)
+        ]
+    )
+    assert all(ws.composition_status == COMPOSITION_TIMEOUT for ws in results)
+    assert all("vault" in ws.timed_out_sources for ws in results)
+    # Extra composes were refused, not queued behind the timed-out workers.
+    assert len(vault_threads) <= _WS_POOL_WORKERS
+    assert _working_set_pool_peak() <= _WS_POOL_WORKERS
+    assert _working_set_pool_submitted() <= _WS_POOL_WORKERS
+    assert all(name.startswith(_WS_POOL_THREAD_PREFIX) for name in vault_threads)
+
+    ping_holder: dict[str, bool] = {}
+
+    def ping() -> int:
+        ping_holder["ok"] = True
+        return 7
+
+    t0 = time.perf_counter()
+    value = await asyncio.to_thread(ping)
+    ping_elapsed = time.perf_counter() - t0
+    assert value == 7
+    assert ping_holder.get("ok") is True
+    # Would stall for ~0.4s if the 12 slow vaults had filled the default pool.
+    assert ping_elapsed < 0.15
+    await _wait_working_set_pool_idle()
