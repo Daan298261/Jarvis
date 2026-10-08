@@ -19,11 +19,13 @@ def test_quick_profile_16k():
 
 def test_unicode_sections_are_lossless_and_byte_bounded():
     from app.inference.prompt_budget import estimate_text_tokens
+    from app.inference.large_input import text_cost
     text = '🦅世界abc' * 2000
     parts = sections(text, 1365)
     assert ''.join(parts) == text
     assert all(len(part.encode('utf-8')) <= 1365 for part in parts)
     assert estimate_text_tokens(text) >= 10000
+    assert text_cost(text) >= 2 * estimate_text_tokens(text)
 
 
 def test_live_config_and_unloaded_catalog():

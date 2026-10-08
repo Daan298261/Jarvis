@@ -17,6 +17,12 @@ ACKNOWLEDGMENT = "That's a lot of text, sir. I'll divide it into sections so I c
 _announced: dict[str, float] = {}
 
 
+def text_cost(text: str) -> int:
+    # Same conservative budget as prompt_budget, expressed in ASCII-equivalent chars.
+    ascii_bytes = len(text.encode("ascii", errors="ignore"))
+    return ascii_bytes + 2 * (len(text.encode("utf-8")) - ascii_bytes)
+
+
 def sections(text: str, max_bytes: int) -> list[str]:
     """Bound tokenizer worst-case bytes while preserving Unicode code points."""
     parts, start, used = [], 0, 0
@@ -86,7 +92,7 @@ async def reduce_user_text(messages: list[ChatMessage], *, provider, max_chars: 
     out = list(messages)
     notified = False
     for index, message in enumerate(messages):
-        if message not in candidates or len(message.content) <= allowance:
+        if message not in candidates or text_cost(message.content) <= allowance:
             continue
         text = message.content
         path = await asyncio.to_thread(retain_input, text)
@@ -99,7 +105,7 @@ async def reduce_user_text(messages: list[ChatMessage], *, provider, max_chars: 
         if section_count > 256:
             raise ValueError(f"Input needs more than 256 sections. Full input retained at {path}; use a file investigation.")
         for depth in range(5):
-            if len(current) <= allowance - 600:
+            if text_cost(current) <= allowance - 600:
                 break
             chunks = sections(current, chunk_size)
             summaries = []
@@ -117,10 +123,10 @@ async def reduce_user_text(messages: list[ChatMessage], *, provider, max_chars: 
                     raise ValueError(f"Section {ordinal} could not be summarized; original retained at {path}")
                 summaries.append(f"[Section {ordinal}] {summary}")
             reduced = "\n".join(summaries)
-            if len(reduced) >= len(current):
+            if text_cost(reduced) >= text_cost(current):
                 raise ValueError(f"Section compression did not reduce input; original retained at {path}")
             current = reduced
-        if len(current) > allowance - 600:
+        if text_cost(current) > allowance - 600:
             raise ValueError(f"Input remains too large after five reduction passes; original retained at {path}")
         header = (f"Sectioned input summary (lossy; all {section_count} source sections processed). "
                   f"Complete original UTF-8 source: {path}. SHA256: {path.stem}. "
