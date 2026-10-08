@@ -3,9 +3,13 @@ cmake_minimum_required(VERSION 3.22.1)
 project(jarvis_voice_native CXX)
 set(CMAKE_CXX_STANDARD 17)
 
+# Static whisper/ggml so the APK does not ship a second libggml.so next to llama.cpp.
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -19,6 +23,8 @@ FetchContent_MakeAvailable(whisper)
 add_library(jarvis_whisper SHARED ../jarvis_whisper.cpp)
 target_include_directories(jarvis_whisper PRIVATE ${whisper_SOURCE_DIR}/include ${whisper_SOURCE_DIR})
 target_link_libraries(jarvis_whisper whisper android log)
+# Hide static ggml symbols so they cannot clash with llama.cpp at load time.
+target_link_options(jarvis_whisper PRIVATE -Wl,--exclude-libs,ALL)
 
 # ONNX Runtime Mobile (Maven artifact onnxruntime-android) — MIT license.
 # Headers from the matching GitHub tag; native .so from the official Android AAR.

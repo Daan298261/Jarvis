@@ -81,7 +81,8 @@ object DeviceInferenceGuard {
         val memory = ActivityManager.MemoryInfo()
         activity.getMemoryInfo(memory)
         val availMb = memory.availMem / (1024 * 1024)
-        if (availMb < pack.minRamMb) {
+        // availMem == 0 is missing telemetry (Robolectric / some emulators), not a real empty heap.
+        if (availMb > 0L && availMb < pack.minRamMb) {
             return "Need about ${pack.minRamMb} MiB free RAM (have ~$availMb MiB). Close other apps or pick a smaller pack."
         }
         val battery = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))

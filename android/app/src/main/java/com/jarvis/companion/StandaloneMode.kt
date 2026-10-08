@@ -35,7 +35,7 @@ object StandaloneMode {
         RegexOption.IGNORE_CASE,
     )
     private val desktopOnly = Regex(
-        """\b(send\s+(an?\s+)?email|email\s+this|mail\s+this|whatsapp|send\s+(this\s+)?(message|sms|text)|hexstrike|run\s+hexstrike|generate\s+(an?\s+)?(image|video)|make\s+(me\s+)?(an?\s+)?(image|video)|draw\s+me|black\s*grid\s+studio|studio\s+render|edit\s+(the\s+)?files?\s+on\s+(the\s+)?(pc|desktop|computer)|(open|use)\s+(the\s+)?desktop\s+browser|browse\s+on\s+(the\s+)?(pc|desktop)|(run|open)\s+(in\s+)?(the\s+)?(desktop\s+)?(terminal|powershell|cmd)|(word|excel|powerpoint|office)\s+on\s+(the\s+)?(pc|desktop)|swarm|spawn\s+workers?)\b""",
+        """\b(send\s+(an?\s+)?email|email\s+this|mail\s+this|whatsapp|send\s+(this\s+)?(message|sms|text)|hexstrike|run\s+hexstrike|generate\s+(an?\s+)?(image|video)|make\s+(me\s+)?(an?\s+)?(image|video)|draw\s+me|black\s*grid\s+studio|studio\s+render|edit\s+(the\s+)?files?\s+on\s+(the\s+)?(pc|desktop|computer)|(open|use)\s+(the\s+)?desktop\s+browser|browse\s+on\s+(the\s+)?(pc|desktop)|run.{0,40}\b(terminal|powershell|cmd)\b|open.{0,40}\b(terminal|powershell|cmd)\b|(word|excel|powerpoint|office)\s+on\s+(the\s+)?(pc|desktop)|swarm|spawn\s+workers?)\b""",
         RegexOption.IGNORE_CASE,
     )
     private val consequentialCue = Regex(

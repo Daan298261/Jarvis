@@ -2,6 +2,8 @@ package com.jarvis.companion
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -11,6 +13,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.File
+import java.security.MessageDigest
 
 @RunWith(RobolectricTestRunner::class)
 class CompanionVoicePackManagerTest {
@@ -85,17 +88,35 @@ class CompanionVoicePackManagerTest {
         }
         val local = CompanionVoicePackManager(context, sttEngine = sttOk, ttsEngine = silentEngine)
         val pack = local.selectedTtsPack()!!
+        val arts = JSONArray()
         pack.artifacts.forEach { art ->
+            val bytes = "fixture-${art.filename}".toByteArray()
             val target = local.artifactFile(pack, art)
             target.parentFile?.mkdirs()
-            target.writeBytes("fixture-${art.filename}".toByteArray())
+            target.writeBytes(bytes)
+            arts.put(
+                JSONObject()
+                    .put("filename", art.filename)
+                    .put("url", art.url)
+                    .put("sha256", sha256Hex(bytes))
+                    .put("size_bytes", bytes.size.toLong()),
+            )
         }
+        local.updateCatalog(
+            JSONObject().put(
+                "packs",
+                JSONArray().put(pack.toJson().put("artifacts", arts).put("sha256", sha256Hex(byteArrayOf(1)))),
+            ),
+        )
         val thrown = runCatching {
             kotlinx.coroutines.runBlocking { local.synthesize("Hello from ANZU") }
         }.exceptionOrNull()
         assertNotNull(thrown)
-        assertTrue(thrown!!.message!!.contains("near-silent") || thrown.message!!.contains("Checksum"))
+        assertTrue(thrown!!.message, thrown.message!!.contains("near-silent"))
     }
+
+    private fun sha256Hex(bytes: ByteArray): String =
+        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 }
 
 @RunWith(RobolectricTestRunner::class)

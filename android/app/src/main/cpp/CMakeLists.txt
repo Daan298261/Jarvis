@@ -34,6 +34,8 @@ if(JARVIS_BUILD_VOICE_NATIVE)
     if(NOT _voice_lib_dir)
         set(_voice_lib_dir "${CMAKE_CURRENT_BINARY_DIR}")
     endif()
+    # Private JNI dir: do not dump whisper's ggml .so next to llama.cpp's ggml.
+    set(_voice_jni "${CMAKE_CURRENT_BINARY_DIR}/voice_native_ext/jni")
     ExternalProject_Add(
         jarvis_voice_native_ext
         SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/voice_native
@@ -48,15 +50,20 @@ if(JARVIS_BUILD_VOICE_NATIVE)
             -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
             -DCMAKE_CXX_STANDARD=17
             -DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
-            -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=${_voice_lib_dir}
-            -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
-            -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}
+            -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=${_voice_jni}
+            -DBUILD_SHARED_LIBS=OFF
         BUILD_BYPRODUCTS
             ${_voice_lib_dir}/libjarvis_whisper.so
             ${_voice_lib_dir}/libjarvis_voice_tts.so
             ${_voice_lib_dir}/libonnxruntime.so
         BUILD_ALWAYS 1
-        INSTALL_COMMAND ""
+        INSTALL_COMMAND ${CMAKE_COMMAND} -E make_directory ${_voice_lib_dir}
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${_voice_jni}/libjarvis_whisper.so ${_voice_lib_dir}/libjarvis_whisper.so
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${_voice_jni}/libjarvis_voice_tts.so ${_voice_lib_dir}/libjarvis_voice_tts.so
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${_voice_jni}/libonnxruntime.so ${_voice_lib_dir}/libonnxruntime.so
         USES_TERMINAL_CONFIGURE TRUE
         USES_TERMINAL_BUILD TRUE
     )
