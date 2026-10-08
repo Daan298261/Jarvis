@@ -353,15 +353,8 @@ export function NamedPersonaControls() {
               onChange={(event) => void patch({ scale: Number(event.target.value) })}
             />
           </label>
-          <label className="named-persona-check">
-            <input
-              type="checkbox"
-              disabled={busy}
-              checked={appearance.specialists_auto_speak}
-              onChange={(event) => void patch({ specialists_auto_speak: event.target.checked })}
-            />
-            Specialists speak with their own voice
-          </label>
+          {/* RFC-0137 §4 interim hide of the orphaned specialists_auto_speak control.
+              Re-enable once the backend specialist-speech acceptance criteria pass. */}
           <button type="button" className="btn secondary" disabled={busy} onClick={() => void run(() => resetNamedPersona(active.id))}>
             Reset persona appearance
           </button>
