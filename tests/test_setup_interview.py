@@ -41,6 +41,40 @@ def hw(*, ram: float = 64, vram_mib: int | None = 16384, disk_free: float = 200)
     )
 
 
+def test_front_2b_is_bundled_and_front_4b_stays_downloadable(monkeypatch):
+    from app.setup_interview import MODEL_MANIFEST
+
+    monkeypatch.setattr("app.setup_interview._installed", lambda model: False)
+    assert MODEL_MANIFEST["front_2b"]["bundled"] is True
+    assert MODEL_MANIFEST["front_2b"]["downloadable"] is True
+    assert MODEL_MANIFEST["front_2b"]["filename"] == "Qwen3.5-2B-Q4_K_M.gguf"
+    assert MODEL_MANIFEST["front_2b"]["relative_dir"] == "Qwen3.5-2B-GGUF"
+    assert MODEL_MANIFEST["front_2b"]["repo"] == "unsloth/Qwen3.5-2B-GGUF"
+    assert MODEL_MANIFEST["front_4b"]["bundled"] is False
+    assert MODEL_MANIFEST["front_4b"]["downloadable"] is True
+
+    plan = plan_interview({}, hw=hw())
+    rows = {row["id"]: row for row in plan["recommended_models"]}
+    assert rows["front_2b"]["bundled"] is True
+    assert rows["front_2b"]["selected"] is True
+    assert rows["front_2b"]["status"] == "bundled"
+    download_ids = [row["id"] for row in plan["download_models"]]
+    assert "front_2b" not in download_ids
+    script = render_download_script(plan)
+    assert "Qwen3.5-2B-Q4_K_M.gguf" not in script
+
+    smarter = plan_interview({"front_profile": "front_4b"}, hw=hw())
+    smarter_ids = [row["id"] for row in smarter["download_models"]]
+    assert "front_4b" in smarter_ids
+    assert "front_2b" not in smarter_ids
+    smarter_rows = {row["id"]: row for row in smarter["recommended_models"]}
+    assert smarter_rows["front_4b"]["bundled"] is False
+    assert smarter_rows["front_4b"]["downloadable"] is True
+    smarter_script = render_download_script(smarter)
+    assert "Qwen3.5-4B-Q4_K_M.gguf" in smarter_script
+    assert "Qwen3.5-2B-Q4_K_M.gguf" not in smarter_script
+
+
 def test_capable_coding_pc_gets_bootstrap_and_expert():
     plan = plan_interview(
         {"use": "Coding and research", "policy": "Local first", "resources": "Balanced (~50%)", "voice": "Yes"},

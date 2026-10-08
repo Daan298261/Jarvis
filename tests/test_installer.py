@@ -347,6 +347,76 @@ def test_inno_excludes_nested_jarvis_copies_and_releases():
     assert "*\\Jarvis\\**" in iss
 
 
+def test_installer_bundles_qwen35_2b_front_model():
+    """Fresh installs ship the warm front lane next to the Ornith bootstrap GGUF."""
+    from app.inference.profiles import PROFILES
+
+    profile = PROFILES["front_2b"]
+    iss = _read(ISS)
+    payload = f"payload\\models\\{profile.repo_dir}\\{profile.filename}"
+    dest = '{app}\\models\\' + profile.repo_dir
+    source = next(
+        line
+        for line in iss.splitlines()
+        if line.strip().startswith("Source:") and profile.filename in line and "Qwen3.5-2B-GGUF" in line
+    )
+    assert payload in source
+    assert f'DestDir: "{dest}"' in source
+    assert "ignoreversion" in source
+    assert "deleteafterinstall" not in source.lower()
+    front_block = iss.split("#ifndef SkipFrontModel", 1)[1].split("#endif", 1)[0]
+    assert payload in front_block
+    assert dest in front_block
+    bootstrap_line = next(
+        line for line in iss.splitlines() if "Ornith-1.5-9B-Q4_K_M.gguf" in line and line.strip().startswith("Source:")
+    )
+    assert "Flags: ignoreversion" in bootstrap_line
+    assert iss.index("#ifndef SkipBootstrapModel") < iss.index("#ifndef SkipFrontModel")
+    assert "semi-clean reinstall" in iss.lower()
+    reset = _read(INSTALLER_DIR / "reset-user-data.ps1").lower()
+    assert "models/" in reset
+    assert "qwen3.5-2b" not in reset
+
+    build = _read(BUILD_SCRIPT)
+    assert "stage-front-model.ps1" in build
+    assert build.index("stage-bootstrap-model.ps1") < build.index("stage-front-model.ps1")
+    assert "/DSkipFrontModel=1" in build
+    assert "Front model payload not ready" in build
+    assert "Includes: Qwen3.5-2B Q4_K_M front-lane weights" in build
+    reject = build.index("Release cuts cannot use -SkipFrontModel")
+    window = build[max(0, reject - 250) : reject]
+    assert "$Release" in window and "$SkipFrontModel" in window
+
+    stage = _read(INSTALLER_DIR / "stage-front-model.ps1")
+    assert "unsloth/Qwen3.5-2B-GGUF" in stage
+    assert profile.filename in stage
+    assert "1280835840" in stage
+    assert "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223" in stage
+    assert "JARVIS_FRONT_2B_GGUF" in stage
+    assert r"models\Qwen3.5-2B-GGUF\Qwen3.5-2B-Q4_K_M.gguf" in stage
+    assert ".jarvis_front_2b_verified" in stage
+    fast_path = stage.split("Test-Path -LiteralPath $Marker))", 1)[1].split("exit 0", 1)[0]
+    assert "Get-FileHash" not in fast_path
+    assert "$ExpectedSha" in fast_path
+    assert "SHA-256" in stage
+
+    bootstrap = _read(BOOTSTRAP)
+    body = bootstrap.split("function Ensure-Front2bGguf", 1)[1].split("function Ensure-DefaultModels", 1)[0]
+    assert r"models\Qwen3.5-2B-GGUF" in body
+    assert profile.filename in body
+    assert body.index("Write-Skip") < body.index("Invoke-HfDownload")
+    assert "Ensure-Front2bGguf -VenvPython $VenvPython" in bootstrap
+    assert bootstrap.index("Ensure-BootstrapGguf -VenvPython $VenvPython") < bootstrap.index(
+        "Ensure-Front2bGguf -VenvPython $VenvPython"
+    )
+
+    readme = _read(README).lower()
+    assert "qwen3.5-2b" in readme
+    assert "models\\qwen3.5-2b-gguf" in readme
+    assert "skipfrontmodel" in readme
+    assert "warm front" in readme or "front model" in readme
+
+
 def test_readme_documents_build_oneliner():
     text = _read(README)
     assert "build-installer.ps1" in text

@@ -4,8 +4,8 @@ Ships **sources** that produce `JarvisSetup.exe` on a Windows machine. The cloud
 
 ## What it does
 
-1. **JarvisSetup.exe** (Inno Setup) copies the repo into `%LOCALAPPDATA%\Jarvis` (default), excluding `.venv`, `node_modules`, `models/`, `runtime/`, `data/`, `logs/`, local `release/` bundles, `_release_upload/`, and `.git`.
-2. Runs **`bootstrap.ps1`** once: installs Python/Node via `winget` if needed, creates `.venv`, installs backend packages, Playwright Chromium, builds the portal, and prepares llama.cpp, the bootstrap GGUF, and the voice models you checked in Setup (household butler is bundled; the other four shared neural packs are optional).
+1. **JarvisSetup.exe** (Inno Setup) copies the repo into `%LOCALAPPDATA%\Jarvis` (default), excluding `.venv`, `node_modules`, `models/`, `runtime/`, `data/`, `logs/`, local `release/` bundles, `_release_upload/`, and `.git`. Bundled weights are installed separately: the Ornith bootstrap GGUF under `models\bootstrap` and the **Qwen3.5-2B Q4_K_M** front model under `models\Qwen3.5-2B-GGUF`.
+2. Runs **`bootstrap.ps1`** once: installs Python/Node via `winget` if needed, creates `.venv`, installs backend packages, Playwright Chromium, builds the portal, and prepares llama.cpp, the bootstrap GGUF, and the voice models you checked in Setup (household butler is bundled; the other four shared neural packs are optional). If the installer already copied the Qwen3.5-2B front GGUF, bootstrap leaves that file in place and does not download it again.
 3. Adds **Start Jarvis** / **Stop Jarvis** shortcuts (Desktop + Start Menu) that call `start-jarvis.ps1` and `stop-jarvis.ps1`.
 4. Uninstall removes shortcuts; **does not** delete `data/` by default.
 
@@ -17,6 +17,7 @@ When Jarvis is already installed, Setup compares the installed version with the 
 - The same version offers **Repair** with the same preservation behavior.
 - **Reinstall and keep custom files** removes the old application files before reinstalling while leaving generated files in place.
 - **Semi-clean reinstall** removes chats, tasks, routines, memory, logs, and most settings while keeping downloaded models, runtime binaries, your private key, and license files.
+- Upgrade, repair, and semi-clean keep the bundled Ornith bootstrap weights and the bundled Qwen3.5-2B front weights the same way: both live under `models\` and are recopied from the installer payload.
 - **Clean reinstall** removes the application and all custom files only after a separate permanent-deletion confirmation.
 - An older installer is blocked to prevent an accidental downgrade.
 
@@ -34,6 +35,12 @@ From the repository root:
 ```
 
 Output: `installer\windows\dist\JarvisSetup.exe`
+
+The installer bundles the **Qwen3.5-2B Q4_K_M** front model (`models\Qwen3.5-2B-GGUF\Qwen3.5-2B-Q4_K_M.gguf`) so a fresh install has a warm front lane without a separate download. `build-installer.ps1` stages it with `stage-front-model.ps1` after the Ornith bootstrap model. Developer builds can omit it; release cuts cannot:
+
+```powershell
+.\installer\windows\build-installer.ps1 -SkipFrontModel
+```
 
 ## Release cuts (required)
 
