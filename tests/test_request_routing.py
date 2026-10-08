@@ -69,7 +69,7 @@ def test_default_is_fast_q6_and_never_silent_27b(tmp_path, monkeypatch):
     monkeypatch.setattr(profiles, "qwen38_9b_profile", lambda: profiles.PROFILES["balanced"])
     settings = InferenceSettings()
     assert settings.profile == "fast"
-    assert settings.context_size == 8192
+    assert settings.context_size == 16384
     assert profiles.preferred_startup_profile() == "fast"
     assert profiles.preferred_startup_profile("fast") == "fast"
     expert = tmp_path / profiles.EXPERT_DIR / profiles.PROFILES["expert"].filename

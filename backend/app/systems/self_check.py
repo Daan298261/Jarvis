@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import asyncio
 import platform
 from typing import Any, Literal
 
@@ -32,8 +33,10 @@ async def run_self_check() -> dict[str, Any]:
     settings = load_settings()
     skip_model = os.environ.get("JARVIS_SKIP_MODEL", "").strip() in {"1", "true", "yes"}
     model = await MANAGER.snapshot(settings)
-    engines = engine_availability()
-    voice = voice_status()
+    # Optional voice adapters perform network/filesystem probes. These must not
+    # hold the API event loop while context preparation queues its spoken cue.
+    engines = await asyncio.to_thread(engine_availability)
+    voice = await asyncio.to_thread(voice_status)
 
     if model.get("loaded"):
         model_item = _item("inference", "Local inference", "ready", model.get("active_model") or "Model online")

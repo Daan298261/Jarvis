@@ -68,7 +68,7 @@ class InferenceSettings(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8088
     profile: str = "fast"
-    context_size: int = 8192
+    context_size: int = 16384
     flash_attn: str = "auto"
     fit: bool = True
     fit_target_mib: int = 1024

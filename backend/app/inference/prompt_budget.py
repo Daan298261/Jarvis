@@ -98,7 +98,9 @@ def estimate_text_tokens(text: str, *, chars_per_token: int = CHARS_PER_TOKEN) -
     """Conservative fallback when no backend tokenizer is available."""
     if not text:
         return 0
-    return max(1, len(text) // max(1, chars_per_token))
+    ascii_count = len(text.encode("ascii", errors="ignore"))
+    non_ascii_bytes = len(text.encode("utf-8")) - ascii_count
+    return max(1, ascii_count // max(1, chars_per_token) + non_ascii_bytes)
 
 
 def estimate_messages_tokens(messages: Iterable[ChatMessage]) -> int:
@@ -247,7 +249,20 @@ async def prepare_inference(
             budget = calculate_prompt_budget(messages, tools, profile=profile, max_tokens=max_tokens, active_context=manager.live_context_size())
             if budget.pressure < PRESSURE_EXPAND_OK:
                 return PreparedInference(messages, tools, profile, budget)
-        if budget.required_context > profile_cap(profile) and budget.pressure >= PRESSURE_EXPAND_OK:
+        if budget.pressure >= PRESSURE_EXPAND_OK:
+            from .large_input import reduce_user_text
+            # Reserve schemas, output, identity, and non-user turns before reducing user text.
+            user_tokens = sum(estimate_text_tokens(m.content) for m in messages
+                              if m.role == "user" and isinstance(m.content, str))
+            fixed = budget.required_context - user_tokens
+            available = int(manager.live_context_size() * 0.75) - fixed
+            if available > 512:
+                messages = await reduce_user_text(messages, provider=getattr(manager, "provider", None),
+                                                 max_chars=available * CHARS_PER_TOKEN,
+                                                 context=manager.live_context_size())
+                budget = calculate_prompt_budget(messages, tools, profile=profile, max_tokens=max_tokens,
+                                                 active_context=manager.live_context_size())
+        if budget.required_context > budget.active_context:
             raise ModelCapacityExceeded(budget)
 
     return PreparedInference(messages, tools, profile, budget)

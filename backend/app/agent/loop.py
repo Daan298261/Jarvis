@@ -2228,7 +2228,19 @@ class AgentRuntime:
             await self._fail_task(task_id, "The language model is not loaded.", working, metrics)
             return
         target_ctx = initial_context_size(working.task_class, profile)
-        live_ctx = await MANAGER.apply_context(settings, target_ctx, allow_shrink=True)
+        from ..inference.lmstudio_context import LocalContextRestoreError
+        try:
+            live_ctx = await MANAGER.apply_context(
+                settings, target_ctx, allow_shrink=True, allow_reload=True
+            )
+        except LocalContextRestoreError as exc:
+            await self._fail_task(
+                task_id,
+                f"The language model could not be restored after a context resize: {exc}",
+                working,
+                metrics,
+            )
+            return
         if live_ctx != effective_cap:
             await BUS.publish(
                 task_id,

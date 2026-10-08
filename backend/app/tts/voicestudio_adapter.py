@@ -17,26 +17,47 @@ from .voice_runtime_config import voicestudio_auth_headers, voicestudio_base_url
 VOICESTUDIO_PROBE_VOICE = "default"
 
 logger = logging.getLogger(__name__)
+_probe_cache: dict[str, tuple[float, bool]] = {}
+_probe_cache_lock = threading.Lock()
 
 
 def voicestudio_probe_endpoint(timeout: float = 2.0) -> bool:
     """Check whether a debpalash/voicestudio local server is listening and healthy."""
     if os.environ.get("JARVIS_DISABLE_VOICESTUDIO", "").strip().lower() in {"1", "true", "yes"}:
         return False
+    deadline = time.monotonic() + max(0.05, min(float(timeout), 2.0))
     base = voicestudio_base_url()
+    with _probe_cache_lock:
+        cached = _probe_cache.get(base)
+    if cached and time.monotonic() - cached[0] < (15 if cached[1] else 5):
+        return cached[1]
+    headers = voicestudio_auth_headers()
     # Check /health or /v1/models or /v1/audio/voices
     candidates = [f"{base}/health", f"{base}/v1/models", f"{base}/v1/audio/voices", f"{base}/docs"]
     for url in candidates:
+        if time.monotonic() >= deadline:
+            break
         try:
             from ..policy.network_http import require_http_url_allowed
 
             require_http_url_allowed(url, tool="web_fetch")
-            req = urllib.request.Request(url, headers=voicestudio_auth_headers())
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=remaining) as resp:
                 if 200 <= resp.status < 400:
+                    with _probe_cache_lock:
+                        if len(_probe_cache) >= 32:
+                            _probe_cache.clear()
+                        _probe_cache[base] = (time.monotonic(), True)
                     return True
         except Exception:
             continue
+    with _probe_cache_lock:
+        if len(_probe_cache) >= 32:
+            _probe_cache.clear()
+        _probe_cache[base] = (time.monotonic(), False)
     return False
 
 

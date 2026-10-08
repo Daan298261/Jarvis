@@ -52,6 +52,7 @@ _MAX_KEYS = (
 )
 _INSTANCE_KEYS = ("loaded_instances", "instances", "loaded")
 _NEST_KEYS = (
+    "config",
     "default_generation_settings",
     "generation_settings",
     "params",
@@ -109,6 +110,9 @@ def _extract_n_ctx(payload: Any, *, allow_max: bool) -> tuple[int | None, bool]:
                 fallback, fallback_is_max = found, used_max
         return fallback, fallback_is_max
     if not isinstance(payload, dict):
+        return None, False
+
+    if "loaded_instances" in payload and not payload["loaded_instances"]:
         return None, False
 
     for key in _INSTANCE_KEYS:

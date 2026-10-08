@@ -36,7 +36,7 @@ def test_with_context_copies_profile():
     grown = with_context(PROFILES["fast"], 32768)
     assert grown.context_size == 32768
     assert grown.filename == PROFILES["fast"].filename
-    assert PROFILES["fast"].context_size == 8192
+    assert PROFILES["fast"].context_size == 16384
 
 
 def test_expert_profile_stays_compact():

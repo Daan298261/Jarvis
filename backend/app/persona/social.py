@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..config import CommentAddressStyle, CommentSarcasm, SocialCommentarySettings
-from ..perception.models import ObservationCandidate
+
+if TYPE_CHECKING:
+    from ..perception.models import ObservationCandidate
 
 _FORBIDDEN_CHARACTER_MARKERS = (
     "codsworth",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import asyncio
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response
@@ -35,8 +36,8 @@ class SpeakIn(BaseModel):
     model: str | None = Field(default=None, max_length=120)
 
 
-def _stt_error_response(exc: VoiceSTTError) -> JSONResponse:
-    status = exc.status or voice_status()
+async def _stt_error_response(exc: VoiceSTTError) -> JSONResponse:
+    status = exc.status or await asyncio.to_thread(voice_status)
     return JSONResponse(
         status_code=503,
         content={
@@ -51,10 +52,10 @@ def _stt_error_response(exc: VoiceSTTError) -> JSONResponse:
 @router.get("/status")
 async def get_voice_status():
     settings = load_settings()
-    status = voice_status()
+    status = await asyncio.to_thread(voice_status)
     tts_backend = status.get("tts")
     runtime = status.get("tts_runtime") or {}
-    status["engines"] = engine_availability()
+    status["engines"] = await asyncio.to_thread(engine_availability)
     status["stt_backend_preference"] = settings.voice.stt_backend
     status["voicestudio_url"] = settings.voice.voicestudio_url
     status["whisper_model"] = settings.voice.whisper_model or None
@@ -87,10 +88,10 @@ async def voice_listen(audio: UploadFile = File(...), autonomy: str | None = For
     try:
         transcript = await transcribe_audio(data, audio.filename or "audio.webm")
     except VoiceSTTError as exc:
-        return _stt_error_response(exc)
+        return await _stt_error_response(exc)
     except RuntimeError as exc:
-        status = voice_status()
-        return _stt_error_response(
+        status = await asyncio.to_thread(voice_status)
+        return await _stt_error_response(
             VoiceSTTError(str(exc), code="stt_failed", install_hint=status.get("install_hint") or "")
         )
     task = await AGENT.create_task(transcript, autonomy)
@@ -109,10 +110,10 @@ async def voice_transcribe(audio: UploadFile = File(...)):
     try:
         transcript = await transcribe_audio(data, audio.filename or "audio.webm")
     except VoiceSTTError as exc:
-        return _stt_error_response(exc)
+        return await _stt_error_response(exc)
     except RuntimeError as exc:
-        status = voice_status()
-        return _stt_error_response(
+        status = await asyncio.to_thread(voice_status)
+        return await _stt_error_response(
             VoiceSTTError(str(exc), code="stt_failed", install_hint=status.get("install_hint") or "")
         )
     return {"transcript": transcript}
