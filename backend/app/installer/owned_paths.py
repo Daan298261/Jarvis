@@ -175,6 +175,8 @@ def owned_paths_preview() -> dict[str, object]:
     script = repo_root() / "installer" / "windows" / "clean-reinstall-jarvis.ps1"
     force_stop = repo_root() / "installer" / "windows" / "force-stop-jarvis.ps1"
     setup_candidates = [
+        install / "installer" / "windows" / "dist" / "AnzuSetup.exe",
+        repo_root() / "installer" / "windows" / "dist" / "AnzuSetup.exe",
         install / "installer" / "windows" / "dist" / "JarvisSetup.exe",
         repo_root() / "installer" / "windows" / "dist" / "JarvisSetup.exe",
     ]

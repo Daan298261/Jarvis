@@ -1,12 +1,12 @@
 # Jarvis Windows installer
 
-Ships **sources** that produce `JarvisSetup.exe` on a Windows machine. The cloud/Linux CI cannot compile or sign the `.exe`; desktop sign-off is required.
+Ships **sources** that produce `AnzuSetup.exe` on a Windows machine. The cloud/Linux CI cannot compile or sign the `.exe`; desktop sign-off is required.
 
 ## What it does
 
-1. **JarvisSetup.exe** (Inno Setup) copies the repo into `%LOCALAPPDATA%\Jarvis` (default), excluding `.venv`, `node_modules`, `models/`, `runtime/`, `data/`, `logs/`, local `release/` bundles, `_release_upload/`, and `.git`. Bundled weights are installed separately: the Ornith bootstrap GGUF under `models\bootstrap` and the **Qwen3.5-2B Q4_K_M** front model under `models\Qwen3.5-2B-GGUF`.
+1. **AnzuSetup.exe** (Inno Setup) copies the repo into `%LOCALAPPDATA%\Jarvis` (default), excluding `.venv`, `node_modules`, `models/`, `runtime/`, `data/`, `logs/`, local `release/` bundles, `_release_upload/`, and `.git`. Bundled weights are installed separately: the Ornith bootstrap GGUF under `models\bootstrap` and the **Qwen3.5-2B Q4_K_M** front model under `models\Qwen3.5-2B-GGUF`. The installed desktop binary stays `desktop\Jarvis.exe`. The wizard, Start menu, and Programs and Features name are **ANZU**.
 2. Runs **`bootstrap.ps1`** once: installs Python/Node via `winget` if needed, creates `.venv`, installs backend packages, Playwright Chromium, builds the portal, and prepares llama.cpp, the bootstrap GGUF, and the voice models you checked in Setup (household butler is bundled; the other four shared neural packs are optional). If the installer already copied the Qwen3.5-2B front GGUF, bootstrap leaves that file in place and does not download it again.
-3. Adds **Start Jarvis** / **Stop Jarvis** shortcuts (Desktop + Start Menu) that call `start-jarvis.ps1` and `stop-jarvis.ps1`.
+3. Adds **Start ANZU** / **Stop ANZU** shortcuts (Desktop + Start Menu) that call `start-jarvis.ps1` and `stop-jarvis.ps1`.
 4. Uninstall removes shortcuts; **does not** delete `data/` by default.
 
 ## Existing installations
@@ -21,7 +21,7 @@ When Jarvis is already installed, Setup compares the installed version with the 
 - **Clean reinstall** removes the application and all custom files only after a separate permanent-deletion confirmation.
 - An older installer is blocked to prevent an accidental downgrade.
 
-## Build `JarvisSetup.exe` (Windows)
+## Build `AnzuSetup.exe` (Windows)
 
 Prerequisites:
 
@@ -34,9 +34,9 @@ From the repository root:
 .\installer\windows\build-installer.ps1
 ```
 
-Output: `installer\windows\dist\JarvisSetup.exe`
+Output: `installer\windows\dist\AnzuSetup.exe`
 
-Every build also copies the customer deliverables into the gitignored repo folder `release\` (repo root): the installer executable (and `JarvisSetup-*.bin` slices), the issued license when one was produced, the vendor license manager when it was built, and a companion APK if one is sitting in `dist`. Source archives are not copied. The same `release\` folder receives the companion APK from `scripts/build_android.py` and from the Linux Android companion workflow, and the Tauri NSIS setup exe from `scripts/build-windows-release.ps1`. The portal `npm run build` output stays in `frontend\dist`; it is an installer input, not a separate customer package.
+Every build also copies the customer deliverables into the gitignored repo folder `release\` (repo root): the installer executable (and `AnzuSetup-*.bin` slices), the issued license when one was produced, the vendor license manager when it was built, and a companion APK if one is sitting in `dist`. Source archives are not copied. The same `release\` folder receives the companion APK from `scripts/build_android.py` and from the Linux Android companion workflow, and the Tauri NSIS setup exe from `scripts/build-windows-release.ps1`. The portal `npm run build` output stays in `frontend\dist`; it is an installer input, not a separate customer package.
 
 To also fill an external drop such as the Google Drive **Jarvis Releases** folder, pass `-DriveReleasesPath`. The script copies the files it just wrote under `release\` into that path. Omit the parameter and only `release\` is updated.
 
@@ -52,7 +52,7 @@ The installer bundles the **Qwen3.5-2B Q4_K_M** front model (`models\Qwen3.5-2B-
 
 ## Release cuts (required)
 
-Every **shipped** `JarvisSetup.exe` must also emit an owner unrestricted license beside Setup (not inside the Inno payload):
+Every **shipped** `AnzuSetup.exe` must also emit an owner unrestricted license beside Setup (not inside the Inno payload):
 
 - `installer\windows\dist\Jarvis-unrestricted.jarvis-license`
 
@@ -112,8 +112,8 @@ Optional speech and voice systems:
 
 ## Desktop sign-off
 
-- Compile `JarvisSetup.exe` on Windows.
+- Compile `AnzuSetup.exe` on Windows.
 - Run installer on a clean Windows 11 + NVIDIA machine.
-- Confirm first boot via **Start Jarvis** opens http://127.0.0.1:4780.
+- Confirm first boot via **Start ANZU** opens http://127.0.0.1:4780.
 
 Manual install steps remain in [`docs/INSTALL.md`](../../docs/INSTALL.md).
