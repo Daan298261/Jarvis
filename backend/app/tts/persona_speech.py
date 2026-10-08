@@ -27,7 +27,6 @@ from ..workers.voice import SynthesizedSpeech, synthesize_speech_result
 
 # Same floor warm-start uses before it will load Chatterbox beside the worker.
 CHATTERBOX_VRAM_FLOOR_MIB = 2560
-SPEECH_LANES = ("front", "worker", "laya")
 _VRAM_CACHE_TTL_SECONDS = 30.0
 _vram_cache: tuple[float, tuple[bool, str]] | None = None
 _CHATTERBOX_ENGINES = frozenset({"chatterbox", "chatterbox_turbo", "chatterbox-turbo"})
