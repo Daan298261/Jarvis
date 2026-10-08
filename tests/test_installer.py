@@ -651,3 +651,54 @@ def test_app_mutex_and_close_applications_release_locked_exe():
     assert "CreateMutexW" in shell
     run = shell.split("pub fn run()", 1)[1]
     assert run.index("hold_anzu_install_mutex()") < run.index("tauri::Builder::default()")
+
+
+def test_bgp_sponsor_credit_is_in_the_wizard_corner():
+    """Welcome and Finished share a clickable Black Grid Publishing credit."""
+    iss = _read(ISS)
+    assert "Made in the Netherlands " in iss
+    assert "#$2014" in iss
+    assert " sponsored by Black Grid Publishing" in iss
+    assert "https://blackgridpublishing.com" in iss
+    assert "ShellExec('open', 'https://blackgridpublishing.com', '', '', SW_SHOWNORMAL, ewNoWait, ErrorCode)" in iss
+    assert "crHand" in iss
+    assert "procedure SponsorCreditClick" in iss
+    assert "SponsorLogo.OnClick := @SponsorCreditClick" in iss
+    assert "SponsorLabel.OnClick := @SponsorCreditClick" in iss
+    assert "SponsorLogo.Cursor := crHand" in iss
+    assert "SponsorLabel.Cursor := crHand" in iss
+    assert "WizardForm.BackButton.Left" in iss
+    assert "WizardForm.CancelButton.Top" in iss
+    assert 'Source: "assets\\sponsor\\bgp-logo-100.png"; DestDir: "{tmp}"; Flags: dontcopy' in iss
+    assert 'Source: "assets\\sponsor\\bgp-logo-150.png"; DestDir: "{tmp}"; Flags: dontcopy' in iss
+    for line in iss.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Source:") and "Logo_black.png" in stripped and "Excludes:" not in stripped:
+            raise AssertionError("full-size Logo_black.png must not be a Setup source")
+    exclude = next(line for line in iss.splitlines() if "Excludes:" in line and "Logo_black.png" in line)
+    assert "Logo_white.png" in exclude
+
+    prepare = iss.split("procedure PrepareAnzuWizard", 1)[1].split("\nprocedure ", 1)[0]
+    assert prepare.index("if WizardSilent then") < prepare.index("PlaceSponsorCredit")
+
+    assets = INSTALLER_DIR / "assets" / "sponsor"
+    logo_100 = assets / "bgp-logo-100.png"
+    logo_150 = assets / "bgp-logo-150.png"
+    assert _png_size(logo_100) == (28, 28)
+    assert _png_size(logo_150) == (42, 42)
+    assert 400 < logo_100.stat().st_size < 65536
+    assert 400 < logo_150.stat().st_size < 65536
+    assert not (assets / "Logo_black.png").is_file()
+    assert not (assets / "Logo_white.png").is_file()
+
+    script = _read(INSTALLER_DIR / "assets" / "render_wizard_assets.py")
+    assert "Made in the Netherlands" in script
+    assert "blackgridpublishing.com" in script
+    assert "LOGO_100 = 28" in script
+    assert "LOGO_150 = 42" in script
+
+    build = _read(BUILD_SCRIPT)
+    assert "bgp-logo-100.png" in build
+    assert "bgp-logo-150.png" in build
+    assert "Sponsor logo missing" in build
+    assert "Full-size" in build
