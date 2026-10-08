@@ -5,6 +5,7 @@
 #include "onnxruntime_cxx_api.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -209,7 +210,7 @@ public:
         return Ort::Value::CreateTensor<float>(mem, empty_storage_, 0, shape.data(), shape.size());
     }
 
-    std::vector<uint8_t> synthesize(const std::string &text) {
+    std::vector<uint8_t> synthesize(const std::string &text, const std::atomic<bool> *cancel) {
         if (text.empty()) return {};
         const auto ids32 = tokenizer_->encode_ids(text);
         if (ids32.empty()) return {};
@@ -249,6 +250,7 @@ public:
         pcm.reserve(static_cast<size_t>(frame_limit) * kFrameSamples);
         int eos_frame = -1;
         for (int frame = 0; frame < frame_limit; ++frame) {
+            if (cancel && cancel->load(std::memory_order_relaxed)) return {};
             std::vector<int64_t> seq_shape{1, 1, kLatent};
             Ort::Value sequence = Ort::Value::CreateTensor<float>(
                 mem, current.data(), current.size(), seq_shape.data(), seq_shape.size());
@@ -410,6 +412,6 @@ PocketTtsEngine::PocketTtsEngine(const std::string &pack_directory)
 
 PocketTtsEngine::~PocketTtsEngine() = default;
 
-std::vector<uint8_t> PocketTtsEngine::synthesize(const std::string &text) {
-    return impl_->synthesize(text);
+std::vector<uint8_t> PocketTtsEngine::synthesize(const std::string &text, const std::atomic<bool> *cancel) {
+    return impl_->synthesize(text, cancel);
 }

@@ -1,5 +1,6 @@
 #include <jni.h>
 #include <android/log.h>
+#include <atomic>
 #include <exception>
 #include <fstream>
 #include <memory>
@@ -17,6 +18,7 @@
 static std::mutex g_mutex;
 static std::string g_pack_dir;
 static std::string g_engine;
+static std::atomic<bool> g_tts_cancel{false};
 #if defined(JARVIS_VOICE_TTS_ORT)
 static std::unique_ptr<PocketTtsEngine> g_pocket;
 #endif
@@ -46,16 +48,19 @@ Java_com_jarvis_companion_VoiceNativeBridge_nativeTtsLoad(
     const std::string dir = jstring_to_std(env, packDirectory);
     const std::string engine = jstring_to_std(env, engineId);
     if (dir.empty()) return to_jstring(env, "TTS pack directory is empty");
+    if (engine != "pocket-tts-onnx") {
+        return to_jstring(env, "Unknown on-device TTS engine id");
+    }
+    g_tts_cancel.store(false);
 
 #if defined(JARVIS_VOICE_TTS_ORT)
+    if (g_pocket && g_pack_dir == dir && g_engine == engine) {
+        return to_jstring(env, "");
+    }
     g_pocket.reset();
 #endif
     g_pack_dir.clear();
     g_engine.clear();
-
-    if (engine != "pocket-tts-onnx") {
-        return to_jstring(env, "Unknown on-device TTS engine id");
-    }
 
     const std::string required[] = {
         dir + "/lm_main.int8.onnx",
@@ -95,6 +100,7 @@ Java_com_jarvis_companion_VoiceNativeBridge_nativeTtsLoad(
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_com_jarvis_companion_VoiceNativeBridge_nativeTtsSynthesize(JNIEnv *env, jclass, jstring text) {
     std::lock_guard<std::mutex> lock(g_mutex);
+    g_tts_cancel.store(false);
     const std::string utterance = jstring_to_std(env, text);
     if (utterance.empty()) return nullptr;
 
@@ -102,7 +108,7 @@ Java_com_jarvis_companion_VoiceNativeBridge_nativeTtsSynthesize(JNIEnv *env, jcl
     if (g_engine == "pocket-tts-onnx") {
         if (!g_pocket) return nullptr;
         try {
-            const std::vector<uint8_t> wav = g_pocket->synthesize(utterance);
+            const std::vector<uint8_t> wav = g_pocket->synthesize(utterance, &g_tts_cancel);
             if (wav.size() <= 44) return nullptr;
             jbyteArray out = env->NewByteArray(static_cast<jsize>(wav.size()));
             if (!out) return nullptr;
@@ -126,7 +132,13 @@ Java_com_jarvis_companion_VoiceNativeBridge_nativeTtsUnload(JNIEnv *, jclass) {
     std::lock_guard<std::mutex> lock(g_mutex);
     g_pack_dir.clear();
     g_engine.clear();
+    g_tts_cancel.store(false);
 #if defined(JARVIS_VOICE_TTS_ORT)
     g_pocket.reset();
 #endif
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_jarvis_companion_VoiceNativeBridge_nativeTtsCancel(JNIEnv *, jclass) {
+    g_tts_cancel.store(true);
 }

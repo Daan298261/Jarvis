@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -17,7 +18,9 @@ public:
     PocketTtsEngine &operator=(const PocketTtsEngine &) = delete;
 
     // PCM16 WAV with header. Empty on failure — never a silent success buffer.
-    std::vector<uint8_t> synthesize(const std::string &text);
+    // [cancel] is checked once per decoder frame so Stop can abort without waiting
+    // on the JNI mutex.
+    std::vector<uint8_t> synthesize(const std::string &text, const std::atomic<bool> *cancel = nullptr);
 
 private:
     class Impl;
