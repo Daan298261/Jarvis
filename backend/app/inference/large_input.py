@@ -17,6 +17,20 @@ ACKNOWLEDGMENT = "That's a lot of text, sir. I'll divide it into sections so I c
 _announced: dict[str, float] = {}
 
 
+def sections(text: str, max_bytes: int) -> list[str]:
+    """Bound tokenizer worst-case bytes while preserving Unicode code points."""
+    parts, start, used = [], 0, 0
+    for index, char in enumerate(text):
+        count = len(char.encode("utf-8"))
+        if used + count > max_bytes and index > start:
+            parts.append(text[start:index])
+            start, used = index, 0
+        used += count
+    if start < len(text):
+        parts.append(text[start:])
+    return parts
+
+
 async def acknowledge(text: str) -> None:
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     now = time.monotonic()
@@ -81,13 +95,13 @@ async def reduce_user_text(messages: list[ChatMessage], *, provider, max_chars: 
             notified = True
         chunk_size = max(1024, min(16384, context // 3))
         current = text
-        section_count = (len(text) + chunk_size - 1) // chunk_size
+        section_count = len(sections(text, chunk_size))
         if section_count > 256:
             raise ValueError(f"Input needs more than 256 sections. Full input retained at {path}; use a file investigation.")
         for depth in range(5):
             if len(current) <= allowance - 600:
                 break
-            chunks = [current[start:start + chunk_size] for start in range(0, len(current), chunk_size)]
+            chunks = sections(current, chunk_size)
             summaries = []
             for ordinal, chunk in enumerate(chunks, 1):
                 result = await asyncio.wait_for(provider.chat([
