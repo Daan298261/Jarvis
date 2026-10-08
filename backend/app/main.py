@@ -350,6 +350,13 @@ async def startup() -> None:
         logging.debug("TTS warm-start scheduling skipped", exc_info=True)
     if not os.environ.get("PYTEST_CURRENT_TEST"):
         try:
+            from .inference.front_runtime import FRONT_RUNTIME
+
+            asyncio.create_task(FRONT_RUNTIME.ensure_started(current))
+        except Exception:
+            logging.debug("Front runtime start skipped", exc_info=True)
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        try:
             from .persona.named_persona import reapply_stored_main_persona
 
             reapply_stored_main_persona()
@@ -406,7 +413,14 @@ async def _auto_start_crucix() -> None:
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
+    try:
+        from .inference.front_runtime import FRONT_RUNTIME
+
+        await FRONT_RUNTIME.stop()
+    except Exception:
+        logging.debug("Front runtime shutdown skipped", exc_info=True)
     from .reverse_engineering.runtime import SERVICE as INVESTIGATIONS
+
     await INVESTIGATIONS.shutdown()
     QUEUE_WATCHER.stop()
     try:

@@ -141,6 +141,7 @@ from .front_responder import (
     classify_front_action,
     enforce_front_safety,
     fallback_text_for_action,
+    front_worker_should_overlap,
     generate_front_reply,
     is_safe_front_speech,
     last_front_timing,
@@ -1164,6 +1165,93 @@ class AgentRuntime:
 
         # RFC-0085 hard bypass: front reply before vault/tool/Supermemory retrieval and
         # before heavy answer-routing. Terminal fronts complete here without memory wait.
+        # When the front server is distinct, worker prep+tokens start during that reply.
+        overlap_cancel = asyncio.Event()
+        overlap_queue: asyncio.Queue = asyncio.Queue()
+        overlap_errors: list[BaseException] = []
+        overlap_task: asyncio.Task | None = None
+        worker_speech_gate = asyncio.Event()
+
+        async def _produce_conversation_worker() -> None:
+            try:
+                briefing_local = await weather_task
+                if overlap_cancel.is_set():
+                    return
+                turn_ws_local = await compose_turn_working_set(
+                    user_text,
+                    task_class=CONVERSATION_CLASS,
+                    agent_id="owner",
+                    recent_messages=prior,
+                    needs_tools=False,
+                )
+                if overlap_cancel.is_set():
+                    return
+                recent = list(turn_ws_local.recent_turns)
+                if len(recent) > MAX_RECENT_TURNS:
+                    recent = recent[-MAX_RECENT_TURNS:]
+                system = apply_working_set_to_system(OWNER_CHAT_SYSTEM, turn_ws_local)
+                produced = [ChatMessage(role="system", content=system), *recent]
+                if briefing_local:
+                    produced.insert(1, ChatMessage(role="system", content=briefing_local))
+                last_local = recent[-1] if recent else None
+                if last_local is None or last_local.role != "user" or (last_local.content or "").strip() != user_text:
+                    produced.append(ChatMessage(role="user", content=user_text))
+                warm_local = ()
+                if MANAGER.state.loaded and MANAGER.state.profile:
+                    warm_local = (MANAGER.state.profile,)
+                produced_profile, produced, _route_decision, _switched = await prepare_answer_route(
+                    task_id,
+                    user_message=user_text,
+                    working=working,
+                    settings=settings,
+                    profile_name=profile.name,
+                    history=recent,
+                    messages=produced,
+                    tools_available=True,
+                    vision_requested=task_needs_vision(
+                        working.task_class, user_text, settings.inference.vision_mode or "lazy"
+                    ),
+                    new_user_turn=True,
+                    warm_models=warm_local,
+                )
+                if overlap_cancel.is_set():
+                    return
+                if not MANAGER.provider or not MANAGER.state.loaded:
+                    await MANAGER.load(settings, produced_profile)
+                if overlap_cancel.is_set():
+                    return
+                from ..persona.inference_context import ensure_context_for_messages as _ensure_ctx
+
+                await _ensure_ctx(
+                    produced,
+                    settings=settings,
+                    profile_name=produced_profile,
+                    task_id=task_id,
+                )
+                if overlap_cancel.is_set():
+                    return
+                active = resolve_profile(MANAGER.state.profile or produced_profile)
+                async for delta in MANAGER.chat_stream(
+                    produced,
+                    temperature=active.temperature,
+                    top_p=active.top_p,
+                    top_k=active.top_k,
+                    max_tokens=owner_chat_max_tokens(active),
+                    thinking=False,
+                ):
+                    if overlap_cancel.is_set():
+                        break
+                    await overlap_queue.put(delta)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                overlap_errors.append(exc)
+            finally:
+                await overlap_queue.put(None)
+
+        if front_worker_should_overlap(settings, user_text, strategy="direct"):
+            overlap_task = asyncio.create_task(_produce_conversation_worker())
+
         prefetched_front = await generate_front_reply(
             user_text,
             history=prior,
@@ -1206,9 +1294,15 @@ class AgentRuntime:
         )
         if terminal.admitted:
             note_fastpath_decision(terminal, task_id=task_id)
+            overlap_cancel.set()
             weather_task.cancel()
+            if overlap_task is not None:
+                overlap_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await weather_task
+            if overlap_task is not None:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await overlap_task
             await BUS.publish(
                 task_id,
                 "fastpath",
@@ -1260,6 +1354,11 @@ class AgentRuntime:
         lookup = admit_lookup_fastpath(user_text, route_kind=route_kind, briefing=briefing)
         if lookup.admitted:
             note_fastpath_decision(lookup, task_id=task_id)
+            overlap_cancel.set()
+            if overlap_task is not None:
+                overlap_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await overlap_task
             await BUS.publish(
                 task_id,
                 "fastpath",
@@ -1293,23 +1392,27 @@ class AgentRuntime:
         )
 
         # Fast-path miss: retrieve vault/tools/Supermemory only now (does not delay first reply).
-        turn_ws = await compose_turn_working_set(
-            user_text,
-            task_class=CONVERSATION_CLASS,
-            agent_id="owner",
-            recent_messages=prior,
-            needs_tools=False,
-        )
-        prior = list(turn_ws.recent_turns)
-        if len(prior) > MAX_RECENT_TURNS:
-            prior = prior[-MAX_RECENT_TURNS:]
-        system = apply_working_set_to_system(OWNER_CHAT_SYSTEM, turn_ws)
-        messages = [ChatMessage(role="system", content=system), *prior]
-        if briefing:
-            messages.insert(1, ChatMessage(role="system", content=briefing))
-        last = prior[-1] if prior else None
-        if last is None or last.role != "user" or (last.content or "").strip() != user_text:
-            messages.append(ChatMessage(role="user", content=user_text))
+        # Overlap already started that retrieval beside the front reply.
+        if overlap_task is None:
+            turn_ws = await compose_turn_working_set(
+                user_text,
+                task_class=CONVERSATION_CLASS,
+                agent_id="owner",
+                recent_messages=prior,
+                needs_tools=False,
+            )
+            prior = list(turn_ws.recent_turns)
+            if len(prior) > MAX_RECENT_TURNS:
+                prior = prior[-MAX_RECENT_TURNS:]
+            system = apply_working_set_to_system(OWNER_CHAT_SYSTEM, turn_ws)
+            messages = [ChatMessage(role="system", content=system), *prior]
+            if briefing:
+                messages.insert(1, ChatMessage(role="system", content=briefing))
+            last = prior[-1] if prior else None
+            if last is None or last.role != "user" or (last.content or "").strip() != user_text:
+                messages.append(ChatMessage(role="user", content=user_text))
+        else:
+            messages = lean_messages
         # Fail closed: a terminal front that could not be admitted must not
         # suppress the worker (empty/unsafe text would otherwise soft-complete).
         if (
@@ -1341,73 +1444,86 @@ class AgentRuntime:
         spoken_parts: list[str] = []
 
         try:
-            warm = ()
-            if MANAGER.state.loaded and MANAGER.state.profile:
-                warm = (MANAGER.state.profile,)
-            profile_name, messages, _route_decision, _switched = await prepare_answer_route(
-                task_id,
-                user_message=user_text,
-                working=working,
-                settings=settings,
-                profile_name=profile.name,
-                history=prior,
-                messages=messages,
-                tools_available=True,
-                vision_requested=task_needs_vision(working.task_class, user_text, settings.inference.vision_mode or "lazy"),
-                new_user_turn=True,
-                warm_models=warm,
-            )
-            profile = resolve_profile(profile_name)
-            await self._update(task_id, compact_memory=working.dumps(), profile=profile.name)
-
-            if not MANAGER.provider or not MANAGER.state.loaded:
-                await BUS.publish(task_id, "stage", "Loading local model", stage="model")
-                await MANAGER.load(settings, profile_name)
-            model_started = time.perf_counter()
-
-            from ..persona.inference_context import ensure_context_for_messages, model_lane_event_payload
-            from ..agent.front_responder import resolve_front_model_id
-
-            async def _expand_notice(before: int, after: int) -> None:
-                # Publish the resize notice only; do not await a second front
-                # regen (blocked the worker) or re-speak after early TTS.
-                await BUS.publish(
+            if overlap_task is not None:
+                # Producer already retrieved, loaded, and is streaming tokens.
+                messages = lean_messages
+            else:
+                warm = ()
+                if MANAGER.state.loaded and MANAGER.state.profile:
+                    warm = (MANAGER.state.profile,)
+                profile_name, messages, _route_decision, _switched = await prepare_answer_route(
                     task_id,
-                    "model_lane",
-                    "Context resize",
-                    model_lane_event_payload(
-                        lane="system",
-                        model=resolve_front_model_id(settings),
-                        text=f"Expanding context {before} → {after}",
-                    ),
-                    stage="model",
-                    persist=False,
+                    user_message=user_text,
+                    working=working,
+                    settings=settings,
+                    profile_name=profile.name,
+                    history=prior,
+                    messages=messages,
+                    tools_available=True,
+                    vision_requested=task_needs_vision(working.task_class, user_text, settings.inference.vision_mode or "lazy"),
+                    new_user_turn=True,
+                    warm_models=warm,
                 )
-                if stream_speak_offset(stream_key) > 0:
-                    return
+                profile = resolve_profile(profile_name)
+                await self._update(task_id, compact_memory=working.dumps(), profile=profile.name)
 
-                async def _on_spoken(text: str) -> None:
+                if not MANAGER.provider or not MANAGER.state.loaded:
+                    await BUS.publish(task_id, "stage", "Loading local model", stage="model")
+                    await MANAGER.load(settings, profile_name)
+                model_started = time.perf_counter()
+
+                from ..persona.inference_context import ensure_context_for_messages, model_lane_event_payload
+                from ..agent.front_responder import resolve_front_model_id
+
+                async def _expand_notice(before: int, after: int) -> None:
+                    # Publish the resize notice only; do not await a second front
+                    # regen (blocked the worker) or re-speak after early TTS.
+                    await BUS.publish(
+                        task_id,
+                        "model_lane",
+                        "Context resize",
+                        model_lane_event_payload(
+                            lane="system",
+                            model=resolve_front_model_id(settings),
+                            text=f"Expanding context {before} → {after}",
+                        ),
+                        stage="model",
+                        persist=False,
+                    )
                     if stream_speak_offset(stream_key) > 0:
                         return
-                    await publish_owner_text(
-                        text,
-                        source="task_chat",
-                        speak=True,
-                        user_prompt=prompt,
-                    )
 
-                spawn_context_expand_keep_busy(on_spoken=_on_spoken)
+                    async def _on_spoken(text: str) -> None:
+                        if stream_speak_offset(stream_key) > 0:
+                            return
+                        await publish_owner_text(
+                            text,
+                            source="task_chat",
+                            speak=True,
+                            user_prompt=prompt,
+                        )
 
-            await ensure_context_for_messages(
-                messages,
-                settings=settings,
-                profile_name=profile.name,
-                on_expanding=_expand_notice,
-                task_id=task_id,
-            )
-            profile = resolve_profile(MANAGER.state.profile or profile.name)
+                    spawn_context_expand_keep_busy(on_spoken=_on_spoken)
+
+                await ensure_context_for_messages(
+                    messages,
+                    settings=settings,
+                    profile_name=profile.name,
+                    on_expanding=_expand_notice,
+                    task_id=task_id,
+                )
+                profile = resolve_profile(MANAGER.state.profile or profile.name)
 
             async def worker_stream():
+                if overlap_task is not None:
+                    while True:
+                        item = await overlap_queue.get()
+                        if item is None:
+                            break
+                        yield item
+                    if overlap_errors:
+                        raise overlap_errors[0]
+                    return
                 async for delta in MANAGER.chat_stream(
                     messages,
                     temperature=profile.temperature,
@@ -1418,10 +1534,15 @@ class AgentRuntime:
                 ):
                     yield delta
 
+            if front_spoken_early or not (prefetched_front.text or "").strip():
+                worker_speech_gate.set()
+
             async def on_delta(lane: str, delta: str) -> None:
                 nonlocal first_response_ms
                 if not delta:
                     return
+                if lane == "worker" and not worker_speech_gate.is_set():
+                    await worker_speech_gate.wait()
                 if lane == "worker":
                     mark_worker_useful_owner_text(task_id)
                 spoken_parts.append(delta)
@@ -1481,6 +1602,7 @@ class AgentRuntime:
                 if kind == "front_response_started":
                     await self._publish_front_events(task_id, "front_response_started", "Front response started")
                 elif kind == "front_response_skipped":
+                    worker_speech_gate.set()
                     await self._publish_front_events(task_id, "front_response_skipped", "Front response skipped")
                 elif kind == "front_response_completed":
                     front = event.get("reply")
@@ -1509,7 +1631,9 @@ class AgentRuntime:
                                 stream_key=stream_key,
                                 turn_started=turn_started or model_started,
                             )
+                    worker_speech_gate.set()
                 elif kind == "worker_response_started":
+                    worker_speech_gate.set()
                     worker_started = True
                     await self._publish_front_events(task_id, "worker_response_started", "Worker response started")
                 elif kind == "worker_response_completed":

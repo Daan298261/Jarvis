@@ -21,6 +21,9 @@ export function ModelsSettingsPane({
   const inference = (settings.inference && typeof settings.inference === "object"
     ? settings.inference
     : {}) as Record<string, unknown>
+  const front = (settings.front_responder && typeof settings.front_responder === "object"
+    ? settings.front_responder
+    : {}) as Record<string, unknown>
 
   return (
     <>
@@ -77,24 +80,58 @@ export function ModelsSettingsPane({
             }
           />
         </label>
-        <label>Front chat model (optional)
+        <label>Front model
+          <select
+            value={String(front.profile || "front_2b")}
+            onChange={(e) => save({ front_responder_profile: e.target.value })}
+          >
+            <option value="front_2b">Faster — Qwen3.5 2B on CPU</option>
+            <option value="front_4b">Smarter — Qwen3.5 4B on GPU when it fits</option>
+          </select>
+        </label>
+        <label>Front device
+          <select
+            value={String(front.device || "auto")}
+            onChange={(e) => save({ front_responder_device: e.target.value })}
+          >
+            <option value="auto">Auto (2B CPU, 4B GPU)</option>
+            <option value="cpu">CPU only</option>
+            <option value="gpu">GPU when it fits</option>
+          </select>
+        </label>
+        <label>Where the front model runs
+          <select
+            value={String(front.placement || "local")}
+            onChange={(e) => save({ front_responder_placement: e.target.value })}
+          >
+            <option value="local">This PC (local CPU server)</option>
+            <option value="remote">A LAN node (manual endpoint)</option>
+          </select>
+        </label>
+        {String(front.placement || "local") === "remote" && (
+          <label>Front node URL
+            <input
+              value={String(front.remote_base_url || "")}
+              placeholder="http://192.168.1.20:8089/v1"
+              onBlur={(e) => save({ front_responder_remote_base_url: e.target.value.trim() })}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  front_responder: { ...front, remote_base_url: e.target.value },
+                })
+              }
+            />
+          </label>
+        )}
+        <label>Front chat model id (optional)
           <input
-            value={String(
-              ((settings.front_responder && typeof settings.front_responder === "object"
-                ? settings.front_responder
-                : {}) as Record<string, unknown>).model || "",
-            )}
-            placeholder="Same host/port as above. Blank uses the loaded model id"
+            value={String(front.model || "")}
+            placeholder="Blank uses the profile alias"
             onBlur={(e) => save({ front_responder_model: e.target.value.trim() })}
             onChange={(e) =>
               setSettings({
                 ...settings,
-                front_responder: {
-                  ...((settings.front_responder && typeof settings.front_responder === "object"
-                    ? settings.front_responder
-                    : {}) as Record<string, unknown>),
-                  model: e.target.value,
-                },
+                front_responder: { ...front, model: e.target.value },
               })
             }
           />

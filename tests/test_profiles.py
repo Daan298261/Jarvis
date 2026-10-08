@@ -10,7 +10,17 @@ from app.inference.profiles import (
 )
 
 
-EXPECTED_PROFILES = {"bootstrap", "fast", "balanced", "quality", "expert", "ornith_9b", "ornith_35b"}
+EXPECTED_PROFILES = {
+    "bootstrap",
+    "fast",
+    "balanced",
+    "quality",
+    "expert",
+    "ornith_9b",
+    "ornith_35b",
+    "front_2b",
+    "front_4b",
+}
 
 
 def test_declared_profiles_include_primary_expert_and_ornith_candidates():

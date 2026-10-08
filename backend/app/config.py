@@ -85,17 +85,36 @@ class InferenceSettings(BaseModel):
 
 
 class FrontResponderSettings(BaseModel):
-    """RFC-0117 tiny front-chat lane on the existing local / LM Studio endpoint.
+    """RFC-0117 front lane: interpret, acknowledge, hand off.
 
-    ``model`` is an OpenAI-compatible model id advertised by that endpoint.
-    Empty means: use ``inference.remote_model`` or the currently loaded alias.
-    No vendor model name is hard-coded.
+    ``model`` is an optional OpenAI-compatible id override. Empty means the
+    profile alias (or the loaded worker alias when no dedicated server is up).
+    No vendor model name is hard-coded in this class; the shipped choice lives
+    in ``config/default.json`` (``profile=front_2b``, CPU).
+
+    ``device=auto`` runs front_2b on CPU (``-ngl 0``) and front_4b on GPU.
+    ``device=cpu`` forces ``-ngl 0`` for either profile. ``placement=remote``
+    uses a manually configured OpenAI-compatible endpoint and falls back to the
+    local CPU server when that endpoint is unhealthy.
     """
 
     model_config = ConfigDict(validate_assignment=True)
 
     enabled: bool = True
     model: str = ""
+    profile: str = ""
+    port: int = Field(default=8089, ge=1, le=65535)
+    context_size: int = Field(default=4096, ge=512, le=32768)
+    resident: bool = True
+    device: Literal["auto", "cpu", "gpu"] = "auto"
+    n_gpu_layers: int = Field(default=0, ge=0, le=999)
+    placement: Literal["local", "remote"] = "local"
+    # Same vocabulary as swarm role policy (AUTO / PREFERRED / FORCED / AVOID / DISABLED).
+    placement_policy: str = "AUTO"
+    remote_base_url: str = ""
+    remote_api_key: str = ""
+    prompt_cache: bool = True
+    ram_headroom_mib: int = Field(default=2048, ge=0, le=262144)
     max_output_tokens: int = Field(default=128, ge=64, le=1024)
     temperature: float = Field(default=0.25, ge=0.0, le=1.0)
     timeout_ms: int = Field(default=1500, ge=250, le=12000)

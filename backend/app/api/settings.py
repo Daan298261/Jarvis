@@ -123,6 +123,13 @@ class SettingsUpdate(BaseModel):
     front_responder_timeout_ms: int | None = Field(default=None, ge=250, le=12000)
     front_responder_context_turns: int | None = Field(default=None, ge=0, le=8)
     front_responder_speak_immediately: bool | None = None
+    front_responder_profile: str | None = Field(default=None, max_length=80)
+    front_responder_device: Literal["auto", "cpu", "gpu"] | None = None
+    front_responder_placement: Literal["local", "remote"] | None = None
+    front_responder_placement_policy: str | None = Field(default=None, max_length=32)
+    front_responder_remote_base_url: str | None = Field(default=None, max_length=300)
+    front_responder_remote_api_key: str | None = Field(default=None, max_length=512)
+    front_responder_prompt_cache: bool | None = None
     decision_tier: Literal["local", "jev_optional", "jev_plus"] | None = None
 
 
@@ -140,6 +147,11 @@ async def get_settings():
         voice["voicestudio_api_key"] = "[configured]"
         payload["voice"] = voice
     payload["allowed_directories"] = live_allowed_directories(payload.get("allowed_directories"))
+    front = payload.get("front_responder")
+    if isinstance(front, dict) and front.get("remote_api_key"):
+        front = dict(front)
+        front["remote_api_key"] = "[configured]"
+        payload["front_responder"] = front
     return payload
 
 
@@ -344,6 +356,13 @@ async def update_settings(body: SettingsUpdate):
         "timeout_ms": body.front_responder_timeout_ms,
         "context_turns": body.front_responder_context_turns,
         "speak_immediately": body.front_responder_speak_immediately,
+        "profile": body.front_responder_profile,
+        "device": body.front_responder_device,
+        "placement": body.front_responder_placement,
+        "placement_policy": body.front_responder_placement_policy,
+        "remote_base_url": body.front_responder_remote_base_url,
+        "remote_api_key": body.front_responder_remote_api_key,
+        "prompt_cache": body.front_responder_prompt_cache,
     }
     for key, value in front_updates.items():
         if value is not None:
