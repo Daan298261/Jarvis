@@ -209,6 +209,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--android", action="store_true", help="Build and run the known source-owned APK fixture with exact-action approval")
     args = parser.parse_args()
-    output = Path.home() / ".anzu" / "acceptance" / "rfc0200"
+    output = Path.home() / ".anzu" / "acceptance" / "rfc0201"
     build_fixtures(output, args.android)
     sys.exit(0 if asyncio.run(verify(output, args.android)) else 1)

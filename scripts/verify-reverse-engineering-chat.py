@@ -66,6 +66,6 @@ if __name__ == "__main__":
     parser.add_argument("--endpoint", default="http://127.0.0.1:1234/v1")
     parser.add_argument("--model", required=True)
     parser.add_argument("--profile", default="fast", choices=["fast", "balanced", "quality"])
-    parser.add_argument("--workspace", default=str(Path.home() / ".anzu/acceptance/rfc0200/chat"))
+    parser.add_argument("--workspace", default=str(Path.home() / ".anzu/acceptance/rfc0201/chat"))
     parser.add_argument("--timeout", type=int, default=900)
     asyncio.run(verify(parser.parse_args()))

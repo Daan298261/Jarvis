@@ -1,4 +1,4 @@
-# RFC-0200: ANZU Reverse Engineer Anything
+# RFC-0201: ANZU Reverse Engineer Anything
 
 **Status:** accepted
 **Author:** Codex / Daan
@@ -9,6 +9,8 @@
 ANZU must investigate a supplied software path and a specific question using real
 analysis providers, retain evidence, and explain what is established or unknown.
 Registering a skill or connecting an MCP server alone does not meet this requirement.
+This extends the RFC-0200 local MCP registration with task-bound investigations,
+dedicated native/mobile providers, evidence reports, and exact-action execution grants.
 
 ## Decision
 
