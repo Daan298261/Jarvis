@@ -1740,6 +1740,9 @@ class AgentRuntime:
                     done = event
         except Exception as exc:
             clear_stream_speak_state(stream_key)
+            from ..tts.persona_speech import announce_stream_stall
+
+            await announce_stream_stall(exc, source="task_chat")
             err = str(exc)
             await self._update(
                 task_id,
@@ -1924,6 +1927,9 @@ class AgentRuntime:
                     persist=False,
                 )
         except Exception as exc:
+            from ..tts.persona_speech import announce_stream_stall
+
+            await announce_stream_stall(exc, source="task_chat")
             err = str(exc)
             await self._update(
                 task_id,

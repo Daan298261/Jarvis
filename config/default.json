@@ -19,7 +19,12 @@
     "threads": 0,
     "auto_load": true,
     "api_key": "",
-    "remote_model": ""
+    "remote_model": "",
+    "stream_first_token_base_ms": 2500,
+    "stream_idle_ms": 12000,
+    "prompt_tps_fallback": 80.0,
+    "stream_first_token_min_ms": 3000,
+    "stream_first_token_max_ms": 180000
   },
   "front_responder": {
     "enabled": true,

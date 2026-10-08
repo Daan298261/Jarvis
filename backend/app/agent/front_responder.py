@@ -618,6 +618,9 @@ async def generate_front_reply(
             temperature=cfg.temperature,
             max_tokens=cfg.max_tokens,
             thinking=False,
+            first_token_deadline_ms=cfg.timeout_ms,
+            idle_deadline_ms=cfg.timeout_ms,
+            stream_lane="front",
         ), timeout_s):
             if time.perf_counter() > deadline:
                 break
@@ -722,6 +725,9 @@ async def generate_progress_update(
             temperature=cfg.temperature,
             max_tokens=min(cfg.max_tokens, 256),
             thinking=False,
+            first_token_deadline_ms=cfg.timeout_ms,
+            idle_deadline_ms=cfg.timeout_ms,
+            stream_lane="front",
         ):
             if time.perf_counter() > deadline:
                 break

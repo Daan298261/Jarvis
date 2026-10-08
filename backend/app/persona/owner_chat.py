@@ -860,6 +860,9 @@ async def stream_owner_chat(
         if overlap_task is not None:
             overlap_task.cancel()
         clear_stream_speak_state(stream_key)
+        from ..tts.persona_speech import announce_stream_stall
+
+        await announce_stream_stall(exc, source="owner_chat")
         yield {"type": "error", "detail": str(exc)[:500]}
         return
     finally:

@@ -43,11 +43,13 @@ from .profiles import (
 )
 from .prompt_budget import (
     ModelCapacityExceeded,
+    estimate_prompt_tokens,
     is_context_overflow,
     prepare_inference,
     recover_context_after_overflow,
 )
 from .request_lease import RequestLease
+from .stream_deadlines import compute_chat_stream_deadlines
 
 
 def resolve_vision(settings: AppSettings, requested: bool | None = None) -> bool:
@@ -550,6 +552,20 @@ class InferenceManager:
                         continue
                 raise
 
+    def _chat_stream_deadlines(self, settings: AppSettings, messages: list[ChatMessage]) -> dict[str, Any]:
+        prompt_tokens = estimate_prompt_tokens(messages)
+        first_ms, idle_ms = compute_chat_stream_deadlines(
+            settings.inference,
+            prompt_tokens=prompt_tokens,
+            prompt_tps=self.state.prompt_tps,
+        )
+        return {
+            "first_token_deadline_ms": first_ms,
+            "idle_deadline_ms": idle_ms,
+            "stream_lane": "worker",
+            "prompt_token_estimate": prompt_tokens,
+        }
+
     async def chat_stream(
         self,
         messages: list[Any],
@@ -623,6 +639,7 @@ class InferenceManager:
                     max_tokens=max_tokens,
                     thinking=thinking,
                     extra=extra_payload,
+                    **self._chat_stream_deadlines(app_settings, prepared),
                 ):
                     yield delta
                 return
@@ -644,6 +661,7 @@ class InferenceManager:
                         max_tokens=max_tokens,
                         thinking=thinking,
                         extra=extra_payload,
+                        **self._chat_stream_deadlines(app_settings, prepared),
                     ):
                         yield delta
                     return

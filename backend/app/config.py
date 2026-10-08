@@ -82,6 +82,12 @@ class InferenceSettings(BaseModel):
     api_key: str = ""
     lmstudio_models_root: str = ""
     orchestrator_idle_seconds: int = Field(default=120, ge=60, le=180)
+    # Streaming stall budgets for manager.chat_stream. providers.base has no defaults.
+    stream_first_token_base_ms: int = Field(default=2500, ge=0, le=120000)
+    stream_idle_ms: int = Field(default=12000, ge=250, le=300000)
+    prompt_tps_fallback: float = Field(default=80.0, gt=0, le=20000)
+    stream_first_token_min_ms: int = Field(default=3000, ge=0, le=300000)
+    stream_first_token_max_ms: int = Field(default=180000, ge=1000, le=600000)
 
 
 class FrontResponderSettings(BaseModel):

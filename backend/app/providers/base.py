@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from openai import AsyncOpenAI
@@ -37,6 +39,79 @@ class ChatResult:
     usage: dict[str, Any] = field(default_factory=dict)
     timings: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
+
+
+class StreamStallError(Exception):
+    """Typed outcome when a caller-supplied first-token or idle deadline is exceeded."""
+
+    def __init__(
+        self,
+        *,
+        deadline: Literal["first_token", "idle"],
+        elapsed_ms: float,
+        budget_ms: float,
+        provider: str,
+        model: str,
+        prompt_tokens: int | None = None,
+        lane: str | None = None,
+    ) -> None:
+        self.deadline = deadline
+        self.elapsed_ms = float(elapsed_ms)
+        self.budget_ms = float(budget_ms)
+        self.provider = str(provider or "")
+        self.model = str(model or "")
+        self.prompt_tokens = int(prompt_tokens) if prompt_tokens is not None else None
+        self.lane = str(lane or "")
+        super().__init__(
+            f"Model stream stalled ({self.deadline}): elapsed {self.elapsed_ms:.0f}ms "
+            f"exceeded budget {self.budget_ms:.0f}ms for {self.provider}/{self.model}"
+        )
+
+
+def _timeout_s(deadline_ms: float | None) -> float | None:
+    """``None`` means no guard. A supplied value is always treated as a deadline."""
+    if deadline_ms is None:
+        return None
+    return max(0.0, float(deadline_ms) / 1000.0)
+
+
+async def close_chat_stream(stream: Any) -> None:
+    """Cancel/close the underlying streaming request. Safe to call more than once."""
+    if stream is None:
+        return
+    for name in ("aclose", "close"):
+        closer = getattr(stream, name, None)
+        if not callable(closer):
+            continue
+        try:
+            result = closer()
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception:
+            pass
+        break
+    response = getattr(stream, "response", None)
+    if response is None:
+        return
+    closer = getattr(response, "aclose", None) or getattr(response, "close", None)
+    if not callable(closer):
+        return
+    try:
+        result = closer()
+        if asyncio.iscoroutine(result):
+            await result
+    except Exception:
+        pass
+
+
+async def _anext_or_end(iterator: Any) -> Any:
+    try:
+        return await anext(iterator)
+    except StopAsyncIteration:
+        return _STREAM_END
+
+
+_STREAM_END = object()
 
 
 def to_openai_messages(
@@ -191,6 +266,39 @@ class ModelProvider:
             raw=raw,
         )
 
+    def _stream_stall(
+        self,
+        *,
+        deadline: Literal["first_token", "idle"],
+        elapsed_ms: float,
+        budget_ms: float,
+        prompt_tokens: int | None,
+        lane: str | None,
+    ) -> StreamStallError:
+        return StreamStallError(
+            deadline=deadline,
+            elapsed_ms=elapsed_ms,
+            budget_ms=budget_ms,
+            provider=self.name,
+            model=self.model,
+            prompt_tokens=prompt_tokens,
+            lane=lane,
+        )
+
+    async def _raise_stream_stall(
+        self,
+        stall: StreamStallError,
+        stream: Any,
+        *,
+        lane: str | None,
+        prompt_tokens: int | None,
+    ) -> None:
+        await close_chat_stream(stream)
+        from ..inference.stream_deadlines import record_stream_stall
+
+        record_stream_stall(stall, lane=lane or stall.lane, prompt_token_estimate=prompt_tokens)
+        raise stall
+
     async def chat_stream(
         self,
         messages: list[ChatMessage],
@@ -201,6 +309,10 @@ class ModelProvider:
         max_tokens: int | None = None,
         thinking: bool | None = None,
         extra: dict[str, Any] | None = None,
+        first_token_deadline_ms: float | None = None,
+        idle_deadline_ms: float | None = None,
+        stream_lane: str | None = None,
+        prompt_token_estimate: int | None = None,
     ) -> AsyncIterator[str]:
         extra_body: dict[str, Any] = dict(extra or {})
         extra_body.setdefault("chat_template_kwargs", {})
@@ -223,30 +335,89 @@ class ModelProvider:
             kwargs["max_tokens"] = max_tokens
         if extra_body:
             kwargs["extra_body"] = extra_body
-        stream = await self.client.chat.completions.create(**kwargs)
-        yielded = False
-        reasoning_parts: list[str] = []
-        finish_reason: str | None = None
-        async for chunk in stream:
-            choice = chunk.choices[0] if getattr(chunk, "choices", None) else None
-            if not choice:
-                continue
-            reason = getattr(choice, "finish_reason", None)
-            if reason:
-                finish_reason = str(reason)
-            delta = getattr(choice, "delta", None)
-            content_delta, reasoning_delta = delta_text_channels(delta)
-            if reasoning_delta:
-                reasoning_parts.append(reasoning_delta)
-            if content_delta:
-                yielded = True
-                yield content_delta
-        if not yielded:
-            fallback = visible_completion_text("", "".join(reasoning_parts))
-            if fallback:
-                yield fallback
-                return
-            raise RuntimeError(empty_generation_error(finish_reason))
+        first_timeout = _timeout_s(first_token_deadline_ms)
+        idle_timeout = _timeout_s(idle_deadline_ms)
+        started = time.perf_counter()
+        last_chunk_at = started
+        stream: Any = None
+        try:
+            create = self.client.chat.completions.create(**kwargs)
+            if first_timeout is None:
+                stream = await create
+            else:
+                try:
+                    stream = await asyncio.wait_for(create, timeout=first_timeout)
+                except asyncio.TimeoutError:
+                    elapsed_ms = (time.perf_counter() - started) * 1000.0
+                    stall = self._stream_stall(
+                        deadline="first_token",
+                        elapsed_ms=elapsed_ms,
+                        budget_ms=float(first_token_deadline_ms) if first_token_deadline_ms is not None else 0.0,
+                        prompt_tokens=prompt_token_estimate,
+                        lane=stream_lane,
+                    )
+                    await self._raise_stream_stall(
+                        stall, stream, lane=stream_lane, prompt_tokens=prompt_token_estimate
+                    )
+                    return
+            iterator = stream.__aiter__()
+            yielded = False
+            reasoning_parts: list[str] = []
+            finish_reason: str | None = None
+            got_chunk = False
+            while True:
+                if not got_chunk:
+                    remaining = None if first_timeout is None else max(
+                        0.0, first_timeout - (time.perf_counter() - started)
+                    )
+                else:
+                    remaining = idle_timeout
+                try:
+                    if remaining is None:
+                        chunk = await _anext_or_end(iterator)
+                    else:
+                        chunk = await asyncio.wait_for(_anext_or_end(iterator), timeout=remaining)
+                except asyncio.TimeoutError:
+                    elapsed_ms = (time.perf_counter() - (started if not got_chunk else last_chunk_at)) * 1000.0
+                    budget = first_token_deadline_ms if not got_chunk else idle_deadline_ms
+                    stall = self._stream_stall(
+                        deadline="first_token" if not got_chunk else "idle",
+                        elapsed_ms=elapsed_ms,
+                        budget_ms=float(budget) if budget is not None else 0.0,
+                        prompt_tokens=prompt_token_estimate,
+                        lane=stream_lane,
+                    )
+                    await self._raise_stream_stall(
+                        stall, stream, lane=stream_lane, prompt_tokens=prompt_token_estimate
+                    )
+                    return
+                if chunk is _STREAM_END:
+                    break
+                got_chunk = True
+                last_chunk_at = time.perf_counter()
+                choice = chunk.choices[0] if getattr(chunk, "choices", None) else None
+                if not choice:
+                    continue
+                reason = getattr(choice, "finish_reason", None)
+                if reason:
+                    finish_reason = str(reason)
+                delta = getattr(choice, "delta", None)
+                content_delta, reasoning_delta = delta_text_channels(delta)
+                if reasoning_delta:
+                    reasoning_parts.append(reasoning_delta)
+                if content_delta:
+                    yielded = True
+                    yield content_delta
+            if not yielded:
+                fallback = visible_completion_text("", "".join(reasoning_parts))
+                if fallback:
+                    yield fallback
+                    return
+                raise RuntimeError(empty_generation_error(finish_reason))
+        except StreamStallError:
+            raise
+        finally:
+            await close_chat_stream(stream)
 
 
 def parse_tool_arguments(payload: str) -> dict[str, Any]:
