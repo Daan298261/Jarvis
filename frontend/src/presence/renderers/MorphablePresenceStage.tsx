@@ -28,6 +28,7 @@ import {
   PRESENCE_QUALITY_DENSITIES,
 } from "../presenceQuality"
 import {
+  FIGURE_SAMPLE_ENERGY,
   createMorphablePresenceSystem,
   particleFragmentShader,
   particleVertexShader,
@@ -159,6 +160,7 @@ export function MorphablePresenceStage({
       uGalaxy: { value: 0 },
       uGalaxyBust: { value: 0 },
       uLattice: { value: 0 },
+      uSampleEnergy: { value: FIGURE_SAMPLE_ENERGY },
     }
     const material = new THREE.ShaderMaterial({
       uniforms,

@@ -1,5 +1,5 @@
 import * as THREE from "three"
-import { presenceBudgets } from "../galaxyPresence"
+import { FIGURE_BUDGET_SCALE, presenceBudgets } from "../galaxyPresence"
 import {
   LIFECYCLE_MORPH_SECONDS,
   REST_TIGHTNESS,
@@ -14,6 +14,14 @@ import {
   resolvePresenceShape,
 } from "./shapes/catalog"
 import type { PresenceShapeId } from "./particleTypes"
+
+/**
+ * Draw ceiling from #541 (`02d7066`). Keeps persona morphs off the ~94k rebuild
+ * hitch. `FIGURE_BUDGET_SCALE` (82000) remains the authored additive energy.
+ */
+export const FIGURE_DRAW_SCALE = 42000
+/** Pre-#541 light restored on the samples still drawn (82000 / 42000). */
+export const FIGURE_SAMPLE_ENERGY = FIGURE_BUDGET_SCALE / FIGURE_DRAW_SCALE
 
 export const particleVertexShader = `
   attribute vec3 aPos;
@@ -188,6 +196,7 @@ export const particleFragmentShader = `
   uniform float uGalaxy;
   uniform float uGalaxyBust;
   uniform float uLattice;
+  uniform float uSampleEnergy;
   varying float vGold;
   varying float vLight;
   varying float vFlow;
@@ -249,6 +258,10 @@ export const particleFragmentShader = `
     // the silhouette into a slab even when glow/bloom are high.
     float coreHot = core * (0.18 + hot * 0.42) * mix(1.0, 0.62, smoothstep(1.15, 1.9, vLight) * uGlow);
     color = mix(color + vec3(coreHot), vPortraitColor.rgb * 1.5, vPortraitColor.a);
+    // #541 halved the additive draw budget (82000 → 42000). Points still blend
+    // ONE, ONE, so that cut read as a ~50% dark veil. Restore the pre-cut
+    // energy on the samples that are still drawn. Do not raise the draw count.
+    color *= uSampleEnergy;
     gl_FragColor = vec4(color, alpha);
   }
 `
@@ -487,9 +500,9 @@ export function createMorphablePresenceSystem(
   // The flowing environment stays intact but no longer outnumbers the bust.
   // Galaxy stars are a separate layer (presenceBudgets) and do not reduce these.
   const maxDensity = THREE.MathUtils.clamp(qualityCeiling, 0.01, 1.15)
-  // An airy 48k ceiling keeps facial landmarks crisp while avoiding the
-  // 94k-point rebuild hitch that made persona changes feel frozen.
-  const figureBudget = Math.round(42000 * maxDensity)
+  // #541 draw ceiling. Keeps facial landmarks crisp and avoids the ~94k
+  // rebuild hitch. Brightness is restored separately via FIGURE_SAMPLE_ENERGY.
+  const figureBudget = Math.round(FIGURE_DRAW_SCALE * maxDensity)
   const fieldBudget = Math.round(15000 * maxDensity)
   let qualityDensity = THREE.MathUtils.clamp(density, Math.min(0.35, maxDensity), maxDensity)
   let shape = resolvePresenceShape(initialShapeId)
@@ -526,6 +539,8 @@ export function createMorphablePresenceSystem(
   let pendingFigureRestore = false
   let restoreFreeOnArrive = false
   const uniforms = material.uniforms
+  uniforms.uSampleEnergy = uniforms.uSampleEnergy ?? { value: FIGURE_SAMPLE_ENERGY }
+  uniforms.uSampleEnergy.value = FIGURE_SAMPLE_ENERGY
   uniforms.uMorph = uniforms.uMorph ?? { value: REST_TIGHTNESS }
   uniforms.uMorph.value = REST_TIGHTNESS
   uniforms.uRestTightness = uniforms.uRestTightness ?? { value: REST_TIGHTNESS }

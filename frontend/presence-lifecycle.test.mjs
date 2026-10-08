@@ -408,6 +408,27 @@ test("mythic live variants use distinct named-being silhouettes", async () => {
   assert.match(variantsSource, /base\.id === "memory_rings"/)
 })
 
+test("halved figure draw budget restores pre-cut additive energy", () => {
+  assert.equal(cloud.FIGURE_DRAW_SCALE, 42000)
+  assert.equal(cloud.FIGURE_SAMPLE_ENERGY, 82000 / 42000)
+  assert.ok(cloud.FIGURE_SAMPLE_ENERGY > 1.9 && cloud.FIGURE_SAMPLE_ENERGY < 2)
+  assert.match(cloud.particleFragmentShader, /uniform float uSampleEnergy/)
+  assert.match(cloud.particleFragmentShader, /color \*= uSampleEnergy/)
+  assert.doesNotMatch(cloud.particleFragmentShader, /alpha \*= uSampleEnergy/)
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uMorph: { value: 0 } },
+    vertexShader: "void main(){}",
+    fragmentShader: "void main(){}",
+  })
+  const system = cloud.createMorphablePresenceSystem(0.95, mat, "humanoid_bust", 1.15)
+  try {
+    assert.equal(mat.uniforms.uSampleEnergy.value, cloud.FIGURE_SAMPLE_ENERGY)
+    assert.equal(system.sampleCounts().figure, Math.round(42000 * 0.95))
+  } finally {
+    system.dispose()
+  }
+})
+
 test("every mythic A and B persona shares persistent detail and brightness controls", async () => {
   const controls = await readFile(new URL("./src/persona/NamedPersonaControls.tsx", import.meta.url), "utf8")
   const personas = await readFile(new URL("./src/persona/namedPersonas.ts", import.meta.url), "utf8")
@@ -420,7 +441,9 @@ test("every mythic A and B persona shares persistent detail and brightness contr
   assert.match(personas, /appearance: mergedAppearance/)
   assert.match(stage, /personaDetail\(current\.personaVisual\?\.detail\)/)
   assert.match(stage, /system\.currentShapeId\.endsWith\("_b"\)/)
-  assert.match(cloud, /Math\.round\(42000 \* maxDensity\)/)
+  assert.match(cloud, /FIGURE_DRAW_SCALE = 42000/)
+  assert.match(cloud, /Math\.round\(FIGURE_DRAW_SCALE \* maxDensity\)/)
+  assert.match(cloud, /uSampleEnergy\.value = FIGURE_SAMPLE_ENERGY/)
 })
 
 test("auto presence quality adapts with sustained thresholds and fit bounds keep safe margins", () => {
