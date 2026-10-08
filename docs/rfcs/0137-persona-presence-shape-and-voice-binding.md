@@ -346,20 +346,22 @@ Desktop sign-off: hear each bound pack once (shared packs still once each, then 
 
 ### 1. Single speech path
 
-When a **specialist persona** (a non-main roster id attached to the task via routing/handoff or `PUT /api/named-personas` with `as_specialist: true`) produces an **owner-facing answer** (not a social ack), and that specialist’s persisted `specialists_auto_speak` is **true**:
+Speaker resolution is **per owner-facing answer line**, not per task attachment. `Task.specialist_persona_ids` (and `tasks.py::_specialist_fields`) is only the **set** of specialists on the task; it does not identify which persona produced a given line. The owner-facing emission path (`owner_chat`, task chat / `loop`, `chat_delivery` enqueue) must **stamp each answer** with the **producing** roster persona id (`speaker_persona_id` or equivalent on the TTS item / `speak_text` call). Speak-time reads that stamp plus the producing specialist’s `specialists_auto_speak` flag — **not** “any specialist is attached.”
 
-- Speech goes **only** through `persona_speech.speak_text` with that specialist’s persona voice binding (roster pack + per-persona appearance overrides: pitch, rate, volume on the neural PCM path).
-- Pass an explicit **speaking persona id** into resolution (new parameter on `resolve_speaking_voice` / `speak_text`, e.g. `persona_id=` or `speaker_persona_id=`) — **not** a parallel specialist lane, **not** `lane="specialist"`, **not** `set_active_voice_profile_id` on attach, **not** any `attach_specialist`-style main-voice swap.
+When the stamped producer is a **specialist persona** (non-main roster id from routing/handoff; attach via `as_specialist` only affects who may be routed, not who speaks) and that line is an **owner-facing answer** (not a social ack), and that **producer’s** persisted `specialists_auto_speak` is **true**:
+
+- Speech goes **only** through `persona_speech.speak_text` with that producer’s persona voice binding (thread the stamped id into `resolve_speaking_voice` / `speak_text`, e.g. `speaker_persona_id=`). Existing helpers already support this: `_appearance_for(settings, persona_id)`, `_playback_for(settings, persona_id)`, and `_neural_profile_for_main(settings, persona_id)` resolve roster/override voice for a non-main id without using the main’s `activated_voice_profile_id`.
+- **Not** a parallel specialist lane, **not** `lane="specialist"`, **not** `set_active_voice_profile_id` on attach, **not** any `attach_specialist`-style main-voice swap.
 - The active main persona bind (`named_personas.active_id`, `activated_voice_profile_id`) stays unchanged for subsequent main-persona lines.
 
-When `specialists_auto_speak` is **false** for that specialist:
+When `specialists_auto_speak` is **false** for the **producing** specialist:
 
-- Specialist answer text is shown in the owner UI; **no** `speak_text` call for that text.
-- The **main** persona does **not** read specialist answer text aloud (no fallback dub).
+- That answer text is shown in the owner UI; **no** `speak_text` / enqueue for that line.
+- The **main** persona does **not** read that specialist answer aloud (no fallback dub). Another attached specialist with auto-speak on does **not** speak this line.
 
-Main-persona speech (owner chat, task chat, companion, phone realtime, WebRTC) is unchanged: always the active main persona through `speak_text` without a specialist speaker id.
+When the stamped producer is the **main** persona (or the stamp is omitted / main id): speak through `speak_text` with the main bind as today (#551). Main lines are unaffected by which specialists are attached.
 
-Fail-closed rules from § Voice bind still apply per specialist id (missing neural pack → `SpeechRefused` / silent skip; no SAPI; main bind untouched).
+Fail-closed rules from § Voice bind still apply per producer id (missing neural pack → `SpeechRefused` / silent skip; no SAPI; main bind untouched).
 
 ### 2. Setting contract
 
@@ -368,7 +370,7 @@ Fail-closed rules from § Voice bind still apply per specialist id (missing neur
 | **Model** | `PersonaAppearanceSettings.specialists_auto_speak` in `backend/app/config.py` |
 | **Storage** | Per persona id in `NamedPersonaSettings.profiles[persona_id]` inside persisted `AppSettings.named_personas` |
 | **API** | Existing named-persona surface: `GET /api/named-personas` returns `appearance.specialists_auto_speak`; `PUT` appearance patch (and `NamedPersonaAppearancePatch` in `backend/app/api/named_personas.py`) accepts `specialists_auto_speak` |
-| **Read at speak time** | Server loads settings in `persona_speech` (or a thin helper) when enqueueing/speaking a line attributed to a specialist persona id — **not** only at `attach_specialist` |
+| **Read at speak time** | Server loads settings in `persona_speech` when enqueueing/speaking a line whose **stamped producing persona id** is a specialist — **not** from `specialist_persona_ids` alone and **not** only at `attach_specialist` |
 | **Default** | **`false`** per persona (`PersonaAppearanceSettings` default). Roster neural voice **bindings** are live (#383); auto-speak remains opt-in per specialist until the owner enables it. |
 
 ### 3. Interplay (acks, progress, companion)
@@ -377,30 +379,37 @@ Fail-closed rules from § Voice bind still apply per specialist id (missing neur
 - **[RFC-0203](0203-fast-path-lane-consolidation.md):** One progress loop per turn; specialist speech does not start a second TTS timer or duplicate progress emission.
 - **Companion / phone:** Refused specialist speech follows #551 — `SpeechRefused` → **HTTP 204** on companion `POST /api/companion/voice/speak`; no SAPI fall-through.
 
-### 4. Interim UI (until backend AC is green)
+### 4. Interim UI (until specialist speech AC is green)
 
-**Astra** (via PG): hide the `specialists_auto_speak` checkbox in `frontend/src/persona/NamedPersonaControls.tsx` (~L360), **or** render it disabled with copy that does not claim function. No live control that implies wiring that is not shipped. **Re-enable** the control when backend acceptance criteria below pass.
+**Senior 4.7 dev** (same owner as backend wiring, via CoS):
 
-Room devs / UX **do not** edit `NamedPersonaControls` for this interim hide.
+1. **Interim (lands with #551):** In a **small separate PR** that merges alongside **#551**, hide or disable the `specialists_auto_speak` checkbox in `frontend/src/persona/NamedPersonaControls.tsx` (~L360) with copy that does not claim function. No live control that implies unwired behaviour.
+2. **Re-enable (same PR as backend wiring):** In the **same implement PR** that wires per-answer specialist speech through `speak_text`, restore the toggle per persona, bound to `PersonaAppearanceSettings.specialists_auto_speak` (default **off**). Re-enable must **not** regress WebGL, presence, or other persona UI.
+
+Room devs / UX **do not** edit `NamedPersonaControls`.
 
 ### 5. Ownership split
 
 | Work | Owner |
 | --- | --- |
-| `persona_speech` specialist speaker resolution, chat/task attribution of specialist answer text, tests | **Senior 4.7 dev** — voice lane via Chief of Staff |
-| Interim hide + later re-enable toggle | **Astra** — route via PG |
+| `persona_speech` speaker resolution, per-answer producer stamp on owner-facing emissions (`owner_chat` / `loop` / `chat_delivery`), specialist speech tests | **Senior 4.7 dev** — voice lane via Chief of Staff |
+| Interim hide/disable toggle (small PR with #551) + re-enable toggle (same PR as backend wiring above) | **Senior 4.7 dev** — same lane |
 
 ### 6. Acceptance criteria (unchecked)
 
-- [ ] **Backend:** With main `anzu`, specialist `enki` attached, `enki` appearance `specialists_auto_speak: true`, and an owner-facing answer attributed to `enki` → exactly **one** `speak_text` (or enqueue stamped with specialist persona) using Enki’s neural binding (`synthetic_command_original_v1` + Enki rate/pitch); main `activated_voice_profile_id` unchanged.
-- [ ] **Backend:** Same setup with `specialists_auto_speak: false` → **zero** `speak_text` / TTS enqueue for specialist answer text; main persona does not speak that text.
+- [ ] **Backend:** Main `anzu`; specialist `enki` attached; `enki` `specialists_auto_speak: true`; one owner-facing answer **stamped** producer `enki` → exactly **one** `speak_text` (or enqueue) with `speaker_persona_id=enki` and Enki’s neural binding (`synthetic_command_original_v1` + Enki rate/pitch); main `activated_voice_profile_id` unchanged.
+- [ ] **Backend (a):** Task with specialists **A** and **B** attached; only **B** produces the answer → exactly one `speak_text` with **B**’s persona id and voice; **zero** for A.
+- [ ] **Backend (b):** Same turn: specialist **A** answers, then specialist **B** answers → one `speak_text` each, in order, each with its own voice binding.
+- [ ] **Backend (c):** Producer **A** has auto-speak **off**, **B** on; line stamped **A** → nothing spoken for that line (B’s setting does not override).
+- [ ] **Backend (d):** Line stamped **main** (`anzu` or omitted) → main voice via `speak_text` as #551; unaffected by attached specialists.
+- [ ] **Backend:** Producer `enki` with `specialists_auto_speak: false` → zero speak/enqueue for that line; main does not dub.
 - [ ] **Backend:** Slow-turn held ack (#552) + specialist answer on same turn → no double-speak (ack + answer use distinct reply classes; specialist answer not voiced as ack).
 - [ ] **Backend:** `specialists_auto_speak` round-trip via `PUT` appearance patch and `GET /api/named-personas`.
-- [ ] **Astra:** Toggle hidden (or honestly disabled) in interim; after backend lands, toggle visible and functional.
+- [ ] **UI (senior 4.7):** Toggle hidden/disabled in interim PR with #551; re-enabled and functional in the wiring PR; no WebGL/presence/persona regression.
 - [ ] `python3 -m pytest` and `npm --prefix frontend run build` green on the implement branch.
-- [ ] **Desktop soak:** Main Anzu coordinating; route/hand off to a specialist with auto-speak on; hear that specialist’s voice on its answer, then main voice on main lines.
+- [ ] **Desktop soak:** Main Anzu coordinating; route/hand off so a specialist **produces** an answer with auto-speak on; hear that specialist’s voice on **that** line, then main voice on main-stamped lines.
 
-**Recommended implement model:** Senior **4.7** standard (`fast=false`) for backend; Composer 2.5 standard for docs-only amend.
+**Recommended implement model:** Senior **4.7** standard (`fast=false`) for backend + portal toggle; Composer 2.5 standard for docs-only amend.
 
 ## Implementation note
 
