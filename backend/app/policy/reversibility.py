@@ -293,6 +293,16 @@ def resolve_action_effect(
     name = (tool_name or "").strip().lower()
     act = str(action or args.get("action") or "").strip().lower()
     target = _target_from_args(args)
+    if name == "reverse_engineer":
+        from ..reverse_engineering.runtime import approval_target, requires_runtime_approval
+        runtime = requires_runtime_approval(args)
+        return ActionEffectMeta(
+            tool_name=name, action=act,
+            reversibility=ReversibilityClass.UNKNOWN if runtime else ReversibilityClass.REVERSIBLE,
+            high_consequence=runtime, side_effecting=runtime,
+            target=approval_target(args),
+            recovery_summary="Exact target/action approval required" if runtime else "Local analysis of a prepared snapshot",
+        )
     command = str(args.get("command") or "") if args else ""
     destructive = is_destructive_operation(name, args, command or None)
     credential = _args_suggest_credential(args) or name in {"vault_memory"} and act in {

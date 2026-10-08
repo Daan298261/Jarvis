@@ -18,6 +18,7 @@ from .filesystem import FilesystemTool
 from .git_tools import GitTool
 from .interpreter import OpenInterpreterTool
 from .mcp_runtime import MCP, MCPProxyTool
+from .reverse_engineer import ReverseEngineerTool
 from .office import OfficeTool
 from .python_exec import PythonTool
 from .request_tools import RequestToolsTool
@@ -77,6 +78,7 @@ class ToolRegistry:
             ReadIngressTool(),
             RequestCapabilityTool(),
             MCPProxyTool(),
+            ReverseEngineerTool(getter),
             UFOTool(),
             CuaTool(),
             ReflexComputerUseTool(),
@@ -179,7 +181,13 @@ class ToolRegistry:
                 elif not tool.enabled:
                     result = ToolResult(False, "", error=f"Tool {name} is disabled")
                 else:
-                    if name == "read_ingress":
+                    if name == "reverse_engineer":
+                        result = await tool.execute(
+                            **arguments,
+                            _task_id=task_id or self._context.get("task_id"),
+                            _grant_id=self._context.get("approval_grant_id"),
+                        )
+                    elif name == "read_ingress":
                         result = await tool.execute(**arguments, _task_id=task_id)
                     else:
                         result = await tool.execute(**arguments)

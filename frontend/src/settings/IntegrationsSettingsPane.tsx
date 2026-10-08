@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom"
 import { KnowledgeVaultSettingsSection } from "./KnowledgeVaultSettingsSection"
+import { ReverseEngineeringSettings } from "./ReverseEngineeringSettings"
 
 export function IntegrationsSettingsPane() {
   return (
@@ -17,6 +18,7 @@ export function IntegrationsSettingsPane() {
         </div>
       </div>
       <KnowledgeVaultSettingsSection />
+      <ReverseEngineeringSettings />
     </div>
   )
 }

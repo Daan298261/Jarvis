@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
+from .api import investigations
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
 from .api import advisor, agent_policy, agent_portability, agent_rooms, amazon_ads, approvals, auth, automation_breaker, autonomy, capability_lab, coding, companion, computer_use, context_repo, custom_presence, cyber_ato, decision, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, installer, integrations, license, lmstudio, lta, mcp, media, memory, mobile, model, modules, named_personas, owner_chat, packs, perception, perception_commentary, perception_identity, permissions, projects, queue, recovery, reversibility, runtime_profiles, security_agents, self_dev, session_personality, settings, setup, skill_forge, supermemory, swarm, system, tasks, tools, trajectories, vault, voice, voice_profiles, worker_environments, workflows, rea
@@ -62,6 +63,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(investigations.router)
 app.include_router(tasks.router)
 app.include_router(delegation.router)
 app.include_router(advisor.router)
@@ -417,6 +419,9 @@ async def shutdown() -> None:
         await FRONT_RUNTIME.stop()
     except Exception:
         logging.debug("Front runtime shutdown skipped", exc_info=True)
+    from .reverse_engineering.runtime import SERVICE as INVESTIGATIONS
+
+    await INVESTIGATIONS.shutdown()
     QUEUE_WATCHER.stop()
     try:
         from .inference.status_monitor import STATUS_MONITOR

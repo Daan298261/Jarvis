@@ -694,6 +694,8 @@ class AgentRuntime:
                     task.duration_seconds = (finished - started).total_seconds()
             await session.commit()
             if terminal_status in {"completed", "failed", "cancelled"}:
+                from ..reverse_engineering.runtime import SERVICE as investigations
+                await investigations.release_task(task_id, cancelled=terminal_status != "completed")
                 from ..automation.breaker import on_task_terminal
                 from .intake import on_task_terminal as advance_intake_chain
 
@@ -782,6 +784,19 @@ class AgentRuntime:
                         stage="act",
                     )
                     return False
+        from ..reverse_engineering.skill import requested as reverse_requested
+        if reverse_requested(prompt) or (working and working.task_class == "reverse engineering"):
+            from ..reverse_engineering.store import list_rows, directory
+            reports = [row for row in list_rows(task_id)
+                       if row["status"] in {"reported", "partial", "closed"}
+                       and (directory(row["id"]) / "report.json").is_file()]
+            if not reports:
+                block = "Reverse engineering requires a saved investigation report. Use reverse_engineer to prepare the supplied target, collect evidence, and report findings or explicit unknowns before completing."
+                messages.append(ChatMessage(role="user", content=block))
+                await self._update(task_id, status="running", stage="act", result=block,
+                                   verification="", current_action="Investigation report required",
+                                   conversation_json=serialize_messages(messages))
+                return False
         await self._await_managed_front(task_id)
         fields = {
             "status": "completed",
@@ -2421,6 +2436,8 @@ class AgentRuntime:
                     stage="understand",
                 )
             system_prompt = apply_working_set_to_system(system_prompt, turn_ws)
+            from ..reverse_engineering.skill import prompt_block as reverse_skill_block
+            system_prompt += "\n\n" + reverse_skill_block(active_prompt, working.task_class)
             audit = professional_prompt_block(active_prompt)
             if audit:
                 # Append after tool exposure so context fitting keeps this block in the tail.
@@ -3286,7 +3303,7 @@ class AgentRuntime:
             profile_id=profile_id,
             park_if_needed=False,
         )
-        if grant_id:
+        if grant_id and name != "reverse_engineer":
             from ..policy.approval_grant import consume_grant
 
             try:

@@ -10,6 +10,7 @@ from ..tools.registry import REGISTRY
 # Task class → native tools Jarvis should send to the model.
 # Mixed / long-horizon start small; prompt retrieval adds tools for this turn.
 CLASS_TOOLS: dict[str, tuple[str, ...]] = {
+    "reverse engineering": ("reverse_engineer", "filesystem"),
     "conversation": (),
     "filesystem": ("filesystem", "python"),
     "shell": ("filesystem", "terminal", "python"),
