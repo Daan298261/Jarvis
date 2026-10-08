@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -1144,7 +1145,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             synthesize = { piece -> withContext(Dispatchers.IO) { voicePackManager.synthesize(piece) } },
             play = { audio ->
                 playAudio(audio)
-                while (mutable.value.speaking && isActive) delay(40)
+                while (mutable.value.speaking && coroutineContext.isActive) delay(40)
             },
             onStopPlayback = { releasePlayer() },
             onIdle = {
