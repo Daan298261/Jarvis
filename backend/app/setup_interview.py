@@ -129,9 +129,9 @@ MODEL_MANIFEST: dict[str, dict[str, Any]] = {
         "relative_dir": "Qwen3.5-2B-GGUF",
         "filename": "Qwen3.5-2B-Q4_K_M.gguf",
         "downloadable": True,
-        "bundled": False,
+        "bundled": True,
         "estimated_disk_gb": 1.6,
-        "why": "Default front model. Short acknowledgements on CPU, no GPU memory.",
+        "why": "Default front model, included with Jarvis. Short acknowledgements on CPU, no GPU memory.",
         "limitations": "Interprets and hands off. It is not the worker that answers hard questions.",
     },
     "front_4b": {
@@ -391,9 +391,9 @@ def plan_interview(answers: dict[str, Any] | None = None, hw: HardwareInfo | Non
     models.append(
         _model_row(
             "front_2b",
-            status="front lane download",
+            status="bundled",
             selected=front_choice == "front_2b",
-            reason="Faster front model. Qwen3.5 2B Q4 stays on CPU and does not use GPU memory.",
+            reason="Faster front model, included with Jarvis. Qwen3.5 2B Q4 stays on CPU and does not use GPU memory.",
         )
     )
     models.append(

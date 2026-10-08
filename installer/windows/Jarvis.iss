@@ -86,6 +86,12 @@ Source: "manage-anzu-hosts.ps1"; DestDir: "{tmp}"; Flags: dontcopy
 ; by build-installer.ps1 and is not committed to the repository.
 Source: "payload\models\bootstrap\Ornith-1.5-9B-Q4_K_M.gguf"; DestDir: "{app}\models\bootstrap"; Flags: ignoreversion
 #endif
+#ifndef SkipFrontModel
+; Always-warm front lane. Staged by stage-front-model.ps1 and not committed.
+; Upgrade, repair, and semi-clean keep it the same way as the Ornith bootstrap
+; GGUF: it lives under models\ and is recopied from this payload.
+Source: "payload\models\Qwen3.5-2B-GGUF\Qwen3.5-2B-Q4_K_M.gguf"; DestDir: "{app}\models\Qwen3.5-2B-GGUF"; Flags: ignoreversion
+#endif
 #ifndef SkipVoicePack
 ; Default household butler Kokoro-82M weights (RFC-0070). Staged by stage-voice-default.ps1.
 Source: "payload\models\tts\kokoro-82m\*"; DestDir: "{app}\models\tts\kokoro-82m"; Flags: ignoreversion recursesubdirs createallsubdirs

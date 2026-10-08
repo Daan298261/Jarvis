@@ -5,7 +5,8 @@
 
 .DESCRIPTION
   Installs or verifies Python, Node.js, llama.cpp CUDA binaries, Python packages,
-  Playwright Chromium, the portal build, bootstrap GGUF, and persona voices.
+  Playwright Chromium, the portal build, bootstrap GGUF, the bundled Qwen3.5-2B
+  front GGUF, and persona voices.
   Safe to re-run: present files are skipped; anything missing is downloaded and installed.
   -SkipHeavyPrepare no longer bails out of setup.
 
@@ -18,7 +19,9 @@
 
 .PARAMETER SkipModelDownload
   Skip extra Qwen GGUF downloads when those files already exist. Missing bootstrap
-  or neural voice packs are still downloaded.
+  or neural voice packs are still downloaded. The bundled Qwen3.5-2B front GGUF
+  is not downloaded again when models\Qwen3.5-2B-GGUF\Qwen3.5-2B-Q4_K_M.gguf
+  is already present (the installer copies it); a missing copy is still fetched.
 
 .PARAMETER SkipLlamaDownload
   Ignored when llama-server.exe is missing; the runtime is downloaded and installed.
@@ -505,10 +508,45 @@ function Ensure-BootstrapGguf([string]$VenvPython) {
     Write-Ok "Ornith bootstrap GGUF ready."
 }
 
+function Ensure-Front2bGguf([string]$VenvPython) {
+    # JarvisSetup.exe copies this beside the Ornith bootstrap weights. When the
+    # file is already there, do not download it again (upgrade, repair, and
+    # semi-clean all recopy or keep models\ before this step).
+    $dir = Join-Path $Root "models\Qwen3.5-2B-GGUF"
+    $gguf = Join-Path $dir "Qwen3.5-2B-Q4_K_M.gguf"
+    $expectedBytes = 1280835840
+    if ((Test-Path $gguf) -and ((Get-Item $gguf).Length -eq $expectedBytes)) {
+        Write-Skip "Qwen3.5-2B front GGUF"
+        return
+    }
+    if (Test-Path $gguf) {
+        Remove-Item -Force $gguf
+    }
+    Write-Host "    Qwen3.5-2B front GGUF is missing; downloading Q4_K_M..."
+    Invoke-HfDownload -VenvPython $VenvPython `
+        -RepoId "unsloth/Qwen3.5-2B-GGUF" `
+        -Includes @("Qwen3.5-2B-Q4_K_M.gguf") `
+        -LocalDir $dir
+    if (-not (Test-Path $gguf)) {
+        $found = Get-ChildItem -Path $dir -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -eq "Qwen3.5-2B-Q4_K_M.gguf" } |
+            Select-Object -First 1
+        if ($found -and $found.FullName -ne $gguf) {
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            Copy-Item -Force $found.FullName $gguf
+        }
+    }
+    if (-not (Test-Path $gguf) -or ((Get-Item $gguf).Length -ne $expectedBytes)) {
+        throw "Qwen3.5-2B front GGUF is still missing or the wrong size after download."
+    }
+    Write-Ok "Qwen3.5-2B front GGUF ready."
+}
+
 function Ensure-DefaultModels([string]$VenvPython) {
     Ensure-BootstrapGguf -VenvPython $VenvPython
+    Ensure-Front2bGguf -VenvPython $VenvPython
     if (-not $InstallLocalLLM) {
-        Write-Host "    Skipping extra Qwen GGUF download (bootstrap model is enough). Re-run with -InstallLocalLLM to fetch 9B."
+        Write-Host "    Skipping extra Qwen GGUF download (bootstrap and front models are enough). Re-run with -InstallLocalLLM to fetch 9B."
         return
     }
 

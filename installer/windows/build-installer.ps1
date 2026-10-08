@@ -5,9 +5,10 @@
 
 .DESCRIPTION
   Run from the repository root or from installer/windows.
-  By default the build first stages the Ornith 1.5 9B Q4_K_M bootstrap model,
-  producing an installer that can start with local inference without a model
-  download on the target PC.
+  By default the build first stages the Ornith 1.5 9B Q4_K_M bootstrap model
+  and the Qwen3.5-2B Q4_K_M front-lane model, producing an installer that can
+  start with local inference and a warm front lane without those downloads
+  on the target PC.
 
   Output: installer/windows/dist/JarvisSetup.exe.
 
@@ -25,11 +26,16 @@
 
 .PARAMETER SkipDesktopShell
   Skip building/staging Jarvis Desktop (Tauri). Release cuts require the desktop shell.
+
+.PARAMETER SkipFrontModel
+  Developer-only escape hatch. Builds an installer without the bundled
+  Qwen3.5-2B front-lane weights. Forbidden with -Release.
 #>
 param(
     [switch]$SkipBootstrapModel,
     [switch]$SkipVoicePack,
     [switch]$SkipDesktopShell,
+    [switch]$SkipFrontModel,
     [switch]$Release
 )
 
@@ -40,6 +46,8 @@ $Root = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
 $Iss = Join-Path $ScriptDir "Jarvis.iss"
 $OutDir = Join-Path $ScriptDir "dist"
 $BootstrapModel = Join-Path $ScriptDir "payload\models\bootstrap\Ornith-1.5-9B-Q4_K_M.gguf"
+$FrontModel = Join-Path $ScriptDir "payload\models\Qwen3.5-2B-GGUF\Qwen3.5-2B-Q4_K_M.gguf"
+$FrontModelBytes = 1280835840
 $VoiceModelMarker = Join-Path $ScriptDir "payload\models\tts\kokoro-82m\.jarvis_staged_ok"
 
 function Find-Iscc {
@@ -75,6 +83,20 @@ if (-not $SkipBootstrapModel) {
     }
 } else {
     Write-Warning "Building without bundled bootstrap model (-SkipBootstrapModel)."
+}
+
+if ($Release -and $SkipFrontModel) {
+    throw "Release cuts cannot use -SkipFrontModel. The installer must ship the Qwen3.5-2B front model."
+}
+if (-not $SkipFrontModel) {
+    Write-Host "==> Staging bundled Qwen3.5-2B front model" -ForegroundColor Cyan
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ScriptDir "stage-front-model.ps1")
+    if ($LASTEXITCODE -ne 0) { throw "Front model staging failed with exit code $LASTEXITCODE" }
+    if (-not (Test-Path $FrontModel) -or (Get-Item $FrontModel).Length -ne $FrontModelBytes) {
+        throw "Front model payload not ready: $FrontModel"
+    }
+} else {
+    Write-Warning "Building without bundled Qwen3.5-2B front model (-SkipFrontModel)."
 }
 
 if (-not $SkipVoicePack) {
@@ -121,6 +143,7 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 Write-Host "Compiling $Iss ..."
 $defines = @()
 if ($SkipBootstrapModel) { $defines += "/DSkipBootstrapModel=1" }
+if ($SkipFrontModel) { $defines += "/DSkipFrontModel=1" }
 if ($SkipVoicePack) { $defines += "/DSkipVoicePack=1" }
 if ($SkipDesktopShell) { $defines += "/DSkipDesktopShell=1" }
 & $iscc @defines "/O$OutDir" $Iss
@@ -132,6 +155,9 @@ Write-Host ""
 Write-Host "Built: $exe" -ForegroundColor Green
 if (-not $SkipBootstrapModel) {
     Write-Host "Includes: Ornith 1.5 9B Q4_K_M bootstrap weights" -ForegroundColor Green
+}
+if (-not $SkipFrontModel) {
+    Write-Host "Includes: Qwen3.5-2B Q4_K_M front-lane weights" -ForegroundColor Green
 }
 if (-not $SkipVoicePack) {
     Write-Host "Includes: Kokoro-82M default household butler voice" -ForegroundColor Green
