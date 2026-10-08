@@ -5,6 +5,7 @@ import importlib.util
 from types import SimpleNamespace
 import json
 import re
+import struct
 import tomllib
 import sys
 
@@ -504,3 +505,116 @@ def test_optional_tauri_shell_sources():
     assert "nsis" in conf.lower()
     assert "stage-release-folder.ps1" in release_text
     assert "release" in release_text
+
+
+def _png_size(path: Path) -> tuple[int, int]:
+    data = path.read_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n", path
+    assert data[12:16] == b"IHDR", path
+    return struct.unpack(">II", data[16:24])
+
+
+def _iss_sections(text: str) -> set[str]:
+    return set(re.findall(r"(?m)^\[([^\]]+)\]\s*$", text))
+
+
+def test_select_all_checkbox_is_wired_to_existing_lists():
+    """Select all sits on every components/tasks checklist the script defines."""
+    iss = _read(ISS)
+    sections = _iss_sections(iss)
+    lists = []
+    if "Tasks" in sections:
+        lists.append("TasksList")
+    if "Components" in sections:
+        lists.append("ComponentsList")
+    assert lists, "installer should define [Tasks] and/or [Components]"
+
+    assert "Caption := 'Select all'" in iss
+    assert "TNewCheckBox" in iss
+    assert "AllowGrayed" in iss
+    assert "cbGrayed" in iss
+    assert "ItemEnabled" in iss
+    assert "ItemObject" in iss
+    assert "procedure ApplySelectAll" in iss
+    assert "procedure SelectAllClick" in iss
+    assert "WizardSilent" in iss
+
+    prepare = iss.split("procedure PrepareAnzuWizard", 1)[1].split("\nprocedure ", 1)[0]
+    assert "WizardSilent" in prepare
+    assert "ApplySelectAll" not in prepare
+    for name in lists:
+        assert f"WizardForm.{name}.OnClickCheck := @ChecklistClickCheck" in iss
+        assert f"WizardForm.{name}" in prepare or f"WizardForm.{name}" in iss
+
+
+def test_anzu_wizard_theme_assets_and_glow_timer():
+    """Dark ANZU art is generated, and the glow timer is stopped on teardown."""
+    iss = _read(ISS)
+    assets = INSTALLER_DIR / "assets"
+    script = assets / "render_wizard_assets.py"
+    assert script.is_file()
+    source = _read(script)
+    for needle in (
+        "#05070a",
+        "#67dcff",
+        "#d4a017",
+        "1100",
+        "0.85",
+        "1.2",
+        "0.65",
+        "0.72",
+        "FRAME_COUNT = 16",
+        "boot-dot-pulse",
+    ):
+        assert needle in source, needle
+
+    assert "WizardStyle=modern" in iss
+    assert "WizardSmallImageBackColor=$0A0705" in iss
+    assert "AnzuGlowIntervalMs = 69" in iss
+    assert "AnzuGlowFrames = 16" in iss
+    assert "CreateCallback(@GlowTimerProc)" in iss
+    assert "PngImage.LoadFromFile" in iss
+    assert "procedure DeinitializeSetup" in iss
+    shutdown = iss.split("procedure DeinitializeSetup", 1)[1]
+    assert "KillTimer(0, GlowTimerID)" in shutdown
+    assert "GlowTimerID := 0" in shutdown
+
+    large = (
+        (164, 314),
+        (202, 386),
+        (240, 459),
+        (269, 515),
+        (290, 556),
+        (315, 604),
+        (336, 643),
+        (403, 772),
+        (430, 824),
+    )
+    small = (58, 71, 77, 85, 97, 103, 112, 116, 124, 129, 143, 147, 159)
+    image_directive = next(line for line in iss.splitlines() if line.startswith("WizardImageFile="))
+    small_directive = next(line for line in iss.splitlines() if line.startswith("WizardSmallImageFile="))
+    for width, height in large:
+        name = f"wizard-large-{width}x{height}.png"
+        path = assets / name
+        assert path.is_file(), name
+        assert _png_size(path) == (width, height)
+        assert f"assets\\{name}" in image_directive
+    for size in small:
+        name = f"wizard-small-{size}.png"
+        path = assets / name
+        assert path.is_file(), name
+        assert _png_size(path) == (size, size)
+        assert f"assets\\{name}" in small_directive
+
+    glow_hashes = []
+    for index in range(16):
+        name = f"glow-{index:02d}.png"
+        path = assets / "glow" / name
+        assert path.is_file(), name
+        assert _png_size(path) == (192, 192)
+        assert f'Source: "assets\\glow\\{name}"' in iss
+        glow_hashes.append(path.read_bytes())
+    assert glow_hashes[0] != glow_hashes[8]
+    assert glow_hashes[0] != glow_hashes[15]
+    assert (assets / "fonts" / "AnzuWizardSans-SemiBold.ttf").is_file()
+    assert (assets / "fonts" / "OFL.txt").is_file()

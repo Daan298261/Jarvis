@@ -30,6 +30,12 @@ SolidCompression=yes
 ; Bundled Ornith Q4_K_M is ~5.4 GB; a single Setup.exe cannot exceed ~4.2 GB on Windows.
 DiskSpanning=yes
 WizardStyle=modern
+; ANZU HUD palette. Sizes cover Inno Setup 6 image areas before and after 6.6
+; so 100% and 150% DPI pick an exact bitmap. Regenerate with
+; installer\windows\assets\render_wizard_assets.py
+WizardImageFile=assets\wizard-large-164x314.png,assets\wizard-large-202x386.png,assets\wizard-large-240x459.png,assets\wizard-large-269x515.png,assets\wizard-large-290x556.png,assets\wizard-large-315x604.png,assets\wizard-large-336x643.png,assets\wizard-large-403x772.png,assets\wizard-large-430x824.png
+WizardSmallImageFile=assets\wizard-small-58.png,assets\wizard-small-71.png,assets\wizard-small-77.png,assets\wizard-small-85.png,assets\wizard-small-97.png,assets\wizard-small-103.png,assets\wizard-small-112.png,assets\wizard-small-116.png,assets\wizard-small-124.png,assets\wizard-small-129.png,assets\wizard-small-143.png,assets\wizard-small-147.png,assets\wizard-small-159.png
+WizardSmallImageBackColor=$0A0705
 PrivilegesRequired=lowest
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\start-jarvis.ps1
@@ -85,6 +91,23 @@ Source: "run-installer-bootstrap.ps1"; DestDir: "{app}\installer\windows"; Flags
 Source: "run-installer-bootstrap.ps1"; DestDir: "{tmp}"; Flags: dontcopy
 Source: "manage-anzu-hosts.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversion
 Source: "manage-anzu-hosts.ps1"; DestDir: "{tmp}"; Flags: dontcopy
+; Pulsing HUD mark. Extracted only for the interactive wizard, not copied into {app}.
+Source: "assets\glow\glow-00.png"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "assets\glow\glow-01.png"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "assets\glow\glow-02.png"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "assets\glow\glow-03.png"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "assets\glow\glow-04.png"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "assets\glow\glow-05.png"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "assets\glow\glow-06.png"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "assets\glow\glow-07.png"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "assets\glow\glow-08.png"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "assets\glow\glow-09.png"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "assets\glow\glow-10.png"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "assets\glow\glow-11.png"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "assets\glow\glow-12.png"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "assets\glow\glow-13.png"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "assets\glow\glow-14.png"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "assets\glow\glow-15.png"; DestDir: "{tmp}"; Flags: dontcopy
 #ifndef SkipBootstrapModel
 ; Release distributions carry a local bootstrap brain. The multi-GB file is staged
 ; by build-installer.ps1 and is not committed to the repository.
@@ -141,6 +164,15 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 const
   JarvisUninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{A7B3C4D5-E6F7-4890-ABCD-EF1234567890}_is1';
   JarvisOwnedPathsKey = 'Software\Jarvis\OwnedPaths';
+  { HUD colors from frontend/src/hud/hud-v2.css, stored as Delphi $00BBGGRR. }
+  AnzuBg = $0A0705;       { #05070a }
+  AnzuPanel = $150F0A;    { #0a0f15 }
+  AnzuText = $FBF7ED;     { #edf7fb }
+  AnzuMuted = $ADA39A;    { #9aa3ad }
+  AnzuGlowFrames = 16;
+  { boot-dot-pulse is 1.1s. 1100/16 rounds to 69ms per pre-rendered frame. }
+  AnzuGlowIntervalMs = 69;
+  AnzuGlowPeak = 8;
 
 var
   ExistingInstallPage: TInputOptionWizardPage;
@@ -150,6 +182,454 @@ var
   ExistingVersionRelation: Integer;
   BootstrapSkipHeavy: Boolean;
   BootstrapSkipModelDownload: Boolean;
+  TasksSelectAll: TNewCheckBox;
+  ComponentsSelectAll: TNewCheckBox;
+  TasksAllSelected: Boolean;
+  ComponentsAllSelected: Boolean;
+  TasksListOriginTop: Integer;
+  TasksListOriginHeight: Integer;
+  ComponentsListOriginTop: Integer;
+  ComponentsListOriginHeight: Integer;
+  TasksLayoutReady: Boolean;
+  ComponentsLayoutReady: Boolean;
+  SelectAllBusy: Boolean;
+  GlowWelcome: TBitmapImage;
+  GlowInstalling: TBitmapImage;
+  GlowFinished: TBitmapImage;
+  AnzuGlowPlaced: Boolean;
+  GlowFrame: Integer;
+  GlowTimerID: UINT_PTR;
+  GlowCallback: NativeInt;
+  GlowTicking: Boolean;
+
+function SetTimer(hWnd: HWND; nIDEvent: UINT_PTR; uElapse: UINT; lpTimerFunc: NativeInt): UINT_PTR;
+  external 'SetTimer@user32.dll stdcall';
+function KillTimer(hWnd: HWND; uIDEvent: UINT_PTR): BOOL;
+  external 'KillTimer@user32.dll stdcall';
+
+function ItemIsSelectable(List: TNewCheckListBox; Index: Integer): Boolean;
+begin
+  { Group captions have no item object. Fixed/required components are created
+    with ItemEnabled = False (the fixed flag) and are never cleared. }
+  Result := List.ItemEnabled[Index] and (List.ItemObject[Index] <> nil);
+end;
+
+procedure ApplySelectAll(List: TNewCheckListBox; Check: Boolean);
+var
+  I: Integer;
+begin
+  SelectAllBusy := True;
+  try
+    for I := 0 to List.Items.Count - 1 do
+      if ItemIsSelectable(List, I) then
+        List.Checked[I] := Check;
+  finally
+    SelectAllBusy := False;
+  end;
+end;
+
+procedure SyncSelectAll(List: TNewCheckListBox; Box: TNewCheckBox);
+var
+  I: Integer;
+  Selectable: Integer;
+  CheckedCount: Integer;
+  NewState: TCheckBoxState;
+begin
+  if (Box = nil) or SelectAllBusy then
+    Exit;
+  Selectable := 0;
+  CheckedCount := 0;
+  for I := 0 to List.Items.Count - 1 do
+    if ItemIsSelectable(List, I) then
+    begin
+      Selectable := Selectable + 1;
+      if List.Checked[I] then
+        CheckedCount := CheckedCount + 1;
+    end;
+  if (Selectable > 0) and (CheckedCount = Selectable) then
+    NewState := cbChecked
+  else if (CheckedCount > 0) and (CheckedCount < Selectable) then
+    NewState := cbGrayed
+  else
+    NewState := cbUnchecked;
+  SelectAllBusy := True;
+  try
+    Box.State := NewState;
+    if Box = TasksSelectAll then
+      TasksAllSelected := (NewState = cbChecked)
+    else if Box = ComponentsSelectAll then
+      ComponentsAllSelected := (NewState = cbChecked);
+  finally
+    SelectAllBusy := False;
+  end;
+end;
+
+procedure SelectAllClick(Sender: TObject);
+var
+  Box: TNewCheckBox;
+  List: TNewCheckListBox;
+  WasComplete: Boolean;
+begin
+  if SelectAllBusy then
+    Exit;
+  if Sender = TasksSelectAll then
+  begin
+    Box := TasksSelectAll;
+    List := WizardForm.TasksList;
+    WasComplete := TasksAllSelected;
+  end
+  else if Sender = ComponentsSelectAll then
+  begin
+    Box := ComponentsSelectAll;
+    List := WizardForm.ComponentsList;
+    WasComplete := ComponentsAllSelected;
+  end
+  else
+    Exit;
+  { A grayed or clear box means "not everything is selected", so a click
+    selects every selectable row. A fully checked box clears those rows.
+    AllowGrayed cycles through gray on the way, and this ignores that. }
+  ApplySelectAll(List, not WasComplete);
+  SyncSelectAll(List, Box);
+end;
+
+procedure ChecklistClickCheck(Sender: TObject);
+begin
+  if SelectAllBusy then
+    Exit;
+  if Sender = WizardForm.TasksList then
+    SyncSelectAll(WizardForm.TasksList, TasksSelectAll)
+  else if Sender = WizardForm.ComponentsList then
+    SyncSelectAll(WizardForm.ComponentsList, ComponentsSelectAll);
+end;
+
+procedure EnsureSelectAllLayout(List: TNewCheckListBox; Box: TNewCheckBox;
+  var OriginTop, OriginHeight: Integer; var Ready: Boolean);
+var
+  Shift: Integer;
+begin
+  if Box = nil then
+    Exit;
+  Shift := ScaleY(24);
+  if not Ready then
+  begin
+    OriginTop := List.Top;
+    OriginHeight := List.Height;
+    Ready := True;
+  end;
+  Box.Left := List.Left;
+  Box.Top := OriginTop;
+  Box.Width := List.Width;
+  Box.Height := ScaleY(20);
+  if List.Top < OriginTop + Shift - 1 then
+  begin
+    List.Top := OriginTop + Shift;
+    if OriginHeight > Shift then
+      List.Height := OriginHeight - Shift;
+  end;
+  Box.Visible := True;
+  Box.BringToFront;
+end;
+
+procedure CreateSelectAll(List: TNewCheckListBox; var Box: TNewCheckBox);
+begin
+  Box := TNewCheckBox.Create(WizardForm);
+  Box.Parent := List.Parent;
+  Box.Caption := 'Select all';
+  Box.AllowGrayed := True;
+  Box.Font.Name := 'Segoe UI';
+  Box.Font.Color := AnzuText;
+  Box.StyleElements := [seClient];
+  Box.TabStop := True;
+  Box.TabOrder := 0;
+  Box.Anchors := [akLeft, akTop, akRight];
+  Box.Visible := False;
+  { CurPageChanged positions the box after Inno lays the checklist out.
+    Sync only reads the defaults; it does not write Checked. }
+  Box.OnClick := @SelectAllClick;
+  SyncSelectAll(List, Box);
+end;
+
+procedure ThemeLabel(ALabel: TNewStaticText; AColor: TColor);
+begin
+  ALabel.Font.Name := 'Segoe UI';
+  ALabel.Font.Color := AColor;
+  ALabel.StyleElements := [];
+end;
+
+procedure ThemeChecklist(List: TNewCheckListBox);
+begin
+  List.Color := AnzuPanel;
+  List.Font.Name := 'Segoe UI';
+  List.Font.Color := AnzuText;
+  List.StyleElements := [];
+end;
+
+procedure ThemePage(Page: TNewNotebookPage);
+begin
+  Page.ParentBackground := False;
+  Page.Color := AnzuBg;
+  Page.StyleElements := [];
+end;
+
+procedure ApplyAnzuTheme;
+begin
+  WizardForm.Caption := 'Setup - ANZU';
+  WizardForm.Color := AnzuBg;
+  WizardForm.Font.Name := 'Segoe UI';
+  WizardForm.Font.Color := AnzuText;
+  WizardForm.StyleElements := [];
+
+  WizardForm.MainPanel.ParentBackground := False;
+  WizardForm.MainPanel.Color := AnzuBg;
+
+  ThemePage(WizardForm.WelcomePage);
+  ThemePage(WizardForm.InnerPage);
+  ThemePage(WizardForm.FinishedPage);
+  ThemePage(WizardForm.SelectDirPage);
+  ThemePage(WizardForm.SelectComponentsPage);
+  ThemePage(WizardForm.SelectTasksPage);
+  ThemePage(WizardForm.ReadyPage);
+  ThemePage(WizardForm.PreparingPage);
+  ThemePage(WizardForm.InstallingPage);
+  ThemePage(WizardForm.LicensePage);
+  ThemePage(WizardForm.InfoBeforePage);
+  ThemePage(WizardForm.InfoAfterPage);
+  ThemePage(WizardForm.PasswordPage);
+  ThemePage(WizardForm.UserInfoPage);
+  ThemePage(WizardForm.SelectProgramGroupPage);
+
+  ThemeLabel(WizardForm.WelcomeLabel1, AnzuText);
+  ThemeLabel(WizardForm.WelcomeLabel2, AnzuMuted);
+  ThemeLabel(WizardForm.FinishedHeadingLabel, AnzuText);
+  ThemeLabel(WizardForm.FinishedLabel, AnzuMuted);
+  ThemeLabel(WizardForm.PageNameLabel, AnzuText);
+  ThemeLabel(WizardForm.PageDescriptionLabel, AnzuMuted);
+  ThemeLabel(WizardForm.StatusLabel, AnzuText);
+  ThemeLabel(WizardForm.FilenameLabel, AnzuMuted);
+  ThemeLabel(WizardForm.ReadyLabel, AnzuMuted);
+  ThemeLabel(WizardForm.SelectTasksLabel, AnzuMuted);
+  ThemeLabel(WizardForm.SelectComponentsLabel, AnzuMuted);
+  ThemeLabel(WizardForm.SelectDirLabel, AnzuMuted);
+  ThemeLabel(WizardForm.DiskSpaceLabel, AnzuMuted);
+  ThemeLabel(WizardForm.BeveledLabel, AnzuMuted);
+  WizardForm.WelcomeLabel1.Caption := 'Welcome to ANZU';
+  WizardForm.FinishedHeadingLabel.Caption := 'ANZU setup is complete';
+
+  ThemeChecklist(WizardForm.TasksList);
+  ThemeChecklist(WizardForm.ComponentsList);
+  ThemeChecklist(WizardForm.RunList);
+
+  WizardForm.ReadyMemo.Color := AnzuPanel;
+  WizardForm.ReadyMemo.Font.Name := 'Segoe UI';
+  WizardForm.ReadyMemo.Font.Color := AnzuText;
+  WizardForm.ReadyMemo.StyleElements := [];
+
+  WizardForm.DirEdit.Color := AnzuPanel;
+  WizardForm.DirEdit.Font.Name := 'Segoe UI';
+  WizardForm.DirEdit.Font.Color := AnzuText;
+  WizardForm.DirEdit.StyleElements := [];
+
+  WizardForm.Bevel.Visible := False;
+  WizardForm.Bevel1.Visible := False;
+end;
+
+procedure ThemeExistingInstallPage;
+begin
+  if ExistingInstallPage = nil then
+    Exit;
+  ExistingInstallPage.Surface.ParentBackground := False;
+  ExistingInstallPage.Surface.Color := AnzuBg;
+  ExistingInstallPage.Surface.StyleElements := [];
+  ThemeChecklist(ExistingInstallPage.CheckListBox);
+end;
+
+function GlowFrameName(Index: Integer): String;
+begin
+  if Index < 10 then
+    Result := 'glow-0' + IntToStr(Index) + '.png'
+  else
+    Result := 'glow-' + IntToStr(Index) + '.png';
+end;
+
+function VisibleGlow: TBitmapImage;
+begin
+  Result := nil;
+  if (GlowWelcome <> nil) and GlowWelcome.Visible then
+    Result := GlowWelcome
+  else if (GlowInstalling <> nil) and GlowInstalling.Visible then
+    Result := GlowInstalling
+  else if (GlowFinished <> nil) and GlowFinished.Visible then
+    Result := GlowFinished;
+end;
+
+procedure ShowGlowFrame(Image: TBitmapImage; Index: Integer);
+begin
+  if Image = nil then
+    Exit;
+  Image.PngImage.LoadFromFile(ExpandConstant('{tmp}\') + GlowFrameName(Index));
+end;
+
+procedure GlowTimerProc(Wnd: HWND; Msg: UINT; EventID: UINT_PTR; Time: DWORD);
+var
+  Target: TBitmapImage;
+begin
+  if GlowTicking or (GlowTimerID = 0) then
+    Exit;
+  Target := VisibleGlow;
+  if Target = nil then
+    Exit;
+  GlowTicking := True;
+  try
+    GlowFrame := (GlowFrame + 1) mod AnzuGlowFrames;
+    try
+      ShowGlowFrame(Target, GlowFrame);
+    except
+      KillTimer(0, GlowTimerID);
+      GlowTimerID := 0;
+      Log('ANZU glow timer stopped after a frame failed to load.');
+    end;
+  finally
+    GlowTicking := False;
+  end;
+end;
+
+function CreateGlowImage: TBitmapImage;
+begin
+  Result := TBitmapImage.Create(WizardForm);
+  Result.Stretch := True;
+  Result.Width := ScaleX(64);
+  Result.Height := ScaleY(64);
+  Result.BackColor := AnzuBg;
+  Result.Visible := False;
+end;
+
+procedure PlaceAnzuGlow;
+var
+  Shift: Integer;
+begin
+  if AnzuGlowPlaced then
+    Exit;
+  AnzuGlowPlaced := True;
+  Shift := ScaleY(68);
+
+  GlowWelcome := CreateGlowImage;
+  GlowWelcome.Parent := WizardForm.WelcomePage;
+  GlowWelcome.Left := WizardForm.WelcomeLabel1.Left;
+  GlowWelcome.Top := WizardForm.WelcomeLabel1.Top;
+  WizardForm.WelcomeLabel1.Top := WizardForm.WelcomeLabel1.Top + Shift;
+  WizardForm.WelcomeLabel2.Top := WizardForm.WelcomeLabel2.Top + Shift;
+
+  GlowInstalling := CreateGlowImage;
+  GlowInstalling.Parent := WizardForm.InstallingPage;
+  GlowInstalling.Left := WizardForm.StatusLabel.Left;
+  GlowInstalling.Top := WizardForm.StatusLabel.Top;
+  WizardForm.StatusLabel.Top := WizardForm.StatusLabel.Top + Shift;
+  WizardForm.FilenameLabel.Top := WizardForm.FilenameLabel.Top + Shift;
+  WizardForm.ProgressGauge.Top := WizardForm.ProgressGauge.Top + Shift;
+
+  GlowFinished := CreateGlowImage;
+  GlowFinished.Parent := WizardForm.FinishedPage;
+  GlowFinished.Left := WizardForm.FinishedHeadingLabel.Left;
+  GlowFinished.Top := WizardForm.FinishedHeadingLabel.Top;
+  WizardForm.FinishedHeadingLabel.Top := WizardForm.FinishedHeadingLabel.Top + Shift;
+  WizardForm.FinishedLabel.Top := WizardForm.FinishedLabel.Top + Shift;
+end;
+
+procedure PaintStaticGlow;
+begin
+  ShowGlowFrame(GlowWelcome, AnzuGlowPeak);
+  ShowGlowFrame(GlowInstalling, AnzuGlowPeak);
+  ShowGlowFrame(GlowFinished, AnzuGlowPeak);
+end;
+
+procedure ExtractGlowFrames;
+var
+  I: Integer;
+begin
+  for I := 0 to AnzuGlowFrames - 1 do
+    ExtractTemporaryFile(GlowFrameName(I));
+end;
+
+procedure StartAnzuGlow;
+begin
+  GlowFrame := AnzuGlowPeak;
+  try
+    ExtractGlowFrames;
+    PlaceAnzuGlow;
+    PaintStaticGlow;
+    GlowCallback := CreateCallback(@GlowTimerProc);
+    if GlowCallback <> 0 then
+      GlowTimerID := SetTimer(0, 0, AnzuGlowIntervalMs, GlowCallback);
+  except
+    Log('ANZU glow could not start; the install will continue with a static mark.');
+    GlowTimerID := 0;
+  end;
+  if GlowTimerID = 0 then
+  begin
+    try
+      PlaceAnzuGlow;
+      PaintStaticGlow;
+    except
+      Log('ANZU glow mark unavailable; continuing without it.');
+    end;
+  end;
+end;
+
+procedure ShowAnzuGlow(CurPageID: Integer);
+begin
+  if GlowWelcome <> nil then
+    GlowWelcome.Visible := (CurPageID = wpWelcome);
+  if GlowInstalling <> nil then
+    GlowInstalling.Visible := (CurPageID = wpInstalling);
+  if GlowFinished <> nil then
+    GlowFinished.Visible := (CurPageID = wpFinished);
+end;
+
+procedure PrepareAnzuWizard;
+begin
+  { Silent and very-silent installs keep /TASKS and /COMPONENTS exactly as
+    Inno parsed them. No checkbox, no theme writes, no timer. }
+  if WizardSilent then
+    Exit;
+
+  ApplyAnzuTheme;
+  WizardForm.TasksList.OnClickCheck := @ChecklistClickCheck;
+  WizardForm.ComponentsList.OnClickCheck := @ChecklistClickCheck;
+  if WizardForm.TasksList.Items.Count > 0 then
+    CreateSelectAll(WizardForm.TasksList, TasksSelectAll);
+  if WizardForm.ComponentsList.Items.Count > 0 then
+    CreateSelectAll(WizardForm.ComponentsList, ComponentsSelectAll);
+  StartAnzuGlow;
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if WizardSilent then
+    Exit;
+  ShowAnzuGlow(CurPageID);
+  if CurPageID = wpSelectTasks then
+  begin
+    EnsureSelectAllLayout(WizardForm.TasksList, TasksSelectAll, TasksListOriginTop,
+      TasksListOriginHeight, TasksLayoutReady);
+    SyncSelectAll(WizardForm.TasksList, TasksSelectAll);
+  end
+  else if CurPageID = wpSelectComponents then
+  begin
+    EnsureSelectAllLayout(WizardForm.ComponentsList, ComponentsSelectAll,
+      ComponentsListOriginTop, ComponentsListOriginHeight, ComponentsLayoutReady);
+    SyncSelectAll(WizardForm.ComponentsList, ComponentsSelectAll);
+  end;
+end;
+
+procedure DeinitializeSetup;
+begin
+  if GlowTimerID <> 0 then
+  begin
+    KillTimer(0, GlowTimerID);
+    GlowTimerID := 0;
+  end;
+end;
 
 function StripPreRelease(const Value: String): String;
 var
@@ -297,6 +777,7 @@ procedure InitializeWizard;
 var
   PrimaryAction: String;
 begin
+  PrepareAnzuWizard;
   if not ExistingInstallDetected then
     Exit;
 
@@ -316,6 +797,8 @@ begin
   ExistingInstallPage.Add('&Semi-clean reinstall - reset chats, routines, memory, and logs; keep models');
   ExistingInstallPage.Add('&Clean reinstall - remove Jarvis and all custom files');
   ExistingInstallPage.SelectedValueIndex := 0;
+  if not WizardSilent then
+    ThemeExistingInstallPage;
 end;
 
 function ResolveForceStopScript(const AppDir: String): String;

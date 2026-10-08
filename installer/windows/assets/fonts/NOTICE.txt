@@ -1,0 +1,6 @@
+AnzuWizardSans-Regular.ttf and AnzuWizardSans-SemiBold.ttf are subset
+derivatives of Inter (https://github.com/rsms/inter), Copyright 2016 The
+Inter Project Authors, licensed under the SIL Open Font License (OFL.txt).
+
+The family was renamed because "Inter" is a Reserved Font Name. These files
+are used only by render_wizard_assets.py to draw the installer bitmaps.
