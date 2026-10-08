@@ -174,6 +174,7 @@ def serialize_messages(messages: list[ChatMessage]) -> str:
                 "name": message.name,
                 "tool_call_id": message.tool_call_id,
                 "tool_calls": message.tool_calls,
+                "audience": getattr(message, "audience", "") or "",
             }
         )
     return json.dumps(payload)
@@ -190,6 +191,7 @@ def deserialize_messages(raw: str) -> list[ChatMessage]:
             name=item.get("name"),
             tool_call_id=item.get("tool_call_id"),
             tool_calls=item.get("tool_calls"),
+            audience=str(item.get("audience") or ""),
         )
         for item in data
     ]

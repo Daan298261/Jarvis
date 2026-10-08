@@ -191,8 +191,8 @@ export function ChatPage() {
           </>
         ) : empty ? (
           <>
-            <h1>What should Jarvis do?</h1>
-            <p className="lede">Describe the end state. Jarvis plans, uses tools on this PC, and checks the result.</p>
+            <h1>What should ANZU do?</h1>
+            <p className="lede">Describe the end state. ANZU plans, uses tools on this PC, and checks the result.</p>
           </>
         ) : (
           <h1>Opening task…</h1>

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Iterable
 
 from ..agent.compaction import compact_history
-from ..agent.context_policy import CONTEXT_LONG, CONTEXT_NORMAL, CONTEXT_SIMPLE, profile_cap
+from ..agent.context_policy import CONTEXT_LONG, CONTEXT_NORMAL, CONTEXT_SIMPLE, CONTEXT_XL, profile_cap
 from ..config import AppSettings
 from .context_window import CHARS_PER_TOKEN, is_n_keep_overflow
 from .inference_prompt import inference_message_text
@@ -158,7 +158,7 @@ def choose_context_window(required: int, cap: int, current: int) -> int:
     current = max(0, int(current or 0))
     required = max(1, int(required or 0))
     chosen = current
-    for tier in (CONTEXT_SIMPLE, CONTEXT_NORMAL, CONTEXT_LONG):
+    for tier in (CONTEXT_SIMPLE, CONTEXT_NORMAL, CONTEXT_LONG, CONTEXT_XL):
         if tier < required:
             continue
         if tier > cap:

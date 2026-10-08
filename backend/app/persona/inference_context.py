@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from ..agent.context_policy import next_context_size, profile_cap
-from ..agent.front_responder import RUNTIME_ROLE, resolve_front_model_id, spawn_context_switch_keep_busy
+from ..agent.front_responder import RUNTIME_ROLE
 from ..config import AppSettings, load_settings
 from ..events import BUS
 from ..inference.context_model_select import select_profile_for_context
@@ -160,6 +160,14 @@ async def maybe_autoselect_runtime_for_budget(
     bus_channel: str | None = None,
     minimum_answer_tier: int = 0,
 ) -> ModelProfile | None:
+    """Context pressure never changes the active model.
+
+    Growing the loaded model's context is the recovery. A larger runtime,
+    including a shared Ollama community model, loads only when the owner
+    picks it in settings or through an explicit activate API. This function
+    records that refusal where the owner can see it and returns None.
+    """
+    del user_prompt, minimum_answer_tier
     required = int(budget.required_context or 0)
     cap = int(budget.profile_cap or profile_cap(profile))
     if required <= cap and budget.pressure < 0.95:
@@ -176,31 +184,35 @@ async def maybe_autoselect_runtime_for_budget(
         required,
         runtimes,
         current_runtime,
-        minimum_answer_tier=minimum_answer_tier,
+        minimum_answer_tier=0,
     )
-    if chosen is None or not isinstance(chosen, RuntimeProfile):
-        return None
+    candidate = ""
+    if isinstance(chosen, RuntimeProfile):
+        candidate = (chosen.model_profile or chosen.name or "").strip()
+    from ..observability.rolling_log import record_event
 
-    async def _publish_keep_busy(text: str) -> None:
-        target = task_id or bus_channel
-        if not target:
-            return
+    record_event(
+        "model_switch_refused",
+        message="Context pressure did not change the active model.",
+        active_profile=profile.name,
+        candidate=candidate,
+        required_context=required,
+        profile_cap=cap,
+        pressure=round(float(budget.pressure or 0), 4),
+    )
+    detail = (
+        f"Context pressure on {profile.name} was not used to switch models. "
+        f"Required {required} tokens, cap {cap}."
+    )
+    if candidate:
+        detail += f" Candidate {candidate} was refused."
+    target = task_id or bus_channel
+    if target:
         await BUS.publish(
             target,
-            "chat_tts",
-            "Switching model",
-            chat_segment_payload(text, source_model=resolve_front_model_id(settings), runtime_role=RUNTIME_ROLE),
-            stage="chat",
-            persist=False,
+            "progress",
+            "Active model unchanged",
+            detail,
+            stage="model",
         )
-
-    spawn_context_switch_keep_busy(settings=settings, user_text=user_prompt, on_spoken=_publish_keep_busy)
-    from ..inference.hotswap import activate_runtime_profile
-
-    try:
-        await activate_runtime_profile(chosen, force=True)
-    except RuntimeError as exc:
-        if "missing model files" not in str(exc).lower():
-            raise
-        return None
-    return resolve_profile((chosen.model_profile or chosen.name or profile.name).strip())
+    return None

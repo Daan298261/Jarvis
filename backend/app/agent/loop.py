@@ -55,7 +55,7 @@ from ..policy.undo_restore import capture_prior_for_effect
 from ..tools.exposure import ToolExposure
 from ..tools.registry import REGISTRY
 from ..tools.safety import RiskLevel, classify_command, is_destructive_operation, needs_confirmation
-from .chat_turns import visible_chat_turns
+from .chat_turns import internal_user_message, visible_chat_turns
 from .compaction import (
     compact_history,
     deserialize_messages,
@@ -63,7 +63,7 @@ from .compaction import (
     serialize_messages,
     SUMMARY_MARKER,
 )
-from .context_policy import initial_context_size, next_context_size
+from .context_policy import initial_context_size, next_context_size, profile_cap
 from .metrics import LiveTaskMetrics
 from .model_policy import select_context_size, task_needs_vision
 from .coding_workers import (
@@ -755,7 +755,7 @@ class AgentRuntime:
             ):
                 if not contract_satisfied(working, prompt, working.task_class):
                     block = contract_completion_blocked_message(working, prompt, working.task_class)
-                    messages.append(ChatMessage(role="user", content=block))
+                    messages.append(internal_user_message(block))
                     await self._update(
                         task_id,
                         status="running",
@@ -775,7 +775,7 @@ class AgentRuntime:
             ):
                 if not cyber_execution_satisfied(working):
                     block = cyber_completion_blocked_message(working)
-                    messages.append(ChatMessage(role="user", content=block))
+                    messages.append(internal_user_message(block))
                     await self._update(
                         task_id,
                         status="running",
@@ -795,7 +795,28 @@ class AgentRuntime:
                         stage="act",
                     )
                     return False
+        from ..memory.owner_facts import is_memory_store_request
         from ..reverse_engineering.skill import requested as reverse_requested
+
+        if working is not None and is_memory_store_request(prompt) and not working.memory_stored:
+            block = (
+                "This task asked to remember a fact, but nothing was stored in memory. "
+                "Write the fact with the memory tools, then complete. Do not report success yet."
+            )
+            messages.append(internal_user_message(block))
+            await self._update(
+                task_id,
+                status="running",
+                stage="act",
+                result=block,
+                verification="",
+                current_action="Memory store required",
+                conversation_json=serialize_messages(messages),
+                compact_memory=working.dumps(),
+                **(metrics.as_fields() if metrics else {}),
+            )
+            await BUS.publish(task_id, "progress", "Remembered fact was not stored", block[:1500], stage="act")
+            return False
         if reverse_requested(prompt) or (working and working.task_class == "reverse engineering"):
             from ..reverse_engineering.store import list_rows, directory
             reports = [row for row in list_rows(task_id)
@@ -803,7 +824,7 @@ class AgentRuntime:
                        and (directory(row["id"]) / "report.json").is_file()]
             if not reports:
                 block = "Reverse engineering requires a saved investigation report. Use reverse_engineer to prepare the supplied target, collect evidence, and report findings or explicit unknowns before completing."
-                messages.append(ChatMessage(role="user", content=block))
+                messages.append(internal_user_message(block))
                 await self._update(task_id, status="running", stage="act", result=block,
                                    verification="", current_action="Investigation report required",
                                    conversation_json=serialize_messages(messages))
@@ -2137,6 +2158,8 @@ class AgentRuntime:
                 working.purple_locked = purple.locked
         gate_text = (extra_prompt or prompt).strip()
         active_prompt = gate_text or prompt
+        if not await self._ensure_owner_memory(task_id, active_prompt, working):
+            return
         if gate_text and not continue_existing:
             ingress_gate = await run_ingress_gate(
                 user_text=gate_text,
@@ -2508,11 +2531,13 @@ class AgentRuntime:
                                 content=message.content + "\n\n" + follow_up_grounding.prompt_block(),
                             )
                             break
-                messages.append(ChatMessage(role="user", content=CONTINUE_PROMPT + "\n\n" + extra_prompt))
+                messages.append(internal_user_message(CONTINUE_PROMPT))
+                messages.append(ChatMessage(role="user", content=extra_prompt))
             else:
-                messages.append(ChatMessage(role="user", content=CONTINUE_PROMPT))
+                messages.append(internal_user_message(CONTINUE_PROMPT))
         else:
-            system_prompt = SYSTEM_PROMPT + "\n\n" + policy_guidance(active_prompt) + _environment_block(settings)
+            guidance = policy_guidance(active_prompt)
+            system_prompt = SYSTEM_PROMPT + (("\n\n" + guidance) if guidance else "") + _environment_block(settings)
             grounding = maybe_docs_first(DocsFirstContext(user_message=active_prompt))
             if grounding and grounding.prompt_block():
                 system_prompt += "\n\n" + grounding.prompt_block()
@@ -2606,7 +2631,8 @@ class AgentRuntime:
                 system_prompt += "\n\n" + audit
             messages = [
                 ChatMessage(role="system", content=system_prompt),
-                ChatMessage(role="user", content=active_prompt + "\n\n" + plan_prompt),
+                ChatMessage(role="user", content=active_prompt),
+                internal_user_message(plan_prompt),
             ]
             for skill in matched_skills:
                 if has_secret_parameters(skill):
@@ -2664,6 +2690,7 @@ class AgentRuntime:
                     observation, attach = await self._execute_tool_ex(task_id, name, arguments, autonomy, settings)
                     failed = "ERROR:" in observation or observation.lower().startswith("error")
                     working.note_tool(name, observation, not failed)
+                    self._note_memory_tool(working, name, arguments, not failed)
                     messages.append(ChatMessage(role="tool", name=name, tool_call_id=call_id, content=observation))
                     if attach:
                         messages.append(_image_message(attach))
@@ -2681,7 +2708,7 @@ class AgentRuntime:
                     awaiting_plan_selection = False
                     working.next_action = "independent verification"
                     await BUS.publish(task_id, "stage", "Independent verification pass", stage="verify")
-                    messages.append(ChatMessage(role="user", content=VERIFY_PROMPT))
+                    messages.append(internal_user_message(VERIFY_PROMPT))
                     await self._update(
                         task_id,
                         conversation_json=serialize_messages(messages),
@@ -2765,7 +2792,7 @@ class AgentRuntime:
                 )
                 needed = next_context_size(
                     int(MANAGER.state.context_size or profile.context_size),
-                    profile.context_size,
+                    effective_cap or profile_cap(profile, settings),
                     estimate_prompt_tokens(messages),
                     compacted=compacted,
                 )
@@ -3040,9 +3067,9 @@ class AgentRuntime:
                             await record_trajectory(task_id, working, "failed")
                             await complete_coding_route(task_id, "failed", call_error)
                             return
-                        messages.append(ChatMessage(role="user", content=(
+                        messages.append(internal_user_message(
                             f"Your tool call was rejected: {call_error} Return one valid call using only the offered schemas."
-                        )))
+                        ))
                         continue
                     invalid_tool_turns = 0
                     tools_used = True
@@ -3229,6 +3256,7 @@ class AgentRuntime:
                             note_contract_tool(working, name, arguments, observation, success=True)
                             note_cyber_tool(working, name, arguments, observation, success=True)
                         working.note_tool(name, observation, not failed)
+                        self._note_memory_tool(working, name, arguments, not failed)
                         messages.append(ChatMessage(role="tool", name=name, tool_call_id=call["id"], content=observation))
                         if attach:
                             messages.append(_image_message(attach))
@@ -3247,7 +3275,7 @@ class AgentRuntime:
                         working.next_action = "recover with a different strategy"
                         recovering = True
                         await BUS.publish(task_id, "retry", "Choosing a recovery strategy", guidance[:1500], stage="diagnose")
-                        messages.append(ChatMessage(role="user", content=guidance))
+                        messages.append(internal_user_message(guidance))
                         expert = await self._maybe_consult_expert(
                             task_id,
                             working,
@@ -3263,24 +3291,23 @@ class AgentRuntime:
                         )
                         if expert:
                             messages.append(
-                                ChatMessage(
-                                    role="user",
-                                    content="Expert 27B analysis (execute this plan with tools; do not wait):\n" + expert,
+                                internal_user_message(
+                                    "Expert 27B analysis (execute this plan with tools; do not wait):\n" + expert,
                                 )
                             )
                     elif verifying and verify_tool_rounds >= policy.max_verify_tools:
                         force_final = True
-                        messages.append(ChatMessage(role="user", content=STOP_AND_REPORT))
+                        messages.append(internal_user_message(STOP_AND_REPORT))
                     elif not verifying and tool_rounds >= policy.force_verify_after:
                         verifying = True
                         working.next_action = "independent verification"
                         await self._update(task_id, stage="verify", current_action="Independent verification")
                         await BUS.publish(task_id, "stage", "Independent verification pass", stage="verify")
-                        messages.append(ChatMessage(role="user", content=VERIFY_PROMPT))
+                        messages.append(internal_user_message(VERIFY_PROMPT))
                     elif same_tool_streak >= 3 and not verifying:
                         verifying = True
                         await BUS.publish(task_id, "stage", "Independent verification pass", stage="verify")
-                        messages.append(ChatMessage(role="user", content=VERIFY_PROMPT))
+                        messages.append(internal_user_message(VERIFY_PROMPT))
                     await self._update(
                         task_id,
                         conversation_json=serialize_messages(messages),
@@ -3307,7 +3334,7 @@ class AgentRuntime:
                             f"{len(plan_candidates)} strategies",
                             stage="plan",
                         )
-                        messages.append(ChatMessage(role="user", content=best_of_n_select_prompt(plan_candidates)))
+                        messages.append(internal_user_message(best_of_n_select_prompt(plan_candidates)))
                         continue
                     best_of_n_complete = True
                     if parsed.get("end_state") or parsed.get("acceptance_criteria") or parsed.get("plan"):
@@ -3342,20 +3369,19 @@ class AgentRuntime:
                         format_selected_plan(chosen)[:1500],
                         stage="plan",
                     )
-                    messages.append(ChatMessage(role="user", content=format_selected_plan(chosen)))
+                    messages.append(internal_user_message(format_selected_plan(chosen)))
                     continue
 
                 if policy.critic_pass and not critic_done and not verifying:
                     critic_done = True
                     critic_turn = True
                     await BUS.publish(task_id, "stage", "Critiquing plan", stage="plan")
-                    messages.append(ChatMessage(role="user", content=CRITIC_PROMPT))
+                    messages.append(internal_user_message(CRITIC_PROMPT))
                     continue
                 if not tools_used:
                     messages.append(
-                        ChatMessage(
-                            role="user",
-                            content="Now execute the plan with tools. Do not conclude until the end state exists on disk or in the environment.",
+                        internal_user_message(
+                            "Now execute the plan with tools. Do not conclude until the end state exists on disk or in the environment.",
                         )
                     )
                     continue
@@ -3364,11 +3390,11 @@ class AgentRuntime:
                     working.next_action = "independent verification"
                     await self._update(task_id, stage="verify", current_action="Independent verification", compact_memory=working.dumps())
                     await BUS.publish(task_id, "stage", "Independent verification pass", stage="verify")
-                    messages.append(ChatMessage(role="user", content=VERIFY_PROMPT))
+                    messages.append(internal_user_message(VERIFY_PROMPT))
                     continue
                 if (policy.require_verify_tools or skill_requires_verify) and verify_tool_rounds == 0:
                     if not evidence_from_working(working).verified:
-                        messages.append(ChatMessage(role="user", content=VERIFY_REQUIRED_PROMPT))
+                        messages.append(internal_user_message(VERIFY_REQUIRED_PROMPT))
                         continue
                 working.verified = True
                 verification = content or "Independent verification pass completed; acceptance criteria checked."
@@ -3433,6 +3459,49 @@ class AgentRuntime:
         )
         return text
 
+    async def _ensure_owner_memory(self, task_id: str, prompt: str, working: WorkingState) -> bool:
+        """Write a remember-request before the model loop. False means the task already failed."""
+        from ..memory.owner_facts import is_memory_store_request, remember_owner_fact
+
+        if not is_memory_store_request(prompt) or working.memory_stored:
+            return True
+        outcome = await remember_owner_fact(prompt, task_id=task_id)
+        working.memory_stored = bool(outcome.get("stored"))
+        detail = (
+            f"Stored: {outcome.get('content') or ''}"
+            if working.memory_stored
+            else (outcome.get("repo_error") or outcome.get("vault_error") or "memory write failed")
+        )
+        await self._update(
+            task_id,
+            compact_memory=working.dumps(),
+            current_action="Remembered fact stored" if working.memory_stored else "Memory store failed",
+        )
+        await BUS.publish(
+            task_id,
+            "progress" if working.memory_stored else "error",
+            "Remembered fact stored" if working.memory_stored else "Could not store the fact",
+            str(detail)[:1500],
+            stage="act",
+        )
+        if working.memory_stored:
+            return True
+        await self._fail_task(
+            task_id,
+            "I could not store that fact, so this task did not succeed.",
+            working,
+            None,
+            current_action="Failed: memory was not stored",
+        )
+        return False
+
+    def _note_memory_tool(self, working: WorkingState, name: str, arguments: dict[str, Any], success: bool) -> None:
+        if not success or name != "vault_memory":
+            return
+        action = str((arguments or {}).get("action") or "").strip().lower()
+        if action in {"create", "append", "edit"}:
+            working.memory_stored = True
+
     async def _execute_tool_ex(
         self,
         task_id: str,
@@ -3447,6 +3516,15 @@ class AgentRuntime:
         profile_id: str | None = None,
         grant_id: str | None = None,
     ) -> tuple[str, str | None]:
+        from .instruction_gate import tool_write_denied
+
+        async with SessionLocal() as session:
+            task_row = await session.get(Task, task_id)
+            owner_prompt = (task_row.prompt if task_row else "") or ""
+        denied_write = tool_write_denied(name, arguments, owner_prompt)
+        if denied_write:
+            await BUS.publish(task_id, "error", "File write refused", denied_write[:1500], stage="act")
+            return denied_write, None
         # Prefer gate_tool_call (via _tool_authorization) so existing hooks/tests that
         # monkeypatch app.agent.loop.gate_tool_call still observe the deny/allow boundary.
         authz = _tool_authorization(

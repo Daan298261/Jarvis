@@ -66,6 +66,10 @@ $env:PYTHONPATH = $backendImportPath + [IO.Path]::PathSeparator + $env:PYTHONPAT
     --hidden-import uvicorn.lifespan.on `
     --hidden-import app.main `
     --hidden-import aiosqlite `
+    --hidden-import kokoro `
+    --collect-all kokoro `
+    --hidden-import soundfile `
+    --collect-all soundfile `
     --collect-submodules app `
     --collect-all app `
     $entry
@@ -74,6 +78,13 @@ if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCOD
 $exe = Join-Path $OutDir "$name\$name.exe"
 if (-not (Test-Path $exe)) {
     throw "PyInstaller finished but $exe is missing"
+}
+
+# Default voice is Kokoro. A green sidecar that cannot import it ships a
+# degraded header. Fail the build instead of discovering that on the desktop.
+& $exe --verify-frozen-imports
+if ($LASTEXITCODE -ne 0) {
+    throw "Frozen backend cannot import kokoro/soundfile. The desktop voice would stay degraded."
 }
 
 # Namespace-package collection can omit on-demand REA assets. Stage these

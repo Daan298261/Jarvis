@@ -114,7 +114,7 @@ def test_request_capability_grant_appears_in_next_turn_without_full_catalog():
     names = tool_names_for("mixed", ["docker"])
     assert "docker" in names
     assert "office" not in names
-    assert "desktop" in names
+    assert "desktop" not in names
 
 
 def test_file_task_prompt_does_not_retrieve_unrelated_tools():

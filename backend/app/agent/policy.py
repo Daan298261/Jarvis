@@ -81,8 +81,17 @@ def unauthorized_operational_request(prompt: str) -> bool:
 
 
 def policy_guidance(prompt: str) -> str:
+    """Attach the professional-analysis essay only when the request needs it.
+
+    Ordinary chat and trivial tasks must not pay for that block on every turn.
+    The system prompt still states that analysis is not authorization.
+    """
+    analysis = is_professional_analysis(prompt)
+    unauthorized = unauthorized_operational_request(prompt)
+    if not analysis and not unauthorized:
+        return ""
     parts = [PROFESSIONAL_ANALYSIS_POLICY]
-    if is_professional_analysis(prompt):
+    if analysis:
         parts.append(
             "This request looks like professional analysis. Prefer accurate technical examination over refusal."
         )
