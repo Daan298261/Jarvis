@@ -8,6 +8,11 @@ import { CustomPresencePanel } from "../presence/CustomPresencePanel"
 import { PresenceModePreview } from "../presence/PresenceModePreview"
 import { updatePresentation } from "../presence/presentationSettings"
 import type { PresentationSettings } from "../presence/presenceTypes"
+import { MUSCULAR_HUMANOID_AVATAR_ID } from "../presence/renderers/HumanoidPresence"
+import {
+  MYTHIC_LIVE_B_AVATAR_ID,
+  MYTHIC_PORTRAIT_A_AVATAR_ID,
+} from "../presence/mythicPersonaVariant"
 
 type AppearanceSettingsPaneProps = {
   settings: PresentationSettings
@@ -58,7 +63,11 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
       ? "classic"
       : hexStrikeActive
         ? "hexstrike"
-        : settings.requestedPresence
+        : settings.requestedPresence === "humanoid" && settings.avatarId === MUSCULAR_HUMANOID_AVATAR_ID
+          ? "muscular_humanoid"
+          : settings.requestedPresence === "particle_bust" && settings.avatarId === MYTHIC_LIVE_B_AVATAR_ID
+            ? "mythic_live_b"
+          : settings.requestedPresence
 
   return (
     <div className="settings-appearance-pane">
@@ -97,7 +106,7 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
           className={selected === "humanoid" ? "active" : ""}
           onClick={() =>
             apply(
-              { shell: "hud", requestedPresence: "humanoid" },
+              { shell: "hud", requestedPresence: "humanoid", avatarId: "jarvis_base" },
               "Humanoid profile active on the shared presence stage. Jarvis falls back to APEX UI · orb + graph if WebGL is unavailable.",
             )
           }
@@ -108,16 +117,44 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
         <button
           type="button"
           disabled={busy}
+          className={selected === "muscular_humanoid" ? "active" : ""}
+          onClick={() =>
+            apply(
+              { shell: "hud", requestedPresence: "humanoid", avatarId: MUSCULAR_HUMANOID_AVATAR_ID },
+              "Muscular humanoid restored from the original Jarvis showcase artwork.",
+            )
+          }
+        >
+          <PresenceModePreview mode="muscular_humanoid" />
+          Muscular humanoid · showcase
+        </button>
+        <button
+          type="button"
+          disabled={busy}
           className={selected === "particle_bust" ? "active" : ""}
           onClick={() =>
             apply(
-              { shell: "hud", requestedPresence: "particle_bust" },
-              "Live mythic persona figure active. Persona selections morph immediately on the shared particle stage.",
+              { shell: "hud", requestedPresence: "particle_bust", avatarId: MYTHIC_PORTRAIT_A_AVATAR_ID },
+              "Mythic portrait cloud A active. Persona selections morph immediately on the shared particle stage.",
             )
           }
         >
           <PresenceModePreview mode="particle_bust" />
-          Mythic persona · live
+          Mythic persona A · portrait cloud
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          className={selected === "mythic_live_b" ? "active" : ""}
+          onClick={() =>
+            apply(
+              { shell: "hud", requestedPresence: "particle_bust", avatarId: MYTHIC_LIVE_B_AVATAR_ID },
+              "Mythic persona B active: procedural live particles, direct gaze, pointer and camera attention.",
+            )
+          }
+        >
+          <PresenceModePreview mode="mythic_live_b" />
+          Mythic persona B · live gaze
         </button>
         <button
           type="button"

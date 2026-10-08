@@ -61,16 +61,19 @@ def test_start_jarvis_probes_health_before_uvicorn_spawn():
     text = _read(START)
     lower = text.lower()
     health_idx = lower.index("/api/health")
-    spawn_idx = lower.index("start-process")
     force_idx = lower.index("force-stop-jarvis.ps1")
     assert health_idx < force_idx or "test-jarvisbackendhealthy" in lower
     assert "adopt" in lower
     assert "force-stop-jarvis.ps1 not found" in lower
-    # force-stop must run before Start-Process uvicorn when not adopting
-    adopt_block = text[text.index("Test-JarvisBackendHealthy") : text.index("Write-Step \"Waiting for")]
-    assert "force-stop-jarvis.ps1" in adopt_block
-    assert adopt_block.index("force-stop-jarvis.ps1") < adopt_block.index("Start-Process")
-    assert "$pidFile" in adopt_block
+    # Elevation helpers (#539) also contain Start-Process (UAC relaunch). The
+    # RFC-0136 contract is spawn-block only: when not adopting a healthy
+    # listener, force-stop-jarvis.ps1 runs before the uvicorn Start-Process.
+    spawn_section = text.split("$adoptExistingBackend", 1)[1].split(
+        'Write-Step "Waiting for', 1
+    )[0]
+    assert "force-stop-jarvis.ps1" in spawn_section
+    assert spawn_section.index("force-stop-jarvis.ps1") < spawn_section.index("Start-Process")
+    assert "$pidFile" in spawn_section
 
 
 def test_start_jarvis_adopt_skips_force_stop_and_pid_file():

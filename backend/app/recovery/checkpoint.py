@@ -50,22 +50,20 @@ def create_checkpoint(
     cp_id = str(uuid.uuid4())
     created_at = _utc_now()
     snap_hash = _snapshot_hash(snapshot)
-    conn = connect()
-    conn.execute(
-        """
-        INSERT INTO checkpoints (id, created_at, tag, journal_seq, snapshot_json, snapshot_hash, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (cp_id, created_at, tag.value, seq, json.dumps(snapshot, sort_keys=True), snap_hash, notes),
-    )
-    conn.close()
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO checkpoints (id, created_at, tag, journal_seq, snapshot_json, snapshot_hash, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (cp_id, created_at, tag.value, seq, json.dumps(snapshot, sort_keys=True), snap_hash, notes),
+        )
     return get_checkpoint(cp_id) or {}
 
 
 def get_checkpoint(checkpoint_id: str) -> dict[str, Any] | None:
-    conn = connect()
-    row = conn.execute("SELECT * FROM checkpoints WHERE id = ?", (checkpoint_id,)).fetchone()
-    conn.close()
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM checkpoints WHERE id = ?", (checkpoint_id,)).fetchone()
     if not row:
         return None
     return _row_to_checkpoint(row)
@@ -92,12 +90,11 @@ def _row_to_checkpoint(row) -> dict[str, Any]:
 
 
 def list_checkpoints(limit: int = 50) -> list[dict[str, Any]]:
-    conn = connect()
-    rows = conn.execute(
-        "SELECT * FROM checkpoints ORDER BY created_at DESC LIMIT ?",
-        (limit,),
-    ).fetchall()
-    conn.close()
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM checkpoints ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
     return [_row_to_checkpoint(row) for row in rows]
 
 
@@ -105,9 +102,10 @@ def verify_and_promote_checkpoint(checkpoint_id: str, *, actor: str = "operator"
     cp = get_checkpoint(checkpoint_id)
     if not cp:
         raise KeyError(f"checkpoint not found: {checkpoint_id}")
-    conn = connect()
-    row = conn.execute("SELECT snapshot_json, snapshot_hash FROM checkpoints WHERE id = ?", (checkpoint_id,)).fetchone()
-    conn.close()
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT snapshot_json, snapshot_hash FROM checkpoints WHERE id = ?", (checkpoint_id,)
+        ).fetchone()
     if not row:
         raise KeyError(checkpoint_id)
     snapshot = json.loads(row["snapshot_json"])
@@ -124,36 +122,33 @@ def verify_and_promote_checkpoint(checkpoint_id: str, *, actor: str = "operator"
 
 
 def _set_tag(checkpoint_id: str, tag: CheckpointTag, verification: dict[str, Any] | None = None) -> None:
-    conn = connect()
-    conn.execute(
-        """
-        UPDATE checkpoints SET tag = ?, verification_json = ?, verified_at = ?
-        WHERE id = ?
-        """,
-        (
-            tag.value,
-            json.dumps(verification or {}, sort_keys=True),
-            _utc_now() if tag in {CheckpointTag.KNOWN_GOOD, CheckpointTag.INVALID} else None,
-            checkpoint_id,
-        ),
-    )
-    conn.close()
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE checkpoints SET tag = ?, verification_json = ?, verified_at = ?
+            WHERE id = ?
+            """,
+            (
+                tag.value,
+                json.dumps(verification or {}, sort_keys=True),
+                _utc_now() if tag in {CheckpointTag.KNOWN_GOOD, CheckpointTag.INVALID} else None,
+                checkpoint_id,
+            ),
+        )
 
 
 def last_known_good_checkpoint() -> dict[str, Any] | None:
-    conn = connect()
-    row = conn.execute(
-        "SELECT * FROM checkpoints WHERE tag = ? ORDER BY journal_seq DESC LIMIT 1",
-        (CheckpointTag.KNOWN_GOOD.value,),
-    ).fetchone()
-    conn.close()
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM checkpoints WHERE tag = ? ORDER BY journal_seq DESC LIMIT 1",
+            (CheckpointTag.KNOWN_GOOD.value,),
+        ).fetchone()
     return _row_to_checkpoint(row) if row else None
 
 
 def load_checkpoint_snapshot(checkpoint_id: str) -> dict[str, Any]:
-    conn = connect()
-    row = conn.execute("SELECT snapshot_json FROM checkpoints WHERE id = ?", (checkpoint_id,)).fetchone()
-    conn.close()
+    with connect() as conn:
+        row = conn.execute("SELECT snapshot_json FROM checkpoints WHERE id = ?", (checkpoint_id,)).fetchone()
     if not row:
         raise KeyError(checkpoint_id)
     return json.loads(row["snapshot_json"])
@@ -191,17 +186,16 @@ def _age_seconds(created_at: str) -> float:
 
 
 def _last_successful_rollback() -> dict[str, Any] | None:
-    conn = connect()
-    row = conn.execute(
-        """
-        SELECT id, updated_at, target_checkpoint_id, terminal_status, phase
-        FROM rollback_runs
-        WHERE terminal_status = ?
-        ORDER BY updated_at DESC LIMIT 1
-        """,
-        ("COMPLETE",),
-    ).fetchone()
-    conn.close()
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, updated_at, target_checkpoint_id, terminal_status, phase
+            FROM rollback_runs
+            WHERE terminal_status = ?
+            ORDER BY updated_at DESC LIMIT 1
+            """,
+            ("COMPLETE",),
+        ).fetchone()
     if not row:
         return None
     return {

@@ -33,6 +33,7 @@ FRONT_MAX_TOKENS_MAX = 160
 FRONT_MAX_TOKENS_DEFAULT = 128
 FRONT_USER_TEXT_SOFT_LIMIT = 1600
 DEEPER_RESULT_LABEL = "Deeper result"
+DEEPER_RESULT_SEP = f"\n\n{DEEPER_RESULT_LABEL}\n"
 
 FRONT_ACTIONS = frozenset(
     {
@@ -49,6 +50,7 @@ SAFE_HANDOFF = "A stronger model is taking this from here."
 SAFE_CLARIFY = "Could you clarify what you need?"
 SAFE_HELLO = "Hello, sir."
 CONTEXT_SWITCH_KEEP_BUSY = "Switching to a larger context model…"
+CONTEXT_EXPAND_KEEP_BUSY = "One moment — expanding context for a fuller answer."
 
 SAFE_PROGRESS_MODEL = "The main model is still loading; I shall update you shortly."
 SAFE_PROGRESS_TOOLS = "I am still working through tools and verification."
@@ -410,7 +412,47 @@ def merge_front_and_worker(front_text: str, worker_text: str, action: str) -> st
         return worker
     if DEEPER_RESULT_LABEL.lower() in front.lower():
         return f"{front}\n\n{worker}"
-    return f"{front}\n\n{DEEPER_RESULT_LABEL}\n{worker}"
+    return f"{front}{DEEPER_RESULT_SEP}{worker}"
+
+
+def speakable_worker_remainder(merged: str, spoken_through: int) -> str:
+    """Slice TTS text after an already-spoken prefix, never speaking merge labels.
+
+    Early front TTS advances the stream cursor by ``len(front)``. The merged
+    reply is ``{front}\\n\\nDeeper result\\n{worker}``, so a raw slice from that
+    cursor would start with the label. Strip the separator (and any mid-tail
+    label) so only owner-facing remainder / worker text is spoken.
+    """
+    text = merged or ""
+    if spoken_through <= 0:
+        fragment = text
+    elif spoken_through >= len(text):
+        return ""
+    else:
+        fragment = text[spoken_through:]
+    return _strip_merge_label_from_tts(fragment).strip()
+
+
+def _strip_merge_label_from_tts(fragment: str) -> str:
+    if not fragment:
+        return ""
+    if fragment.startswith(DEEPER_RESULT_SEP):
+        return fragment[len(DEEPER_RESULT_SEP) :]
+    if DEEPER_RESULT_SEP in fragment:
+        before, after = fragment.split(DEEPER_RESULT_SEP, 1)
+        before = before.rstrip()
+        after = after.lstrip()
+        if before and after:
+            return f"{before}\n\n{after}"
+        return before or after
+    leading = re.match(
+        rf"^\s*{re.escape(DEEPER_RESULT_LABEL)}\s*\n?",
+        fragment,
+        flags=re.IGNORECASE,
+    )
+    if leading:
+        return fragment[leading.end() :]
+    return fragment
 
 
 def merge_consecutive_assistant_turns(turns: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -941,6 +983,34 @@ def spawn_context_switch_keep_busy(
             user_text=user_text,
             on_spoken=on_spoken,
         )
+
+    task = asyncio.create_task(_runner())
+    _front_lane_tasks.add(task)
+    task.add_done_callback(_front_lane_tasks.discard)
+    return task
+
+
+async def emit_context_expand_keep_busy(
+    *,
+    on_spoken: SpokenCallback | None = None,
+) -> str:
+    """Static keep-busy while context expands — never regenerates a front reply."""
+    text = CONTEXT_EXPAND_KEEP_BUSY
+    if on_spoken:
+        maybe = on_spoken(text)
+        if asyncio.iscoroutine(maybe):
+            await maybe
+    return text
+
+
+def spawn_context_expand_keep_busy(
+    *,
+    on_spoken: SpokenCallback | None = None,
+) -> asyncio.Task[str]:
+    """Fire-and-forget keep-busy so context expand does not block the worker path."""
+
+    async def _runner() -> str:
+        return await emit_context_expand_keep_busy(on_spoken=on_spoken)
 
     task = asyncio.create_task(_runner())
     _front_lane_tasks.add(task)

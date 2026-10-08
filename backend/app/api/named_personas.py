@@ -34,6 +34,7 @@ class AppearanceIn(BaseModel):
     orb_color: str | None = None
     accent_color: str | None = None
     glow: float | None = None
+    detail: float | None = None
     animation: float | None = None
     scale: float | None = None
     specialists_auto_speak: bool | None = None

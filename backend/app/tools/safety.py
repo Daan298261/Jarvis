@@ -167,38 +167,59 @@ def _is_unc_path(path: str) -> bool:
     return _unc_host(path) is not None
 
 
+def reject_unsafe_path_text(path: str) -> str:
+    """Reject null bytes and empty path strings before any filesystem use."""
+    raw = str(path or "")
+    if not raw.strip():
+        raise PermissionError("Path is empty")
+    if "\x00" in raw:
+        raise PermissionError("Path contains a null byte")
+    return raw
+
+
+def path_is_under_root(candidate: str, root: str) -> bool:
+    """True when realpath(candidate) is root or a descendant (CodeQL-visible prefix check)."""
+    if not candidate or not root or "\x00" in candidate or "\x00" in root:
+        return False
+    if root == LOCAL_NETWORK_SCOPE:
+        return False
+    matchpath = os.path.realpath(os.path.expanduser(candidate))
+    base = os.path.realpath(os.path.expanduser(root))
+    try:
+        return base == os.path.commonpath((base, matchpath))
+    except ValueError:
+        return False
+
+
 def resolve_allowed_path(path: str, allowed: list[str]) -> Path:
-    if _is_unc_path(path):
-        if LOCAL_NETWORK_SCOPE in allowed and _private_lan_unc(path):
+    raw = reject_unsafe_path_text(path)
+    if _is_unc_path(raw):
+        if LOCAL_NETWORK_SCOPE in allowed and _private_lan_unc(raw):
             # Normalize .. lexically within the share; Path.resolve would contact
             # the remote host before authorization and can stall an offline share.
-            normalized = ntpath.normpath(str(path).replace("/", "\\"))
+            normalized = ntpath.normpath(raw.replace("/", "\\"))
             if os.name == "nt":
                 return Path(normalized)
             return Path("//" + normalized.lstrip("\\").replace("\\", "/"))
         explicit = any(
             _is_unc_path(root)
-            and PureWindowsPath(path.replace("/", "\\")).is_relative_to(
+            and PureWindowsPath(raw.replace("/", "\\")).is_relative_to(
                 PureWindowsPath(root.replace("/", "\\"))
             )
             for root in allowed
         )
         if not explicit:
-            raise PermissionError(f"Path {path} is outside allowed directories")
-        normalized = ntpath.normpath(str(path).replace("/", "\\"))
+            raise PermissionError(f"Path {raw} is outside allowed directories")
+        normalized = ntpath.normpath(raw.replace("/", "\\"))
         if os.name == "nt":
             return Path(normalized)
         return Path("//" + normalized.lstrip("\\").replace("\\", "/"))
-    target = Path(path).expanduser().resolve()
     if not allowed:
         raise PermissionError("No workspace directories are configured")
+    matchpath = os.path.realpath(os.path.expanduser(raw))
     for root in allowed:
         if root == LOCAL_NETWORK_SCOPE:
             continue
-        base = Path(root).expanduser().resolve()
-        try:
-            target.relative_to(base)
-            return target
-        except ValueError:
-            continue
-    raise PermissionError(f"Path {target} is outside allowed directories")
+        if path_is_under_root(matchpath, str(root)):
+            return Path(matchpath)
+    raise PermissionError(f"Path {matchpath} is outside allowed directories")

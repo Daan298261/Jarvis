@@ -59,6 +59,9 @@ $name = "jarvis-backend"
     --hidden-import uvicorn.protocols.websockets.auto `
     --hidden-import uvicorn.lifespan `
     --hidden-import uvicorn.lifespan.on `
+    --hidden-import app.main `
+    --hidden-import aiosqlite `
+    --collect-submodules app `
     --collect-all app `
     $entry
 
@@ -70,6 +73,13 @@ if (-not (Test-Path $exe)) {
 # Copy into Tauri resources for bundling
 $tauriSidecar = Join-Path $Root "frontend\src-tauri\sidecars"
 New-Item -ItemType Directory -Force -Path $tauriSidecar | Out-Null
+$tauriSidecarTarget = Join-Path $tauriSidecar $name
+if (-not $tauriSidecarTarget.StartsWith($Root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Sidecar target is outside the repository: $tauriSidecarTarget"
+}
+if (Test-Path $tauriSidecarTarget) {
+    Remove-Item -LiteralPath $tauriSidecarTarget -Recurse -Force
+}
 Copy-Item -Recurse -Force (Join-Path $OutDir $name) (Join-Path $tauriSidecar $name)
 
 Write-Host "OK: $exe" -ForegroundColor Green

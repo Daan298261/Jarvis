@@ -13,6 +13,7 @@ const quality = await import("./src/presence/presenceQuality.ts")
 const personas = await import("./src/persona/namedPersonas.ts")
 const THREE = await import("three")
 const portraits = await import("./src/presence/renderers/shapes/portraitCloud.ts")
+const variants = await import("./src/presence/mythicPersonaVariant.ts")
 
 test("portrait particles preserve colour and aspect, discard black, and cache decoding", async () => {
   const previousImage = globalThis.Image
@@ -53,12 +54,22 @@ test("portrait particles preserve colour and aspect, discard black, and cache de
 test("avatar decoding failures are retryable", async () => {
   const previousImage = globalThis.Image
   let decodes = 0
-  globalThis.Image = class { async decode() { decodes++; throw new Error("unavailable") } }
+  globalThis.Image = class {
+    set src(_value) { queueMicrotask(() => this.onerror?.()) }
+    async decode() { decodes++; throw new Error("unavailable") }
+  }
   try {
     await assert.rejects(portraits.preparePortraitCloud("missing-avatar", "retry_test"), /unavailable/)
     await assert.rejects(portraits.preparePortraitCloud("missing-avatar", "retry_test"), /unavailable/)
     assert.equal(decodes, 2)
   } finally { globalThis.Image = previousImage }
+})
+
+test("portrait loading has an onload fallback for Windows embedded browsers", async () => {
+  const source = await readFile(new URL("./src/presence/renderers/shapes/portraitCloud.ts", import.meta.url), "utf8")
+  assert.match(source, /image\.onload = ready/)
+  assert.match(source, /image\.decode\?\.\(\)\.then\(ready\)/)
+  assert.match(source, /Some WebView builds reject decode/)
 })
 
 function meanAxis(attribute, axis) {
@@ -126,6 +137,14 @@ test("idle keeps rest tightness and morphs into the selected figure when engaged
   system.dispose()
 })
 
+test("portrait-backed avatars retain authored colour in the idle silhouette", () => {
+  const color = [0.1, 0.7, 1, 1]
+  const [rest] = cloud.buildRestSilhouette([{
+    x: 1, y: 1, z: 0, size: 2, light: 1, gold: 0, flow: 0, color,
+  }])
+  assert.deepEqual(rest.color, color)
+})
+
 test("reduced motion snaps uMorph to a static readable rest pose", () => {
   const system = cloud.createMorphablePresenceSystem(0.02, material(), "humanoid_bust")
   system.morphTo("hex_aegis", { immediate: true })
@@ -185,31 +204,81 @@ test("all named personas expose their own registered visual avatar", async () =>
   const shapeIds = personas.ROSTER_IDS.map((id) => personas.PERSONA_VISUALS[id].shapeId)
   assert.equal(personas.ROSTER_IDS.length, 14)
   assert.equal(shapeIds.length, 14)
-  // Umi shares memory_rings with Nabu; every shapeId must still resolve.
-  assert.equal(new Set(shapeIds).size, 13)
+  assert.equal(new Set(shapeIds).size, 14, "Umi must not clone Nabu")
+  assert.equal(personas.PERSONA_VISUALS.umi.shapeId, "opus_tide")
   for (const shapeId of shapeIds) {
     assert.equal(shapes.resolvePresenceShape(shapeId).id, shapeId)
+    const variantId = variants.mythicLiveVariantShapeId(shapeId)
+    const variant = shapes.resolvePresenceShape(variantId)
+    assert.equal(variant.id, variantId)
+    assert.equal(variant.framing?.yaw, 0, `${variantId} faces the camera`)
   }
 
   const controls = await readFile(new URL("./src/persona/NamedPersonaControls.tsx", import.meta.url), "utf8")
   assert.match(controls, /Named persona avatars/)
   assert.match(controls, /SpecialistShapeMark/)
+
+  const portraits = await readFile(new URL("./src/persona/personaPortraits.ts", import.meta.url), "utf8")
+  assert.match(portraits, /anzu\.png/)
+  assert.match(portraits, /nabu\.png/)
+  assert.doesNotMatch(portraits, /assets\/persona\/[^"']+\.webp/)
+  for (const id of personas.ROSTER_IDS) {
+    const bytes = await readFile(new URL(`./src/assets/persona/${id}.png`, import.meta.url))
+    assert.ok(bytes.length > 40_000, `${id} portrait should retain showcase detail`)
+  }
 })
 
 test("persona selection activates mythic mode on the shared morphable stage", async () => {
   const home = await readFile(new URL("./src/hud/HudChatHome.tsx", import.meta.url), "utf8")
   const settings = await readFile(new URL("./src/settings/AppearanceSettingsPane.tsx", import.meta.url), "utf8")
   const activation = await readFile(new URL("./src/persona/activateNamedPersona.ts", import.meta.url), "utf8")
+  const controls = await readFile(new URL("./src/persona/NamedPersonaControls.tsx", import.meta.url), "utf8")
   const host = await readFile(new URL("./src/presence/PresenceHost.tsx", import.meta.url), "utf8")
   assert.match(home, /presentation\.requestedPresence === "humanoid"/)
   assert.match(home, /\? "humanoid_bust"/)
-  assert.match(settings, /Mythic persona · live/)
+  assert.match(settings, /Mythic persona A · portrait cloud/)
+  assert.match(settings, /Mythic persona B · live gaze/)
   assert.match(activation, /requestedPresence: "particle_bust"/)
+  assert.match(activation, /avatarId: MYTHIC_LIVE_B_AVATAR_ID/)
   assert.match(activation, /Promise\.allSettled/)
+  assert.match(controls, /chooseRevision\.current/)
+  assert.doesNotMatch(controls, /className={`named-persona-card\$\{selected \? " active" : ""}`}[\s\S]{0,180}disabled={busy}/)
   assert.match(host, /resolved\.effective === "particle_bust"/)
   assert.doesNotMatch(host, /ParticleBustPresence/)
   assert.match(host, /key="morphable-presence"/)
-  assert.equal(lifecycle.PERSONA_MORPH_SECONDS, 0.42)
+  assert.equal(lifecycle.PERSONA_MORPH_SECONDS, 0.09)
+
+  const humanoid = await readFile(new URL("./src/presence/renderers/HumanoidPresence.tsx", import.meta.url), "utf8")
+  const stageCss = await readFile(new URL("./src/presence/renderers/presence-stage.css", import.meta.url), "utf8")
+  assert.doesNotMatch(humanoid, /jarvis-mythic-avatar-shell/)
+  assert.match(humanoid, /Portrait sampling unavailable · using the live particle avatar/)
+  assert.doesNotMatch(humanoid, /preparing \|\| prepareError/)
+  assert.match(stageCss, /position: absolute;/)
+  assert.match(stageCss, /overflow: hidden;/)
+})
+
+test("the README muscular humanoid is additive and the production humanoid stays the default", async () => {
+  const settings = await readFile(new URL("./src/settings/AppearanceSettingsPane.tsx", import.meta.url), "utf8")
+  const humanoid = await readFile(new URL("./src/presence/renderers/HumanoidPresence.tsx", import.meta.url), "utf8")
+  assert.match(settings, /Humanoid HUD · built in/)
+  assert.match(settings, /Muscular humanoid · showcase/)
+  assert.match(settings, /avatarId: "jarvis_base"/)
+  assert.match(settings, /MUSCULAR_HUMANOID_AVATAR_ID/)
+  assert.match(humanoid, /CURRENT_HUMANOID_ARTWORK = "\/presence\/jarvis-original\/humanoid\.webp"/)
+  assert.match(humanoid, /MUSCULAR_HUMANOID_ARTWORK = "\/presence\/jarvis-original\/humanoid-muscular\.png"/)
+  assert.match(humanoid, /settings\.avatarId === MUSCULAR_HUMANOID_AVATAR_ID/)
+})
+
+test("the README muscular humanoid is additive and the production humanoid stays the default", async () => {
+  const settings = await readFile(new URL("./src/settings/AppearanceSettingsPane.tsx", import.meta.url), "utf8")
+  const humanoid = await readFile(new URL("./src/presence/renderers/HumanoidPresence.tsx", import.meta.url), "utf8")
+  assert.match(settings, /Humanoid HUD · built in/)
+  assert.match(settings, /Muscular humanoid · showcase/)
+  assert.match(settings, /avatarId: "jarvis_base"/)
+  assert.match(settings, /MUSCULAR_HUMANOID_AVATAR_ID/)
+  assert.match(humanoid, /CURRENT_HUMANOID_ARTWORK = "\/presence\/jarvis-original\/humanoid\.webp"/)
+  assert.match(humanoid, /MUSCULAR_HUMANOID_ARTWORK = "\/presence\/jarvis-original\/humanoid-muscular\.png"/)
+  assert.match(humanoid, /settings\.avatarId === MUSCULAR_HUMANOID_AVATAR_ID/)
 })
 
 test("camera-unavailable attract stays on the pointer and does not invent a face", () => {
@@ -305,12 +374,53 @@ test("shared dot appearance supports optional profiles and bounded shader contro
 
 test("shared motion cues breathe without attention and keep alerts reduced-motion safe", async () => {
   assert.match(cloud.particleVertexShader, /uBreath/)
+  assert.match(cloud.particleVertexShader, /restPulse/)
   assert.match(cloud.particleVertexShader, /uListen/)
   assert.match(cloud.particleFragmentShader, /alertRing/)
   const stage = await readFile(new URL("./src/presence/renderers/MorphablePresenceStage.tsx", import.meta.url), "utf8")
-  assert.match(stage, /phase !== "idle" \? 0 : Math\.sin/)
+  assert.match(stage, /0\.5 \+ 0\.5 \* Math\.sin\(animationTime \* 0\.92\)/)
   assert.match(stage, /if \(reduced\) alertAge = 4/)
   assert.match(stage, /meterNow\.attached && meterNow\.kind === "tts" && phase === "speaking"/)
+})
+
+test("opening HUD settings morphs the live cloud without a background starfield swap", async () => {
+  const home = await readFile(new URL("./src/hud/HudChatHome.tsx", import.meta.url), "utf8")
+  const shell = await readFile(new URL("./src/hud/HudShell.tsx", import.meta.url), "utf8")
+  const controls = await readFile(new URL("./src/presence/AppearancePresenceControls.tsx", import.meta.url), "utf8")
+  const hudCss = await readFile(new URL("./src/hud/hud-v2.css", import.meta.url), "utf8")
+  const humanoidCss = await readFile(new URL("./src/presence/renderers/humanoid-presence.css", import.meta.url), "utf8")
+  assert.match(home, /settingsPanelOpen \? SETTINGS_CLOUD_SHAPE_ID/)
+  assert.match(controls, /onOpenChange\?\.\(openMenu !== null, openMenu\)/)
+  assert.match(home, /setSettingsPanelOpen\(open && menu !== "persona"\)/)
+  assert.equal(shapes.resolvePresenceShape(variants.SETTINGS_CLOUD_SHAPE_ID).id, "settings_cloud")
+  assert.match(shell, /!isChat && <HudStarfield/)
+  assert.match(hudCss, /inset: 0;/)
+  assert.doesNotMatch(humanoidCss, /jarvis-humanoid-hud-tl::before/)
+})
+
+test("mythic live variants use distinct named-being silhouettes", async () => {
+  const variantsSource = await readFile(new URL("./src/presence/renderers/shapes/mythicVariants.ts", import.meta.url), "utf8")
+  for (const archetype of ["stormbird", "strategist", "owl", "water_sage", "serpent", "justice",
+    "sea_giant", "bard", "messenger", "guardian", "healer", "celestial", "forge", "abyss"]) {
+    assert.match(variantsSource, new RegExp(`archetype: "${archetype}"`))
+  }
+  assert.match(variantsSource, /buildOwlLiveFigure/)
+  assert.match(variantsSource, /base\.id === "memory_rings"/)
+})
+
+test("every mythic A and B persona shares persistent detail and brightness controls", async () => {
+  const controls = await readFile(new URL("./src/persona/NamedPersonaControls.tsx", import.meta.url), "utf8")
+  const personas = await readFile(new URL("./src/persona/namedPersonas.ts", import.meta.url), "utf8")
+  const stage = await readFile(new URL("./src/presence/renderers/MorphablePresenceStage.tsx", import.meta.url), "utf8")
+  const cloud = await readFile(new URL("./src/presence/renderers/morphableOrbCloud.ts", import.meta.url), "utf8")
+  assert.match(controls, /A · portrait cloud/)
+  assert.match(controls, /B · live gaze/)
+  assert.match(controls, /Persona brightness/)
+  assert.match(controls, /Persona particle detail/)
+  assert.match(personas, /appearance: mergedAppearance/)
+  assert.match(stage, /personaDetail\(current\.personaVisual\?\.detail\)/)
+  assert.match(stage, /system\.currentShapeId\.endsWith\("_b"\)/)
+  assert.match(cloud, /Math\.round\(42000 \* maxDensity\)/)
 })
 
 test("auto presence quality adapts with sustained thresholds and fit bounds keep safe margins", () => {
@@ -407,13 +517,13 @@ test("yaw-frame fit offset cancels AABB center under Three.js T*R*S", () => {
 test("presence quality changes figure, field, and stars in place without resetting morph", () => {
   const system = cloud.createMorphablePresenceSystem(0.95, material(), "humanoid_bust", 1.15)
   const initial = system.setQuality(0.95)
-  assert.deepEqual(initial, { figure: 77900, field: 14250, galaxyStars: 22800 })
+  assert.deepEqual(initial, { figure: 39900, field: 14250, galaxyStars: 22800 })
   system.setLifecycleTarget(1, { duration: 1 })
   system.tick(0.25)
   const morph = system.morphValue()
   const low = system.setQuality(0.6)
   assert.ok(morph > 0 && morph < 1)
-  assert.deepEqual(low, { figure: 49200, field: 9000, galaxyStars: 14400 })
+  assert.deepEqual(low, { figure: 25200, field: 9000, galaxyStars: 14400 })
   assert.equal(system.morphValue(), morph)
   system.dispose()
 })

@@ -153,12 +153,20 @@ def audit_lta(event: str, **fields: Any) -> None:
     audit_security_event(f"lta.{event}", **scrub_secret_fields(fields))
 
 
-def assert_path_allowed(path: str | Path) -> Path:
-    """RFC-0079: deny paths outside allowed_directories / owner grant."""
+def _path_roots(*, extra: list[str] | None = None) -> list[str]:
     settings = load_settings()
     roots = live_allowed_directories(settings.allowed_directories)
+    for item in extra or []:
+        text = str(item or "").strip()
+        if text and text not in roots:
+            roots.append(text)
+    return roots
+
+
+def assert_path_allowed(path: str | Path, *, extra_roots: list[str] | None = None) -> Path:
+    """RFC-0079: deny paths outside allowed_directories / owner grant."""
     try:
-        return resolve_allowed_path(str(path), roots)
+        return resolve_allowed_path(str(path), _path_roots(extra=extra_roots))
     except PermissionError as exc:
         raise PathDenied(str(exc), detail="path_denied") from exc
 
@@ -172,7 +180,7 @@ def resolve_manifest_path(manifest_path: str) -> Path:
     except PathDenied:
         raise
     if resolved.is_dir():
-        candidate = resolved / "manifest.xml"
+        candidate = assert_path_allowed(resolved / "manifest.xml")
         if not candidate.is_file():
             raise ManifestNotFound(f"manifest.xml not found under {resolved}")
         return candidate
@@ -190,8 +198,9 @@ def _local_attr(attrs: dict[str, str], *names: str) -> str:
 
 
 def parse_manifest_access(manifest_path: Path) -> list[AccessEntry]:
+    allowed = assert_path_allowed(manifest_path)
     try:
-        text = manifest_path.read_text(encoding="utf-8-sig")
+        text = allowed.read_text(encoding="utf-8-sig")
     except OSError as exc:
         raise ManifestNotFound(f"manifest unreadable: {manifest_path}") from exc
     try:
@@ -239,7 +248,7 @@ def discover_archive_path(manifest_path: Path, archive_path: str | None) -> Path
         if not resolved.is_file():
             raise ArchiveFailed(f"archive not found: {resolved}", detail="archive_missing")
         return resolved
-    parent = manifest_path.parent
+    parent = assert_path_allowed(manifest_path.parent)
     candidates = [
         parent / "archive.7z",
         parent / "Archive.7z",
@@ -427,23 +436,65 @@ def _decrypt_windows_cms(blob: bytes) -> str:
             CertCloseStore(handle, 0)
 
 
+_MAX_7Z_PASSWORD = 1024
+
+
+def _validate_7z_password(password: str) -> str:
+    if not isinstance(password, str) or not password:
+        raise ArchiveFailed("archive password empty", detail="empty_password")
+    if len(password) > _MAX_7Z_PASSWORD:
+        raise ArchiveFailed("archive password too long", detail="password_too_long")
+    if "\x00" in password or any(ord(ch) < 32 for ch in password):
+        raise ArchiveFailed("archive password contains control characters", detail="password_invalid")
+    return password
+
+
 def extract_with_7z(archive_path: Path, password: str, dest_dir: Path) -> list[str]:
     exe = find_7z_executable()
     if not exe:
         raise ArchiveFailed("7-Zip executable not found (install 7z or set JARVIS_7Z_PATH)", detail="7z_missing")
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    # Do not put password in any logged argv copy. Pass via -p but never record command.
-    # 7z treats empty -p as no password; non-empty unlocks encrypted archives.
-    cmd = [exe, "x", f"-p{password}", f"-o{dest_dir}", "-y", "-bso0", "-bsp0", str(archive_path)]
+    exe_path = Path(exe).expanduser()
+    if not exe_path.is_file():
+        raise ArchiveFailed("7-Zip executable not found (install 7z or set JARVIS_7Z_PATH)", detail="7z_missing")
+    job_root = jobs_root()
+    archive = assert_path_allowed(archive_path)
+    dest = assert_path_allowed(dest_dir, extra_roots=[str(job_root), str(data_dir())])
+    secret = _validate_7z_password(password)
+    dest.mkdir(parents=True, exist_ok=True)
+    # Argv list only — never shell=True, never interpolate into a command string.
+    cmd = [
+        str(exe_path),
+        "x",
+        "-p" + secret,
+        "-o" + str(dest),
+        "-y",
+        "-bso0",
+        "-bsp0",
+        str(archive),
+    ]
     try:
-        proc = subprocess.run(cmd, capture_output=True, check=False)
+        proc = subprocess.run(cmd, capture_output=True, check=False, shell=False)
     except OSError as exc:
         raise ArchiveFailed("failed to invoke 7-Zip", detail=type(exc).__name__) from exc
     if proc.returncode != 0:
         # Map common 7z codes without echoing stderr (may mention paths only — still scrub)
         detail = f"7z_exit_{proc.returncode}"
         raise ArchiveFailed("7-Zip extract failed", detail=detail)
-    return list_extract_tree(dest_dir)
+    return list_extract_tree(dest)
+
+
+def succeeded_lta_extract_root(job_id: str) -> Path:
+    """RFC-0200 §3.3: post-extract root after RFC-0198 open succeeded. No second unlock."""
+    job = get_lta_job(job_id)
+    if str(job.get("status") or "") != "succeeded":
+        raise PathDenied("LTA job has not completed open", detail="lta_not_extracted")
+    job_root = job_directory(str(job.get("id") or job_id)).resolve()
+    extract = Path(str(job.get("extract_dir") or job_root / "files")).expanduser().resolve()
+    try:
+        extract.relative_to(job_root)
+    except ValueError as exc:
+        raise PathDenied("extract dir is not under the LTA job root", detail="lta_extract_mismatch") from exc
+    return job_root
 
 
 def list_extract_tree(root: Path, *, limit: int = 500) -> list[str]:

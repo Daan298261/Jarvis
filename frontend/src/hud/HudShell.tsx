@@ -3,6 +3,13 @@ import { refreshSessionPersonality } from "./sessionPersonality"
 import { Link, NavLink, useLocation } from "react-router-dom"
 import type { AwayModeState, LicenseStatus, SwarmNode, Task } from "../api"
 import { HelpPanel, HelpTrigger } from "../help/HelpPanel"
+import { PERSONA_LABELS, ROSTER_IDS, useNamedPersonas, type NamedPersonaId } from "../persona/namedPersonas"
+import { PersonaSetupGuide } from "../persona/PersonaSetupGuide"
+import {
+  isPersonaSetupIncomplete,
+  offerPersonaSetup,
+  usePersonaSetup,
+} from "../persona/personaSetup"
 import { PortalNav } from "../components/PortalNav"
 import { HudHealthRail } from "./HudHealthRail"
 import { HudLocalStatus } from "./HudLocalStatus"
@@ -54,6 +61,12 @@ type HudTopChromeProps = {
   onDaybreakToggle?: () => void
   onAdminNav?: () => void
   healthIssues?: HealthIssue[]
+  setupIncomplete?: boolean
+  onToolPackSetup?: () => void
+  setupOpen?: boolean
+  onSetupClose?: () => void
+  setupPersonaId?: NamedPersonaId
+  setupPersonaLabel?: string
 }
 
 export function HudTopChrome({
@@ -77,6 +90,12 @@ export function HudTopChrome({
   onDaybreakToggle,
   onAdminNav,
   healthIssues = [],
+  setupIncomplete = false,
+  onToolPackSetup,
+  setupOpen = false,
+  onSetupClose,
+  setupPersonaId = "anzu",
+  setupPersonaLabel = "Anzu",
 }: HudTopChromeProps) {
   return (
     <header className="hud-top">
@@ -140,6 +159,7 @@ export function HudTopChrome({
         <HelpTrigger variant="hud" onClick={onHelpToggle} expanded={helpOpen} />
         <button type="button" className="hud-icon-btn" onClick={onAdminToggle} aria-expanded={adminOpen}>
           Admin
+          {setupIncomplete && <span className="hud-setup-dot" aria-hidden="true" />}
         </button>
         <button
           type="button"
@@ -166,7 +186,31 @@ export function HudTopChrome({
           <Link to="/model" onClick={() => onAdminNav?.()}>Model</Link>
           <Link to="/tools" onClick={() => onAdminNav?.()}>Tools</Link>
           <Link to="/mcp" onClick={() => onAdminNav?.()}>MCP</Link>
+          <button
+            type="button"
+            className="hud-admin-setup-entry"
+            onClick={() => onToolPackSetup?.()}
+          >
+            Tool pack setup
+            {setupIncomplete && <span className="hud-setup-dot" aria-label="Setup incomplete" />}
+          </button>
         </nav>
+      )}
+      {setupOpen && (
+        <aside className="persona-setup-panel" aria-label="Tool pack setup">
+          <header className="persona-setup-panel-head">
+            <strong>Tool pack setup</strong>
+            <button type="button" className="hud-drawer-close" onClick={() => onSetupClose?.()} aria-label="Close tool pack setup">
+              ×
+            </button>
+          </header>
+          <PersonaSetupGuide
+            key={setupPersonaId}
+            personaId={setupPersonaId}
+            personaLabel={setupPersonaLabel}
+            onDismiss={onSetupClose}
+          />
+        </aside>
       )}
     </header>
   )
@@ -255,8 +299,17 @@ function HudShellInner({
   const location = useLocation()
   const [adminOpen, setAdminOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
+  const [setupOpen, setSetupOpen] = useState(false)
   const [panel, setPanel] = useState<HudPanel>(null)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  const namedPersonas = useNamedPersonas()
+  const rawPersonaId = namedPersonas?.active?.id || "anzu"
+  const setupPersonaId = (ROSTER_IDS.includes(rawPersonaId as NamedPersonaId) ? rawPersonaId : "anzu") as NamedPersonaId
+  const setupPersonaLabel = namedPersonas?.active?.id === setupPersonaId
+    ? namedPersonas.active.label
+    : PERSONA_LABELS[setupPersonaId]
+  const setupProgress = usePersonaSetup(setupPersonaId)
+  const setupIncomplete = isPersonaSetupIncomplete(setupProgress)
 
   useEffect(() => {
     refreshSessionPersonality().catch(() => undefined)
@@ -268,6 +321,7 @@ function HudShellInner({
     setPanel(null)
     setAdminOpen(false)
     setHelpOpen(false)
+    setSetupOpen(false)
   }, [location.pathname])
 
   const runningCount = tasks.filter((task) => ["running", "queued", "waiting"].includes(task.status)).length
@@ -276,6 +330,7 @@ function HudShellInner({
   function togglePanel(next: Exclude<HudPanel, null>) {
     setAdminOpen(false)
     setHelpOpen(false)
+    setSetupOpen(false)
     dismissHexSuiteForOverlay()
     setPanel((current) => current === next ? null : next)
   }
@@ -283,6 +338,7 @@ function HudShellInner({
   function toggleAdmin() {
     setPanel(null)
     setHelpOpen(false)
+    setSetupOpen(false)
     setAdminOpen((open) => {
       const next = !open
       if (next) dismissHexSuiteForOverlay()
@@ -293,6 +349,7 @@ function HudShellInner({
   function toggleHelp() {
     setPanel(null)
     setAdminOpen(false)
+    setSetupOpen(false)
     setHelpOpen((open) => {
       const next = !open
       if (next) dismissHexSuiteForOverlay()
@@ -308,6 +365,16 @@ function HudShellInner({
     setPanel(null)
     setAdminOpen(false)
     setHelpOpen(false)
+    setSetupOpen(false)
+  }
+
+  function openToolPackSetup() {
+    offerPersonaSetup(setupPersonaId)
+    setPanel(null)
+    setHelpOpen(false)
+    setAdminOpen(false)
+    setSetupOpen(true)
+    dismissHexSuiteForOverlay()
   }
 
   function onDaybreakToggle() {
@@ -326,7 +393,7 @@ function HudShellInner({
 
   return (
     <div className={`hud-app${skyOpen ? " hud-sky" : ""}${galaxyEffective ? " hud-galaxy" : ""}`}>
-      <HudStarfield mode={skyOpen ? "sky" : "cluster"} pulseKey={pulseKey} galaxy={galaxyEffective} />
+      {!isChat && <HudStarfield mode={skyOpen ? "sky" : "cluster"} pulseKey={pulseKey} galaxy={galaxyEffective} />}
       <HudTopChrome
         version={version}
         statusOnline={statusOnline}
@@ -347,11 +414,18 @@ function HudShellInner({
         onDaybreakToggle={onDaybreakToggle}
         onAdminNav={closeAdminDrawer}
         healthIssues={healthIssues}
+        setupIncomplete={setupIncomplete}
+        onToolPackSetup={openToolPackSetup}
+        setupOpen={setupOpen}
+        onSetupClose={() => setSetupOpen(false)}
+        setupPersonaId={setupPersonaId}
+        setupPersonaLabel={setupPersonaLabel}
         onModelMenuOpenChange={(open) => {
           setModelMenuOpen(open)
           if (open) {
             setAdminOpen(false)
             setHelpOpen(false)
+            setSetupOpen(false)
             dismissHexSuiteForOverlay()
           }
         }}

@@ -152,9 +152,12 @@ def test_mapped_address_is_egress_detects_double_nat(monkeypatch):
     assert mapped_address_is_egress("8.8.8.8") is True
 
 
-def test_windows_firewall_helper_skips_on_linux():
+def test_windows_firewall_helper_skips_on_linux(monkeypatch):
     from app.mobile.wan_forward import ensure_companion_firewall, ensure_private_firewall_4782
 
+    from types import SimpleNamespace
+
+    monkeypatch.setattr("app.mobile.wan_forward.os", SimpleNamespace(name="posix"))
     assert ensure_private_firewall_4781() == "skipped"
     assert ensure_private_firewall_4782() == "skipped"
     assert ensure_companion_firewall() == {"tcp_4781": "skipped", "udp_4782": "skipped"}

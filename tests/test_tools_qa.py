@@ -26,7 +26,8 @@ async def test_docker_requires_targets_before_invoking_cli():
 async def test_office_info_does_not_require_com():
     tool = OfficeTool()
     result = await tool.execute(app="word", action="info")
-    assert "Office" in (result.output or result.error)
+    assert "app=word" in result.output
+    assert "COM was not" in result.output
     if platform.system() != "Windows":
         assert "COM was not launched" in (result.output or "")
         create = await tool.execute(app="word", action="create", destination="/tmp/no.docx")

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 from ..config import data_dir, resolved_data_sidecar_dir
 
@@ -38,17 +40,24 @@ def reset_recovery_db() -> None:
         if path.exists():
             path.unlink()
         _DB_PATH = path.parent / "journal.db"
-        _init_schema(connect())
+        # connect() initializes the schema. Close its handle before callers
+        # remove or reconfigure the database (Windows otherwise locks it).
+        with connect():
+            pass
 
 
-def connect() -> sqlite3.Connection:
+@contextmanager
+def connect() -> Iterator[sqlite3.Connection]:
     with _lock:
         conn = sqlite3.connect(str(recovery_db_path()), timeout=30, isolation_level=None)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=30000")
         _init_schema(conn)
-        return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def _init_schema(conn: sqlite3.Connection) -> None:

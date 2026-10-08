@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import hashlib
 import json
 import logging
@@ -145,6 +146,7 @@ from .front_responder import (
     last_front_timing,
     note_front_audio,
     run_two_lane_chat,
+    spawn_context_expand_keep_busy,
     worker_required,
 )
 from .task_fastpath import (
@@ -915,6 +917,9 @@ class AgentRuntime:
             return False
         if not front or not is_safe_front_speech(front.action, front.text):
             return False
+        # Already past early TTS (or a prior speak) — do not re-speak on expand/retry.
+        if stream_speak_offset(stream_key) > 0:
+            return False
         spoken = front.text if front.text.endswith((".", "!", "?")) else f"{front.text}."
         early_id = maybe_enqueue_streaming_social_tts(
             spoken,
@@ -1121,8 +1126,6 @@ class AgentRuntime:
             used += size
         prior = list(reversed(bounded))
 
-        briefing = await weather_system_message(user_text)
-
         from ..inference.answer_routing import prepare_answer_route
         from ..inference.model_escalation import schedule_orchestrator_restore
         from ..tts.speech_safe import speech_safe
@@ -1134,10 +1137,12 @@ class AgentRuntime:
                 stored_route = str(getattr(task_row, "response_route", "") or "")
         route_kind = resolve_route_kind(user_text, stored_route=stored_route)
 
+        # Front before weather HTTP — ack/first-audible must not wait on Open-Meteo.
+        weather_task = asyncio.create_task(weather_system_message(user_text))
+
         # Lean prompt for fast-path only — vault/Supermemory compose happens after miss.
+        # Briefing is injected after the front lane when the weather task completes.
         lean_messages: list[ChatMessage] = [ChatMessage(role="system", content=OWNER_CHAT_SYSTEM), *prior]
-        if briefing:
-            lean_messages.insert(1, ChatMessage(role="system", content=briefing))
         last = prior[-1] if prior else None
         if last is None or last.role != "user" or (last.content or "").strip() != user_text:
             lean_messages.append(ChatMessage(role="user", content=user_text))
@@ -1186,6 +1191,9 @@ class AgentRuntime:
         )
         if terminal.admitted:
             note_fastpath_decision(terminal, task_id=task_id)
+            weather_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await weather_task
             await BUS.publish(
                 task_id,
                 "fastpath",
@@ -1229,6 +1237,10 @@ class AgentRuntime:
                 metrics,
             )
             return
+
+        briefing = await weather_task
+        if briefing:
+            lean_messages.insert(1, ChatMessage(role="system", content=briefing))
 
         lookup = admit_lookup_fastpath(user_text, route_kind=route_kind, briefing=briefing)
         if lookup.admitted:
@@ -1342,20 +1354,8 @@ class AgentRuntime:
             from ..agent.front_responder import resolve_front_model_id
 
             async def _expand_notice(before: int, after: int) -> None:
-                front = await generate_front_reply(
-                    user_text,
-                    history=prior,
-                    settings=settings,
-                    turn_started=turn_started or model_started,
-                )
-                if front.text:
-                    await self._speak_front_reply(
-                        task_id,
-                        front,
-                        prompt=prompt,
-                        stream_key=stream_key,
-                        turn_started=turn_started or model_started,
-                    )
+                # Publish the resize notice only; do not await a second front
+                # regen (blocked the worker) or re-speak after early TTS.
                 await BUS.publish(
                     task_id,
                     "model_lane",
@@ -1368,6 +1368,20 @@ class AgentRuntime:
                     stage="model",
                     persist=False,
                 )
+                if stream_speak_offset(stream_key) > 0:
+                    return
+
+                async def _on_spoken(text: str) -> None:
+                    if stream_speak_offset(stream_key) > 0:
+                        return
+                    await publish_owner_text(
+                        text,
+                        source="task_chat",
+                        speak=True,
+                        user_prompt=prompt,
+                    )
+
+                spawn_context_expand_keep_busy(on_spoken=_on_spoken)
 
             await ensure_context_for_messages(
                 messages,

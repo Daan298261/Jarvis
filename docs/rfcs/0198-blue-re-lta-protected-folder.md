@@ -124,3 +124,4 @@ Implement follow-up:
 
 - Authorized recovery tooling only; aligns with defensive owner use (Themis-led UX).
 - Cloud VM cannot run Windows cert store or desktop soak.
+- See [RFC-0200](0200-rea-mcp-local-investigation.md) for REA MCP on post-extract paths.

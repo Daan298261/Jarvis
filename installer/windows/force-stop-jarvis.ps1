@@ -19,6 +19,11 @@ param(
 
     [switch]$IncludeTray,
 
+    # Manager lifecycle controls must stop only the core; its tray stays alive.
+    [switch]$PreserveManager,
+
+    [switch]$StartupCleanup,
+
     [switch]$CheckOnly,
 
     [int]$MaxWaitSeconds = 90,
@@ -176,6 +181,8 @@ function Invoke-ForceStopSingleRoot {
 
     function Test-IsJarvisTrayProcess {
         param($Proc)
+        $leaf = Get-ProcessNameLeaf ([string]$Proc.Name)
+        if ($leaf -notmatch '^(powershell|pwsh)$') { return $false }
         $cmd = [string]$Proc.CommandLine
         if (-not ($cmd -match 'jarvis-tray\.ps1')) { return $false }
         if (-not $IncludeTray) { return $false }
@@ -184,6 +191,8 @@ function Invoke-ForceStopSingleRoot {
 
     function Test-IsJarvisStartScriptProcess {
         param($Proc)
+        $leaf = Get-ProcessNameLeaf ([string]$Proc.Name)
+        if ($leaf -notmatch '^(powershell|pwsh)$') { return $false }
         $cmd = [string]$Proc.CommandLine
         if (-not ($cmd -match 'start-jarvis\.ps1')) { return $false }
         if (Test-IsProtectedInstallerProcess $Proc) { return $false }
@@ -231,8 +240,14 @@ function Invoke-ForceStopSingleRoot {
         $cmd = [string]$Proc.CommandLine
         $exePath = Get-ProcExecutablePath $Proc
 
+        if ($PreserveManager -and (($leaf -eq 'anzumanager') -or ($cmd -match 'app\.manager\.main:app'))) { return $false }
+
         if (Test-HaystackUnderRoot $exePath $RootNorm) { return $true }
-        if (Test-HaystackUnderRoot $cmd $RootNorm) { return $true }
+        # A document opened from the install folder is not a Jarvis process.
+        # Only command interpreters and runtime processes may be identified by
+        # a Jarvis path in their command line (e.g. python, PowerShell, Node).
+        if ($leaf -match '^(python|pythonw|powershell|pwsh|cmd|node|npm|java|javaw|gradle|jarvis|jarvis-backend|llama-server|supermemory-server)$' -and
+            (Test-HaystackUnderRoot $cmd $RootNorm)) { return $true }
         if ($leaf -eq "llama-server" -and (Test-HaystackUnderRoot $exePath $RootNorm)) { return $true }
         if ($leaf -match '^(node|npm|java|javaw|gradle)$' -and $cmd) {
             $rootLower = $RootNorm.TrimEnd('\').ToLowerInvariant()
@@ -255,6 +270,9 @@ function Invoke-ForceStopSingleRoot {
     function Test-IsJarvisIdentityProcess {
         param($Proc, [string]$RootNorm)
         if (Test-IsProtectedInstallerProcess $Proc) { return $false }
+        # A startup cleanup must never terminate a second launcher while it is
+        # starting the backend. Full installer/uninstall stops still kill it.
+        if ($StartupCleanup -and ([string]$Proc.CommandLine) -match 'start-jarvis\.ps1') { return $false }
         if (Test-ProcessUnderInstall $Proc $RootNorm) { return $true }
         if (Test-IsJarvisUvicornBackend $Proc) { return $true }
         if (Test-IsJarvisMobileGateway $Proc) { return $true }

@@ -25,7 +25,7 @@ export type PresencePhase =
   | "approval"
   | "error"
 
-/** Optional named-persona colour, glow, and scale on the existing orb cloud. */
+/** Optional named-persona colour, brightness, detail, and scale on the existing orb cloud. */
 export type PersonaCloudVisual = {
   personaId?: string
   personaLabel?: string
@@ -33,6 +33,8 @@ export type PersonaCloudVisual = {
   orbColor?: string
   accentColor?: string
   glow?: number
+  /** Fraction of the available particle budget; lower values leave more air between points. */
+  detail?: number
   animation?: number
   scale?: number
   /** Bounded renderer-wide orb size multiplier, independent of bust framing. */

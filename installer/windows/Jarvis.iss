@@ -2,7 +2,7 @@
 ; Build on Windows with build-installer.ps1 (requires Inno Setup 6 + iscc on PATH).
 
 #define MyAppName "Jarvis"
-#define MyAppVersion "1.5.0"
+#define MyAppVersion "1.5.2"
 #define MyAppPublisher "Jarvis"
 #define MyAppURL "https://github.com/Daan298261/Jarvis"
 #define MyAppExe "powershell.exe"
@@ -40,6 +40,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a &Desktop shortcut to start Jarvis"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
 Name: "launchjarvis"; Description: "Start Jarvis when setup finishes"; GroupDescription: "After installing:"; Flags: checkedonce
 Name: "elevatedlogon"; Description: "Start Jarvis elevated at Windows logon (one UAC prompt)"; GroupDescription: "After installing:"; Flags: checkedonce
+Name: "anzualias"; Description: "Use anzu in local browser addresses (http://anzu:4780)"; GroupDescription: "Local convenience:"; Flags: checkedonce
 Name: "voicebutler"; Description: "Household butler (Kokoro — Anzu default)"; GroupDescription: "Voice models:"; Flags: checkedonce
 Name: "voicedry"; Description: "Dry household butler (Nabu, Eir)"; GroupDescription: "Voice models:"; Flags: checkedonce
 Name: "voicetactical"; Description: "Tactical aide (Mestor, Themis, Heimdall)"; GroupDescription: "Voice models:"; Flags: checkedonce
@@ -50,9 +51,9 @@ Name: "voicechatterbox"; Description: "Expressive Chatterbox (Aegir, Bragi, Herm
 Name: "dl_kokoro"; Description: "Kokoro-82M TTS neural voice (recommended default butler)"; GroupDescription: "Speech and voice systems to download:"; Flags: checkedonce
 Name: "dl_personavoices"; Description: "Persona neural voices (5 shared voice packs for 13 personas)"; GroupDescription: "Speech and voice systems to download:"; Flags: checkedonce
 Name: "dl_whisper"; Description: "Whisper speech-to-text base model (faster-whisper local STT)"; GroupDescription: "Speech and voice systems to download:"; Flags: checkedonce
-Name: "dl_voicestudio"; Description: "VoiceStudio local multi-engine voice suite integration (debpalash/voicestudio)"; GroupDescription: "Speech and voice systems to download:"; Flags: unchecked
-Name: "dl_pockettts"; Description: "Pocket TTS lightweight CPU neural voice (Kyutai Labs)"; GroupDescription: "Speech and voice systems to download:"; Flags: unchecked
-Name: "dl_umi_brain"; Description: "Umi persona brain (Ollama Qwen3.5 9B Opus reasoning + Pocket TTS voice)"; GroupDescription: "Speech and voice systems to download:"; Flags: unchecked
+Name: "dl_voicestudio"; Description: "VoiceStudio local multi-engine voice suite integration (debpalash/voicestudio)"; GroupDescription: "Speech and voice systems to download:"; Flags: checkedonce
+Name: "dl_pockettts"; Description: "Pocket TTS lightweight CPU neural voice (Kyutai Labs)"; GroupDescription: "Speech and voice systems to download:"; Flags: checkedonce
+Name: "dl_umi_brain"; Description: "Umi persona brain (Ollama Qwen3.5 9B Opus reasoning + Pocket TTS voice)"; GroupDescription: "Speech and voice systems to download:"; Flags: checkedonce
 
 ; Local LLM weights
 Name: "dl_localllm"; Description: "Qwen3.5-9B GGUF weights (recommended local agent model)"; GroupDescription: "AI models to download:"; Flags: checkedonce
@@ -61,7 +62,11 @@ Name: "dl_expert27b"; Description: "Qwen3.5-27B Expert weights (high VRAM/RAM re
 [Files]
 ; Copy application tree from repo root (two levels up from this .iss file).
 ; Exclude heavy or machine-local dirs — bootstrap recreates them on first run.
-Source: "..\..\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*,.git\**,.venv\*,.venv\**,.vendor\*,.vendor\**,.pytest_cache\*,.pytest_cache\**,tests\*,tests\**,__pycache__\*,__pycache__\**,*\__pycache__\*,*\__pycache__\**,node_modules\*,node_modules\**,frontend\node_modules\*,frontend\node_modules\**,frontend\dist\*,frontend\dist\**,mcp\node_modules\*,mcp\node_modules\**,models\*,models\**,runtime\*,runtime\**,data\*,data\**,logs\*,logs\**,release\*,release\**,Releases\*,Releases\**,_release_upload\*,_release_upload\**,installer-build*.log,android\.gradle\*,android\.gradle\**,android\app\build\*,android\app\build\**,.codex-remote-attachments\*,.codex-remote-attachments\**,installer\windows\payload\*,installer\windows\payload\**,installer\windows\dist\*,installer\windows\dist\**,tools\license_manager\*,tools\license_manager\**,backend\app\licensing\manager_app.py,JarvisLicenseManager.exe,*.jarvis-license,issuer.key,issuer.pub,issuer.sqlite,Jarvis\*,Jarvis\**,*\Jarvis\*,*\Jarvis\**"
+Source: "..\..\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*,.git\**,.venv\*,.venv\**,.vendor\*,.vendor\**,.pytest_cache\*,.pytest_cache\**,tests\*,tests\**,__pycache__\*,__pycache__\**,*\__pycache__\*,*\__pycache__\**,node_modules\*,node_modules\**,frontend\node_modules\*,frontend\node_modules\**,frontend\dist\*,frontend\dist\**,mcp\node_modules\*,mcp\node_modules\**,models\*,models\**,runtime\*,runtime\**,data\*,data\**,logs\*,logs\**,release\*,release\**,Releases\*,Releases\**,_release_upload\*,_release_upload\**,installer-build*.log,stage-desktop*.log,build-*.log,android\app\.cxx\*,android\app\.cxx\**,android\build\*,android\build\**,frontend\src-tauri\target\*,frontend\src-tauri\target\**,frontend\src-tauri\gen\*,frontend\src-tauri\sidecars\*,frontend\src-tauri\sidecars\**,frontend\src-tauri\gen\**,android\.gradle\*,android\.gradle\**,android\app\build\*,android\app\build\**,.codex-remote-attachments\*,.codex-remote-attachments\**,installer\windows\payload\*,installer\windows\payload\**,installer\windows\dist\*,installer\windows\dist\**,tools\license_manager\*,tools\license_manager\**,backend\app\licensing\manager_app.py,JarvisLicenseManager.exe,*.jarvis-license,issuer.key,issuer.pub,issuer.sqlite,Jarvis\*,Jarvis\**,*\Jarvis\*,*\Jarvis\**"
+; The broad runtime/dist exclusions above also match nested first-party packages.
+; Include these explicitly: 1.5.0 omitted app.runtime and kept a stale portal build.
+Source: "..\..\backend\app\runtime\*"; DestDir: "{app}\backend\app\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__\*,__pycache__\**,*\__pycache__\*,*\__pycache__\**"
+Source: "..\..\frontend\dist\*"; DestDir: "{app}\frontend\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Always ship bootstrap beside the installed tree (also under installer\windows in source).
 Source: "bootstrap.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversion
 Source: "force-stop-jarvis.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversion
@@ -74,6 +79,8 @@ Source: "reset-user-data.ps1"; DestDir: "{app}\installer\windows"; Flags: ignore
 Source: "reset-user-data.ps1"; DestDir: "{tmp}"; Flags: dontcopy
 Source: "run-installer-bootstrap.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversion
 Source: "run-installer-bootstrap.ps1"; DestDir: "{tmp}"; Flags: dontcopy
+Source: "manage-anzu-hosts.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversion
+Source: "manage-anzu-hosts.ps1"; DestDir: "{tmp}"; Flags: dontcopy
 #ifndef SkipBootstrapModel
 ; Release distributions carry a local bootstrap brain. The multi-GB file is staged
 ; by build-installer.ps1 and is not committed to the repository.
@@ -86,15 +93,20 @@ Source: "payload\models\tts\kokoro-82m\*"; DestDir: "{app}\models\tts\kokoro-82m
 #ifndef SkipDesktopShell
 ; Native Jarvis Desktop (Tauri) + PyInstaller backend sidecar — staged by stage-desktop-shell.ps1.
 Source: "payload\desktop\Jarvis.exe"; DestDir: "{app}\desktop"; Flags: ignoreversion
+Source: "payload\desktop\AnzuManager.exe"; DestDir: "{app}\desktop"; Flags: ignoreversion
 Source: "payload\desktop\sidecars\*"; DestDir: "{app}\desktop\sidecars"; Flags: ignoreversion recursesubdirs createallsubdirs
 #endif
 
 [Icons]
 Name: "{group}\Start Jarvis"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"""; WorkingDir: "{app}"; Comment: "Start Jarvis (desktop shell when installed, else browser portal)"
 Name: "{group}\Jarvis Desktop"; Filename: "{app}\desktop\Jarvis.exe"; WorkingDir: "{app}"; Comment: "Open Jarvis in the native desktop window (Obsidian embed)"; Check: DesktopShellInstalled
+Name: "{group}\ANZU Manager"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-anzu-manager.ps1"""; WorkingDir: "{app}"; Comment: "Open ANZU Manager in the tray"
 Name: "{group}\Stop Jarvis"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\stop-jarvis.ps1"" -IncludeTray"; WorkingDir: "{app}"; Comment: "Stop Jarvis backend and llama.cpp"
 Name: "{autodesktop}\Start Jarvis"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"""; WorkingDir: "{app}"; Tasks: desktopicon; Comment: "Start Jarvis (desktop shell when installed, else browser portal)"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
+
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "ANZUManager"; ValueData: "powershell.exe -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File ""{app}\start-anzu-manager.ps1"" -NoWindow"; Flags: uninsdeletevalue
 
 [Run]
 ; First-run bootstrap: Python venv, pip, Playwright, portal build and llama.cpp.
@@ -107,11 +119,13 @@ Filename: "powershell.exe"; Parameters: "{code:GetBootstrapRunParameters}"; Work
 #endif
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"" -RegisterLogonTask"; WorkingDir: "{app}"; Description: "Register elevated Jarvis at Windows logon"; Flags: postinstall waituntilterminated skipifsilent; Tasks: elevatedlogon
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-jarvis.ps1"" -OpenPath ""/setup?step=integrations"""; WorkingDir: "{app}"; Description: "Connect Gmail and WhatsApp in Jarvis"; Flags: postinstall nowait skipifsilent; Tasks: launchjarvis
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\start-anzu-manager.ps1"""; WorkingDir: "{app}"; Description: "Start ANZU Manager"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
 ; Stop backend, llama-server, and tray helper before uninstall.
 Filename: "powershell.exe"; Parameters: "{code:GetUninstallForceStopParameters}"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "StopJarvis"
 Filename: "schtasks.exe"; Parameters: "/Delete /TN JarvisElevatedBackend /F"; Flags: runhidden; RunOnceId: "RemoveJarvisElevatedBackend"
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\installer\windows\manage-anzu-hosts.ps1"" -Action Remove"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveAnzuAlias"
 
 [Code]
 const
@@ -170,6 +184,9 @@ begin
 
   if ExistingInstallDir = '' then
     ExistingInstallDir := ExpandConstant('{localappdata}\Jarvis');
+  { The ARP InstallLocation ends in a backslash. If quoted as a PowerShell
+    argument, that trailing slash escapes the quote and swallows later flags. }
+  ExistingInstallDir := RemoveBackslashUnlessRoot(ExistingInstallDir);
   if (not Result) and FileExists(AddBackslash(ExistingInstallDir) + 'unins000.exe') then
     Result := True;
   { Half-dead leftover tree: unins000.exe /VERYSILENT can exit 0 after deleting }
@@ -218,6 +235,7 @@ begin
   ExtractTemporaryFile('clean-reinstall-jarvis.ps1');
   ExtractTemporaryFile('reset-user-data.ps1');
   ExtractTemporaryFile('run-installer-bootstrap.ps1');
+  ExtractTemporaryFile('manage-anzu-hosts.ps1');
 end;
 
 function InitializeSetup: Boolean;
@@ -283,10 +301,12 @@ var
   ForceScript: String;
   Params: String;
   WorkDir: String;
+  NormalizedAppDir: String;
 begin
   Result := True;
   if AppDir = '' then
     Exit;
+  NormalizedAppDir := RemoveBackslashUnlessRoot(AppDir);
   ForceScript := ResolveForceStopScript(AppDir);
   if ForceScript = '' then
   begin
@@ -297,7 +317,7 @@ begin
 
   WorkDir := ExpandConstant('{tmp}');
   Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ForceScript +
-    '" -InstallRoot "' + AppDir + '" -IncludeTray -MaxWaitSeconds 90 -LogPath "' +
+    '" -InstallRoot "' + NormalizedAppDir + '" -IncludeTray -MaxWaitSeconds 90 -LogPath "' +
     ExpandConstant('{tmp}\installer-stop.log') + '"';
   if Exec('powershell.exe', Params, WorkDir, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
   begin
@@ -308,6 +328,16 @@ begin
   begin
     Log('Failed to launch force-stop-jarvis.ps1');
     Result := False;
+  end;
+  if not Result then
+  begin
+    { Jarvis may have been launched elevated while this per-user Setup is not.
+      Retry with UAC so upgrade, repair and uninstall can stop that backend. }
+    Log('Retrying Jarvis force-stop with administrator privileges.');
+    ResultCode := -1;
+    Result := ShellExec('runas', 'powershell.exe', Params, WorkDir, SW_HIDE,
+      ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+    Log('Elevated Jarvis force-stop finished with code ' + IntToStr(ResultCode));
   end;
 end;
 
@@ -364,7 +394,7 @@ begin
   begin
     MsgBox(
       'Jarvis is still running and could not be stopped. Close Jarvis and try again.' + #13#10 +
-      'See logs\installer-stop.log in your Jarvis folder for details.',
+      'See %TEMP%\Jarvis-installer-stop.log for details.',
       mbError, MB_OK);
     Result := False;
   end;
@@ -396,7 +426,15 @@ end;
 function GetUninstallForceStopParameters(Param: String): String;
 begin
   Result := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\installer\windows\force-stop-jarvis.ps1') +
-    '" -InstallRoot "' + ExpandConstant('{app}') + '" -IncludeTray -MaxWaitSeconds 90';
+    '" -InstallRoot "' + RemoveBackslashUnlessRoot(ExpandConstant('{app}')) + '" -IncludeTray -MaxWaitSeconds 90';
+end;
+
+function InitializeUninstall: Boolean;
+begin
+  Result := ForceStopJarvisUnder(ExpandConstant('{app}'));
+  if not Result then
+    MsgBox('Jarvis could not be stopped, so uninstall was cancelled.' + #13#10 +
+      'See %TEMP%\Jarvis-installer-stop.log for the process and error.', mbError, MB_OK);
 end;
 
 procedure RecordOwnedPathsRegistry(const InstallDir, SetupExe: String);
@@ -476,9 +514,18 @@ begin
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
 begin
   if CurStep = ssPostInstall then
+  begin
     RecordOwnedPathsRegistry(ExpandConstant('{app}'), ExpandConstant('{srcexe}'));
+    if WizardIsTaskSelected('anzualias') then
+    begin
+      if not ShellExec('runas', 'powershell.exe', '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\manage-anzu-hosts.ps1') + '" -Action Install', ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+        Log('ANZU local alias was not installed because elevation was declined or failed.');
+    end;
+  end;
 end;
 
 function ShouldRunInstallerBootstrap: Boolean;
@@ -670,7 +717,7 @@ begin
   if not StopJarvisProcessesForPrepare then
   begin
     Result := 'Jarvis is still running and could not be stopped. Close Jarvis and try again.' + #13#10 +
-      'See logs\installer-stop.log in your Jarvis folder for details.';
+      'See %TEMP%\Jarvis-installer-stop.log for details.';
     Exit;
   end;
 
