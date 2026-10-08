@@ -29,6 +29,11 @@ option(JARVIS_BUILD_VOICE_NATIVE "Build jarvis_whisper + jarvis_voice_tts (RFC-0
 if(JARVIS_BUILD_VOICE_NATIVE)
     include(ExternalProject)
     # Isolated configure so whisper.cpp's ggml targets do not collide with llama.cpp.
+    # Must be part of the default ninja graph or AGP never builds the voice .so files.
+    set(_voice_lib_dir "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
+    if(NOT _voice_lib_dir)
+        set(_voice_lib_dir "${CMAKE_CURRENT_BINARY_DIR}")
+    endif()
     ExternalProject_Add(
         jarvis_voice_native_ext
         SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/voice_native
@@ -43,10 +48,18 @@ if(JARVIS_BUILD_VOICE_NATIVE)
             -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
             -DCMAKE_CXX_STANDARD=17
             -DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
-            -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+            -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=${_voice_lib_dir}
             -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
             -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}
+        BUILD_BYPRODUCTS
+            ${_voice_lib_dir}/libjarvis_whisper.so
+            ${_voice_lib_dir}/libjarvis_voice_tts.so
+            ${_voice_lib_dir}/libonnxruntime.so
         BUILD_ALWAYS 1
         INSTALL_COMMAND ""
+        USES_TERMINAL_CONFIGURE TRUE
+        USES_TERMINAL_BUILD TRUE
     )
+    add_custom_target(jarvis_voice_native ALL DEPENDS jarvis_voice_native_ext)
+    add_dependencies(jarvis_llama jarvis_voice_native_ext)
 endif()

@@ -632,7 +632,8 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         offlineQueue.markSynced(syncedIds)
         offlineQueue.pruneSynced()
         mutable.value = mutable.value.copy(
-            conversationId = result.optString("conversation_id", mutable.value.conversationId),
+            conversationId = result.optString("conversation_id").takeIf { it.isNotBlank() }
+                ?: mutable.value.conversationId,
             offlineQueueDepth = offlineQueue.pendingCount(),
             activity = CompanionOfflineStatus.desktopBackBanner(),
         )
