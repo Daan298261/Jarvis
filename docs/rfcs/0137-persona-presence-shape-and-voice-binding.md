@@ -5,7 +5,8 @@
 **Author:** Jarvis Architect  
 **Date:** 2026-09-23  
 **Amended:** 2026-09-23 on `development` @ `ec5c8f8c` (PR #376); 13-persona roster amend #379 @ `a434f4c8`. This file stays **0137**. Do not open RFC-0138 for the roster.  
-**Amended:** 2026-09-30 — [RFC-0195](0195-visual-acceptance-and-presence-stage.md) uniqueness: selector cards use WebGL shape+profile thumbnails; side-injected **Umi** must not reuse Nabu `memory_rings` (unique `opus_tide`). Does **not** add a fourteenth canonical roster row. Status stays **implemented**. Desktop soak unchecked.
+**Amended:** 2026-09-30 — [RFC-0195](0195-visual-acceptance-and-presence-stage.md) uniqueness: selector cards use WebGL shape+profile thumbnails; side-injected **Umi** must not reuse Nabu `memory_rings` (unique `opus_tide`). Does **not** add a fourteenth canonical roster row. Status stays **implemented**. Desktop soak unchecked.  
+**Amended:** 2026-10-08 — specialist persona speech via `persona_speech.speak_text` (post-#551); see § Amendment 2026-10-08 below.
 
 **Related (do not rewrite):** [RFC-0126](0126-personality-session-modes.md) and [RFC-0130](0130-session-personalities.md) stay **session modes** (HUD accent + prompt). They are not this catalog. [RFC-0069](0069-presence-shape-catalog-and-morph-api.md) (**implemented** — `registerPresenceShape`, `uMorph`). [RFC-0051](0051-humanoid-presence-runtime.md) (reduced motion; existing phase machine). [RFC-0062](0062-selectable-voice-profile-catalog.md) / [RFC-0092](0092-neural-tts-default-no-silent-sapi.md) (original packs; no silent SAPI). [RFC-0078](0078-hexstrike-cyber-suite.md) already morphs to `hex_aegis` when the HexStrike suite profile is selected. [RFC-0106](0106-hexstrike-jarvis-full-operator-control.md) operator contract stays. [RFC-0104](0104-persona-candidates-pack.md) stays an unmerged hold.
 
@@ -337,6 +338,70 @@ Desktop sign-off: hear each bound pack once (shared packs still once each, then 
 
 #376’s four-name decision in §59 is superseded by the amendment decision recorded with this amend. Do not implement from the #376 table.
 
+## Amendment 2026-10-08 — Specialist persona speech (post-#551)
+
+**Architect decision (locked):** Wire specialist persona speech end to end through the single speech path PR #551 established (`backend/app/tts/persona_speech.py` → `speak_text`). Hide the portal `specialists_auto_speak` control only as an **interim** until that wiring ships. Rationale: Taco’s 13-name ANZU roster gives each persona its own voice intent ([`ANZU_PRODUCT_NORTH_STAR.md`](../../ANZU_PRODUCT_NORTH_STAR.md) — ANZU should feel alive and multi-specialist without the owner managing lanes). Deleting specialist voice is wrong; a toggle that does nothing violates the north-star no-stub / no-unwired rule.
+
+**Context:** #551 removed the half-wired `attach_specialist` voice swap (`_activate` ping-pong, `specialist_spoken`) and routes all model lanes through `speak_text` with the **main** persona only. This amendment is the separate RFC-0137 follow-on #551’s body referenced.
+
+### 1. Single speech path
+
+When a **specialist persona** (a non-main roster id attached to the task via routing/handoff or `PUT /api/named-personas` with `as_specialist: true`) produces an **owner-facing answer** (not a social ack), and that specialist’s persisted `specialists_auto_speak` is **true**:
+
+- Speech goes **only** through `persona_speech.speak_text` with that specialist’s persona voice binding (roster pack + per-persona appearance overrides: pitch, rate, volume on the neural PCM path).
+- Pass an explicit **speaking persona id** into resolution (new parameter on `resolve_speaking_voice` / `speak_text`, e.g. `persona_id=` or `speaker_persona_id=`) — **not** a parallel specialist lane, **not** `lane="specialist"`, **not** `set_active_voice_profile_id` on attach, **not** any `attach_specialist`-style main-voice swap.
+- The active main persona bind (`named_personas.active_id`, `activated_voice_profile_id`) stays unchanged for subsequent main-persona lines.
+
+When `specialists_auto_speak` is **false** for that specialist:
+
+- Specialist answer text is shown in the owner UI; **no** `speak_text` call for that text.
+- The **main** persona does **not** read specialist answer text aloud (no fallback dub).
+
+Main-persona speech (owner chat, task chat, companion, phone realtime, WebRTC) is unchanged: always the active main persona through `speak_text` without a specialist speaker id.
+
+Fail-closed rules from § Voice bind still apply per specialist id (missing neural pack → `SpeechRefused` / silent skip; no SAPI; main bind untouched).
+
+### 2. Setting contract
+
+| Item | Spec |
+| --- | --- |
+| **Model** | `PersonaAppearanceSettings.specialists_auto_speak` in `backend/app/config.py` |
+| **Storage** | Per persona id in `NamedPersonaSettings.profiles[persona_id]` inside persisted `AppSettings.named_personas` |
+| **API** | Existing named-persona surface: `GET /api/named-personas` returns `appearance.specialists_auto_speak`; `PUT` appearance patch (and `NamedPersonaAppearancePatch` in `backend/app/api/named_personas.py`) accepts `specialists_auto_speak` |
+| **Read at speak time** | Server loads settings in `persona_speech` (or a thin helper) when enqueueing/speaking a line attributed to a specialist persona id — **not** only at `attach_specialist` |
+| **Default** | **`false`** per persona (`PersonaAppearanceSettings` default). Roster neural voice **bindings** are live (#383); auto-speak remains opt-in per specialist until the owner enables it. |
+
+### 3. Interplay (acks, progress, companion)
+
+- **Companion / social ack (amendment #552):** Held ~1.2 s; spoken only when the worker answer is late; `final_basic` / `ask_clarification` immediate; **no double ack**. Specialist answer speech is the **answer**, not an ack — do not speak specialist lines during the held-ack window unless that text is the actual answer payload.
+- **[RFC-0203](0203-fast-path-lane-consolidation.md):** One progress loop per turn; specialist speech does not start a second TTS timer or duplicate progress emission.
+- **Companion / phone:** Refused specialist speech follows #551 — `SpeechRefused` → **HTTP 204** on companion `POST /api/companion/voice/speak`; no SAPI fall-through.
+
+### 4. Interim UI (until backend AC is green)
+
+**Astra** (via PG): hide the `specialists_auto_speak` checkbox in `frontend/src/persona/NamedPersonaControls.tsx` (~L360), **or** render it disabled with copy that does not claim function. No live control that implies wiring that is not shipped. **Re-enable** the control when backend acceptance criteria below pass.
+
+Room devs / UX **do not** edit `NamedPersonaControls` for this interim hide.
+
+### 5. Ownership split
+
+| Work | Owner |
+| --- | --- |
+| `persona_speech` specialist speaker resolution, chat/task attribution of specialist answer text, tests | **Senior 4.7 dev** — voice lane via Chief of Staff |
+| Interim hide + later re-enable toggle | **Astra** — route via PG |
+
+### 6. Acceptance criteria (unchecked)
+
+- [ ] **Backend:** With main `anzu`, specialist `enki` attached, `enki` appearance `specialists_auto_speak: true`, and an owner-facing answer attributed to `enki` → exactly **one** `speak_text` (or enqueue stamped with specialist persona) using Enki’s neural binding (`synthetic_command_original_v1` + Enki rate/pitch); main `activated_voice_profile_id` unchanged.
+- [ ] **Backend:** Same setup with `specialists_auto_speak: false` → **zero** `speak_text` / TTS enqueue for specialist answer text; main persona does not speak that text.
+- [ ] **Backend:** Slow-turn held ack (#552) + specialist answer on same turn → no double-speak (ack + answer use distinct reply classes; specialist answer not voiced as ack).
+- [ ] **Backend:** `specialists_auto_speak` round-trip via `PUT` appearance patch and `GET /api/named-personas`.
+- [ ] **Astra:** Toggle hidden (or honestly disabled) in interim; after backend lands, toggle visible and functional.
+- [ ] `python3 -m pytest` and `npm --prefix frontend run build` green on the implement branch.
+- [ ] **Desktop soak:** Main Anzu coordinating; route/hand off to a specialist with auto-speak on; hear that specialist’s voice on its answer, then main voice on main lines.
+
+**Recommended implement model:** Senior **4.7** standard (`fast=false`) for backend; Composer 2.5 standard for docs-only amend.
+
 ## Implementation note
 
-Evidence: UX #383 @ `5bce6a2` on `development` (13-persona ANZU roster, presence shapes, and neural voice bind: `backend/app/persona/named_persona.py`, `/api/named-personas`, thirteen `registerPresenceShape` figures). Roster specs amend #379 @ `a434f4c8` (supersedes the #376 four-name catalog). `tests/test_rfc0137_named_persona.py`. Live listening and a GPU capture of the morph remain Windows desktop sign-off. Acceptance checkboxes left open for that sign-off.
+Evidence: UX #383 @ `5bce6a2` on `development` (13-persona ANZU roster, presence shapes, and neural voice bind: `backend/app/persona/named_persona.py`, `/api/named-personas`, thirteen `registerPresenceShape` figures). Roster specs amend #379 @ `a434f4c8` (supersedes the #376 four-name catalog). `tests/test_rfc0137_named_persona.py`. Live listening and a GPU capture of the morph remain Windows desktop sign-off. Acceptance checkboxes left open for that sign-off. Post-#551 specialist speech wiring tracked in **Amendment 2026-10-08** above (unchecked AC).
