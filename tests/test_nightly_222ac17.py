@@ -334,9 +334,11 @@ def test_trivial_and_reply_only_requests_stay_in_chat():
 def test_internal_plan_turn_does_not_drop_the_memory_tool():
     """Tool grants follow the owner's request, not the internal plan instruction."""
     from app.agent.chat_turns import internal_user_message
-    from app.agent.loop import _latest_owner_text
+    from app.agent.loop import _latest_owner_text, _pin_granted_schemas, _tool_grant_prompt
+    from app.agent.planning import WorkingState
     from app.agent.prompts import PLAN_PROMPT
     from app.agent.tool_exposure import schemas_for, tool_names_for
+    from app.agent.turn_tools import select_turn_schemas
 
     owner = "Remember that the porch code is blue"
     messages = [
@@ -346,11 +348,17 @@ def test_internal_plan_turn_does_not_drop_the_memory_tool():
     chosen = _latest_owner_text(messages, owner)
     assert "porch code" in chosen
     assert "END STATE" not in chosen
-    names = tool_names_for("mixed", prompt=chosen, needs_tools=True)
+    grant_prompt = _tool_grant_prompt(messages, owner)
+    assert "porch code" in grant_prompt
+    assert "END STATE" in grant_prompt
+    names = tool_names_for("mixed", prompt=grant_prompt, needs_tools=True)
     assert "vault_memory" in names
-    schemas = schemas_for("mixed", prompt=chosen, needs_tools=True)
+    schemas = schemas_for("mixed", prompt=grant_prompt, needs_tools=True)
     granted = {item.get("function", {}).get("name") for item in schemas}
     assert "vault_memory" in granted
+    trimmed = select_turn_schemas(schemas, model_family="9b-abliterated", prompt="unrelated", limit=1)
+    pinned = _pin_granted_schemas(trimmed, WorkingState(), grant_prompt)
+    assert "vault_memory" in {item.get("function", {}).get("name") for item in pinned or []}
     # Same intersection the task API uses: a stored grant survives when the prompt is the owner's.
     allowed = set(tool_names_for("mixed", security_role="", prompt=owner))
     exposed = [item for item in ("filesystem", "python", "mcp_call", "vault_memory") if item in allowed]

@@ -258,8 +258,18 @@ def _exposed_csv(working: WorkingState, prompt: str | None = None) -> str:
     )
 
 
+def _latest_user_text(messages: list[ChatMessage], fallback: str = "") -> str:
+    for message in reversed(messages or []):
+        if message.role != "user":
+            continue
+        text = message.content if isinstance(message.content, str) else ""
+        if text.strip():
+            return text.strip()
+    return (fallback or "").strip()
+
+
 def _latest_owner_text(messages: list[ChatMessage], fallback: str = "") -> str:
-    """Owner utterance used for tool grants. Internal instructions do not replace it."""
+    """Owner utterance. Internal instructions do not replace it."""
     from .chat_turns import INTERNAL_AUDIENCE, is_internal_instruction, owner_visible_user_text
 
     for message in reversed(messages or []):
@@ -273,6 +283,45 @@ def _latest_owner_text(messages: list[ChatMessage], fallback: str = "") -> str:
             continue
         return visible.strip()
     return (fallback or "").strip()
+
+
+def _tool_grant_prompt(messages: list[ChatMessage], fallback: str = "") -> str:
+    """Owner request plus the latest instruction.
+
+    Memory grants follow the owner. Plan text still counts so a later
+    request_tools expansion (browser, terminal) is not ranked out.
+    """
+    owner = _latest_owner_text(messages, fallback)
+    latest = _latest_user_text(messages, "")
+    parts: list[str] = []
+    for part in (owner, latest):
+        text = (part or "").strip()
+        if text and text not in parts:
+            parts.append(text)
+    return "\n\n".join(parts) or (fallback or "").strip()
+
+
+def _pin_granted_schemas(schemas: list[dict] | None, working: WorkingState, prompt: str) -> list[dict] | None:
+    """Keep explicit grants inside the small-model schema cap."""
+    if not schemas:
+        return schemas
+    from ..memory.owner_facts import is_memory_recall_request, is_memory_store_request
+
+    required = [str(name) for name in (working.requested_tools or []) if str(name).strip()]
+    if is_memory_store_request(prompt) or is_memory_recall_request(prompt):
+        if "vault_memory" not in required:
+            required.append("vault_memory")
+    have = {str(item.get("function", {}).get("name") or "") for item in schemas}
+    pinned = list(schemas)
+    for name in required:
+        if name in have:
+            continue
+        tool = REGISTRY.tools.get(name)
+        if tool is None or not tool.enabled:
+            continue
+        pinned.append(tool.schema())
+        have.add(name)
+    return pinned
 
 
 def _authorization_observation(result: AuthorizationResult) -> str:
@@ -2772,7 +2821,7 @@ class AgentRuntime:
                     execution_mode=execution_mode,
                     task_class=working.task_class,
                     exposed_tools=_exposed_csv(
-                        working, _latest_owner_text(messages, extra_prompt or prompt)
+                        working, _tool_grant_prompt(messages, extra_prompt or prompt)
                     ),
                 )
                 think = should_enable_thinking(
@@ -2822,15 +2871,17 @@ class AgentRuntime:
                             working.task_class,
                             working.requested_tools,
                             security_role=working.security_role,
-                            prompt=_latest_owner_text(messages, working.goal or active_prompt),
+                            prompt=_tool_grant_prompt(messages, working.goal or active_prompt),
                             needs_tools=working.ingress_needs_tools,
                         )
                     )
+                    grant_prompt = _tool_grant_prompt(messages, working.goal or active_prompt)
                     turn_tools = select_turn_schemas(
                         turn_tools,
                         model_family=profile.family,
-                        prompt=_latest_owner_text(messages, working.goal or active_prompt),
+                        prompt=grant_prompt,
                     )
+                    turn_tools = _pin_granted_schemas(turn_tools, working, grant_prompt)
                     if working.ingress_blob_id and not force_final:
                         ingress_tool = REGISTRY.tools.get("read_ingress")
                         if ingress_tool is not None and ingress_tool.enabled:
