@@ -11,6 +11,7 @@ from ..skills.approval import ApprovalError
 from ..skills.forge import ForgeError, forge
 from ..skills.marketplace import MarketplaceError
 from ..skills.permissions import PrivilegeExpansionError
+from ..persona.named_persona import active_persona_id
 from ..skills.routing import goal_runtime_skill_context, search_skills
 from ..skills.store import get_candidate, get_version, list_candidates, list_skills
 from ..trajectories.schema import JarvisTrajectoryV1
@@ -289,4 +290,9 @@ async def search(body: SearchIn) -> dict[str, Any]:
 
 @router.get("/goals/{goal_id}/skills")
 async def goal_skills(goal_id: str, objective: str = "", task_class: str = "") -> dict[str, Any]:
-    return goal_runtime_skill_context(goal_id, objective or goal_id, task_class=task_class)
+    return goal_runtime_skill_context(
+        goal_id,
+        objective or goal_id,
+        task_class=task_class,
+        persona_id=active_persona_id(),
+    )

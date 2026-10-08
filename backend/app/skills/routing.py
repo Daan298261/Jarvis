@@ -49,6 +49,8 @@ def search_skills(
             if persona_id not in manifest.compatible_personas:
                 continue
         score = 0.0
+        if persona_id and persona_id in manifest.compatible_personas:
+            score += 1.5
         if task_class and manifest.task_class and manifest.task_class == task_class:
             score += 3.0
         blob = f"{manifest.name} {manifest.purpose} {' '.join(manifest.tools)}"
@@ -113,11 +115,27 @@ def persona_skill_context(persona_id: str | None, goal_or_prompt: str, *, task_c
     )
 
 
-def goal_runtime_skill_context(goal_id: str, objective: str, *, task_class: str = "") -> dict[str, Any]:
+def goal_runtime_skill_context(
+    goal_id: str,
+    objective: str,
+    *,
+    task_class: str = "",
+    persona_id: str | None = None,
+) -> dict[str, Any]:
     """Public hook for Goal Runtime to attach ranked skills to a goal turn."""
-    hits = search_skills(objective, goal_id=goal_id, task_class=task_class or None)
+    hits = search_skills(
+        objective,
+        persona_id=persona_id,
+        goal_id=goal_id,
+        task_class=task_class or None,
+    )
     return {
         "goal_id": goal_id,
         "skills": hits,
-        "prompt_block": skills_prompt_block(objective, goal_id=goal_id, task_class=task_class or None),
+        "prompt_block": skills_prompt_block(
+            objective,
+            persona_id=persona_id,
+            goal_id=goal_id,
+            task_class=task_class or None,
+        ),
     }

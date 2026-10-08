@@ -19,6 +19,7 @@ from app.skills.schema import (
     SkillManifest,
     SkillScope,
     SkillStep,
+    SkillVersion,
     TypedField,
 )
 from app.skills.store import (
@@ -94,6 +95,44 @@ def _traj(
             details="checked",
         ),
     )
+
+
+_FORGE_CAPS = {
+    "task_capabilities": ["python", "filesystem", "filesystem.read"],
+    "node_capabilities": ["python", "filesystem", "filesystem.read"],
+}
+
+
+def _persona_skill_manifest(name: str, purpose: str, compatible_personas: list[str]) -> SkillManifest:
+    return SkillManifest(
+        name=name,
+        purpose=purpose,
+        tools=["python"],
+        task_class="office",
+        compatible_personas=compatible_personas,
+        steps=[SkillStep(tool="python", arguments={"code": "1"})],
+        tests=[
+            DeterministicTest(
+                id="t1",
+                expected_tools=["python"],
+                expected_step_count=1,
+                golden_outputs=[{"index": 0, "tool": "python", "success": True}],
+            )
+        ],
+        provenance=Provenance(source="owner_request"),
+    )
+
+
+def _activate_manifest(manifest: SkillManifest) -> SkillVersion:
+    from app.skills.extract import sign_manifest
+
+    candidate = forge.propose_from_manifest(sign_manifest(manifest))
+    candidate = forge.sandbox(candidate.candidate_id, **_FORGE_CAPS)
+    candidate = forge.verify(candidate.candidate_id)
+    forge.request_owner_approval(candidate.candidate_id)
+    forge.approve(candidate.candidate_id, actor="owner", admin=True)
+    activated = forge.activate(candidate.candidate_id, actor="owner", **_FORGE_CAPS)
+    return activated.version
 
 
 @pytest.fixture(autouse=True)
@@ -383,6 +422,61 @@ def test_persona_and_goal_runtime_routing_hooks(skill_forge_store):
     goal_ctx = goal_runtime_skill_context("goal-office-1", "export report.xlsx", task_class="office")
     assert goal_ctx["skills"]
     assert "Skill Forge" in goal_ctx["prompt_block"] or goal_ctx["skills"][0]["name"]
+
+
+def test_goal_runtime_skill_context_ranks_by_persona(skill_forge_store):
+    shared = "persona goal export report workflow"
+    anzu_version = _activate_manifest(
+        _persona_skill_manifest("anzu-export", shared, ["anzu"]),
+    )
+    enki_version = _activate_manifest(
+        _persona_skill_manifest("enki-export", shared, ["enki"]),
+    )
+    objective = "export report workflow"
+
+    anzu_ctx = goal_runtime_skill_context("goal-persona-1", objective, persona_id="anzu")
+    enki_ctx = goal_runtime_skill_context("goal-persona-1", objective, persona_id="enki")
+
+    assert anzu_ctx["skills"]
+    assert enki_ctx["skills"]
+    assert anzu_ctx["skills"][0]["skill_id"] == anzu_version.skill_id
+    assert enki_ctx["skills"][0]["skill_id"] == enki_version.skill_id
+    assert anzu_ctx["skills"][0]["skill_id"] != enki_ctx["skills"][0]["skill_id"]
+
+
+@pytest.mark.asyncio
+async def test_goal_skills_endpoint_uses_active_persona(
+    skill_forge_store, jarvis_env, allow_loopback_api, monkeypatch
+):
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+
+    shared = "persona goal export report workflow"
+    anzu_version = _activate_manifest(
+        _persona_skill_manifest("anzu-api-export", shared, ["anzu"]),
+    )
+    enki_version = _activate_manifest(
+        _persona_skill_manifest("enki-api-export", shared, ["enki"]),
+    )
+    objective = "export report workflow"
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        monkeypatch.setattr("app.api.skill_forge.active_persona_id", lambda: "anzu")
+        anzu_resp = await client.get(
+            "/api/skill-forge/goals/goal-api-persona/skills",
+            params={"objective": objective},
+        )
+        assert anzu_resp.status_code == 200
+        assert anzu_resp.json()["skills"][0]["skill_id"] == anzu_version.skill_id
+
+        monkeypatch.setattr("app.api.skill_forge.active_persona_id", lambda: "enki")
+        enki_resp = await client.get(
+            "/api/skill-forge/goals/goal-api-persona/skills",
+            params={"objective": objective},
+        )
+        assert enki_resp.status_code == 200
+        assert enki_resp.json()["skills"][0]["skill_id"] == enki_version.skill_id
 
 
 @pytest.mark.asyncio
