@@ -22,7 +22,8 @@ from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 
 from . import service
 from .store import database, get
-from ..workers.voice import synthesize_speech, transcribe_audio, VoiceSTTError
+from ..tts.persona_speech import speak_text
+from ..workers.voice import transcribe_audio, VoiceSTTError
 
 MAX_AUDIO_BYTES = 4 * 1024 * 1024
 MAX_TURN_SECONDS = 90
@@ -256,7 +257,9 @@ async def stream_reply(turn: VoiceTurn, text: str) -> AsyncIterator[dict[str, An
                 for sentence in _split_sentences(remainder):
                     if turn.cancelled:
                         return
-                    audio = await synthesize_speech(sentence, voice_profile_id=turn.voice_profile_id)
+                    audio = (
+                        await speak_text(sentence, lane="worker", model=turn.inference_profile or "")
+                    ).audio
                     turn.tts_seq += 1
                     yield {
                         "type": "tts",

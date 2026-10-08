@@ -14,7 +14,8 @@ from aiortc.mediastreams import MediaStreamError
 
 from . import calls, service
 from .store import database, get
-from ..workers.voice import synthesize_speech, transcribe_audio
+from ..tts.persona_speech import speak_text
+from ..workers.voice import transcribe_audio
 
 
 class Speaker(AudioStreamTrack):
@@ -32,7 +33,7 @@ class Speaker(AudioStreamTrack):
 
     async def speak(self, text):
         generation = self.generation
-        wav = await synthesize_speech(text[:6000])
+        wav = (await speak_text(text[:6000], lane="worker")).audio
         if generation != self.generation:
             return
         resampler = av.AudioResampler(format="s16", layout="mono", rate=48000)

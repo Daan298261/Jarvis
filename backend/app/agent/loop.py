@@ -123,6 +123,7 @@ from .planning import (
     resolve_execution_policy,
     select_best_plan,
 )
+from ..tts.persona_speech import speech_lane_for_model
 from ..persona.chat_delivery import (
     clear_stream_speak_state,
     mark_stream_spoken,
@@ -942,6 +943,8 @@ class AgentRuntime:
             source=source,
             stream_key=stream_key,
             user_prompt=prompt,
+            lane="front",
+            model=getattr(front, "model", "") or "",
         )
         audio_ms = max(0.0, (time.perf_counter() - turn_started) * 1000)
         if early_id:
@@ -960,6 +963,8 @@ class AgentRuntime:
             source=source,
             speak=True,
             user_prompt=prompt,
+            lane="front",
+            model=getattr(front, "model", "") or "",
         )
         if delivery.get("tts_id"):
             # Advance the stream cursor so the final merged reply cannot re-speak
@@ -1551,11 +1556,19 @@ class AgentRuntime:
                     first_response_ms = elapsed
                     await self._update(task_id, first_response_ms=round(first_response_ms, 1))
                 accumulated = "".join(spoken_parts)
+                from ..persona.inference_context import model_lane_event_payload
+                from ..agent.front_responder import resolve_front_model_id
+
+                lane_model = resolve_front_model_id(settings) if lane == "front" else str(
+                    getattr(MANAGER.provider, "model", "") or profile.name
+                )
                 early_id = maybe_enqueue_streaming_social_tts(
                     accumulated,
                     source="task_chat",
                     stream_key=stream_key,
                     user_prompt=prompt,
+                    lane=speech_lane_for_model(lane, lane_model),
+                    model=lane_model,
                 )
                 if early_id:
                     await BUS.publish(
@@ -1566,12 +1579,6 @@ class AgentRuntime:
                         stage="chat",
                     )
                     note_front_audio(None, elapsed)
-                from ..persona.inference_context import model_lane_event_payload
-                from ..agent.front_responder import resolve_front_model_id
-
-                lane_model = resolve_front_model_id(settings) if lane == "front" else str(
-                    getattr(MANAGER.provider, "model", "") or profile.name
-                )
                 await BUS.publish(
                     task_id,
                     "assistant_delta",
@@ -1700,6 +1707,8 @@ class AgentRuntime:
             speak=True,
             user_prompt=prompt,
             tts_char_offset=stream_speak_offset(stream_key),
+            lane="worker",
+            model=str(getattr(MANAGER.provider, "model", "") or ""),
         )
         if not should_skip_background_verify(route_kind):
             from .background_verify import schedule_background_verification
@@ -1842,6 +1851,8 @@ class AgentRuntime:
             speak=True,
             user_prompt=prompt,
             tts_char_offset=stream_speak_offset(stream_key),
+            lane="worker",
+            model=str(getattr(MANAGER.provider, "model", "") or ""),
         )
         await BUS.publish(
             task_id,

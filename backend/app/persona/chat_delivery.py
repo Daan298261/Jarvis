@@ -28,6 +28,9 @@ class ChatTtsItem:
     source: str
     reply_class: str = "technical"
     partial: bool = False
+    lane: str = "worker"
+    persona_id: str = ""
+    voice_profile_id: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -36,6 +39,9 @@ class ChatTtsItem:
             "source": self.source,
             "reply_class": self.reply_class,
             "partial": self.partial,
+            "lane": self.lane,
+            "persona_id": self.persona_id,
+            "voice_profile_id": self.voice_profile_id,
         }
 
 
@@ -52,6 +58,9 @@ async def publish_owner_text(
     speak: bool | None = None,
     user_prompt: str | None = None,
     tts_char_offset: int = 0,
+    lane: str = "worker",
+    speaker_persona_id: str | None = None,
+    model: str = "",
 ) -> dict[str, Any]:
     """Deliver assistant text on the owner chat event channel and optionally queue TTS."""
     cleaned = (text or "").strip()
@@ -78,6 +87,9 @@ async def publish_owner_text(
             source=source,
             user_prompt=user_prompt,
             full_text_for_class=cleaned,
+            lane=lane,
+            speaker_persona_id=speaker_persona_id,
+            model=model,
         )
         if tts_id:
             await BUS.publish_ephemeral(
@@ -99,6 +111,9 @@ def enqueue_chat_tts(
     full_text_for_class: str | None = None,
     partial: bool = False,
     reply_class: ReplySpeechClass | None = None,
+    lane: str = "worker",
+    speaker_persona_id: str | None = None,
+    model: str = "",
 ) -> str:
     basis = (full_text_for_class or text or "").strip()
     speech_class = reply_class or classify_reply_for_speech(basis, user_prompt=user_prompt)
@@ -110,12 +125,28 @@ def enqueue_chat_tts(
     )
     if not speakable:
         return ""
+    from ..tts.persona_speech import SpeechRefused, resolve_speaking_voice
+
+    try:
+        voice = resolve_speaking_voice(
+            lane=lane,
+            speaker_persona_id=speaker_persona_id,
+            model=model,
+        )
+    except SpeechRefused:
+        return ""
+    if voice.refused:
+        # Specialist pack missing: do not speak, do not fall through to SAPI.
+        return ""
     item = ChatTtsItem(
         id=str(uuid.uuid4()),
         text=speakable,
         source=source,
         reply_class=speech_class,
         partial=partial,
+        lane=voice.lane,
+        persona_id=voice.persona_id,
+        voice_profile_id=voice.profile_id,
     )
     _pending_tts.append(item)
     return item.id
@@ -184,6 +215,9 @@ def maybe_enqueue_streaming_social_tts(
     stream_key: str,
     user_prompt: str | None = None,
     awaiting_tool_result: bool = False,
+    lane: str = "worker",
+    speaker_persona_id: str | None = None,
+    model: str = "",
 ) -> str | None:
     """RFC-0036 / RFC-0075: enqueue first stable social sentence without waiting for full reply."""
     already = _stream_spoken_through.get(stream_key, 0)
@@ -212,6 +246,9 @@ def maybe_enqueue_streaming_social_tts(
         full_text_for_class=accumulated,
         partial=True,
         reply_class="social",
+        lane=lane,
+        speaker_persona_id=speaker_persona_id,
+        model=model,
     )
     if not item_id:
         return None

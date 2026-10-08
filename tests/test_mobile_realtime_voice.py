@@ -122,19 +122,21 @@ async def test_stream_reply_emits_tts_before_final_and_uses_profile(mobile_env, 
     async def snapshot(task_id):
         return next(snapshots)
 
-    async def synthesize(text, *, voice_profile_id=None):
-        spoken.append((text, voice_profile_id))
-        return b"RIFFdata"
+    async def synthesize(text, *, lane="worker", speaker_persona_id=None, model=""):
+        spoken.append((text, lane, model))
+        from app.workers.voice import SynthesizedSpeech
+
+        return SynthesizedSpeech(b"RIFFdata", "kokoro", "butler_original_v1")
 
     monkeypatch.setattr(realtime_voice.service, "submit", submit)
     monkeypatch.setattr(realtime_voice.service, "task_snapshot", snapshot)
-    monkeypatch.setattr(realtime_voice, "synthesize_speech", synthesize)
+    monkeypatch.setattr(realtime_voice, "speak_text", synthesize)
 
     events = [event async for event in realtime_voice.stream_reply(turn, "Hello")]
     assert events[0]["type"] == "tts" and events[0]["final"] is False and events[0]["data"]
     assert any(event["type"] == "tts" and event["final"] for event in events)
     assert any(event["type"] == "done" for event in events)
-    assert spoken and all(profile == "butler_original_v1" for _, profile in spoken)
+    assert spoken and all(lane == "worker" for _, lane, _model in spoken)
     assert spoken[0][0] == "One sentence."
     assert submitted["profile"] == "qwen38_9b"
 

@@ -152,12 +152,14 @@ async def synthesize_with_engine(
     profile: VoiceProfile | None = None,
     speaker_ref: str = "",
     model_dir: Path | None = None,
+    playback: tuple[float, float, float] | None = None,
 ) -> bytes:
     engine = (engine_id or "").strip().lower()
     voice = speaker_ref or (profile.tts.speaker_ref if profile else "") or ""
     speaking_rate = profile.tts.speaking_rate if profile else 1.0
     profile_id = profile.id if profile else ""
-    playback = _persona_playback()
+    if playback is None:
+        playback = _persona_playback()
     if engine == "kokoro":
         try:
             # Persona rate is Kokoro's speed argument. Pitch and gain stay on the PCM.

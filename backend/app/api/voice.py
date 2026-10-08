@@ -10,7 +10,8 @@ from ..agent.loop import AGENT
 from ..config import load_settings
 from ..persona.quiet import should_speak_chat_reply
 from ..tts.engines import engine_availability
-from ..workers.voice import VoiceSTTError, synthesize_speech_result, transcribe_audio, voice_status
+from ..tts.persona_speech import SpeechRefused, speak_text
+from ..workers.voice import VoiceSTTError, transcribe_audio, voice_status
 
 router = APIRouter(prefix="/api/voice", tags=["voice"])
 
@@ -22,12 +23,17 @@ class VoiceIn(BaseModel):
 
 class SpeakIn(BaseModel):
     text: str
+    # Ignored for model speech. The server resolves the active persona voice.
+    # Catalog preview stays on /api/voice-profiles/{id}/preview.
     voice_profile_id: str | None = Field(
         default=None,
         min_length=1,
         max_length=80,
         pattern=r"^[a-z0-9_]+$",
     )
+    lane: str | None = Field(default=None, max_length=32)
+    speaker_persona_id: str | None = Field(default=None, max_length=80)
+    model: str | None = Field(default=None, max_length=120)
 
 
 def _stt_error_response(exc: VoiceSTTError) -> JSONResponse:
@@ -123,7 +129,14 @@ async def voice_speak(body: SpeakIn):
     if not text:
         return Response(status_code=204)
     try:
-        result = await synthesize_speech_result(text, voice_profile_id=body.voice_profile_id)
+        result = await speak_text(
+            text,
+            lane=body.lane or "worker",
+            speaker_persona_id=body.speaker_persona_id,
+            model=body.model or "",
+        )
+    except SpeechRefused:
+        return Response(status_code=204)
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
     duration_ms = (time.perf_counter() - started) * 1000
