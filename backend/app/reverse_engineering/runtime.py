@@ -180,7 +180,7 @@ class Investigations:
         return {**row, "source_files": [item["path"] for item in row.get("manifest", [])[:100]] if row["kind"] == "source" else [],
                 "source_file_count": len(row.get("manifest", [])) if row["kind"] == "source" else 0,
                 "skill": guide(row["kind"]), "workflow": (
-            "Source target: inspect with normal file tools." if row["kind"] == "source"
+            "Source target: call record_source with the snapshot-relative filename to save evidence, then report with its returned evidence_id. Ordinary filesystem reads do not create investigation evidence." if row["kind"] == "source"
             else "Use catalog for the exact schema, then call focused operations. Native/archive: open_binary first; "
                  "managed: inspect_managed_artifact; JavaScript: analyze_javascript_application; "
                  "browser: list_browser_targets. Target paths are translated by the adapter."

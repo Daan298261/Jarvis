@@ -28,6 +28,9 @@ class ReverseEngineerTool(Tool):
             "origins": {"type": "array", "items": {"type": "string"}},
             "investigation_id": {"type": "string"}, "operation": {"type": "string"},
             "arguments": {"type": "object"}, "evidence_id": {"type": "string"},
+            "path": {"type": "string", "description": "record_source: snapshot-relative source filename (also accepted inside arguments)"},
+            "start": {"type": "integer", "minimum": 1},
+            "end": {"type": "integer", "minimum": 1},
             "findings": {"type": "array", "items": {"type": "object", "properties": {
                 "claim": {"type": "string"}, "kind": {"type": "string", "enum": ["observation", "inference"]},
                 "evidence_ids": {"type": "array", "items": {"type": "string"}},
@@ -68,7 +71,13 @@ class ReverseEngineerTool(Tool):
                     from ..reverse_engineering.skill import guide
                     data = {"skill": guide(row["kind"])}
                 elif action == "record_source":
-                    data = await SERVICE.record_source(ident, kwargs.get("arguments", {}), _task_id)
+                    arguments = dict(kwargs.get("arguments") or {})
+                    for field in ("path", "start", "end"):
+                        if field in kwargs:
+                            if field in arguments and arguments[field] != kwargs[field]:
+                                raise ValueError(f"Conflicting record_source {field}")
+                            arguments[field] = kwargs[field]
+                    data = await SERVICE.record_source(ident, arguments, _task_id)
                 else:
                     raise ValueError("Unknown reverse_engineer action")
             success = data.get("status") not in {"pending_approval", "denied", "analysis_failed"}

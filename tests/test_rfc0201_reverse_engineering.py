@@ -212,6 +212,10 @@ async def test_single_source_file_and_changed_snapshot(investigation_env):
     ident = prepared.data["id"]
     result = await tool.execute(action="record_source", investigation_id=ident, arguments={"path": "single.py"}, _task_id="a")
     assert result.success and "42" in result.output
+    flattened = await tool.execute(action="record_source", investigation_id=ident, path="single.py", start=1, end=1, _task_id="a")
+    assert flattened.success and "42" in flattened.output
+    conflict = await tool.execute(action="record_source", investigation_id=ident, path="single.py", arguments={"path": "other.py"}, _task_id="a")
+    assert not conflict.success and "Conflicting" in conflict.error
     Path(prepared.data["snapshot"]).write_text("changed")
     result = await tool.execute(action="record_source", investigation_id=ident, arguments={"path": "single.py"}, _task_id="a")
     assert not result.success and "changed" in result.error
