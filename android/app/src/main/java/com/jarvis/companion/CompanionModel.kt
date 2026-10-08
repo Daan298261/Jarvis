@@ -18,6 +18,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -1147,10 +1148,28 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                 playAudio(audio)
                 while (mutable.value.speaking && coroutineContext.isActive) delay(40)
             },
-            onStopPlayback = { releasePlayer() },
+            onStopPlayback = {
+                VoiceNativeBridge.requestTtsCancel()
+                releasePlayer()
+            },
+            onError = { error ->
+                mutable.value = mutable.value.copy(
+                    error = error.message,
+                    activity = "Ready when you are",
+                    onDeviceVoiceActive = false,
+                )
+            },
             onIdle = {
-                voicePackManager.unloadIdle()
-                publishVoiceRoute()
+                withContext(NonCancellable + Dispatchers.IO) {
+                    voicePackManager.unloadIdle()
+                }
+                withContext(Dispatchers.Main) {
+                    publishVoiceRoute()
+                    mutable.value = mutable.value.copy(
+                        activity = "Ready when you are",
+                        onDeviceVoiceActive = false,
+                    )
+                }
             },
         ).also { onDeviceSpeak = it }
     }

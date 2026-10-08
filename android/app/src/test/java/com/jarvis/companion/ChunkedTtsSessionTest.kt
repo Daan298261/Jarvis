@@ -1,5 +1,8 @@
 package com.jarvis.companion
 
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.runBlocking
@@ -20,7 +23,6 @@ class ChunkedTtsSessionTest {
         val concurrentPlay = AtomicInteger(0)
         val maxPlay = AtomicInteger(0)
         val holdPlayback = AtomicBoolean(true)
-        var busy = true
 
         val session = ChunkedTtsSession(
             scope = this,
@@ -41,17 +43,17 @@ class ChunkedTtsSessionTest {
             },
         )
 
-        // Mirror CompanionModel.speak(): on-device chunk loop is outside action{}, so busy is false.
-        busy = false
         session.start(listOf("one.", "two.", "three."))
         withTimeout(2_000) { while (played.isEmpty()) delay(2) }
         delay(20)
-        assertFalse("busy must be false once the first chunk starts", busy)
+        assertTrue("session must be running while a chunk is held for playback", session.isRunning())
         assertEquals(listOf("one."), played.toList())
         assertTrue("next chunk should prefetch while the first plays", synthesized.size >= 2)
 
         session.stop()
-        delay(60)
+        session.job?.join()
+        delay(20)
+        assertFalse("stop must leave the session idle", session.isRunning())
         assertEquals("stop must cancel remaining chunks", listOf("one."), played.toList())
         assertTrue("stop must not synthesize every leftover chunk", synthesized.size < 3 || played.size == 1)
 
@@ -71,5 +73,51 @@ class ChunkedTtsSessionTest {
         )
         assertTrue(played.contains("xxx."))
         assertEquals("plays must not overlap", 1, maxPlay.get())
+        assertFalse(session.isRunning())
+    }
+
+    @Test
+    fun throwingSynthCallsOnErrorAndDoesNotHitExceptionHandler() = runBlocking {
+        val handlerHits = CopyOnWriteArrayList<Throwable>()
+        val handler = CoroutineExceptionHandler { _, t -> handlerHits += t }
+        val supervisor = SupervisorJob()
+        val scope = CoroutineScope(coroutineContext + supervisor + handler)
+        val errors = CopyOnWriteArrayList<Throwable>()
+        val session = ChunkedTtsSession(
+            scope = scope,
+            synthesize = { error("near-silent refusal") },
+            play = {},
+            onError = { errors += it },
+        )
+        session.start(listOf("hello there.")).join()
+        assertEquals(1, errors.size)
+        assertTrue(errors[0].message!!.contains("near-silent refusal"))
+        assertTrue("CoroutineExceptionHandler must stay silent", handlerHits.isEmpty())
+        supervisor.cancel()
+    }
+
+    @Test
+    fun stopRunsOnIdleCleanupExactlyOnce() = runBlocking {
+        val idle = AtomicInteger(0)
+        val holdPlayback = AtomicBoolean(true)
+        val session = ChunkedTtsSession(
+            scope = this,
+            synthesize = { it.toByteArray() },
+            play = {
+                while (holdPlayback.get() && isActive) delay(4)
+            },
+            onIdle = { idle.incrementAndGet() },
+        )
+        session.start(listOf("one.", "two."))
+        withTimeout(2_000) { while (!session.isRunning()) delay(2) }
+        delay(20)
+        session.stop()
+        session.job?.join()
+        delay(20)
+        assertEquals(1, idle.get())
+        assertFalse(session.isRunning())
+        session.stop()
+        delay(20)
+        assertEquals("a second stop must not rerun cleanup", 1, idle.get())
     }
 }

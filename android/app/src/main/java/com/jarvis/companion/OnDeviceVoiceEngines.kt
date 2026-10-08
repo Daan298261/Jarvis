@@ -1,12 +1,16 @@
 package com.jarvis.companion
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * On-device STT engine contract (RFC-0140).
@@ -78,12 +82,19 @@ class WhisperCppSttEngine : OnDeviceSttEngine {
  * Pocket TTS (the only on-device TTS). Requires native ONNX voice bridge;
  * honest error when unavailable.
  */
-class PocketTtsEngine : OnDeviceTtsEngine {
+class PocketTtsEngine(
+    private val runtimeAvailable: () -> Boolean = { VoiceNativeBridge.isTtsLoaded() },
+    private val nativeLoad: (String, String) -> String = { dir, engine ->
+        VoiceNativeBridge.nativeTtsLoad(dir, engine)
+    },
+    private val nativeSynthesize: (String) -> ByteArray? = { VoiceNativeBridge.nativeTtsSynthesize(it) },
+    private val nativeUnload: () -> Unit = { VoiceNativeBridge.nativeTtsUnload() },
+) : OnDeviceTtsEngine {
     override val runtimeName: String = CompanionVoicePackCatalog.POCKET_TTS_ENGINE
     private var loadedDir: String? = null
     private var engineId: String = ""
 
-    override fun isRuntimeAvailable(): Boolean = VoiceNativeBridge.isTtsLoaded()
+    override fun isRuntimeAvailable(): Boolean = runtimeAvailable()
 
     override fun load(packDirectory: String, engineId: String): String? {
         if (!isRuntimeAvailable()) {
@@ -92,7 +103,8 @@ class PocketTtsEngine : OnDeviceTtsEngine {
         if (engineId != CompanionVoicePackCatalog.POCKET_TTS_ENGINE) {
             return "Unknown on-device TTS engine id"
         }
-        val err = VoiceNativeBridge.nativeTtsLoad(packDirectory, engineId)
+        if (loadedDir == packDirectory && this.engineId == engineId) return null
+        val err = nativeLoad(packDirectory, engineId)
         if (err.isNotBlank()) return err
         loadedDir = packDirectory
         this.engineId = engineId
@@ -106,7 +118,7 @@ class PocketTtsEngine : OnDeviceTtsEngine {
         if (text.isBlank()) {
             return Result.failure(IllegalArgumentException("Nothing to speak"))
         }
-        val audio = VoiceNativeBridge.nativeTtsSynthesize(text)
+        val audio = nativeSynthesize(text)
         if (audio == null || audio.isEmpty()) {
             return Result.failure(IllegalStateException("On-device TTS produced no audio"))
         }
@@ -118,7 +130,7 @@ class PocketTtsEngine : OnDeviceTtsEngine {
     }
 
     override fun unload() {
-        if (isRuntimeAvailable()) VoiceNativeBridge.nativeTtsUnload()
+        if (isRuntimeAvailable()) nativeUnload()
         loadedDir = null
         engineId = ""
     }
@@ -248,23 +260,30 @@ object ChunkedTtsPlayer {
 /**
  * Owns the on-device speak [Job] so stop/toggle and a new speak cancel the prior
  * session instead of overlapping it. [start] returns immediately (does not hold
- * a UI `busy` flag).
+ * a UI `busy` flag). A generation counter makes the latest session's [onIdle]
+ * always run, including after [stop].
  */
 class ChunkedTtsSession(
     private val scope: CoroutineScope,
     private val synthesize: suspend (String) -> ByteArray,
     private val play: suspend (ByteArray) -> Unit,
     private val onStopPlayback: () -> Unit = {},
-    private val onIdle: () -> Unit = {},
+    private val onError: (Throwable) -> Unit = {},
+    private val onIdle: suspend () -> Unit = {},
 ) {
     var job: Job? = null
         private set
+    private val generation = AtomicInteger(0)
 
     fun isRunning(): Boolean = job?.isActive == true
 
     fun start(chunks: List<String>): Job {
-        stop()
+        val token = generation.incrementAndGet()
+        val previous = job
+        previous?.cancel()
+        onStopPlayback()
         val launched = scope.launch {
+            previous?.join()
             try {
                 ChunkedTtsPlayer.speak(
                     chunks = chunks,
@@ -272,10 +291,14 @@ class ChunkedTtsSession(
                     play = play,
                     isActive = { isActive },
                 )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                onError(e)
             } finally {
-                if (job == coroutineContext[Job]) {
+                if (token == generation.get()) {
                     job = null
-                    onIdle()
+                    withContext(NonCancellable) { onIdle() }
                 }
             }
         }
@@ -284,9 +307,7 @@ class ChunkedTtsSession(
     }
 
     fun stop() {
-        val running = job
-        job = null
-        running?.cancel()
+        job?.cancel()
         onStopPlayback()
     }
 }
@@ -316,4 +337,10 @@ object VoiceNativeBridge {
     external fun nativeTtsLoad(packDirectory: String, engineId: String): String
     external fun nativeTtsSynthesize(text: String): ByteArray?
     external fun nativeTtsUnload()
+    external fun nativeTtsCancel()
+
+    fun requestTtsCancel() {
+        if (!ttsLoaded) return
+        runCatching { nativeTtsCancel() }
+    }
 }
