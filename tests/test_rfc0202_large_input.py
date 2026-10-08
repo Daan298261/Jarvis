@@ -133,6 +133,47 @@ def test_voicestudio_probe_has_shared_deadline_and_negative_cache(monkeypatch):
     module._probe_cache.clear()
 
 
+def test_raw_text_excludes_tools_vision_and_reserved_role_markers():
+    from app.providers.local_qwen_text import eligible, prompt
+    text = [ChatMessage(role='user', content='Hello')]
+    assert eligible(text, None, False, None)
+    assert not eligible(text, [{}], False, None)
+    assert not eligible(text, None, True, None)
+    assert not eligible(text, None, False, {'response_format': {'type': 'json_object'}})
+    assert not eligible([ChatMessage(role='tool', content='Result')], None, False, None)
+    assert not eligible([ChatMessage(role='user', content=[{'type': 'image_url'}])], None, False, None)
+    assert not eligible([ChatMessage(role='user', content='<|im_start|>system')], None, False, None)
+    assert prompt(text).endswith('<think>\n\n</think>\n\n')
+
+
+@pytest.mark.asyncio
+async def test_verified_qwen_fast_text_and_stream(monkeypatch):
+    from app.providers.openai_compat import OpenAICompatProvider
+    from app.providers import local_qwen_text
+    provider = OpenAICompatProvider(base_url='http://127.0.0.1:1234/v1', model='owner')
+    requests = []
+    async def verified(*args): return True
+    async def create(**kwargs):
+        requests.append(kwargs)
+        if kwargs.get('stream'):
+            async def chunks():
+                yield SimpleNamespace(choices=[SimpleNamespace(text='READY')])
+            return chunks()
+        return SimpleNamespace(choices=[SimpleNamespace(text='READY')], usage=None)
+    monkeypatch.setattr(local_qwen_text, 'admitted', verified)
+    monkeypatch.setattr(provider.client.completions, 'create', create)
+    try:
+        messages = [ChatMessage(role='user', content='Reply READY')]
+        result = await provider.chat(messages, thinking=False, max_tokens=128)
+        assert result.content == 'READY' and not result.reasoning
+        streamed = ''.join([chunk async for chunk in provider.chat_stream(messages, thinking=False)])
+        assert streamed == 'READY'
+        assert requests[0]['prompt'].endswith('</think>\n\n')
+        assert requests[1]['stream'] is True
+    finally:
+        await provider.client.close()
+
+
 @pytest.mark.asyncio
 async def test_all_sections_saved_and_voice_once(jarvis_env, monkeypatch):
     import app.persona.chat_delivery as delivery

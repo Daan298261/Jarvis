@@ -3,12 +3,15 @@ import argparse
 import asyncio
 import os
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 
 async def verify(args):
+    sys.stdout.reconfigure(encoding="utf-8")
+    started = time.perf_counter()
     os.environ["JARVIS_ROOT"] = str(Path(args.workspace).resolve())
     from app.inference.large_input import reduce_user_text, retain_input
     from app.providers.base import ChatMessage
@@ -25,7 +28,7 @@ async def verify(args):
         assert len(summary) < 6000
         assert "ALPHA_42" in summary and "OMEGA_99" in summary
         assert retain_input(text).read_text(encoding="utf-8") == text
-        print("REAL SECTION COMPRESSION PASSED", len(text), len(summary))
+        print("REAL SECTION COMPRESSION PASSED", len(text), len(summary), "seconds", round(time.perf_counter() - started, 3))
     finally:
         await provider.client.close()
 
