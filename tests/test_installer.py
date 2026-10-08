@@ -292,9 +292,26 @@ def test_installer_and_desktop_versions_match():
         r'__version__ = "([^"]+)"',
         _read(REPO_ROOT / "backend" / "app" / "__init__.py"),
     ).group(1)
+    package = json.loads(_read(REPO_ROOT / "frontend" / "package.json"))
+    lock = json.loads(_read(REPO_ROOT / "frontend" / "package-lock.json"))
+    cargo_lock = _read(REPO_ROOT / "frontend" / "src-tauri" / "Cargo.lock")
+    gradle = _read(REPO_ROOT / "android" / "app" / "build.gradle.kts")
+    assert installer_version == "1.5.3-beta"
     assert installer_version == backend
     assert cargo["package"]["version"] == installer_version
     assert tauri["version"] == installer_version
+    assert package["version"] == installer_version
+    assert lock["version"] == installer_version
+    assert lock["packages"][""]["version"] == installer_version
+    assert f'name = "jarvis"\nversion = "{installer_version}"' in cargo_lock
+    assert f'versionName = "{installer_version}"' in gradle
+    # Windows VERSIONINFO cannot carry a semver pre-release tag.
+    assert "VersionInfoVersion={#MyAppVersion}.0" not in iss_text
+    assert "VersionInfoVersion={#MyAppVersionCore}.0" in iss_text
+    assert "MyAppVersionCore Copy(MyAppVersion, 1, Pos(\"-\" , MyAppVersion + \"-\") - 1)" in iss_text or (
+        "MyAppVersionCore" in iss_text and 'Pos("-"' in iss_text
+    )
+    assert "function StripPreRelease" in iss_text
 
 
 def test_reset_user_data_script_exists():
@@ -417,6 +434,43 @@ def test_installer_bundles_qwen35_2b_front_model():
     assert "warm front" in readme or "front model" in readme
 
 
+def test_customer_deliverables_publish_to_gitignored_release_dir():
+    """Every installer build copies the customer set into <repo>/release/."""
+    gitignore = _read(REPO_ROOT / ".gitignore")
+    assert "\nrelease/\n" in f"\n{gitignore}\n"
+    build = _read(BUILD_SCRIPT)
+    stage = _read(INSTALLER_DIR / "stage-release-folder.ps1")
+    assert "[string]$DriveReleasesPath" in build
+    assert "Publishing customer deliverables to release\\" in build
+    invoke_line = next(
+        line
+        for line in build.splitlines()
+        if "stage-release-folder.ps1" in line and line.lstrip().startswith("& powershell")
+    )
+    assert invoke_line.startswith("& powershell")
+    assert "-StageVersionedHotfix" in build
+    assert build.index("if ($Release)") < build.index("Publishing customer deliverables to release\\")
+    assert build.index("-StageVersionedHotfix") < build.index(invoke_line)
+    assert 'Join-Path $Root "release"' in stage
+    assert "[string]$DriveReleasesPath" in stage
+    assert "Customer deliverables copied from $ReleaseDir to $drive" in stage
+    assert "JarvisSetup.exe" in stage
+    assert "JarvisLicenseManager.exe" in stage
+    assert "*.jarvis-license" in stage
+    assert "*.apk" in stage
+    assert "-setup.exe" in stage
+    assert ".zip" in stage
+    assert ".tar.gz" in stage
+    readme = _read(README)
+    assert "DriveReleasesPath" in readme
+    assert "release\\" in readme
+    workflow = _read(REPO_ROOT / ".github" / "workflows" / "android-companion.yml")
+    assert "publish_customer_release.py" in workflow
+    android = _read(REPO_ROOT / "scripts" / "build_android.py")
+    assert "publish_customer_release.py" in android
+    assert "release_path" in android
+
+
 def test_readme_documents_build_oneliner():
     text = _read(README)
     assert "build-installer.ps1" in text
@@ -448,3 +502,5 @@ def test_optional_tauri_shell_sources():
     conf = _read(tauri_conf)
     assert "ANZU" in conf or "Jarvis" in conf
     assert "nsis" in conf.lower()
+    assert "stage-release-folder.ps1" in release_text
+    assert "release" in release_text

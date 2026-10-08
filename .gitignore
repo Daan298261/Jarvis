@@ -57,7 +57,9 @@ Thumbs.db
 .idea/
 .vscode/
 
-# Local release bundles and upload staging (never commit or ship inside JarvisSetup)
+# Customer deliverables from every build (installer, license, companion APK,
+# license manager). Gitignored in full; never commit or ship inside JarvisSetup.
+# build-installer.ps1 -DriveReleasesPath copies this same set to an external folder.
 release/
 _release_upload/
 installer-build*.log

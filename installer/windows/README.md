@@ -36,6 +36,14 @@ From the repository root:
 
 Output: `installer\windows\dist\JarvisSetup.exe`
 
+Every build also copies the customer deliverables into the gitignored repo folder `release\` (repo root): the installer executable (and `JarvisSetup-*.bin` slices), the issued license when one was produced, the vendor license manager when it was built, and a companion APK if one is sitting in `dist`. Source archives are not copied. The same `release\` folder receives the companion APK from `scripts/build_android.py` and from the Linux Android companion workflow, and the Tauri NSIS setup exe from `scripts/build-windows-release.ps1`. The portal `npm run build` output stays in `frontend\dist`; it is an installer input, not a separate customer package.
+
+To also fill an external drop such as the Google Drive **Jarvis Releases** folder, pass `-DriveReleasesPath`. The script copies the files it just wrote under `release\` into that path. Omit the parameter and only `release\` is updated.
+
+```powershell
+.\installer\windows\build-installer.ps1 -DriveReleasesPath "G:\My Drive\Jarvis Releases"
+```
+
 The installer bundles the **Qwen3.5-2B Q4_K_M** front model (`models\Qwen3.5-2B-GGUF\Qwen3.5-2B-Q4_K_M.gguf`) so a fresh install has a warm front lane without a separate download. `build-installer.ps1` stages it with `stage-front-model.ps1` after the Ornith bootstrap model. Developer builds can omit it; release cuts cannot:
 
 ```powershell

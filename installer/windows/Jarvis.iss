@@ -2,7 +2,11 @@
 ; Build on Windows with build-installer.ps1 (requires Inno Setup 6 + iscc on PATH).
 
 #define MyAppName "Jarvis"
-#define MyAppVersion "1.5.2"
+; AppVersion is the semver customers see (pre-release tags allowed).
+; Windows VERSIONINFO is numeric only, so VersionInfoVersion uses the core
+; before the first '-' (1.5.3-beta -> 1.5.3.0).
+#define MyAppVersion "1.5.3-beta"
+#define MyAppVersionCore Copy(MyAppVersion, 1, Pos("-", MyAppVersion + "-") - 1)
 #define MyAppPublisher "Jarvis"
 #define MyAppURL "https://github.com/Daan298261/Jarvis"
 #define MyAppExe "powershell.exe"
@@ -11,7 +15,7 @@
 AppId={{A7B3C4D5-E6F7-4890-ABCD-EF1234567890}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-VersionInfoVersion={#MyAppVersion}.0
+VersionInfoVersion={#MyAppVersionCore}.0
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
@@ -147,12 +151,25 @@ var
   BootstrapSkipHeavy: Boolean;
   BootstrapSkipModelDownload: Boolean;
 
+function StripPreRelease(const Value: String): String;
+var
+  Cut: Integer;
+begin
+  Result := Trim(Value);
+  Cut := Pos('-', Result);
+  if Cut > 0 then
+    Result := Copy(Result, 1, Cut - 1);
+  Cut := Pos('+', Result);
+  if Cut > 0 then
+    Result := Copy(Result, 1, Cut - 1);
+end;
+
 function NormalizeVersion(const Value: String): String;
 var
   I: Integer;
   DotCount: Integer;
 begin
-  Result := Trim(Value);
+  Result := StripPreRelease(Value);
   DotCount := 0;
   for I := 1 to Length(Result) do
     if Result[I] = '.' then
@@ -168,6 +185,8 @@ function CompareVersionStrings(const InstallerVersion, InstalledVersion: String)
 var
   InstallerPacked: Int64;
   InstalledPacked: Int64;
+  InstallerPre: Boolean;
+  InstalledPre: Boolean;
 begin
   Result := 0;
   if not StrToVersion(NormalizeVersion(InstallerVersion), InstallerPacked) then
@@ -175,6 +194,15 @@ begin
   if not StrToVersion(NormalizeVersion(InstalledVersion), InstalledPacked) then
     Exit;
   Result := ComparePackedVersion(InstallerPacked, InstalledPacked);
+  if Result <> 0 then
+    Exit;
+  { Same numeric core: a pre-release (1.5.3-beta) is older than the final (1.5.3). }
+  InstallerPre := Pos('-', InstallerVersion) > 0;
+  InstalledPre := Pos('-', InstalledVersion) > 0;
+  if InstallerPre and (not InstalledPre) then
+    Result := -1
+  else if InstalledPre and (not InstallerPre) then
+    Result := 1;
 end;
 
 function DetectExistingInstallation: Boolean;

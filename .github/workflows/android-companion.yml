@@ -65,6 +65,8 @@ jobs:
         with:
           name: jarvis-android-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
+      - name: Publish companion APK into repo release/
+        run: python3 scripts/publish_customer_release.py --source android/app/build/outputs/apk/release/app-release.apk --as JarvisCompanion.apk
       - uses: actions/upload-artifact@v4
         with:
           name: jarvis-android-generic-release

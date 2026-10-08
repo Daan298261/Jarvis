@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -340,9 +341,11 @@ def build(
     subprocess.run([str(verifier), "verify", str(source)], env=env, check=True, capture_output=True)
     target = folder / (f"JarvisCompanion-generic-{release_code}.apk" if generic else f"jarvis-{release_code}.apk")
     shutil.copyfile(source, target)
+    release_copy = _publish_apk(target)
     result = {
         "filename": target.name,
         "path": str(target),
+        "release_path": str(release_copy),
         "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
         "mode": "generic" if generic else "personalized",
         "features": list(REQUIRED_COMPANION_FEATURES),
@@ -352,6 +355,17 @@ def build(
         result["server_pin"] = settings["server_pin"]
     progress("APK signature verified; ready to install")
     return result
+
+
+def _publish_apk(apk: Path) -> Path:
+    """Copy the signed companion APK into <repo>/release/ as well as the build folder."""
+    source = REPO / "scripts" / "publish_customer_release.py"
+    spec = importlib.util.spec_from_file_location("publish_customer_release", source)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Cannot load {source}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.publish_file(apk)
 
 
 def main():
