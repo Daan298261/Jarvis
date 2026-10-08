@@ -1015,13 +1015,18 @@ class InferenceManager:
         """Set the live context window. Mid-task callers pass allow_shrink=False so we only grow.
 
         Local LM Studio may reload an idle instance only when ``allow_reload`` is true
-        (turn start). Mid-turn callers compact or trim; they never unload the model.
+        (turn start). Mid-turn callers compact or trim; they never unload that server.
         Other external servers stay capped at their actual loaded slot.
+
+        A Jarvis-owned llama.cpp process is different: the slot it booted with is
+        not a ceiling. Growing past ``server_n_ctx`` reloads that process at the
+        requested window, up to the hardware cap the caller already chose.
         """
         target = int(context_size or 0)
         if target <= 0:
             return int(self.state.context_size or 0)
         live_cap = int(self.state.server_n_ctx or 0)
+        manages = bool(self.backend and getattr(self.backend, "manages_process", False))
         if allow_reload and target > live_cap and self.state.backend in LMSTUDIO_ALIASES:
             from .lmstudio_context import LocalContextRestoreError, grow_local_instance
             identifier = getattr(self.provider, "model", "")
@@ -1041,17 +1046,18 @@ class InferenceManager:
                 self.state.server_n_ctx = grown
                 self.state.context_size = grown
                 live_cap = grown
-        if live_cap > 0:
+        # External servers cannot grow past the slot they already loaded.
+        # Managed llama.cpp can, so do not clamp before the reload below.
+        if live_cap > 0 and not manages:
             target = min(target, live_cap)
         current = int(self.state.context_size or 0)
-        if live_cap > 0 and current > live_cap:
+        if live_cap > 0 and current > live_cap and not manages:
             self.state.context_size = live_cap
             current = live_cap
         if current == target:
             return current
         if not allow_shrink and current >= target and current > 0:
             return current
-        manages = bool(self.backend and getattr(self.backend, "manages_process", False))
         if not manages:
             self.state.context_size = target
             return target

@@ -25,7 +25,7 @@ LM_STUDIO_APP_GB = 2.0
 QUESTIONS: tuple[dict[str, Any], ...] = (
     {
         "id": "use",
-        "question": "What do you mainly want Jarvis to do?",
+        "question": "What do you mainly want ANZU to do?",
         "help": "A short answer is enough. For example: coding, everyday automation, research and writing, security monitoring, or a bit of everything.",
         "choices": ["Everyday assistant", "Coding", "Research / writing", "Security / monitoring", "A bit of everything"],
     },
@@ -37,13 +37,13 @@ QUESTIONS: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "resources",
-        "question": "How much of this computer may Jarvis use while you are using it?",
-        "help": "Jarvis still respects the hardware limits it detects.",
+        "question": "How much of this computer may ANZU use while you are using it?",
+        "help": "ANZU still respects the hardware limits it detects.",
         "choices": ["Light (~25%)", "Balanced (~50%)", "Aggressive (~80%)", "Maximum when needed"],
     },
     {
         "id": "voice",
-        "question": "Do you want to use voice with Jarvis?",
+        "question": "Do you want to use voice with ANZU?",
         "help": "You can change this later. Speech input during setup is optional either way.",
         "choices": ["Yes", "No"],
     },

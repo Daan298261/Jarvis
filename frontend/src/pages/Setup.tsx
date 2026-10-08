@@ -238,7 +238,7 @@ export function SetupPage() {
         method: "POST",
         body: JSON.stringify({ answers }),
       })
-      if (!result.ok) throw new Error("Jarvis could not apply the setup plan.")
+      if (!result.ok) throw new Error("ANZU could not apply the setup plan.")
       navigate("/setup?step=integrations", { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -257,15 +257,15 @@ export function SetupPage() {
     return (
       <div className="setup-conversation setup-connections">
         <header className="setup-conversation-head">
-          <span className="setup-kicker">JARVIS · CONNECTIONS</span>
+          <span className="setup-kicker">ANZU · CONNECTIONS</span>
           <h1>Connect Gmail and WhatsApp</h1>
-          <p className="lede">No terminal commands. Jarvis checks Gmail for you and shows the WhatsApp QR code here.</p>
+          <p className="lede">No terminal commands. ANZU checks Gmail for you and shows the WhatsApp QR code here.</p>
         </header>
         {error && <div className="setup-inline-error">{error}</div>}
         <IntegrationSetup />
         <div className="setup-plan-actions setup-connections-actions">
           <button type="button" className="btn" onClick={() => navigate(interviewComplete ? "/" : "/setup", { replace: true })}>
-            {interviewComplete ? "Finish and open Jarvis" : "Continue setup"}
+            {interviewComplete ? "Finish and open ANZU" : "Continue setup"}
           </button>
         </div>
         <p className="setup-advanced-note">Both connections are optional and can be changed later under Connections.</p>
@@ -274,17 +274,17 @@ export function SetupPage() {
   }
 
   if (!questions.length && !error) {
-    return <div className="setup-conversation"><p className="lede">Jarvis is preparing setup…</p></div>
+    return <div className="setup-conversation"><p className="lede">ANZU is preparing setup…</p></div>
   }
 
   return (
     <div className="setup-conversation">
       <header className="setup-conversation-head">
-        <span className="setup-kicker">JARVIS · FIRST RUN</span>
+        <span className="setup-kicker">ANZU · FIRST RUN</span>
         <h1>{plan ? "This is what I’ll configure" : "A few questions. That’s it."}</h1>
         <p className="lede">
           {plan
-            ? "You can change any of this later. Jarvis keeps the complicated controls out of the way until you need them."
+            ? "You can change any of this later. ANZU keeps the complicated controls out of the way until you need them."
             : "Answer normally, pick a shortcut, or use the microphone. I’ll detect the hardware and configure the rest."}
         </p>
       </header>
@@ -300,7 +300,7 @@ export function SetupPage() {
           <div className="setup-jarvis-line">
             <span className="setup-ai-dot" aria-hidden />
             <div>
-              <small>Jarvis</small>
+              <small>ANZU</small>
               <h2>{question.question}</h2>
               {question.help && <p>{question.help}</p>}
             </div>
@@ -321,7 +321,7 @@ export function SetupPage() {
               onKeyDown={(event) => {
                 if (event.key === "Enter" && input.trim()) void answer(input)
               }}
-              placeholder="Or just tell Jarvis…"
+              placeholder="Or just tell ANZU…"
               autoFocus
             />
             {speechAvailable && (
@@ -427,14 +427,14 @@ export function SetupPage() {
 
           {plan.download_models.length > 0 ? (
             <p className="setup-download-note">
-              Jarvis will also create <code>data/setup/download-models.ps1</code> for {plan.download_models.length} selected model{plan.download_models.length === 1 ? "" : "s"} that are not already present.
+              ANZU will also create <code>data/setup/download-models.ps1</code> for {plan.download_models.length} selected model{plan.download_models.length === 1 ? "" : "s"} that are not already present.
             </p>
           ) : (
-            <p className="setup-download-note">No additional model download is required to start using Jarvis.</p>
+            <p className="setup-download-note">No additional model download is required to start using ANZU.</p>
           )}
 
           <div className="setup-zero-config">
-            <h3>What Jarvis will write</h3>
+            <h3>What ANZU will write</h3>
             <ul>
               <li><code>data/setup/download-models.ps1</code> — selected models only, with a disk-space check before download.</li>
               <li><code>data/setup/install-lm-studio.ps1</code> — no-op unless a future plan requires LM Studio.</li>
@@ -446,7 +446,7 @@ export function SetupPage() {
           <div className="setup-plan-actions">
             <button type="button" className="btn secondary" onClick={restartInterview} disabled={busy}>Change answers</button>
             <button type="button" className="btn" onClick={apply} disabled={busy || !plan.disk.enough}>
-              {busy ? "Configuring…" : plan.disk.enough ? "Configure Jarvis" : `Free ${fmtGb(plan.disk.shortfall_gb)} first`}
+              {busy ? "Configuring…" : plan.disk.enough ? "Configure ANZU" : `Free ${fmtGb(plan.disk.shortfall_gb)} first`}
             </button>
           </div>
           <p className="setup-advanced-note">

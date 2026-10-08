@@ -21,7 +21,24 @@ def _resolve_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _verify_frozen_imports() -> None:
+    """Fail the sidecar build when the default voice stack was not collected."""
+    missing: list[str] = []
+    for name in ("kokoro", "soundfile"):
+        try:
+            __import__(name)
+        except Exception as exc:
+            missing.append(f"{name}: {exc}")
+    if missing:
+        print("Frozen import check failed: " + "; ".join(missing), file=sys.stderr)
+        raise SystemExit(1)
+    print("Frozen import check ok: kokoro, soundfile")
+
+
 def main() -> None:
+    if "--verify-frozen-imports" in sys.argv:
+        _verify_frozen_imports()
+        return
     root = _resolve_root()
     os.environ.setdefault("JARVIS_ROOT", str(root))
     backend = root / "backend"

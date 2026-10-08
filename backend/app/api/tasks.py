@@ -105,7 +105,14 @@ def _task_dict(
             extra = []
     task_class = getattr(task, "task_class", None) or ""
     security_role = getattr(task, "security_role", None) or ""
-    allowed_tools = sorted(tool_names_for(task_class, extra, security_role=security_role))
+    allowed_tools = sorted(
+        tool_names_for(
+            task_class,
+            extra,
+            security_role=security_role,
+            prompt=getattr(task, "prompt", None) or "",
+        )
+    )
     db_exposed = [item for item in (getattr(task, "exposed_tools", None) or "").split(",") if item]
     current_allowed = set(allowed_tools)
     exposed_tools = [item for item in db_exposed if item in current_allowed] if db_exposed else allowed_tools

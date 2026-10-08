@@ -23,7 +23,10 @@ CLASS_TOOLS: dict[str, tuple[str, ...]] = {
     "document processing": ("office", "filesystem", "python", "web_fetch"),
     "data processing": ("filesystem", "python", "terminal"),
     "multimodal": ("screenshot", "desktop", "browser", "filesystem"),
-    "mixed": ("filesystem", "apps", "python", "terminal", "desktop", "screenshot", "chat_projects", "mcp_call"),
+    # Ordinary mixed work starts with the tools a turn can actually use.
+    # Terminal, desktop, screenshot, and apps stay in the catalog and are
+    # retrieved when the prompt asks for them — they are not on every task.
+    "mixed": ("filesystem", "python", "mcp_call"),
     "long-horizon autonomous": (
         "filesystem",
         "python",
@@ -189,6 +192,11 @@ def tool_names_for(
     if lta_protected_folder_path(prompt or "") and "lta_protected_folder" not in wanted:
         wanted.append("lta_protected_folder")
     lowered_prompt = (prompt or "").lower()
+    from ..memory.owner_facts import is_memory_recall_request, is_memory_store_request
+
+    if is_memory_store_request(prompt or "") or is_memory_recall_request(prompt or ""):
+        if "vault_memory" not in wanted:
+            wanted.append("vault_memory")
     if any(token in lowered_prompt for token in (" reverse engineer", "rea ", "rea this", "investigate the extract")):
         if "rea_investigate" not in wanted:
             wanted.append("rea_investigate")
