@@ -258,13 +258,20 @@ def _exposed_csv(working: WorkingState, prompt: str | None = None) -> str:
     )
 
 
-def _latest_user_text(messages: list[ChatMessage], fallback: str = "") -> str:
+def _latest_owner_text(messages: list[ChatMessage], fallback: str = "") -> str:
+    """Owner utterance used for tool grants. Internal instructions do not replace it."""
+    from .chat_turns import INTERNAL_AUDIENCE, is_internal_instruction, owner_visible_user_text
+
     for message in reversed(messages or []):
         if message.role != "user":
             continue
+        if str(getattr(message, "audience", "") or "") == INTERNAL_AUDIENCE:
+            continue
         text = message.content if isinstance(message.content, str) else ""
-        if text.strip():
-            return text.strip()
+        visible = owner_visible_user_text(text)
+        if not visible or is_internal_instruction(visible):
+            continue
+        return visible.strip()
     return (fallback or "").strip()
 
 
@@ -2764,7 +2771,9 @@ class AgentRuntime:
                     compact_memory=working.dumps(),
                     execution_mode=execution_mode,
                     task_class=working.task_class,
-                    exposed_tools=_exposed_csv(working, _latest_user_text(messages, extra_prompt or prompt)),
+                    exposed_tools=_exposed_csv(
+                        working, _latest_owner_text(messages, extra_prompt or prompt)
+                    ),
                 )
                 think = should_enable_thinking(
                     profile,
@@ -2813,14 +2822,14 @@ class AgentRuntime:
                             working.task_class,
                             working.requested_tools,
                             security_role=working.security_role,
-                            prompt=_latest_user_text(messages, working.goal or active_prompt),
+                            prompt=_latest_owner_text(messages, working.goal or active_prompt),
                             needs_tools=working.ingress_needs_tools,
                         )
                     )
                     turn_tools = select_turn_schemas(
                         turn_tools,
                         model_family=profile.family,
-                        prompt=_latest_user_text(messages, working.goal or active_prompt),
+                        prompt=_latest_owner_text(messages, working.goal or active_prompt),
                     )
                     if working.ingress_blob_id and not force_final:
                         ingress_tool = REGISTRY.tools.get("read_ingress")

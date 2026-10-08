@@ -331,6 +331,32 @@ def test_trivial_and_reply_only_requests_stay_in_chat():
     assert denied.startswith("ERROR:")
 
 
+def test_internal_plan_turn_does_not_drop_the_memory_tool():
+    """Tool grants follow the owner's request, not the internal plan instruction."""
+    from app.agent.chat_turns import internal_user_message
+    from app.agent.loop import _latest_owner_text
+    from app.agent.prompts import PLAN_PROMPT
+    from app.agent.tool_exposure import schemas_for, tool_names_for
+
+    owner = "Remember that the porch code is blue"
+    messages = [
+        ChatMessage(role="user", content=owner),
+        internal_user_message(PLAN_PROMPT),
+    ]
+    chosen = _latest_owner_text(messages, owner)
+    assert "porch code" in chosen
+    assert "END STATE" not in chosen
+    names = tool_names_for("mixed", prompt=chosen, needs_tools=True)
+    assert "vault_memory" in names
+    schemas = schemas_for("mixed", prompt=chosen, needs_tools=True)
+    granted = {item.get("function", {}).get("name") for item in schemas}
+    assert "vault_memory" in granted
+    # Same intersection the task API uses: a stored grant survives when the prompt is the owner's.
+    allowed = set(tool_names_for("mixed", security_role="", prompt=owner))
+    exposed = [item for item in ("filesystem", "python", "mcp_call", "vault_memory") if item in allowed]
+    assert "vault_memory" in exposed
+
+
 def test_installer_allowlist_skips_scratch_folders_and_sidecar_collects_kokoro():
     iss = (ROOT / "installer" / "windows" / "Jarvis.iss").read_text(encoding="utf-8")
     assert 'Source: "..\\..\\*";' not in iss
