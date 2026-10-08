@@ -454,6 +454,10 @@ class AppSettings(BaseModel):
     front_responder: FrontResponderSettings = Field(default_factory=FrontResponderSettings)
     autonomy: str = "trusted"
     default_timeout_seconds: int = 1800
+    # Turn working-set composition (vault + tools + Supermemory). Must stay well
+    # inside the front-lane ack budget (front_responder.timeout_ms=1500) so
+    # retrieval cannot starve first speech. Reflex rerank is ~80–100ms.
+    working_set_deadline_ms: int = Field(default=400, ge=50, le=8000)
     retry_limit: int = 4
     execution_mode: str = "balanced"
     logging_level: str = "INFO"

@@ -24,6 +24,7 @@ class SettingsUpdate(BaseModel):
     autonomy: str | None = None
     allowed_directories: list[str] | None = None
     default_timeout_seconds: int | None = None
+    working_set_deadline_ms: int | None = Field(default=None, ge=50, le=8000)
     retry_limit: int | None = None
     logging_level: str | None = None
     lan_access: bool | None = None
@@ -164,6 +165,8 @@ async def update_settings(body: SettingsUpdate):
         settings.allowed_directories = body.allowed_directories
     if body.default_timeout_seconds is not None:
         settings.default_timeout_seconds = body.default_timeout_seconds
+    if body.working_set_deadline_ms is not None:
+        settings.working_set_deadline_ms = body.working_set_deadline_ms
     if body.retry_limit is not None:
         settings.retry_limit = body.retry_limit
     if body.logging_level is not None:

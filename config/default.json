@@ -46,6 +46,7 @@
   "autonomy": "trusted",
   "professional_mode": false,
   "default_timeout_seconds": 1800,
+  "working_set_deadline_ms": 400,
   "retry_limit": 4,
   "execution_mode": "balanced",
   "logging_level": "INFO",
