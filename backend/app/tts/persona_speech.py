@@ -18,8 +18,9 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
+from typing import Any
 
-from ..config import load_settings
+from ..config import AppSettings, load_settings
 from ..persona.named_persona import CATALOG, _appearance_for
 from ..voice_profiles.catalog import WINDOWS_NATURAL_VOICE_PROFILE_ID, get_catalog
 from ..voice_profiles.ip_guard import contains_forbidden_ip_term
@@ -276,3 +277,76 @@ async def speak_text(
         }
     )
     return result
+
+
+def address_vocative(settings: AppSettings | None = None) -> str:
+    """Return the vocative from the address-style resolver, or empty for neutral."""
+    from ..persona.social import resolve_address_style
+
+    current = settings or load_settings()
+    commentary = current.social_commentary
+    style = resolve_address_style(commentary)
+    name = (commentary.configured_address_name or "").strip()
+    if style == "neutral":
+        return ""
+    if style in {"first_name", "configured"}:
+        return name
+    if style == "sir_maam":
+        return name or "sir"
+    return ""
+
+
+def with_address(sentence: str, settings: AppSettings | None = None) -> str:
+    """Append the resolved vocative. Neutral address leaves the sentence unchanged."""
+    core = (sentence or "").strip()
+    if not core:
+        return ""
+    if core[-1] in ".!?":
+        body, punct = core[:-1].rstrip(), core[-1]
+    else:
+        body, punct = core, "."
+    vocative = address_vocative(settings)
+    if not vocative:
+        return f"{body}{punct}"
+    return f"{body}, {vocative}{punct}"
+
+
+def stall_spoken_line(stall: Any, settings: AppSettings | None = None) -> str:
+    """Plain spoken failure for a provider stream stall. Does not invent an answer."""
+    deadline = str(getattr(stall, "deadline", "") or "")
+    if deadline == "idle":
+        sentence = "The model stalled in the middle of the reply."
+    else:
+        sentence = "The model stalled before the first token."
+    return with_address(sentence, settings)
+
+
+async def speak_stream_stall(
+    stall: Any,
+    *,
+    settings: AppSettings | None = None,
+    source: str = "system",
+) -> dict[str, Any]:
+    """Speak an honest stall failure through owner delivery. Callers still propagate the stall."""
+    from ..persona.chat_delivery import publish_owner_text
+
+    line = stall_spoken_line(stall, settings)
+    cleaned = (line or "").strip()
+    if not cleaned:
+        return {"text": "", "spoken": False, "tts_id": None}
+    return await publish_owner_text(cleaned, source=source, speak=True)
+
+
+async def announce_stream_stall(
+    exc: BaseException,
+    *,
+    settings: AppSettings | None = None,
+    source: str = "system",
+) -> bool:
+    """Speak when ``exc`` is a stream stall. Returns True if a stall was announced."""
+    from ..providers.base import StreamStallError
+
+    if not isinstance(exc, StreamStallError):
+        return False
+    await speak_stream_stall(exc, settings=settings, source=source)
+    return True
