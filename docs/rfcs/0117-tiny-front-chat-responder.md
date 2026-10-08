@@ -227,3 +227,31 @@ The owner explicitly reported that the delay occurs across models, not only with
 ## Implementation note
 
 Landed on `development` via specs **#303** @ `49f6af4` (tiny front-chat responder RFC + README pointer) + implement **#305** @ `4eb25d9` (`front_responder` lane; tools/thinking disabled; 96–160 token cap; two-lane owner chat; one-transcript merge; immediate safe TTS; `front_responder.last_turn` diagnostics) + harden **#481** @ `c50a65341fc6f3522b3d58a681a107bedd321e0a` (squash; pre-squash `fc198f64093d56bc05e204248a07a69a7abaed5f`, D2 peer APPROVE). #481 closes the owner-chat terminal path: `final_basic` / `ask_clarification` finish without `MANAGER.load` / `ensure_context` / two-lane worker; first text + TTS leave immediately; ack/handoff emit before the worker; diagnostics preserve early audio timings; double-speak guard. **Colliding number:** `docs/rfcs/0117-durable-state-journal-rollback.md` is a different ticket (implemented via #380) and is unchanged by this tick. The earlier note that #304 left that file **accepted** is stale — #380 implemented it; this ledger does not retick it. Post-1.4 optional accelerator; does **not** block 1.4.0. Windows first-visible / first-audible measurement across two larger models remains desktop sign-off (unchecked). No new §58 checkbox.
+
+## Amendment 2026-10-08
+
+**Author:** Jarvis Architect
+
+**Product alignment:** Per [`ANZU_PRODUCT_NORTH_STAR.md`](../../ANZU_PRODUCT_NORTH_STAR.md), ANZU should combine deep capability with **the responsiveness of conventional software** — filler acknowledgements must not talk over a fast answer.
+
+**Supersedes (for `ack_continue` / `handoff_notice` only):** §6 voice behaviour and any “immediate safe acknowledgement” wording for non-terminal front actions. `final_basic` and `ask_clarification` on the front lane stay **immediate** (text + eligible TTS without hold).
+
+### Ack-only-when-late
+
+After turn start, when the front lane selects `ack_continue` or `handoff_notice`, the portal/TTS payload is **held** for a configurable delay (inference/front setting; default **1200 ms**). It is spoken/shown **only if** no **final answer** and no **first answer token** (worker or front `final_basic` stream) has arrived before the hold expires. If any qualifying answer arrives first, the held ack is **dropped silently** (no transcript line, no TTS).
+
+`final_basic` complete answers are never delayed by this hold.
+
+### No double ack
+
+At most **one** ack-class utterance per owner turn across the front lane and loop progress paths. `owner_chat` and `loop.py` share a single per-turn **`ack_emitted`** (or equivalent) flag. A progress/loop line after an ack is allowed only as **genuine progress**, not a second ack template.
+
+### Acceptance criteria (Wave 2 implement)
+
+- [ ] Fast answer path: answer arrives before ~1.2 s → **no** ack shown/spoken.
+- [ ] Slow answer path: no answer before ~1.2 s → **exactly one** ack at ~1.2 s (config default), then answer when ready.
+- [ ] `final_basic` front lane: immediate text/TTS; never gated by ack hold.
+- [ ] No double ack across `owner_chat` (~L219–223) and managed `loop` (~L1992) emit paths.
+- [ ] `python3 -m pytest` green (timing/flag contract tests).
+
+**Note:** Wiring at `owner_chat` / `loop` call sites is senior 4.7 dev Wave 2; this amendment is spec-only. See also [RFC-0127](0127-swift-initial-reply-and-progress.md) Amendment 2026-10-08 (Decision 1).
