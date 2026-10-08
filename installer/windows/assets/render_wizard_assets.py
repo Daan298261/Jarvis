@@ -85,10 +85,16 @@ SMALL_SIZES = (58, 71, 77, 85, 97, 103, 112, 116, 124, 129, 143, 147, 159)
 
 # Official mark is Logo_black.png (1254×1254, gold on black). The wizard shows
 # the downscale: 28px at 100% DPI and 42px at 150% (ScaleY(28)).
-SPONSOR_CREDIT = "Made in the Netherlands \u2014 sponsored by Black Grid Publishing"
+# Two lines replace the em dash so the credit does not depend on that glyph.
+SPONSOR_LINES = (
+    "Made in the Netherlands",
+    "Sponsored by Black Grid Publishing",
+)
 SPONSOR_URL = "https://blackgridpublishing.com"
 LOGO_100 = 28
 LOGO_150 = 42
+# Design pixels. Matches ScaleX(16) in Jarvis.iss, the clear gap before Back.
+SPONSOR_GAP_BEFORE_BACK = 16
 
 
 def app_version() -> str:
@@ -347,23 +353,6 @@ def render_sponsor_logos(source: Path, out_dir: Path) -> dict[int, Image.Image]:
     return logos
 
 
-def _wrap(text: str, font: ImageFont.FreeTypeFont, limit: float) -> list[str]:
-    words = text.split()
-    lines: list[str] = []
-    current = ""
-    for word in words:
-        trial = word if not current else f"{current} {word}"
-        if font.getlength(trial) <= limit:
-            current = trial
-        else:
-            if current:
-                lines.append(current)
-            current = word
-    if current:
-        lines.append(current)
-    return lines or [""]
-
-
 def render_wizard_page(
     kind: str,
     scale: float,
@@ -442,13 +431,25 @@ def render_wizard_page(
 
     credit_font = _font(REGULAR, max(9, round(11 * scale)))
     text_left = logo_left + logo_size + round(8 * scale)
-    text_limit = back_left - round(8 * scale) - text_left
-    lines = _wrap(SPONSOR_CREDIT, credit_font, text_limit)
-    line_h = round(13 * scale)
-    block_h = line_h * len(lines)
+    gap_before_back = round(SPONSOR_GAP_BEFORE_BACK * scale)
+    text_right_limit = back_left - gap_before_back
+    # ScaleY(14) in the installer: two lines match the 28px logo and stay centered.
+    line_h = round(14 * scale)
+    block_h = line_h * len(SPONSOR_LINES)
     text_top = logo_top + (logo_size - block_h) // 2
-    for index, line in enumerate(lines):
-        draw.text((text_left, text_top + index * line_h), line, font=credit_font, fill=(*MUTED[:3], 230))
+    for index, line in enumerate(SPONSOR_LINES):
+        line_width = credit_font.getlength(line)
+        if text_left + line_width > text_right_limit:
+            raise SystemExit(
+                f"Sponsor line does not fit before Back at {scale:.0%} DPI: {line!r} "
+                f"({line_width:.0f}px, limit {text_right_limit - text_left:.0f}px)"
+            )
+        draw.text(
+            (text_left, text_top + index * line_h),
+            line,
+            font=credit_font,
+            fill=(*MUTED[:3], 230),
+        )
     return image
 
 

@@ -223,7 +223,8 @@ var
   GlowCallback: NativeInt;
   GlowTicking: Boolean;
   SponsorLogo: TBitmapImage;
-  SponsorLabel: TNewStaticText;
+  SponsorLine1: TNewStaticText;
+  SponsorLine2: TNewStaticText;
 
 function SetTimer(hWnd: HWND; nIDEvent: UINT_PTR; uElapse: UINT; lpTimerFunc: NativeInt): UINT_PTR;
   external 'SetTimer@user32.dll stdcall';
@@ -626,9 +627,35 @@ begin
     Result := 'bgp-logo-100.png';
 end;
 
+procedure PlaceSponsorLine(var Line: TNewStaticText; CaptionText: String;
+  LineLeft, LineTop, LineWidth, LineHeight: Integer);
+begin
+  Line := TNewStaticText.Create(WizardForm);
+  Line.Parent := WizardForm;
+  Line.Caption := CaptionText;
+  Line.Font.Name := 'Segoe UI';
+  Line.Font.Size := 8;
+  Line.Font.Color := AnzuMuted;
+  Line.StyleElements := [];
+  Line.ShowAccelChar := False;
+  { Width is the corner up to the gap before Back. WordWrap stays off so a
+    phrase cannot break in the middle at 100% or 150% DPI. }
+  Line.AutoSize := False;
+  Line.WordWrap := False;
+  Line.Left := LineLeft;
+  Line.Top := LineTop;
+  Line.Width := LineWidth;
+  Line.Height := LineHeight;
+  Line.Cursor := crHand;
+  Line.OnClick := @SponsorCreditClick;
+  Line.Hint := 'https://blackgridpublishing.com';
+  Line.ShowHint := True;
+  Line.Anchors := [akLeft, akBottom];
+end;
+
 procedure PlaceSponsorCredit;
 var
-  LogoSize, TextLeft, TextLimit: Integer;
+  LogoSize, TextLeft, TextLimit, LineWidth, LineHeight, BlockTop: Integer;
 begin
   { Bottom-left corner, in the strip under the sidebar art and left of Back.
     Welcome, Finished, and the other pages share that corner. Select all and
@@ -665,34 +692,22 @@ begin
   SponsorLogo.Anchors := [akLeft, akBottom];
 
   TextLeft := SponsorLogo.Left + LogoSize + ScaleX(8);
-  TextLimit := WizardForm.BackButton.Left - ScaleX(8);
-  SponsorLabel := TNewStaticText.Create(WizardForm);
-  SponsorLabel.Parent := WizardForm;
-  { Exact credit: Made in the Netherlands — sponsored by Black Grid Publishing }
-  SponsorLabel.Caption := 'Made in the Netherlands ' + #$2014 + ' sponsored by Black Grid Publishing';
-  SponsorLabel.Font.Name := 'Segoe UI';
-  SponsorLabel.Font.Size := 8;
-  SponsorLabel.Font.Color := AnzuMuted;
-  SponsorLabel.StyleElements := [];
-  SponsorLabel.ShowAccelChar := False;
-  SponsorLabel.Left := TextLeft;
-  { The sentence is wider than the corner, so wrap it beside the mark instead
-    of measuring AutoSize (that width is still 0 before the control is shown). }
-  SponsorLabel.AutoSize := False;
-  SponsorLabel.WordWrap := True;
+  { 16 design pixels of clear space before Back. The line break replaces the
+    em dash, so the credit does not depend on that glyph. }
+  TextLimit := WizardForm.BackButton.Left - ScaleX(16);
   if TextLimit > TextLeft then
-    SponsorLabel.Width := TextLimit - TextLeft
+    LineWidth := TextLimit - TextLeft
   else
-    SponsorLabel.Width := ScaleX(180);
-  SponsorLabel.Height := ScaleY(32);
-  SponsorLabel.Top := SponsorLogo.Top + (LogoSize - SponsorLabel.Height) div 2;
-  SponsorLabel.Cursor := crHand;
-  SponsorLabel.OnClick := @SponsorCreditClick;
-  SponsorLabel.Hint := 'https://blackgridpublishing.com';
-  SponsorLabel.ShowHint := True;
-  SponsorLabel.Anchors := [akLeft, akBottom];
+    LineWidth := ScaleX(180);
+  LineHeight := ScaleY(14);
+  BlockTop := SponsorLogo.Top + (LogoSize - (LineHeight * 2)) div 2;
+  PlaceSponsorLine(SponsorLine1, 'Made in the Netherlands',
+    TextLeft, BlockTop, LineWidth, LineHeight);
+  PlaceSponsorLine(SponsorLine2, 'Sponsored by Black Grid Publishing',
+    TextLeft, BlockTop + LineHeight, LineWidth, LineHeight);
   SponsorLogo.BringToFront;
-  SponsorLabel.BringToFront;
+  SponsorLine1.BringToFront;
+  SponsorLine2.BringToFront;
 end;
 
 procedure PrepareAnzuWizard;

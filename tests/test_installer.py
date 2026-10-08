@@ -654,20 +654,22 @@ def test_app_mutex_and_close_applications_release_locked_exe():
 
 
 def test_bgp_sponsor_credit_is_in_the_wizard_corner():
-    """Welcome and Finished share a clickable Black Grid Publishing credit."""
+    """Welcome and Finished share a clickable two-line Black Grid Publishing credit."""
     iss = _read(ISS)
-    assert "Made in the Netherlands " in iss
-    assert "#$2014" in iss
-    assert " sponsored by Black Grid Publishing" in iss
+    assert "PlaceSponsorLine(SponsorLine1, 'Made in the Netherlands'," in iss
+    assert "PlaceSponsorLine(SponsorLine2, 'Sponsored by Black Grid Publishing'," in iss
+    assert "#$2014" not in iss
     assert "https://blackgridpublishing.com" in iss
     assert "ShellExec('open', 'https://blackgridpublishing.com', '', '', SW_SHOWNORMAL, ewNoWait, ErrorCode)" in iss
     assert "crHand" in iss
     assert "procedure SponsorCreditClick" in iss
     assert "SponsorLogo.OnClick := @SponsorCreditClick" in iss
-    assert "SponsorLabel.OnClick := @SponsorCreditClick" in iss
+    assert "Line.OnClick := @SponsorCreditClick" in iss
     assert "SponsorLogo.Cursor := crHand" in iss
-    assert "SponsorLabel.Cursor := crHand" in iss
-    assert "WizardForm.BackButton.Left" in iss
+    assert "Line.Cursor := crHand" in iss
+    assert "Line.AutoSize := False" in iss
+    assert "Line.WordWrap := False" in iss
+    assert "WizardForm.BackButton.Left - ScaleX(16)" in iss
     assert "WizardForm.CancelButton.Top" in iss
     assert 'Source: "assets\\sponsor\\bgp-logo-100.png"; DestDir: "{tmp}"; Flags: dontcopy' in iss
     assert 'Source: "assets\\sponsor\\bgp-logo-150.png"; DestDir: "{tmp}"; Flags: dontcopy' in iss
@@ -692,10 +694,13 @@ def test_bgp_sponsor_credit_is_in_the_wizard_corner():
     assert not (assets / "Logo_white.png").is_file()
 
     script = _read(INSTALLER_DIR / "assets" / "render_wizard_assets.py")
-    assert "Made in the Netherlands" in script
+    assert '"Made in the Netherlands"' in script
+    assert '"Sponsored by Black Grid Publishing"' in script
+    assert "\\u2014" not in script
     assert "blackgridpublishing.com" in script
     assert "LOGO_100 = 28" in script
     assert "LOGO_150 = 42" in script
+    assert "SPONSOR_GAP_BEFORE_BACK = 16" in script
 
     build = _read(BUILD_SCRIPT)
     assert "bgp-logo-100.png" in build
