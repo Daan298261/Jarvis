@@ -108,7 +108,9 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private var captureJob: Job? = null
     private var listenJob: Job? = null
     private val ttsQueue = LinkedBlockingQueue<ByteArray>()
+    private var ttsQueueJob: Job? = null
     private var ttsJob: Job? = null
+    private var onDeviceSpeak: ChunkedTtsSession? = null
     private var onDevicePcm: java.io.ByteArrayOutputStream? = null
     private var onDeviceListening = false
     private var pickedTextForPrompt: String? = null
@@ -608,7 +610,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                 localLlmReady = packManager.isPackReady(),
             )
             if (StandaloneMode.shouldSpeakVoiceReply(fromVoice = true, ttsRoute = route.tts)) {
-                speakNow(reply)
+                startOnDeviceSpeak(reply)
             }
         }
     }
@@ -1094,8 +1096,8 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun ensureTtsWorker() {
-        if (ttsJob?.isActive == true) return
-        ttsJob = viewModelScope.launch(Dispatchers.IO) {
+        if (ttsQueueJob?.isActive == true) return
+        ttsQueueJob = viewModelScope.launch(Dispatchers.IO) {
             while (isActive) {
                 val audio = ttsQueue.take()
                 withContext(Dispatchers.Main) { playAudio(audio) }
@@ -1104,14 +1106,29 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun speak(text: String) = action {
-        if (player != null || mutable.value.speaking) { stopSpeaking(); realtime?.interrupt(); return@action }
-        speakNow(text)
+    fun speak(text: String) {
+        if (player != null || mutable.value.speaking || onDeviceSpeak?.isRunning() == true) {
+            cancelOnDeviceSpeak()
+            realtime?.interrupt()
+            return
+        }
+        val route = currentVoiceRoute()
+        when (route.tts) {
+            TtsVoiceRoute.ON_DEVICE -> startOnDeviceSpeak(text)
+            TtsVoiceRoute.INSTALL -> mutable.value = mutable.value.copy(
+                error = route.error ?: "Install on-device TTS in More → Voice before speaking offline",
+            )
+            else -> action {
+                val body = JSONObject().put("text", text.take(6000))
+                mutable.value.selectedVoice.takeIf { it.isNotEmpty() }?.let { body.put("voice_profile_id", it) }
+                playAudio(api.raw("/voice/speak", "POST", body.toString().toByteArray()))
+            }
+        }
     }
 
-    private suspend fun speakNow(text: String) {
+    private fun currentVoiceRoute(): VoiceRouteDecision {
         val voiceCaps = mutable.value.capabilities.optJSONObject("voice")
-        val route = CompanionVoiceRouting.decide(
+        return CompanionVoiceRouting.decide(
             leaderReachable = mutable.value.leaderReachable || mutable.value.connected,
             realtimeVoiceHealthy = mutable.value.connected && voiceCaps?.optBoolean("realtime") == true,
             hostTtsHealthy = mutable.value.connected && voiceCaps?.optBoolean("tts_ready") == true,
@@ -1119,36 +1136,42 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             ttsPackStatus = voicePackManager.ttsStatus(),
             localLlmReady = packManager.isPackReady(),
         )
-        if (route.tts == TtsVoiceRoute.ON_DEVICE) {
-            mutable.value = mutable.value.copy(onDeviceVoiceActive = true, activity = "Speaking on this phone…")
-            try {
-                val chunks = SpeakableTtsChunker.chunk(text)
-                if (chunks.isEmpty()) error("Nothing speakable in that reply")
-                val first = voicePackManager.synthesize(chunks.first())
-                playAudio(first)
-                for (piece in chunks.drop(1)) {
-                    while (mutable.value.speaking) delay(40)
-                    playAudio(voicePackManager.synthesize(piece))
-                }
-            } finally {
+    }
+
+    private fun onDeviceSpeakSession(): ChunkedTtsSession {
+        return onDeviceSpeak ?: ChunkedTtsSession(
+            scope = viewModelScope,
+            synthesize = { piece -> withContext(Dispatchers.IO) { voicePackManager.synthesize(piece) } },
+            play = { audio ->
+                playAudio(audio)
+                while (mutable.value.speaking && isActive) delay(40)
+            },
+            onStopPlayback = { releasePlayer() },
+            onIdle = {
                 voicePackManager.unloadIdle()
                 publishVoiceRoute()
-            }
-            return
-        }
-        if (route.tts == TtsVoiceRoute.INSTALL) {
-            mutable.value = mutable.value.copy(
-                error = route.error ?: "Install on-device TTS in More → Voice before speaking offline",
-            )
-            return
-        }
-        val body = JSONObject().put("text", text.take(6000))
-        mutable.value.selectedVoice.takeIf { it.isNotEmpty() }?.let { body.put("voice_profile_id", it) }
-        val audio = api.raw("/voice/speak", "POST", body.toString().toByteArray())
-        playAudio(audio)
+            },
+        ).also { onDeviceSpeak = it }
     }
+
+    private fun startOnDeviceSpeak(text: String) {
+        val chunks = SpeakableTtsChunker.chunk(text)
+        if (chunks.isEmpty()) {
+            mutable.value = mutable.value.copy(error = "Nothing speakable in that reply")
+            return
+        }
+        mutable.value = mutable.value.copy(onDeviceVoiceActive = true, activity = "Speaking on this phone…")
+        ttsJob = onDeviceSpeakSession().start(chunks)
+    }
+
+    private fun cancelOnDeviceSpeak() {
+        onDeviceSpeak?.stop()
+        ttsJob = null
+        releasePlayer()
+    }
+
     fun previewVoice(profileId: String) = action {
-        stopSpeaking()
+        cancelOnDeviceSpeak()
         val audio = api.raw("/voice/profiles/$profileId/preview", "POST", ByteArray(0))
         playAudio(audio)
     }
@@ -1159,7 +1182,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             playerFile = file
             player = MediaPlayer().apply {
                 setDataSource(file.absolutePath)
-                setOnCompletionListener { stopSpeaking() }
+                setOnCompletionListener { releasePlayer() }
                 prepare(); start()
             }
             mutable.value = mutable.value.copy(speaking = true)
@@ -1169,17 +1192,21 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             throw exc
         }
     }
-    private fun stopSpeaking() {
+    private fun releasePlayer() {
         player?.release(); player = null
         playerFile?.delete(); playerFile = null
         mutable.value = mutable.value.copy(speaking = false)
     }
+    private fun stopSpeaking() {
+        cancelOnDeviceSpeak()
+    }
     override fun onCleared() {
-        captureJob?.cancel(); listenJob?.cancel(); ttsJob?.cancel()
+        captureJob?.cancel(); listenJob?.cancel(); ttsQueueJob?.cancel(); ttsJob?.cancel()
+        onDeviceSpeak?.stop()
         onDeviceListening = false
         runCatching { audioRecord?.stop() }; audioRecord?.release()
         realtime?.close()
-        recorder?.release(); recordingFile?.delete(); stopSpeaking()
+        recorder?.release(); recordingFile?.delete(); releasePlayer()
         packManager.unload()
         voicePackManager.unloadIdle()
         super.onCleared()
