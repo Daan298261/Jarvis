@@ -942,6 +942,8 @@ html[data-session-mode] .hud-app {
 .hud-center:has(.jarvis-presence-stage) {
     align-items: stretch;
     overflow: hidden;
+    overflow: clip;
+    scrollbar-width: none;
 }
 
 .hud-home:has(.jarvis-presence-stage) {
@@ -980,11 +982,13 @@ html[data-session-mode] .hud-app {
     z-index: 8;
     left: auto;
     bottom: auto;
-    width: min(1000px, calc(100% - 32px));
+    /* Fill the stage column so the canvas clear is not an empty side panel. */
+    width: calc(100% - 32px);
+    max-width: none;
     transform: none;
     grid-column: 2;
     grid-row: 2;
-    justify-self: center;
+    justify-self: stretch;
     margin: 0 auto clamp(12px, 2vh, 24px);
 }
 
@@ -1291,8 +1295,10 @@ html[data-session-mode] .hud-app {
   padding: clamp(10px, 1.1vw, 14px) clamp(12px, 1.2vw, 16px);
   border: 1px solid rgba(142, 219, 241, 0.1);
   border-radius: 13px;
-  background: rgba(8, 12, 18, 0.88);
-  backdrop-filter: blur(6px);
+  /* Opaque stand-in for rgba(8, 12, 18, 0.88) over #02050a. backdrop-filter
+     would sample the WebGL canvas and can fail as black compositor tiles. */
+  background: rgb(7, 11, 17);
+  backdrop-filter: none;
   font-size: clamp(13px, 0.72vw, 14px);
   line-height: 1.55;
   overflow-wrap: anywhere;
@@ -1410,12 +1416,14 @@ html[data-session-mode] .hud-app {
   padding: 14px 16px 12px 20px;
   border: 1px solid rgba(152, 222, 242, 0.24);
   border-radius: 24px;
-  background: linear-gradient(135deg, rgba(16, 29, 37, 0.82), rgba(7, 14, 20, 0.9));
+  /* Opaque stand-in for the old translucent gradient over #02050a.
+     No backdrop-filter: WebView2 must not sample the presence canvas. */
+  background: linear-gradient(135deg, rgb(13, 25, 32), rgb(7, 13, 19));
   box-shadow:
     0 18px 60px rgba(0, 0, 0, 0.3),
     0 0 40px rgba(65, 185, 219, 0.035),
     inset 0 1px 0 rgba(230, 249, 255, 0.055);
-  backdrop-filter: blur(18px);
+  backdrop-filter: none;
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
@@ -1830,6 +1838,11 @@ html[data-session-mode] .hud-app {
   .hud-chat {
     width: min(920px, calc(100% - clamp(48px, 6vw, 96px)));
     gap: clamp(10px, 1.2vh, 14px);
+  }
+
+  .hud-home:has(.jarvis-presence-stage) > .hud-chat {
+    width: calc(100% - 32px);
+    max-width: none;
   }
 
   .hud-composer {

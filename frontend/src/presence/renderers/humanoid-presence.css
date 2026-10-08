@@ -8,7 +8,24 @@
     radial-gradient(ellipse 30% 58% at 50% 43%, rgba(0, 126, 190, 0.045), transparent 70%),
     radial-gradient(ellipse 52% 34% at 50% 72%, rgba(255, 128, 28, 0.018), transparent 72%),
     #02050a;
-  mask-image: linear-gradient(180deg, transparent, black 4%, black 94%, transparent);
+}
+
+/* Edge fade is a sibling overlay, not a mask on the WebGL canvas.
+   On WebView2 a masked GL layer plus backdrop-filter sampling paints failed
+   compositor tiles as opaque black bands through the figure. */
+.jarvis-presence-humanoid::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    #02050a 0%,
+    transparent 4%,
+    transparent 94%,
+    #02050a 100%
+  );
 }
 
 .hud-orb-zone:has(.jarvis-presence-humanoid) .hud-orb-caption { margin-top: -8px; }
@@ -16,6 +33,17 @@
 .jarvis-presence-humanoid.galaxy,
 .jarvis-presence-humanoid[data-galaxy="true"] {
   background: transparent;
+}
+
+.jarvis-presence-humanoid.galaxy::after,
+.jarvis-presence-humanoid[data-galaxy="true"]::after {
+  background: linear-gradient(
+    180deg,
+    rgba(1, 3, 8, 0.85) 0%,
+    transparent 4%,
+    transparent 94%,
+    rgba(1, 3, 8, 0.85) 100%
+  );
 }
 
 .jarvis-galaxy-status {
