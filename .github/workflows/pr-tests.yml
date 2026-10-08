@@ -73,3 +73,48 @@ jobs:
 
       - name: Build frontend
         run: npm run build
+
+  installer-compile:
+    name: installer-compile
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Inno Setup 6.7.3
+        shell: pwsh
+        run: |
+          # Chocolatey's innosetup package is 6.7.1. The nightly uses 6.7.3,
+          # which is the compiler that rejected NativeInt, so pin that release.
+          $setup = Join-Path $env:RUNNER_TEMP "innosetup-6.7.3.exe"
+          Invoke-WebRequest -Uri "https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe" -OutFile $setup
+          $dest = "C:\InnoSetup"
+          Start-Process -FilePath $setup -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/DIR=$dest" -Wait
+          if (-not (Test-Path -LiteralPath "$dest\ISCC.exe")) { throw "ISCC.exe missing after Inno Setup 6.7.3 install" }
+
+      - name: Stub payloads the compile check does not ship
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path frontend/dist | Out-Null
+          if (-not (Test-Path -LiteralPath frontend/dist/index.html)) {
+            Set-Content -LiteralPath frontend/dist/index.html -Value '<!doctype html><html><body>compile-check</body></html>'
+          }
+
+      - name: Compile Jarvis.iss
+        shell: pwsh
+        run: |
+          $iscc = "C:\InnoSetup\ISCC.exe"
+          if (-not (Test-Path -LiteralPath $iscc)) { throw "ISCC.exe not found at $iscc" }
+          Write-Host "ISCC $((Get-Item -LiteralPath $iscc).VersionInfo.FileVersion) at $iscc"
+          & $iscc `
+            /DSkipBootstrapModel=1 `
+            /DSkipFrontModel=1 `
+            /DSkipVoicePack=1 `
+            /DSkipDesktopShell=1 `
+            /DInstallerCompileCheck=1 `
+            "/O$env:RUNNER_TEMP\anzu-setup" `
+            installer\windows\Jarvis.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+          $exe = Join-Path $env:RUNNER_TEMP "anzu-setup\AnzuSetup.exe"
+          if (-not (Test-Path -LiteralPath $exe)) { throw "ISCC did not write $exe" }
+          Write-Host "Compiled $exe ($((Get-Item -LiteralPath $exe).Length) bytes)"

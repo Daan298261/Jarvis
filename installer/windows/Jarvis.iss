@@ -26,8 +26,14 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=dist
 OutputBaseFilename=AnzuSetup
+#ifndef InstallerCompileCheck
 Compression=lzma2/ultra64
 SolidCompression=yes
+#else
+; CI compile check only. Nightly and release builds do not pass this define.
+Compression=none
+SolidCompression=no
+#endif
 ; Bundled Ornith Q4_K_M is ~5.4 GB; a single Setup.exe cannot exceed ~4.2 GB on Windows.
 DiskSpanning=yes
 WizardStyle=modern
@@ -219,14 +225,16 @@ var
   GlowFinished: TBitmapImage;
   AnzuGlowPlaced: Boolean;
   GlowFrame: Integer;
+  { Inno Setup 6.7 registers HWND, UINT, BOOL, DWORD, and UINT_PTR.
+    CreateCallback returns LongWord, which is the timer callback. }
   GlowTimerID: UINT_PTR;
-  GlowCallback: NativeInt;
+  GlowCallback: LongWord;
   GlowTicking: Boolean;
   SponsorLogo: TBitmapImage;
   SponsorLine1: TNewStaticText;
   SponsorLine2: TNewStaticText;
 
-function SetTimer(hWnd: HWND; nIDEvent: UINT_PTR; uElapse: UINT; lpTimerFunc: NativeInt): UINT_PTR;
+function SetTimer(hWnd: HWND; nIDEvent: UINT_PTR; uElapse: UINT; lpTimerFunc: LongWord): UINT_PTR;
   external 'SetTimer@user32.dll stdcall';
 function KillTimer(hWnd: HWND; uIDEvent: UINT_PTR): BOOL;
   external 'KillTimer@user32.dll stdcall';
