@@ -148,6 +148,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             while (true) {
+                StandaloneActions.deliverDueReminders(app)
                 if (foreground && api.deviceId.isNotEmpty()) {
                     if (mutable.value.pendingApproval) {
                         runCatching {
@@ -547,7 +548,13 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             StandaloneIntent.LOCAL_REMINDER -> {
                 val at = decision.reminderAt ?: error("Reminder time did not parse")
                 val scheduled = StandaloneActions.scheduleReminder(getApplication(), text, at)
-                scheduled.getOrElse { error(it.message ?: StandaloneActions.reminderPermissionDeniedCopy()) }.message
+                val result = scheduled.getOrElse { error(it.message ?: StandaloneActions.reminderPermissionDeniedCopy()) }
+                viewModelScope.launch {
+                    val wait = result.at.toInstant().toEpochMilli() - System.currentTimeMillis()
+                    if (wait > 0L) delay(wait)
+                    StandaloneActions.deliverDueReminders(getApplication())
+                }
+                result.message
             }
             StandaloneIntent.REMINDER_NEEDS_TIME -> StandaloneActions.reminderNeedsTimeCopy()
             StandaloneIntent.LOCAL_NOTE -> StandaloneActions.noteAckCopy()

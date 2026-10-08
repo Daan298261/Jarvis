@@ -4,7 +4,6 @@ import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -29,7 +28,6 @@ object StandaloneActions {
     const val PREFS = "standalone_actions"
     const val KEY_REMINDERS = "reminders_json"
     const val EXTRA_REMINDER_ID = "com.jarvis.companion.REMINDER_ID"
-    const val ACTION_REMINDER = "com.jarvis.companion.STANDALONE_REMINDER"
 
     fun queueOrRefuseCopy(): String = "I'll do that when the ANZU desktop is back."
 
@@ -138,16 +136,11 @@ object StandaloneActions {
         val id = UUID.randomUUID().toString()
         val triggerAt = at.toInstant().toEpochMilli()
         val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val launch = reminderIntent(context, id)
-        val pending = PendingIntent.getBroadcast(
+        // Manifest is owned by a parallel UX PR, so the alarm must wake the existing
+        // launcher activity. CompanionModel delivers due reminders on start/refresh.
+        val pending = PendingIntent.getActivity(
             context,
             id.hashCode(),
-            launch,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val activityPending = PendingIntent.getActivity(
-            context,
-            id.hashCode() xor 0x51ed,
             activityWakeIntent(context, id),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -158,7 +151,7 @@ object StandaloneActions {
         }
         try {
             if (!inexact && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                alarm.setAlarmClock(AlarmManager.AlarmClockInfo(triggerAt, activityPending), pending)
+                alarm.setAlarmClock(AlarmManager.AlarmClockInfo(triggerAt, pending), pending)
             } else if (!inexact) {
                 alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
             } else {
@@ -179,7 +172,7 @@ object StandaloneActions {
 
     fun deliverDueReminders(context: Context, nowMillis: Long = System.currentTimeMillis()) {
         val items = loadReminders(context)
-        if (items.isEmpty()) return
+        if (items.length() == 0) return
         ensureChannel(context)
         val kept = JSONArray()
         for (index in 0 until items.length()) {
@@ -292,11 +285,6 @@ object StandaloneActions {
             .setType("*/*")
             .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("text/plain", "text/markdown"))
 
-    private fun reminderIntent(context: Context, id: String): Intent =
-        Intent(context, StandaloneReminderReceiver::class.java)
-            .setAction(ACTION_REMINDER)
-            .putExtra(EXTRA_REMINDER_ID, id)
-
     private fun activityWakeIntent(context: Context, id: String): Intent {
         val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
             ?: Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
@@ -326,24 +314,3 @@ object StandaloneActions {
     }
 }
 
-class StandaloneReminderReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
-        val id = intent.getStringExtra(StandaloneActions.EXTRA_REMINDER_ID).orEmpty()
-        StandaloneActions.deliverDueReminders(context.applicationContext)
-        if (id.isNotBlank()) {
-            val prefs = context.applicationContext.getSharedPreferences(StandaloneActions.PREFS, Context.MODE_PRIVATE)
-            val items = runCatching { JSONArray(prefs.getString(StandaloneActions.KEY_REMINDERS, "[]")) }.getOrNull()
-            var text = ""
-            if (items != null) {
-                for (index in 0 until items.length()) {
-                    val item = items.optJSONObject(index) ?: continue
-                    if (item.optString("id") == id) {
-                        text = item.optString("text")
-                        break
-                    }
-                }
-            }
-            StandaloneActions.postReminderNotification(context.applicationContext, id, text)
-        }
-    }
-}

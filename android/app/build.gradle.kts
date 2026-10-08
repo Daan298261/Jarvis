@@ -92,7 +92,8 @@ dependencies {
     // ONNX Runtime Mobile for Pocket TTS (RFC-0204 S2). MIT license.
     // AAR ships per-ABI libonnxruntime.so (~12–16 MiB arm64-v8a). CMake also
     // links the same AAR native library into libjarvis_voice_tts.so.
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.1")
+    // Pinned to 1.20.0 (1.20.1 was never published on Maven Central).
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.14.1")
     testImplementation("androidx.test:core:1.6.1")

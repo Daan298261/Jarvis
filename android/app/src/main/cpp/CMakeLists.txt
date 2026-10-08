@@ -27,5 +27,26 @@ target_link_libraries(jarvis_llama llama android log)
 # Enable with -DJARVIS_BUILD_VOICE_NATIVE=ON for device soak APKs.
 option(JARVIS_BUILD_VOICE_NATIVE "Build jarvis_whisper + jarvis_voice_tts (RFC-0140)" OFF)
 if(JARVIS_BUILD_VOICE_NATIVE)
-    add_subdirectory(voice_native)
+    include(ExternalProject)
+    # Isolated configure so whisper.cpp's ggml targets do not collide with llama.cpp.
+    ExternalProject_Add(
+        jarvis_voice_native_ext
+        SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/voice_native
+        BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/voice_native_ext
+        CMAKE_GENERATOR "${CMAKE_GENERATOR}"
+        CMAKE_ARGS
+            -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+            -DANDROID_ABI=${ANDROID_ABI}
+            -DANDROID_PLATFORM=${ANDROID_PLATFORM}
+            -DANDROID_NDK=${ANDROID_NDK}
+            -DANDROID_STL=${ANDROID_STL}
+            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+            -DCMAKE_CXX_STANDARD=17
+            -DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
+            -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=${CMAKE_LIBRARY_OUTPUT_DIRECTORY}
+            -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+            -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}
+        BUILD_ALWAYS 1
+        INSTALL_COMMAND ""
+    )
 endif()

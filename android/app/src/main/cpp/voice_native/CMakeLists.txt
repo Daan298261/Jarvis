@@ -1,5 +1,7 @@
-# Separate ggml namespace from llama — only included when JARVIS_BUILD_VOICE_NATIVE=ON.
+# Isolated CMake project so whisper.cpp ggml does not clash with llama.cpp.
 cmake_minimum_required(VERSION 3.22.1)
+project(jarvis_voice_native CXX)
+set(CMAKE_CXX_STANDARD 17)
 
 set(WHISPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -20,7 +22,7 @@ target_link_libraries(jarvis_whisper whisper android log)
 
 # ONNX Runtime Mobile (Maven artifact onnxruntime-android) — MIT license.
 # Headers from the matching GitHub tag; native .so from the official Android AAR.
-set(ORT_VERSION "1.20.1")
+set(ORT_VERSION "1.20.0")
 set(ORT_AAR_DIR "${CMAKE_CURRENT_BINARY_DIR}/ort-aar")
 set(ORT_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/ort-include")
 set(ORT_AAR_FILE "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime-android-${ORT_VERSION}.aar")

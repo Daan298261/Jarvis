@@ -1,7 +1,9 @@
 package com.jarvis.companion
 
 import android.app.AlarmManager
+import android.app.NotificationManager
 import android.content.Context
+import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -15,6 +17,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows
 import org.robolectric.annotation.Config
+import java.io.File
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
@@ -60,6 +63,15 @@ class StandaloneModeTest {
         val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val scheduled = Shadows.shadowOf(alarm).scheduledAlarms
         assertTrue("expected a real AlarmManager alarm", scheduled != null && scheduled.isNotEmpty())
+    }
+
+    @Test
+    fun dueReminderPostsANotification() {
+        val past = now.minusMinutes(2)
+        StandaloneActions.scheduleReminder(context, "Remind me at 2:58 pm", past).getOrThrow()
+        StandaloneActions.deliverDueReminders(context, now.toInstant().toEpochMilli())
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        assertTrue("expected a fired reminder notification", Shadows.shadowOf(manager).allNotifications.isNotEmpty())
     }
 
     @Test
@@ -141,6 +153,17 @@ class StandaloneModeTest {
         val prompt = StandalonePrompt.build(emptyList(), "Summarize this file", under)
         assertTrue(prompt.contains(under))
         assertTrue(StandalonePrompt.identifiesAnzu(prompt))
+
+        val overFile = File(context.cacheDir, "over-cap.txt")
+        overFile.writeBytes(over)
+        val refusedRead = StandaloneActions.readPickedText(context, Uri.fromFile(overFile), "text/plain", "over-cap.txt")
+        assertTrue(refusedRead.isFailure)
+        assertTrue(refusedRead.exceptionOrNull()!!.message!!.contains("64 KiB"))
+
+        val underFile = File(context.cacheDir, "under-cap.md")
+        underFile.writeText(under)
+        val loaded = StandaloneActions.readPickedText(context, Uri.fromFile(underFile), "text/markdown", "under-cap.md")
+        assertEquals(under, loaded.getOrThrow())
     }
 
     @Test
