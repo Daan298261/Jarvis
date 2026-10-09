@@ -70,6 +70,7 @@ class CompanionVoicePackCatalogTest {
         assertTrue(pocket.attribution.contains("https://huggingface.co/kyutai/tts-voices#alba-mackenna"))
         assertTrue(pocket.attribution.contains("Kyutai Pocket TTS"))
         assertEquals(CompanionVoicePackCatalog.POCKET_VOICE_ATTRIBUTION, pocket.attribution)
+        assertEquals(CompanionVoicePackCatalog.POCKET_VOICE_ATTRIBUTION, pocket.toJson().optString("attribution"))
     }
 }
 

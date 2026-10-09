@@ -575,7 +575,6 @@ class StandaloneModeTest {
 
     @Test
     fun exactAlarmDeniedUsesApproximateCopyAndSettingsIntent() {
-        val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         ShadowAlarmManager.setCanScheduleExactAlarms(false)
         val at = now.plusHours(2)
         val denied = StandaloneActions.scheduleReminder(context, "Remind me at 7:30 pm", at).getOrThrow()
