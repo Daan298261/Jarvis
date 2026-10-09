@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 param(
     [switch]$NoBrowser,
     [switch]$SkipModelLoad,
@@ -238,7 +238,7 @@ if ($RegisterLogonTask) {
 $elevated = Test-CurrentProcessElevated
 if (-not $elevated -and -not $RegisterLogonTask) {
     # Prefer registered highest-privileges logon task (no UAC). Otherwise keep
-    # running as standard user — never exit just because elevation was denied.
+    # running as standard user â€” never exit just because elevation was denied.
     try {
         if (Start-JarvisViaLogonTask) {
             Write-Host "Jarvis startup handed to the elevated logon task."
@@ -326,6 +326,11 @@ elseif ($PromptFile) {
     Write-Host "Copied launch prompt file to $dest" -ForegroundColor Yellow
 }
 
+# Owner/dev flag: defer multi-GB companion pack downloads that wedge the API.
+if (Test-Path (Join-Path $Root "data\skip_companion_pack_cache.flag")) {
+    $env:JARVIS_SKIP_COMPANION_PACK_CACHE = "1"
+    $env:JARVIS_COMPANION_PACK_DELAY_S = "0"
+}
 Write-Step "Starting Jarvis API"
 $env:PYTHONPATH = Join-Path $Root "backend"
 if ($SkipModelLoad) {
@@ -472,3 +477,4 @@ Write-Host "Stop with .\stop-jarvis.ps1 or use the system tray icon (Stop / Quit
     Show-StartupFailure $_
     exit 1
 }
+

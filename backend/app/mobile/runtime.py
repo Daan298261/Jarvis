@@ -106,10 +106,26 @@ class MobileRuntime:
             from .connectivity import CONNECTIVITY
             from .provision import recover_interrupted
             recover_interrupted()
-            start_recommended_pack_cache()
-            start_recommended_voice_pack_cache()
-            self.tasks = [asyncio.create_task(scheduler.run()), asyncio.create_task(self.notifications()),
-                          asyncio.create_task(self.reap_calls()), asyncio.create_task(self.deliver_pushes())]
+
+            async def _deferred_pack_cache() -> None:
+                # Multi-GB companion downloads steal the event loop / disk during
+                # cold start and wedge /api/health + task creation. Wait until the
+                # elevated backend has had time to serve owner work first.
+                delay_s = float(os.environ.get("JARVIS_COMPANION_PACK_DELAY_S", "300"))
+                if delay_s > 0:
+                    await asyncio.sleep(delay_s)
+                if os.environ.get("JARVIS_SKIP_COMPANION_PACK_CACHE") == "1":
+                    return
+                start_recommended_pack_cache()
+                start_recommended_voice_pack_cache()
+
+            self.tasks = [
+                asyncio.create_task(_deferred_pack_cache()),
+                asyncio.create_task(scheduler.run()),
+                asyncio.create_task(self.notifications()),
+                asyncio.create_task(self.reap_calls()),
+                asyncio.create_task(self.deliver_pushes()),
+            ]
             self.tasks.append(asyncio.create_task(CONNECTIVITY.run()))
             if os.environ.get("JARVIS_RELAY_URL") and os.environ.get("JARVIS_RELAY_CREDENTIAL"):
                 from .relay import run
