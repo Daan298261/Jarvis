@@ -4,6 +4,7 @@
 
 #include "onnxruntime_cxx_api.h"
 
+#include <android/log.h>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -272,6 +273,10 @@ public:
             }
             const float *samples = audio.GetTensorData<float>();
             pcm.insert(pcm.end(), samples, samples + count);
+        }
+        if (eos_frame < 0) {
+            __android_log_print(ANDROID_LOG_WARN, "pocket_tts",
+                                "decoder hit frame_limit without EOS — audio truncated");
         }
         if (pcm.empty()) return {};
         std::vector<uint8_t> wav;

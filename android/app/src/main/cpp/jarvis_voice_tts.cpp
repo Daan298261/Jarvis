@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <android/log.h>
 #include <atomic>
+#include <cstdint>
 #include <exception>
 #include <fstream>
 #include <memory>
@@ -19,6 +20,7 @@ static std::mutex g_mutex;
 static std::string g_pack_dir;
 static std::string g_engine;
 static std::atomic<bool> g_tts_cancel{false};
+static std::atomic<uint64_t> g_tts_epoch{0};
 #if defined(JARVIS_VOICE_TTS_ORT)
 static std::unique_ptr<PocketTtsEngine> g_pocket;
 #endif
@@ -99,8 +101,11 @@ Java_com_jarvis_companion_VoiceNativeBridge_nativeTtsLoad(
 
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_com_jarvis_companion_VoiceNativeBridge_nativeTtsSynthesize(JNIEnv *env, jclass, jstring text) {
+    const uint64_t epoch = g_tts_epoch.load(std::memory_order_acquire);
     std::lock_guard<std::mutex> lock(g_mutex);
-    g_tts_cancel.store(false);
+    if (g_tts_epoch.load(std::memory_order_relaxed) != epoch) {
+        return env->NewByteArray(0);
+    }
     const std::string utterance = jstring_to_std(env, text);
     if (utterance.empty()) return nullptr;
 
@@ -109,7 +114,8 @@ Java_com_jarvis_companion_VoiceNativeBridge_nativeTtsSynthesize(JNIEnv *env, jcl
         if (!g_pocket) return nullptr;
         try {
             const std::vector<uint8_t> wav = g_pocket->synthesize(utterance, &g_tts_cancel);
-            if (g_tts_cancel.load(std::memory_order_relaxed)) {
+            if (g_tts_epoch.load(std::memory_order_relaxed) != epoch ||
+                g_tts_cancel.load(std::memory_order_relaxed)) {
                 // Non-null empty array: cancelled, never a synth failure.
                 return env->NewByteArray(0);
             }
@@ -145,4 +151,5 @@ Java_com_jarvis_companion_VoiceNativeBridge_nativeTtsUnload(JNIEnv *, jclass) {
 extern "C" JNIEXPORT void JNICALL
 Java_com_jarvis_companion_VoiceNativeBridge_nativeTtsCancel(JNIEnv *, jclass) {
     g_tts_cancel.store(true);
+    g_tts_epoch.fetch_add(1, std::memory_order_acq_rel);
 }

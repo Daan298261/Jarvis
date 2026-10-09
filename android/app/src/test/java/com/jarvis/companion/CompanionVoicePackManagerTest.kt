@@ -10,9 +10,11 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.File
@@ -247,6 +249,54 @@ class CompanionVoicePackManagerTest {
             assertEquals("", local.lastError())
         } finally {
             release.countDown()
+            supervisor.cancel()
+        }
+    }
+
+    @Test
+    fun emptyNativeSynthIsCancelNotFailure() {
+        val engine = PocketTtsEngine(
+            runtimeAvailable = { true },
+            nativeLoad = { _, _ -> "" },
+            nativeSynthesize = { ByteArray(0) },
+            nativeUnload = {},
+        )
+        assertEquals(null, engine.load("/pack", CompanionVoicePackCatalog.POCKET_TTS_ENGINE))
+        val result = engine.synthesize("hello")
+        assertTrue(result.exceptionOrNull() is CancellationException)
+    }
+
+    @Test
+    fun deletePackAfterStopAndAwaitCleansFiles() = kotlinx.coroutines.runBlocking {
+        val hold = CountDownLatch(1)
+        val engine = PocketTtsEngine(
+            runtimeAvailable = { true },
+            nativeLoad = { _, _ -> "" },
+            nativeSynthesize = { audibleWav() },
+            nativeUnload = {},
+        )
+        val local = CompanionVoicePackManager(context, ttsEngine = engine)
+        seedReadyTts(local)
+        val supervisor = SupervisorJob()
+        val errors = CopyOnWriteArrayList<Throwable>()
+        val session = ChunkedTtsSession(
+            scope = CoroutineScope(Dispatchers.Default + supervisor),
+            synthesize = { local.synthesize(it) },
+            play = { hold.await() },
+            onError = { errors += it },
+            onIdle = { local.unloadIdle() },
+        )
+        try {
+            session.start(listOf("hello there."))
+            delay(80)
+            session.stopAndAwait()
+            local.deletePackAwait(CompanionVoicePackCatalog.POCKET_TTS_ID)
+            val pack = local.selectedTtsPack()!!
+            assertFalse(local.artifactFile(pack, pack.artifacts.first()).exists())
+            assertEquals(CompanionVoicePackStatus.MISSING, local.ttsStatus())
+            assertTrue(errors.none { it !is CancellationException })
+        } finally {
+            hold.countDown()
             supervisor.cancel()
         }
     }

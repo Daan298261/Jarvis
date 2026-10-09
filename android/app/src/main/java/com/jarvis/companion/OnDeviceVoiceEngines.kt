@@ -313,6 +313,11 @@ class ChunkedTtsSession(
         job?.cancel()
         onStopPlayback()
     }
+
+    suspend fun stopAndAwait() {
+        stop()
+        job?.join()
+    }
 }
 
 object VoiceNativeBridge {
