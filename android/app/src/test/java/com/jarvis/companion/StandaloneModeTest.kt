@@ -26,21 +26,46 @@ import java.io.InputStream
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
-class ScriptedInferenceEngine(
+open class ScriptedInferenceEngine(
     var tokens: String = "Hello from this phone.",
 ) : LocalInferenceEngine {
     override val runtimeName: String = "scripted"
     var lastMaxTokens: Int = 0
     var lastPrompt: String = ""
+    var lastContextTokens: Int = 0
+    var unloadCount: Int = 0
+    var loadOnMain: Boolean? = null
+    var generateOnMain: Boolean? = null
+    var truncateNext: Boolean = false
+    @Volatile var cancelled: Boolean = false
     override fun isRuntimeAvailable(): Boolean = true
-    override fun load(modelPath: String, contextTokens: Int): String? = null
-    override fun generate(prompt: String, maxTokens: Int, onToken: (String) -> Unit): String? {
-        lastPrompt = prompt
-        lastMaxTokens = maxTokens
-        if (tokens.isNotEmpty()) onToken(tokens)
+    override fun requestCancel() { cancelled = true }
+    open override fun tokenize(text: String): Int = (text.length + 3) / 4
+
+    open override fun load(modelPath: String, contextTokens: Int): String? {
+        lastContextTokens = contextTokens
+        loadOnMain = android.os.Looper.myLooper() == android.os.Looper.getMainLooper()
         return null
     }
-    override fun unload() {}
+    open override fun generate(prompt: String, maxTokens: Int, onToken: (String) -> Unit): GenerateOutcome {
+        lastPrompt = prompt
+        lastMaxTokens = maxTokens
+        generateOnMain = android.os.Looper.myLooper() == android.os.Looper.getMainLooper()
+        val text = if (prompt.contains("Summarize this section")) {
+            "Section summary of picked text."
+        } else {
+            tokens
+        }
+        if (cancelled) return GenerateOutcome(cancelled = true)
+        if (text.isNotEmpty()) onToken(text)
+        if (cancelled) return GenerateOutcome(cancelled = true)
+        if (truncateNext) {
+            truncateNext = false
+            return GenerateOutcome(truncated = true)
+        }
+        return GenerateOutcome()
+    }
+    override fun unload() { unloadCount += 1 }
 }
 
 @RunWith(RobolectricTestRunner::class)
@@ -56,6 +81,10 @@ class StandaloneModeTest {
         context.getSharedPreferences(StandaloneActions.PREFS, Context.MODE_PRIVATE).edit().clear().apply()
         context.getSharedPreferences("companion_pack", Context.MODE_PRIVATE).edit().clear().apply()
         context.getSharedPreferences("companion_pack_digest", Context.MODE_PRIVATE).edit().clear().apply()
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        Shadows.shadowOf(nm).setNotificationsEnabled(true)
+        Shadows.shadowOf(context.getSystemService(Context.ALARM_SERVICE) as AlarmManager)
+            .setCanScheduleExactAlarms(true)
     }
 
     @Test
@@ -361,10 +390,201 @@ class StandaloneModeTest {
 
         engine.tokens = ""
         val blank = StringBuilder()
-        kotlinx.coroutines.runBlocking {
-            manager.generate(prompt, DeviceInferenceGuard.BUDGET_CLEAR) { blank.append(it) }
-        }
+        val thrown = runCatching {
+            kotlinx.coroutines.runBlocking {
+                manager.generate(prompt, DeviceInferenceGuard.BUDGET_CLEAR) { blank.append(it) }
+            }
+        }.exceptionOrNull()
         assertTrue(blank.toString().isEmpty())
+        assertNotNull(thrown)
+        assertTrue(thrown!!.message!!.contains("no tokens"))
+    }
+
+    @Test
+    fun generateRunsLoadAndDecodeOffMain() {
+        val engine = ScriptedInferenceEngine("ok")
+        val manager = CompanionPackManager(context, engine)
+        val pack = CompanionPackCatalog.builtIn.first()
+        manager.selectPack(pack.id)
+        val file = manager.packFile(pack)
+        file.parentFile?.mkdirs()
+        file.writeBytes("gguf-fixture".toByteArray())
+        kotlinx.coroutines.runBlocking {
+            manager.generate("hello", DeviceInferenceGuard.BUDGET_CLEAR) {}
+        }
+        assertEquals(false, engine.loadOnMain)
+        assertEquals(false, engine.generateOnMain)
+    }
+
+    @Test
+    fun generateCancelBetweenTokensAborts() {
+        val started = java.util.concurrent.CountDownLatch(1)
+        val engine = object : ScriptedInferenceEngine("abcdefghij") {
+            override fun generate(prompt: String, maxTokens: Int, onToken: (String) -> Unit): GenerateOutcome {
+                lastPrompt = prompt
+                lastMaxTokens = maxTokens
+                generateOnMain = android.os.Looper.myLooper() == android.os.Looper.getMainLooper()
+                onToken("abc")
+                started.countDown()
+                var spins = 0
+                while (!cancelled && spins < 400) {
+                    Thread.sleep(10)
+                    spins++
+                }
+                if (cancelled) return GenerateOutcome(cancelled = true)
+                onToken("def")
+                return GenerateOutcome()
+            }
+        }
+        val manager = CompanionPackManager(context, engine)
+        val pack = CompanionPackCatalog.builtIn.first()
+        manager.selectPack(pack.id)
+        val file = manager.packFile(pack)
+        file.parentFile?.mkdirs()
+        file.writeBytes("gguf-fixture".toByteArray())
+        val out = StringBuilder()
+        val thrown = kotlinx.coroutines.runBlocking {
+            val job = kotlinx.coroutines.launch(kotlinx.coroutines.Dispatchers.Default) {
+                manager.generate("hello", DeviceInferenceGuard.BUDGET_CLEAR) { out.append(it) }
+            }
+            assertTrue(started.await(3, java.util.concurrent.TimeUnit.SECONDS))
+            job.cancel()
+            job.join()
+            job
+        }
+        assertTrue(thrown.isCancelled)
+        assertFalse(out.toString().contains("def"))
+    }
+
+    @Test
+    fun contextTokensStayBoundedAndGrowWithRam() {
+        assertEquals(2048, DeviceInferenceGuard.contextTokens(0, 3072))
+        assertEquals(2048, DeviceInferenceGuard.contextTokens(3100, 3072))
+        assertEquals(4096, DeviceInferenceGuard.contextTokens(5000, 3072))
+        assertEquals(128, OfflinePromptPlanner.promptTokenBudget(2048, 2000))
+        assertEquals(
+            listOf(512, 512, 176),
+            OfflinePromptPlanner.promptBatches(1200, 512),
+        )
+    }
+
+    @Test
+    fun overBudgetPickedTextIsSectionedThenAnswered() {
+        val engine = object : ScriptedInferenceEngine("Final answer from summaries.") {
+            override fun tokenize(text: String): Int =
+                if (text.contains("PICKED-BLOCK")) 8000 else (text.length + 3) / 4
+        }
+        val manager = CompanionPackManager(context, engine)
+        val pack = CompanionPackCatalog.builtIn.first()
+        manager.selectPack(pack.id)
+        val file = manager.packFile(pack)
+        file.parentFile?.mkdirs()
+        file.writeBytes("gguf-fixture".toByteArray())
+        val picked = "PICKED-BLOCK " + "word ".repeat(400)
+        val out = StringBuilder()
+        val result = kotlinx.coroutines.runBlocking {
+            manager.generate(
+                prompt = StandalonePrompt.build(emptyList(), "Summarize this file", picked),
+                maxTokens = 256,
+                onToken = { out.append(it) },
+                history = emptyList(),
+                latest = "Summarize this file",
+                pickedText = picked,
+            )
+        }
+        assertTrue(result.sectioned)
+        assertTrue(out.toString().contains("Final answer from summaries."))
+    }
+
+    @Test
+    fun truncatedGenerateMarksTheAnswer() {
+        val engine = ScriptedInferenceEngine("Partial.")
+        engine.truncateNext = true
+        val manager = CompanionPackManager(context, engine)
+        val pack = CompanionPackCatalog.builtIn.first()
+        manager.selectPack(pack.id)
+        val file = manager.packFile(pack)
+        file.parentFile?.mkdirs()
+        file.writeBytes("gguf-fixture".toByteArray())
+        val result = kotlinx.coroutines.runBlocking {
+            manager.generate("hello", 32) {}
+        }
+        assertTrue(result.truncated)
+    }
+
+    @Test
+    fun errorMidAnswerUnloadsAndClearsPicked() {
+        val engine = object : ScriptedInferenceEngine("nope") {
+            override fun generate(prompt: String, maxTokens: Int, onToken: (String) -> Unit): GenerateOutcome {
+                generateOnMain = android.os.Looper.myLooper() == android.os.Looper.getMainLooper()
+                return GenerateOutcome(error = "boom mid-answer")
+            }
+        }
+        val manager = CompanionPackManager(context, engine)
+        val pack = CompanionPackCatalog.builtIn.first()
+        manager.selectPack(pack.id)
+        val file = manager.packFile(pack)
+        file.parentFile?.mkdirs()
+        file.writeBytes("gguf-fixture".toByteArray())
+        var picked: String? = "keep me"
+        val started = java.util.concurrent.atomic.AtomicBoolean(false)
+        val result = kotlinx.coroutines.runBlocking {
+            withOfflineAnswerCleanup(
+                packManager = manager,
+                clearPicked = { picked = null },
+                onStart = { started.set(true) },
+                onFinally = {},
+            ) {
+                manager.generate("hello", 64) {}
+            }
+        }
+        assertTrue(started.get())
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull()!!.message!!.contains("boom"))
+        assertNull(picked)
+        assertTrue(engine.unloadCount >= 1)
+    }
+
+    @Test
+    fun reminderWithoutNotificationsReturnsCopyNotThrow() {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        Shadows.shadowOf(nm).setNotificationsEnabled(false)
+        val at = now.plusHours(3)
+        val scheduled = StandaloneActions.scheduleReminder(context, "Remind me at 7", at)
+        assertTrue(scheduled.isFailure)
+        val reply = scheduled.exceptionOrNull()?.message ?: StandaloneActions.reminderPermissionDeniedCopy()
+        assertTrue(reply.contains("Notification permission is off"))
+    }
+
+    @Test
+    fun exactAlarmGrantedUsesExactReminderCopy() {
+        val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        Shadows.shadowOf(alarm).setCanScheduleExactAlarms(true)
+        val at = now.plusHours(2)
+        val granted = StandaloneActions.scheduleReminder(context, "Remind me at 7:30 pm", at).getOrThrow()
+        assertFalse(granted.inexact)
+        assertTrue(granted.message.contains("for"))
+        assertFalse(granted.message.contains("approximate"))
+        assertFalse(granted.message.contains("system settings"))
+        val copy = StandaloneActions.reminderOnThisPhoneCopy(at, inexact = false)
+        assertFalse(copy.contains("approximate"))
+    }
+
+    @Test
+    fun exactAlarmDeniedUsesApproximateCopyAndSettingsIntent() {
+        val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        Shadows.shadowOf(alarm).setCanScheduleExactAlarms(false)
+        val at = now.plusHours(2)
+        val denied = StandaloneActions.scheduleReminder(context, "Remind me at 7:30 pm", at).getOrThrow()
+        assertTrue(denied.inexact)
+        assertTrue(denied.message.contains("approximate"))
+        assertTrue(denied.message.contains("system settings"))
+        val copy = StandaloneActions.reminderOnThisPhoneCopy(at, inexact = true)
+        assertTrue(copy.contains("approximate"))
+        val intent = StandaloneActions.exactAlarmSettingsIntent(context)
+        assertEquals(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, intent.action)
+        assertEquals("package", intent.data?.scheme)
+        assertTrue(intent.dataString!!.contains(context.packageName))
     }
 
     @Test

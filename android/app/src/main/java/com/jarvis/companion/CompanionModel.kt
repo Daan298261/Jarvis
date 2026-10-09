@@ -65,6 +65,7 @@ data class CompanionState(
     val lanStatus: String = "idle",
     val lanLabel: String = "",
     val pendingApproval: Boolean = false,
+    val requestExactAlarms: Boolean = false,
 )
 
 fun JSONArray.objects(): List<JSONObject> = (0 until length()).mapNotNull { optJSONObject(it) }
@@ -281,6 +282,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun downloadVoicePack(packId: String) = action {
+        stopOnDeviceSpeakAndAwait()
         voicePackManager.downloadPack(packId) { progress ->
             mutable.value = mutable.value.copy(voicePackProgress = progress)
         }
@@ -294,6 +296,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun downloadRecommendedVoicePacks() = action {
+        stopOnDeviceSpeakAndAwait()
         voicePackManager.downloadRecommendedPair { progress ->
             mutable.value = mutable.value.copy(voicePackProgress = progress)
         }
@@ -307,7 +310,8 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteVoicePack(packId: String) = action {
-        voicePackManager.deletePack(packId)
+        stopOnDeviceSpeakAndAwait()
+        voicePackManager.deletePackAwait(packId)
         mutable.value = mutable.value.copy(
             voiceSttStatus = voicePackManager.sttStatus(),
             voiceTtsStatus = voicePackManager.ttsStatus(),
@@ -318,8 +322,9 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun selectSttVoicePack(id: String) {
-        voicePackManager.selectSttPack(id)
         viewModelScope.launch {
+            stopOnDeviceSpeakAndAwait()
+            voicePackManager.selectSttPack(id)
             voicePackManager.refreshStatus()
             mutable.value = mutable.value.copy(voiceSttStatus = voicePackManager.sttStatus())
             publishVoiceRoute()
@@ -327,12 +332,21 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun selectTtsVoicePack(id: String) {
-        voicePackManager.selectTtsPack(id)
         viewModelScope.launch {
+            stopOnDeviceSpeakAndAwait()
+            voicePackManager.selectTtsPack(id)
             voicePackManager.refreshStatus()
             mutable.value = mutable.value.copy(voiceTtsStatus = voicePackManager.ttsStatus())
             publishVoiceRoute()
         }
+    }
+
+    fun openExactAlarmSettings() {
+        val app = getApplication<Application>()
+        val intent = StandaloneActions.exactAlarmSettingsIntent(app)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        app.startActivity(intent)
+        mutable.value = mutable.value.copy(requestExactAlarms = false)
     }
 
     private fun publishVoiceRoute() {
@@ -542,33 +556,71 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         val assistantId = UUID.randomUUID().toString()
         val userMessage = StandaloneActions.chatMessage(userId, "user", text, StandaloneActions.ORIGIN_USER)
         val prior = mutable.value.messages + userMessage
-        mutable.value = mutable.value.copy(
-            messages = prior,
-            offlineAnswering = true,
-            activity = "Answering on this phone…",
-        )
-        val reply = when (decision.intent) {
-            StandaloneIntent.LOCAL_REMINDER -> {
-                val at = decision.reminderAt ?: error("Reminder time did not parse")
-                val scheduled = StandaloneActions.scheduleReminder(getApplication(), text, at)
-                scheduled.getOrElse { error(it.message ?: StandaloneActions.reminderPermissionDeniedCopy()) }.message
-            }
-            StandaloneIntent.REMINDER_NEEDS_TIME -> StandaloneActions.reminderNeedsTimeCopy()
-            StandaloneIntent.LOCAL_NOTE -> StandaloneActions.noteAckCopy()
-            StandaloneIntent.QUEUE_OR_REFUSE -> StandaloneActions.queueOrRefuseCopy()
-            StandaloneIntent.MEDIA_WAIT_DESKTOP -> StandaloneActions.mediaSavedCopy()
-            StandaloneIntent.LOCAL_FILE, StandaloneIntent.CONVERSATION -> {
-                val prompt = StandalonePrompt.build(prior, text, picked)
-                val budget = DeviceInferenceGuard.generationBudget(getApplication())
-                DeviceInferenceGuard.pressureReason(getApplication())?.let { reason ->
-                    mutable.value = mutable.value.copy(activity = reason)
+        var requestExact = false
+        val outcome = withOfflineAnswerCleanup(
+            packManager = packManager,
+            clearPicked = { pickedTextForPrompt = null },
+            onStart = {
+                mutable.value = mutable.value.copy(
+                    messages = prior,
+                    offlineAnswering = true,
+                    activity = "Answering on this phone…",
+                    error = null,
+                )
+            },
+            onFinally = {
+                mutable.value = mutable.value.copy(
+                    offlineAnswering = false,
+                    activity = "Ready when you are",
+                    localPackStatus = packManager.status(),
+                    requestExactAlarms = requestExact,
+                )
+            },
+        ) {
+            when (decision.intent) {
+                StandaloneIntent.LOCAL_REMINDER -> {
+                    val at = decision.reminderAt ?: error("Reminder time did not parse")
+                    val scheduled = StandaloneActions.scheduleReminder(getApplication(), text, at)
+                    scheduled.fold(
+                        onSuccess = { result ->
+                            requestExact = result.inexact
+                            result.message
+                        },
+                        onFailure = { err ->
+                            err.message ?: StandaloneActions.reminderPermissionDeniedCopy()
+                        },
+                    )
                 }
-                val assistantText = StringBuilder()
-                packManager.generate(prompt, budget) { chunk -> assistantText.append(chunk) }
-                assistantText.toString().ifBlank { error("On-device model returned no tokens") }
+                StandaloneIntent.REMINDER_NEEDS_TIME -> StandaloneActions.reminderNeedsTimeCopy()
+                StandaloneIntent.LOCAL_NOTE -> StandaloneActions.noteAckCopy()
+                StandaloneIntent.QUEUE_OR_REFUSE -> StandaloneActions.queueOrRefuseCopy()
+                StandaloneIntent.MEDIA_WAIT_DESKTOP -> StandaloneActions.mediaSavedCopy()
+                StandaloneIntent.LOCAL_FILE, StandaloneIntent.CONVERSATION -> {
+                    val budget = DeviceInferenceGuard.generationBudget(getApplication())
+                    DeviceInferenceGuard.pressureReason(getApplication())?.let { reason ->
+                        mutable.value = mutable.value.copy(activity = reason)
+                    }
+                    val assistantText = StringBuilder()
+                    val result = packManager.generate(
+                        prompt = StandalonePrompt.build(prior, text, picked),
+                        maxTokens = budget,
+                        onToken = { chunk -> assistantText.append(chunk) },
+                        history = prior,
+                        latest = text,
+                        pickedText = picked,
+                    )
+                    var reply = assistantText.toString()
+                    if (result.sectioned) reply = OfflinePromptPlanner.SECTIONED_NOTE + reply
+                    if (result.truncated) reply += OfflinePromptPlanner.TRUNCATED_NOTE
+                    reply.ifBlank { error("On-device model returned no tokens") }
+                }
             }
         }
-        if (reply.isBlank()) error("On-device model returned no tokens")
+        val reply = outcome.getOrElse { err ->
+            val message = err.message ?: "On-device answer failed"
+            mutable.value = mutable.value.copy(error = message)
+            message
+        }
         val assistantMessage = StandaloneActions.chatMessage(
             assistantId,
             "assistant",
@@ -576,32 +628,31 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             StandaloneActions.ORIGIN_ASSISTANT,
         )
         val neverDone = StandaloneMode.desktopOnlyNeverDone(decision)
-        offlineQueue.append(
-            StandaloneActions.userTurnJson(
-                userId,
-                text,
-                consequential = decision.consequential,
-                autoReplay = decision.autoReplay && !neverDone,
-            ),
-        )
-        offlineQueue.append(
-            StandaloneActions.assistantTurnJson(
-                assistantId,
-                reply,
-                consequential = decision.consequential,
-                autoReplay = decision.autoReplay && !neverDone,
-            ),
-        )
-        if (!pickedOverride.isNullOrBlank()) pickedTextForPrompt = null
+        if (outcome.isSuccess) {
+            offlineQueue.append(
+                StandaloneActions.userTurnJson(
+                    userId,
+                    text,
+                    consequential = decision.consequential,
+                    autoReplay = decision.autoReplay && !neverDone,
+                ),
+            )
+            offlineQueue.append(
+                StandaloneActions.assistantTurnJson(
+                    assistantId,
+                    reply,
+                    consequential = decision.consequential,
+                    autoReplay = decision.autoReplay && !neverDone,
+                ),
+            )
+        }
         mutable.value = mutable.value.copy(
             messages = prior + assistantMessage,
-            offlineAnswering = false,
             offlineQueueDepth = offlineQueue.pendingCount(),
-            activity = "Answering on this phone.",
-            localPackStatus = packManager.status(),
+            activity = if (outcome.isSuccess) "Answering on this phone." else mutable.value.activity,
+            error = if (outcome.isSuccess) mutable.value.error else (mutable.value.error ?: reply),
         )
-        packManager.unload()
-        if (fromVoice) {
+        if (fromVoice && outcome.isSuccess) {
             val voiceCaps = mutable.value.capabilities.optJSONObject("voice")
             val route = CompanionVoiceRouting.decide(
                 leaderReachable = mutable.value.leaderReachable || mutable.value.connected,
@@ -1186,6 +1237,13 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
 
     private fun cancelOnDeviceSpeak() {
         onDeviceSpeak?.stop()
+        ttsJob = null
+        releasePlayer()
+    }
+
+    private suspend fun stopOnDeviceSpeakAndAwait() {
+        val session = onDeviceSpeak
+        session?.stopAndAwait()
         ttsJob = null
         releasePlayer()
     }

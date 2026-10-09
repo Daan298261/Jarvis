@@ -12,6 +12,22 @@ import android.os.PowerManager
 object DeviceInferenceGuard {
     const val BUDGET_CLEAR = 512
     const val BUDGET_PRESSURE = 256
+    const val N_CTX_MIN = OfflinePromptPlanner.N_CTX_MIN
+    const val N_CTX_MAX = OfflinePromptPlanner.N_CTX_MAX
+
+    fun contextTokens(availMb: Long, packMinRamMb: Int): Int {
+        if (availMb <= 0L) return N_CTX_MIN
+        val headroom = availMb - packMinRamMb
+        return if (headroom >= 768L) N_CTX_MAX else N_CTX_MIN
+    }
+
+    fun contextTokens(context: Context, pack: CompanionPack): Int {
+        val activity = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val memory = ActivityManager.MemoryInfo()
+        activity.getMemoryInfo(memory)
+        val availMb = memory.availMem / (1024 * 1024)
+        return contextTokens(availMb, pack.minRamMb)
+    }
 
     fun generationBudget(
         batteryPercent: Int,

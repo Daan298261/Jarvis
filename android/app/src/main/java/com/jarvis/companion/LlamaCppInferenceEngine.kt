@@ -15,18 +15,35 @@ class LlamaCppInferenceEngine : LocalInferenceEngine {
         return CompanionNativeBridge.nativeLoad(modelPath, contextTokens).ifBlank { null }
     }
 
-    override fun generate(prompt: String, maxTokens: Int, onToken: (String) -> Unit): String? {
+    override fun tokenize(text: String): Int {
+        if (!isRuntimeAvailable()) return (text.length + 3) / 4
+        val n = CompanionNativeBridge.nativeTokenize(text)
+        return if (n > 0) n else (text.length + 3) / 4
+    }
+
+    override fun generate(prompt: String, maxTokens: Int, onToken: (String) -> Unit): GenerateOutcome {
         if (!isRuntimeAvailable()) {
-            return "On-device inference runtime is missing from this build"
+            return GenerateOutcome(error = "On-device inference runtime is missing from this build")
         }
-        val output = CompanionNativeBridge.nativeGenerate(prompt, maxTokens)
-        if (output.startsWith("error:")) return output.removePrefix("error:")
-        if (output.isNotEmpty()) onToken(output)
-        return null
+        val output = CompanionNativeBridge.nativeGenerate(prompt, maxTokens, OfflinePromptPlanner.N_BATCH)
+        if (output.startsWith("error:cancelled") || output == "cancelled") {
+            return GenerateOutcome(cancelled = true)
+        }
+        if (output.startsWith("error:")) {
+            return GenerateOutcome(error = output.removePrefix("error:"))
+        }
+        val truncated = output.startsWith("truncated:")
+        val text = if (truncated) output.removePrefix("truncated:") else output
+        if (text.isNotEmpty()) onToken(text)
+        return GenerateOutcome(truncated = truncated)
     }
 
     override fun unload() {
         if (isRuntimeAvailable()) CompanionNativeBridge.nativeUnload()
+    }
+
+    override fun requestCancel() {
+        if (isRuntimeAvailable()) CompanionNativeBridge.nativeGenerateCancel()
     }
 }
 
@@ -43,6 +60,8 @@ object CompanionNativeBridge {
     fun isLoaded(): Boolean = loaded
 
     external fun nativeLoad(modelPath: String, contextTokens: Int): String
-    external fun nativeGenerate(prompt: String, maxTokens: Int): String
+    external fun nativeTokenize(text: String): Int
+    external fun nativeGenerate(prompt: String, maxTokens: Int, batchSize: Int): String
+    external fun nativeGenerateCancel()
     external fun nativeUnload()
 }

@@ -2,7 +2,9 @@ package com.jarvis.companion
 
 import android.content.Context
 import android.content.SharedPreferences
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -12,6 +14,7 @@ import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.coroutineContext
 
 fun interface FileHasher {
     fun hash(file: File): String
@@ -119,6 +122,7 @@ class CompanionPackManager(
     private val progressRef = AtomicReference(0)
     private val errorRef = AtomicReference("")
     private var catalog: List<CompanionPack> = CompanionPackCatalog.builtIn
+    private val llamaDispatcher = Dispatchers.IO.limitedParallelism(1)
 
     fun selectedPackId(): String = prefs.getString("selected_pack_id", CompanionPackCatalog.builtIn.first().id) ?: CompanionPackCatalog.builtIn.first().id
 
@@ -259,26 +263,82 @@ class CompanionPackManager(
         progressRef.set(0)
     }
 
-    suspend fun generate(prompt: String, maxTokens: Int = DeviceInferenceGuard.BUDGET_CLEAR, onToken: (String) -> Unit): String {
+    suspend fun generate(
+        prompt: String,
+        maxTokens: Int = DeviceInferenceGuard.BUDGET_CLEAR,
+        history: List<org.json.JSONObject> = emptyList(),
+        latest: String = "",
+        pickedText: String? = null,
+        onToken: (String) -> Unit,
+    ): GenerateResult = withContext(llamaDispatcher) {
         val pack = resolveOfflinePack() ?: selectedPack() ?: error("No pack selected")
         DeviceInferenceGuard.blockReason(app, pack)?.let { error(it) }
         val path = packFile(pack)
         if (!path.isFile) error("Install the companion model pack first")
         statusRef.set(CompanionPackStatus.RUNNING)
-        val loadError = engine.load(path.absolutePath, 2048)
-        if (loadError != null) {
-            statusRef.set(CompanionPackStatus.ERROR)
-            errorRef.set(loadError)
-            error(loadError)
+        val nCtx = DeviceInferenceGuard.contextTokens(app, pack)
+        val cancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { engine.requestCancel() }
+        try {
+            val loadError = engine.load(path.absolutePath, nCtx)
+            if (loadError != null) {
+                statusRef.set(CompanionPackStatus.ERROR)
+                errorRef.set(loadError)
+                error(loadError)
+            }
+            if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
+            val promptBudget = OfflinePromptPlanner.promptTokenBudget(nCtx, maxTokens)
+            val plan = if (latest.isNotEmpty() || !pickedText.isNullOrBlank()) {
+                OfflinePromptPlanner.plan(
+                    history = history,
+                    latest = latest.ifBlank { prompt },
+                    pickedText = pickedText,
+                    tokenize = { engine.tokenize(it) },
+                    promptBudget = promptBudget,
+                )
+            } else {
+                OfflinePromptPlanner.Plan(prompt = prompt, sectioned = false)
+            }
+            val sectioned = plan.sectioned
+            val toRun = if (plan.sectioned && plan.sections.isNotEmpty()) {
+                val summaries = ArrayList<String>()
+                for (section in plan.sections) {
+                    if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
+                    val piece = StringBuilder()
+                    val outcome = engine.generate(
+                        OfflinePromptPlanner.summarizeSectionPrompt(section),
+                        maxTokens.coerceAtMost(128),
+                    ) { piece.append(it) }
+                    if (outcome.cancelled) throw CancellationException("generate cancelled")
+                    outcome.error?.let { failGenerate(it) }
+                    summaries.add(piece.toString().ifBlank { section.take(240) })
+                }
+                OfflinePromptPlanner.finalPromptFromSummaries(history, latest.ifBlank { prompt }, summaries)
+            } else {
+                plan.prompt
+            }
+            if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
+            var produced = false
+            val outcome = engine.generate(toRun, maxTokens) { chunk ->
+                produced = true
+                onToken(chunk)
+            }
+            if (outcome.cancelled) throw CancellationException("generate cancelled")
+            if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
+            statusRef.set(CompanionPackStatus.READY)
+            outcome.error?.let { failGenerate(it) }
+            if (!produced && !outcome.truncated) {
+                failGenerate("On-device model returned no tokens")
+            }
+            GenerateResult(truncated = outcome.truncated, sectioned = sectioned)
+        } finally {
+            cancelHandle?.dispose()
         }
-        val genError = engine.generate(prompt, maxTokens, onToken)
-        statusRef.set(CompanionPackStatus.READY)
-        if (genError != null) {
-            statusRef.set(CompanionPackStatus.ERROR)
-            errorRef.set(genError)
-            error(genError)
-        }
-        return ""
+    }
+
+    private fun failGenerate(message: String): Nothing {
+        statusRef.set(CompanionPackStatus.ERROR)
+        errorRef.set(message)
+        error(message)
     }
 
     fun unload() {
