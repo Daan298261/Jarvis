@@ -342,7 +342,10 @@ async def startup() -> None:
         STATUS_MONITOR.start()
     except Exception:
         logging.debug("Model status monitor start skipped", exc_info=True)
-    await QUEUE_WATCHER.process_pending()
+    # Never await queue ingest on the startup path — create_task / routing can
+    # stall (model/network) and leave Uvicorn stuck at "Waiting for application
+    # startup" with nothing listening on :4780.
+    asyncio.create_task(QUEUE_WATCHER.process_pending())
     try:
         from .tts.warm_start import schedule_tts_warm_start
 
