@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import uuid
 from pathlib import Path
 
@@ -489,17 +490,41 @@ async def _autoload_model(current) -> None:
 
 @app.get("/api/health")
 async def health():
+    """Lightweight liveness. Heavy probes run off the event loop with a hard cap.
+
+    Cold-start and companion clients poll this often; blocking here (schtasks,
+    UFO path walks, pywinauto import) starves every other API route.
+    """
     from .runtime.elevation import snapshot as elevation_snapshot
     from .workers.computer import NativeWindowsBackend, UFOBackend
 
-    return {
-        "ok": True,
-        **elevation_snapshot(),
-        "computer_use": {
-            "windows_ui": NativeWindowsBackend().probe(),
-            "ufo": UFOBackend().probe(),
-        },
-    }
+    def _probe() -> dict[str, object]:
+        return {
+            "ok": True,
+            "pid": os.getpid(),
+            **elevation_snapshot(),
+            "computer_use": {
+                "windows_ui": NativeWindowsBackend().probe(),
+                "ufo": UFOBackend().probe(),
+            },
+        }
+
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(_probe), timeout=2.5)
+    except (TimeoutError, Exception):
+        # Still report process identity so force-stop / starters can adopt.
+        return {
+            "ok": True,
+            "elevated": False,
+            "pid": os.getpid(),
+            "executable": sys.executable,
+            "platform": os.name,
+            "computer_use": {
+                "windows_ui": {"status": "probe_timeout"},
+                "ufo": {"status": "probe_timeout"},
+            },
+            "health_degraded": True,
+        }
 
 
 @app.websocket("/api/ws")
