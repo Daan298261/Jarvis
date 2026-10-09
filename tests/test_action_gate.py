@@ -48,6 +48,27 @@ def test_gate_allows_routine_reads(monkeypatch):
     assert result.allowed is True
 
 
+def test_harm_veto_deadline_leaves_room_for_warm_laya(monkeypatch):
+    """CPU Laya infer is ~100–150 ms; an 80 ms budget guaranteed generative fallback."""
+    from app.policy import action_gate as gate
+
+    seen: dict[str, float] = {}
+
+    def _capture(state, questions, decision_class, deadline_ms=None, privacy="local_only", *args, **_k):
+        del state, questions, privacy, args
+        seen["deadline_ms"] = float(deadline_ms if deadline_ms is not None else 0.0)
+        seen["decision_class"] = decision_class
+        return type("R", (), {"answers": {}, "fallback_used": False, "provider": "laya"})()
+
+    monkeypatch.setattr("app.policy.reversibility_gate.authorize", lambda *a, **k: _allow())
+    monkeypatch.setattr("app.policy.action_gate.decide", _capture)
+    result = gate_tool_call("filesystem", action="read", arguments={"path": "notes.txt"})
+    assert result.allowed is True
+    assert seen["decision_class"] == "harm_veto"
+    assert seen["deadline_ms"] >= 500.0
+    assert seen["deadline_ms"] == gate.HARM_VETO_DEADLINE_MS
+
+
 def test_gate_fail_closed_on_destructive_when_unsure(monkeypatch, tmp_path):
     monkeypatch.setattr("app.config.data_dir", lambda: tmp_path)
     monkeypatch.setattr("app.policy.approval_grant.data_dir", lambda: tmp_path)
