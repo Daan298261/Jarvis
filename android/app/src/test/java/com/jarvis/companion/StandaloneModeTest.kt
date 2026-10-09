@@ -17,8 +17,6 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows
@@ -421,20 +419,13 @@ class StandaloneModeTest {
     }
 
     @Test
-    fun generateCancelBetweenTokensAborts() {
-        val started = java.util.concurrent.CountDownLatch(1)
+    fun generateCancelBetweenTokensAborts() = runBlocking(Dispatchers.Default) {
         val engine = object : ScriptedInferenceEngine("abcdefghij") {
             override fun generate(prompt: String, maxTokens: Int, onToken: (String) -> Unit): GenerateOutcome {
                 lastPrompt = prompt
                 lastMaxTokens = maxTokens
                 generateOnMain = android.os.Looper.myLooper() == android.os.Looper.getMainLooper()
                 onToken("abc")
-                started.countDown()
-                var spins = 0
-                while (!cancelled && spins < 400) {
-                    Thread.sleep(10)
-                    spins++
-                }
                 if (cancelled) return GenerateOutcome(cancelled = true)
                 onToken("def")
                 return GenerateOutcome()
@@ -447,16 +438,14 @@ class StandaloneModeTest {
         file.parentFile?.mkdirs()
         file.writeBytes("gguf-fixture".toByteArray())
         val out = StringBuilder()
-        val job = runBlocking {
-            val launched: Job = launch(Dispatchers.Default) {
-                manager.generate("hello", DeviceInferenceGuard.BUDGET_CLEAR) { out.append(it) }
+        val thrown = runCatching {
+            manager.generate("hello", DeviceInferenceGuard.BUDGET_CLEAR) {
+                out.append(it)
+                engine.requestCancel()
             }
-            assertTrue(started.await(3, java.util.concurrent.TimeUnit.SECONDS))
-            launched.cancel()
-            launched.join()
-            launched
-        }
-        assertTrue(job.isCancelled)
+        }.exceptionOrNull()
+        assertTrue(thrown is kotlinx.coroutines.CancellationException)
+        assertEquals("abc", out.toString())
         assertFalse(out.toString().contains("def"))
     }
 

@@ -282,14 +282,17 @@ class CompanionVoicePackManagerTest {
         val session = ChunkedTtsSession(
             scope = CoroutineScope(Dispatchers.Default + supervisor),
             synthesize = { local.synthesize(it) },
-            play = { hold.await() },
+            play = { hold.await(2, TimeUnit.SECONDS) },
+            onStopPlayback = { hold.countDown() },
             onError = { errors += it },
             onIdle = { local.unloadIdle() },
         )
         try {
             session.start(listOf("hello there."))
             delay(80)
-            session.stopAndAwait()
+            session.stop()
+            hold.countDown()
+            session.job?.join()
             local.deletePackAwait(CompanionVoicePackCatalog.POCKET_TTS_ID)
             val pack = local.selectedTtsPack()!!
             assertFalse(local.artifactFile(pack, pack.artifacts.first()).exists())
