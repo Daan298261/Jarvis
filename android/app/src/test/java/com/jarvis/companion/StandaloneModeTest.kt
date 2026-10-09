@@ -16,9 +16,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowAlarmManager
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FilterInputStream
@@ -83,8 +88,7 @@ class StandaloneModeTest {
         context.getSharedPreferences("companion_pack_digest", Context.MODE_PRIVATE).edit().clear().apply()
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         Shadows.shadowOf(nm).setNotificationsEnabled(true)
-        Shadows.shadowOf(context.getSystemService(Context.ALARM_SERVICE) as AlarmManager)
-            .setCanScheduleExactAlarms(true)
+        ShadowAlarmManager.setCanScheduleExactAlarms(true)
     }
 
     @Test
@@ -443,16 +447,16 @@ class StandaloneModeTest {
         file.parentFile?.mkdirs()
         file.writeBytes("gguf-fixture".toByteArray())
         val out = StringBuilder()
-        val thrown = kotlinx.coroutines.runBlocking {
-            val job = kotlinx.coroutines.launch(kotlinx.coroutines.Dispatchers.Default) {
+        val job = runBlocking {
+            val launched: Job = launch(Dispatchers.Default) {
                 manager.generate("hello", DeviceInferenceGuard.BUDGET_CLEAR) { out.append(it) }
             }
             assertTrue(started.await(3, java.util.concurrent.TimeUnit.SECONDS))
-            job.cancel()
-            job.join()
-            job
+            launched.cancel()
+            launched.join()
+            launched
         }
-        assertTrue(thrown.isCancelled)
+        assertTrue(job.isCancelled)
         assertFalse(out.toString().contains("def"))
     }
 
@@ -558,8 +562,7 @@ class StandaloneModeTest {
 
     @Test
     fun exactAlarmGrantedUsesExactReminderCopy() {
-        val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        Shadows.shadowOf(alarm).setCanScheduleExactAlarms(true)
+        ShadowAlarmManager.setCanScheduleExactAlarms(true)
         val at = now.plusHours(2)
         val granted = StandaloneActions.scheduleReminder(context, "Remind me at 7:30 pm", at).getOrThrow()
         assertFalse(granted.inexact)
@@ -573,7 +576,7 @@ class StandaloneModeTest {
     @Test
     fun exactAlarmDeniedUsesApproximateCopyAndSettingsIntent() {
         val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        Shadows.shadowOf(alarm).setCanScheduleExactAlarms(false)
+        ShadowAlarmManager.setCanScheduleExactAlarms(false)
         val at = now.plusHours(2)
         val denied = StandaloneActions.scheduleReminder(context, "Remind me at 7:30 pm", at).getOrThrow()
         assertTrue(denied.inexact)
