@@ -192,12 +192,38 @@ class Investigations:
             raise PermissionError("Investigation belongs to a different task")
         return row
 
+    async def ingest(
+        self,
+        source: str,
+        question: str = "Forensic image ingest and file index",
+        allowed: list[str] | None = None,
+        task_id: str | None = None,
+        investigation_id: str | None = None,
+        source_type: str = "auto",
+        checkpoint_interval: int = 1,
+        stop_after: int | None = None,
+    ) -> dict:
+        from .ffs_ingest import FFSIngest
+        ingest_svc = FFSIngest(
+            source=source,
+            investigation_id=investigation_id,
+            task_id=task_id,
+            question=question,
+            source_type=source_type,
+            checkpoint_interval=checkpoint_interval,
+            allowed_directories=allowed,
+            stop_after=stop_after,
+        )
+        return await ingest_svc.run()
+
     async def catalog(self, ident: str, task_id: str | None, operation: str = "") -> dict:
         row = self.owned(ident, task_id)
         if row["status"] in {"closed", "cancelled"}:
             raise ValueError("Investigation is closed")
         if row["kind"] == "source":
             return {"operations": [], "workflow": "Use normal repository tools; source evidence may be recorded with action=record_source."}
+        if row["kind"] == "forensic":
+            return {"operations": [], "workflow": "Forensic image investigation: files indexed with cryptographic hashes and chain of custody."}
         actor = await self.actor(ident)
         tools = {k: v for k, v in actor.tools.items() if k in STATIC_OPERATIONS | RUNTIME_OPERATIONS}
         tools.update(BUILTIN_SCHEMAS)

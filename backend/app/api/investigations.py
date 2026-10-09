@@ -34,6 +34,16 @@ class ReportBody(BaseModel):
     unknowns: list[str] = Field(default_factory=list)
 
 
+class IngestBody(BaseModel):
+    source: str = Field(default="", max_length=4096)
+    target: str = Field(default="", max_length=4096)
+    investigation_id: str | None = None
+    question: str = Field(default="Forensic image ingest and file index", max_length=10000)
+    task_id: str | None = None
+    source_type: Literal["auto", "folder", "tar", "zip", "raw"] = "auto"
+    background: bool = False
+
+
 def public_row(row: dict) -> dict:
     return {k: v for k, v in row.items() if k not in {"manifest", "snapshot"}}
 
@@ -79,12 +89,84 @@ async def prepare(body: PrepareBody):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@router.post("/ingest")
+async def ingest(body: IngestBody):
+    source_target = body.target or body.source
+    if not source_target.strip():
+        raise HTTPException(status_code=422, detail="Source or target path is required")
+    try:
+        from ..reverse_engineering.ffs_ingest import FFSIngest
+        settings = load_settings()
+        ingest_svc = FFSIngest(
+            source=source_target,
+            investigation_id=body.investigation_id,
+            task_id=body.task_id,
+            question=body.question,
+            source_type=body.source_type,
+            allowed_directories=settings.allowed_directories,
+        )
+        if body.background:
+            row = ingest_svc.prepare_investigation()
+            asyncio.create_task(ingest_svc.run())
+            return public_row(row)
+        row = await ingest_svc.run()
+        return public_row(row)
+    except (ValueError, OSError, PermissionError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("/{ident}")
 async def detail(ident: str):
     try:
         return public_row(store.load(ident))
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(status_code=404, detail="Unknown investigation") from exc
+
+
+@router.get("/{ident}/status")
+async def investigation_status(ident: str):
+    try:
+        row = store.load(ident)
+        return {
+            "id": ident,
+            "status": row.get("status"),
+            "progress": row.get("progress"),
+            "chain_of_custody": row.get("chain_of_custody", []),
+            "evidence": row.get("evidence", []),
+            "updated_at": row.get("updated_at"),
+        }
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail="Unknown investigation") from exc
+
+
+@router.post("/{ident}/ingest")
+async def ingest_into_investigation(ident: str, body: IngestBody):
+    try:
+        existing = store.load(ident)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail="Unknown investigation") from exc
+    source_target = body.target or body.source or existing.get("target") or ""
+    if not source_target.strip():
+        raise HTTPException(status_code=422, detail="Source or target path is required")
+    try:
+        from ..reverse_engineering.ffs_ingest import FFSIngest
+        settings = load_settings()
+        ingest_svc = FFSIngest(
+            source=source_target,
+            investigation_id=ident,
+            task_id=body.task_id or existing.get("task_id"),
+            question=body.question if body.question != "Forensic image ingest and file index" else existing.get("question", body.question),
+            source_type=body.source_type,
+            allowed_directories=settings.allowed_directories,
+        )
+        if body.background:
+            row = ingest_svc.prepare_investigation()
+            asyncio.create_task(ingest_svc.run())
+            return public_row(row)
+        row = await ingest_svc.run()
+        return public_row(row)
+    except (ValueError, OSError, PermissionError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/{ident}/catalog")
