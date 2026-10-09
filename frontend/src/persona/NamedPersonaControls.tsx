@@ -12,6 +12,7 @@ import {
   type PersonaAppearance,
 } from "./namedPersonas"
 import { SpecialistShapeMark } from "./SpecialistShapeMark"
+import { PersonaVisualSliders } from "./PersonaVisualSliders"
 import { updatePresentation, usePresentationSettings } from "../presence/presentationSettings"
 import {
   MYTHIC_LIVE_B_AVATAR_ID,
@@ -299,34 +300,7 @@ export function NamedPersonaControls() {
               onChange={(event) => void patch({ accent_color: event.target.value })}
             />
           </label>
-          <label>
-            Brightness
-            <input
-              type="range"
-              min={0.35}
-              max={1}
-              step={0.05}
-              disabled={busy}
-              value={appearance.glow}
-              aria-label="Persona brightness"
-              onChange={(event) => void patch({ glow: Number(event.target.value) })}
-            />
-            <output>{Math.round(appearance.glow * 100)}%</output>
-          </label>
-          <label>
-            Particle detail
-            <input
-              type="range"
-              min={0.35}
-              max={1}
-              step={0.05}
-              disabled={busy}
-              value={appearance.detail ?? 0.68}
-              aria-label="Persona particle detail"
-              onChange={(event) => void patch({ detail: Number(event.target.value) })}
-            />
-            <output>{Math.round((appearance.detail ?? 0.68) * 100)}%</output>
-          </label>
+          <PersonaVisualSliders />
           <label>
             Animation
             <input

@@ -6,7 +6,6 @@ import { MorphablePresenceStage } from "./MorphablePresenceStage"
 import { preparePortraitCloud } from "./shapes/portraitCloud"
 import {
   SETTINGS_CLOUD_SHAPE_ID,
-  mythicLiveVariantShapeId,
   usesMythicLiveVariantB,
 } from "../mythicPersonaVariant"
 import "./humanoid-presence.css"
@@ -47,16 +46,17 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
     : muscular
       ? MUSCULAR_HUMANOID_AVATAR_ID
       : "humanoid"
-  const artworkKey = `${portraitId}:${portraitUrl}`
+  const volumetric = mythic && liveVariantB
+  const artworkKey = `${portraitId}:${portraitUrl}:${volumetric}`
   const [artwork, setArtwork] = useState<{ key: string; shapeId: string }>()
   const [failedArtworkKey, setFailedArtworkKey] = useState<string>()
-  const portraitBacked = !galaxy && !settingsCloud && (!mythic || !liveVariantB)
+  const portraitBacked = !galaxy && !settingsCloud
   const preparing = portraitBacked && mythic && artwork?.key !== artworkKey && failedArtworkKey !== artworkKey
   const prepareError = portraitBacked && mythic && failedArtworkKey === artworkKey
   useEffect(() => {
     let cancelled = false
     if (!portraitBacked) return () => { cancelled = true }
-    preparePortraitCloud(portraitUrl, portraitId)
+    preparePortraitCloud(portraitUrl, portraitId, volumetric)
       .then(shapeId => {
         if (cancelled) return
         setArtwork({ key: artworkKey, shapeId })
@@ -68,7 +68,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
         console.warn("Presence artwork unavailable; retaining the current particle figure", error)
       })
     return () => { cancelled = true }
-  }, [artworkKey, portraitBacked, portraitId, portraitUrl])
+  }, [artworkKey, portraitBacked, portraitId, portraitUrl, volumetric])
   const [meter, setMeter] = useState({ level: 0, attached: false })
 
   useEffect(() => {
@@ -98,11 +98,11 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
       settings={settings}
       shapeId={settingsCloud
         ? SETTINGS_CLOUD_SHAPE_ID
-        : (mythic || galaxy) && liveVariantB
-          ? mythicLiveVariantShapeId(shapeId)
-          : galaxy
+        : galaxy
             ? shapeId
-            : artwork?.key === artworkKey ? artwork.shapeId : shapeId || "humanoid_bust"}
+            : portraitBacked
+              ? artwork?.shapeId || "humanoid_bust"
+              : shapeId || "humanoid_bust"}
       personaVisual={personaVisual}
       className={`jarvis-presence jarvis-presence-stage jarvis-presence-humanoid${mythic ? " jarvis-presence-particle" : ""}${galaxy ? " galaxy" : ""}`}
       ariaLabel={`${mythic ? personaVisual?.personaLabel || "ANZU mythic" : muscular ? "ANZU muscular humanoid" : "ANZU particle"} presence is ${snapshot.phase === "executing" ? "working" : snapshot.phase}`}
@@ -116,7 +116,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
       )}
       {prepareError && mythic && (
         <span className="jarvis-presence-fallback-note" role="status">
-          Portrait sampling unavailable · using the live particle avatar
+          Avatar artwork unavailable · retaining the previous figure
         </span>
       )}
       {galaxy ? (

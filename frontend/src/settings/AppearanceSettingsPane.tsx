@@ -3,6 +3,7 @@ import { applyRuntimeProfile } from "../hud/applyRuntimeProfile"
 import { useHexStrikeSuiteActive } from "../hud/hexstrikeSuite"
 import { useHudOverlayOptional } from "../hud/hudOverlayContext"
 import { NamedPersonaControls } from "../persona/NamedPersonaControls"
+import { PersonaVisualSliders } from "../persona/PersonaVisualSliders"
 import { SessionPersonalityControls } from "../personality/SessionPersonalityControls"
 import { CustomPresencePanel } from "../presence/CustomPresencePanel"
 import { PresenceModePreview } from "../presence/PresenceModePreview"
@@ -185,6 +186,7 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
         {APEX_ASSISTIVE}
       </p>
 
+      {!showPersona && <PersonaVisualSliders />}
       {showPersona && (
         <>
           <SessionPersonalityControls />

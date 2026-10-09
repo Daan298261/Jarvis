@@ -182,7 +182,7 @@ export function HudChatHome() {
       <div className="jarvis-presence-controls-split">
         <AppearancePresenceControls
           settings={presentation}
-          onOpenChange={(open, menu) => setSettingsPanelOpen(open && menu !== "persona")}
+          onOpenChange={(open, menu) => setSettingsPanelOpen(open && menu !== "persona" && menu !== "appearance")}
         />
       </div>
       <section className="hud-orb-zone" aria-label="ANZU state">

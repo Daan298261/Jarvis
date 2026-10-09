@@ -438,14 +438,20 @@ export function MorphablePresenceStage({
       const follow = !reduced && mode !== "off"
       const att = attentionRef.current
       const morphNow = system.morphValue()
-      const yawGain = THREE.MathUtils.degToRad(3.2)
-      const pitchGain = THREE.MathUtils.degToRad(1.35)
+      const volumetricPersona = system.currentShapeId.startsWith("portrait_") && system.currentShapeId.endsWith("_b")
+      const yawGain = THREE.MathUtils.degToRad(volumetricPersona ? 18 : 3.2)
+      const pitchGain = THREE.MathUtils.degToRad(volumetricPersona ? 9 : 1.35)
+      const idleMotion = reduced ? 0 : Math.max(0, animation)
+      const hoverX = volumetricPersona ? Math.sin(animationTime * 0.48) * 0.035 * idleMotion : 0
+      const hoverY = Math.sin(animationTime * 1.05) * (volumetricPersona ? 0.032 : 0.016) * idleMotion
+      const breathScale = volumetricPersona ? 1 + Math.sin(animationTime * 0.92) * 0.009 * idleMotion : 1
+      bust.scale.setScalar(fitScale * breathScale)
       const rotationLerp = 1 - Math.exp(-delta * 3.4)
       if (!follow) {
         bust.rotation.set(0, baseYaw, 0)
         bust.position.set(
-          framedX,
-          framedY + (reduced ? 0 : Math.sin(animationTime * 1.05) * 0.016),
+          framedX + hoverX,
+          framedY + hoverY,
           framedZ,
         )
         uniforms.uPointerStrength.value = 0
@@ -456,9 +462,9 @@ export function MorphablePresenceStage({
         const yawFollow = morphNow
         bust.rotation.y += ((baseYaw + ax * yawGain * yawFollow) - bust.rotation.y) * rotationLerp
         bust.rotation.x += ((-ay * pitchGain * yawFollow) - bust.rotation.x) * rotationLerp
-        bust.position.x = framedX
+        bust.position.x = framedX + hoverX
         bust.position.z = framedZ
-        bust.position.y = framedY + Math.sin(animationTime * 1.05) * 0.016
+        bust.position.y = framedY + hoverY
         uniforms.uPointer.value.set(ax * 1.45, 0.12 - ay * 1.35)
         const pointerTarget = THREE.MathUtils.clamp(att.confidence, 0, 1) * restAttractGain(morphNow)
         uniforms.uPointerStrength.value += (pointerTarget - uniforms.uPointerStrength.value)
@@ -466,6 +472,9 @@ export function MorphablePresenceStage({
         const gestureTarget = att.source === "camera" ? att.gesture : 0
         uniforms.uGesture.value += (gestureTarget - uniforms.uGesture.value) * Math.min(1, delta * 4)
       }
+      stage.dataset.presenceYaw = bust.rotation.y.toFixed(3)
+      stage.dataset.presencePitch = bust.rotation.x.toFixed(3)
+      stage.dataset.presenceMotion = String(idleMotion)
       try {
         if (composer && bloomPass.enabled) composer.render()
         else renderer.render(scene, camera)

@@ -1,6 +1,7 @@
 import { registerPresenceShape } from "./catalog"
 import { buildHumanoidBustField } from "./humanoidBust"
 import type { ParticleOrb } from "../particleTypes"
+import { buildPortraitVolume } from "./portraitVolume"
 
 const pending = new Map<string, Promise<string>>()
 let terrain: Promise<ParticleOrb[]> | undefined
@@ -54,8 +55,8 @@ function prepareTerrain(): Promise<ParticleOrb[]> {
 const linear = (v: number) => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
 
 /** Decode once; every visible pixel becomes a luminous sample in the shared cloud. */
-export function preparePortraitCloud(url: string, persona: string): Promise<string> {
-  const key = `${persona}:${url}`
+export function preparePortraitCloud(url: string, persona: string, volumetric = false): Promise<string> {
+  const key = `${persona}:${url}:${volumetric}`
   const cached = pending.get(key)
   if (cached) return cached
   const promise = (async () => {
@@ -91,11 +92,12 @@ export function preparePortraitCloud(url: string, persona: string): Promise<stri
       }
     }
     if (!points.length) throw new Error("Avatar artwork contains no visible particles")
+    const figure = volumetric ? buildPortraitVolume(pixels, resolution, height) : points
     const field = persona === "humanoid" ? await prepareTerrain().catch(() => undefined) : undefined
-    const id = `portrait_${persona}`
+    const id = `portrait_${persona}${volumetric ? "_b" : ""}`
     registerPresenceShape({
       id, label: `${persona} particle avatar`,
-      buildFigure: () => points,
+      buildFigure: () => figure,
       buildField: field ? () => field : buildHumanoidBustField,
       framing: { yaw: 0, position: [0, 0, 0], fitMargin: 0.83 },
       appearance: { pointScale: 1, depthSoftness: 1 },

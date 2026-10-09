@@ -17,7 +17,7 @@ export function Check() {
   const [phase, setPhase] = useState<PresencePhase>("idle")
   const [shapeId, setShapeId] = useState("humanoid_bust")
   const [personaId, setPersonaId] = useState("anzu")
-  const [dotAppearance, setDotAppearance] = useState({ pointScale: 1, depthSoftness: 0 })
+  const [dotAppearance, setDotAppearance] = useState({ pointScale: 1, depthSoftness: 0, glow: 0.82, detail: 0.68, animation: 0.72 })
   const [settings, setSettings] = useState<PresentationSettings>({
     ...DEFAULT_PRESENTATION_SETTINGS,
     requestedPresence: "humanoid" as const,
@@ -105,6 +105,21 @@ export function Check() {
             ))}
           </select>
         </label>
+        <label>
+          Version{" "}
+          <select aria-label="Avatar version" value={settings.avatarId}
+            onChange={(e) => setSettings((s) => ({ ...s, avatarId: e.target.value }))}>
+            <option value="mythic_portrait_a">A · portrait</option>
+            <option value="mythic_live_b">B · 3D live gaze</option>
+            <option value="humanoid_bust">Humanoid</option>
+          </select>
+        </label>
+        {(["glow", "detail", "animation"] as const).map((key) => (
+          <label key={key}>{key === "glow" ? "Brightness" : key === "detail" ? "Density" : "Animation"}{" "}
+            <input aria-label={key} type="range" min={key === "animation" ? 0 : 0.35} max={1} step={0.01}
+              value={dotAppearance[key]} onChange={(e) => setDotAppearance((v) => ({ ...v, [key]: Number(e.target.value) }))} />
+          </label>
+        ))}
         <label>
           Attention{" "}
           <select
