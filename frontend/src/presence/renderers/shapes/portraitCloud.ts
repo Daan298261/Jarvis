@@ -100,7 +100,7 @@ export function preparePortraitCloud(url: string, persona: string, volumetric = 
       buildFigure: () => figure,
       buildField: field ? () => field : buildHumanoidBustField,
       framing: { yaw: 0, position: [0, 0, 0], fitMargin: 0.83 },
-      appearance: { pointScale: 1, depthSoftness: 1 },
+      appearance: { pointScale: 1, depthSoftness: 1, bloomStrength: volumetric ? 0.14 : undefined },
     })
     return id
   })()

@@ -59,6 +59,7 @@ export const particleVertexShader = `
   uniform vec2 uPointer;
   uniform float uPointerStrength;
   uniform float uGesture;
+  uniform vec2 uAvatarDeform;
   varying float vGold;
   varying float vLight;
   varying float vFlow;
@@ -72,6 +73,12 @@ export const particleVertexShader = `
     float m = mix(morph01, lifecycle01, step(0.5, uRestRemap));
     vec3 p = mix(aPos, bPos, m);
     vPortraitColor = mix(aColor, bColor, m);
+    // Bounded edge feather movement and a soft surface ripple, using the same
+    // authored cloud. The face stays intact; there is no particle dissolution.
+    float avatarEdge = smoothstep(0.45, 1.4, abs(p.x)) * vPortraitColor.a;
+    p.y += avatarEdge * uAvatarDeform.x;
+    p.z += avatarEdge * uAvatarDeform.x * 0.45
+      + sin(p.y * 2.2) * uAvatarDeform.y;
     // Idle breathing loosens the same live cloud and lets it settle again.
     // The anatomical silhouette remains readable; this is not a texture pulse.
     float restPulse = uBreath * (1.0 - m) * uMotion;

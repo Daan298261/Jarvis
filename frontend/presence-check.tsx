@@ -112,6 +112,7 @@ export function Check() {
             <option value="mythic_portrait_a">A · portrait</option>
             <option value="mythic_live_b">B · 3D live gaze</option>
             <option value="humanoid_bust">Humanoid</option>
+            <option value="humanoid_muscular">Muscular humanoid</option>
           </select>
         </label>
         {(["glow", "detail", "animation"] as const).map((key) => (

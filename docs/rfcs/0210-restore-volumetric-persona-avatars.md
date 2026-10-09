@@ -17,6 +17,7 @@ Restore the original artwork in both A and B. B uses a closed particle relief wi
 - All fourteen named personas use their detailed artwork in B, with measurable depth and a rear surface; A remains available.
 - Humanoid artwork and terrain remain unchanged.
 - Live gaze and idle motion respect reduced motion and animation intensity.
+- All fourteen personas and both humanoids have restrained authored idle motion profiles; portrait surfaces are softened and excessive bloom is reduced.
 - Brightness and density are immediately visible, persistent, and previewable in Appearance.
 - Rapid A/B changes cannot be undone by older settings responses.
 - Geometry/selection regression tests, frontend build/lint and pytest pass.

@@ -15,6 +15,7 @@ import {
 } from "../presenceLifecycle"
 import type { PersonaCloudVisual, PresencePhase, PresenceSnapshot, PresentationSettings } from "../presenceTypes"
 import { readVoiceMeter } from "../../tts/voiceAnalyser"
+import { avatarMotionProfile, sampleAvatarMotion } from "../avatarMotion"
 import {
   AutoPresenceQuality,
   motifSafeAccentHex,
@@ -154,6 +155,7 @@ export function MorphablePresenceStage({
       uPointer: { value: new THREE.Vector2(0, 0) },
       uPointerStrength: { value: 0 },
       uGesture: { value: 0 },
+      uAvatarDeform: { value: new THREE.Vector2(0, 0) },
       uColor: { value: new THREE.Color(PHASE_COLOR.idle) },
       uGold: { value: new THREE.Color(0xff941f) },
       uAccent: { value: new THREE.Color(0xd4a017) },
@@ -442,16 +444,18 @@ export function MorphablePresenceStage({
       const yawGain = THREE.MathUtils.degToRad(volumetricPersona ? 18 : 3.2)
       const pitchGain = THREE.MathUtils.degToRad(volumetricPersona ? 9 : 1.35)
       const idleMotion = reduced ? 0 : Math.max(0, animation)
-      const hoverX = volumetricPersona ? Math.sin(animationTime * 0.48) * 0.035 * idleMotion : 0
-      const hoverY = Math.sin(animationTime * 1.05) * (volumetricPersona ? 0.032 : 0.016) * idleMotion
-      const breathScale = volumetricPersona ? 1 + Math.sin(animationTime * 0.92) * 0.009 * idleMotion : 1
-      bust.scale.setScalar(fitScale * breathScale)
+      const motionProfile = avatarMotionProfile(system.currentShapeId)
+      const motion = sampleAvatarMotion(motionProfile, animationTime, animation, reduced)
+      bust.scale.setScalar(fitScale * motion.scale)
+      bust.rotation.z = motion.roll
+      // Deform only the detailed persona relief. Humanoid artwork remains solid.
+      uniforms.uAvatarDeform.value.set(volumetricPersona ? motion.flutter : 0, volumetricPersona ? motion.ripple : 0)
       const rotationLerp = 1 - Math.exp(-delta * 3.4)
       if (!follow) {
-        bust.rotation.set(0, baseYaw, 0)
+        bust.rotation.set(motion.pitch, baseYaw + motion.yaw, motion.roll)
         bust.position.set(
-          framedX + hoverX,
-          framedY + hoverY,
+          framedX + motion.x,
+          framedY + motion.y,
           framedZ,
         )
         uniforms.uPointerStrength.value = 0
@@ -460,11 +464,11 @@ export function MorphablePresenceStage({
         const ax = att.x
         const ay = att.y
         const yawFollow = morphNow
-        bust.rotation.y += ((baseYaw + ax * yawGain * yawFollow) - bust.rotation.y) * rotationLerp
-        bust.rotation.x += ((-ay * pitchGain * yawFollow) - bust.rotation.x) * rotationLerp
-        bust.position.x = framedX + hoverX
+        bust.rotation.y += ((baseYaw + motion.yaw + ax * yawGain * yawFollow) - bust.rotation.y) * rotationLerp
+        bust.rotation.x += ((motion.pitch - ay * pitchGain * yawFollow) - bust.rotation.x) * rotationLerp
+        bust.position.x = framedX + motion.x
         bust.position.z = framedZ
-        bust.position.y = framedY + hoverY
+        bust.position.y = framedY + motion.y
         uniforms.uPointer.value.set(ax * 1.45, 0.12 - ay * 1.35)
         const pointerTarget = THREE.MathUtils.clamp(att.confidence, 0, 1) * restAttractGain(morphNow)
         uniforms.uPointerStrength.value += (pointerTarget - uniforms.uPointerStrength.value)
@@ -475,6 +479,8 @@ export function MorphablePresenceStage({
       stage.dataset.presenceYaw = bust.rotation.y.toFixed(3)
       stage.dataset.presencePitch = bust.rotation.x.toFixed(3)
       stage.dataset.presenceMotion = String(idleMotion)
+      stage.dataset.presenceAnimation = motionProfile.name
+      stage.dataset.presenceHover = motion.y.toFixed(4)
       try {
         if (composer && bloomPass.enabled) composer.render()
         else renderer.render(scene, camera)
