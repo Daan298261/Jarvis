@@ -82,6 +82,7 @@ class QueueWatcher:
         self.poll_interval = poll_interval
         self._running = False
         self._task: asyncio.Task | None = None
+        self._lock = asyncio.Lock()
 
     def start(self) -> None:
         if self._running:
@@ -108,10 +109,16 @@ class QueueWatcher:
         if kill_switch_active():
             logger.info("Kill switch active; leaving queued files in pending")
             return []
+        async with self._lock:
+            return await self._process_pending_locked()
+
+    async def _process_pending_locked(self) -> list[str]:
         root = queue_root()
         pending_dirs = [root / "pending"]
         processed_dir = root / "processed"
         failed_dir = root / "failed"
+        claim_dir = root / "claiming"
+        claim_dir.mkdir(parents=True, exist_ok=True)
         processed_tasks = []
 
         candidates: list[Path] = []
@@ -134,8 +141,17 @@ class QueueWatcher:
             if not filepath.exists():
                 continue
             ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            # Claim before create_task so startup + poll cannot double-ingest.
+            claimed = claim_dir / f"{ts}_{filepath.name}"
             try:
-                task_data = parse_queue_file(filepath)
+                os.replace(filepath, claimed)
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                logger.warning("Failed to claim queue file %s: %s", filepath.name, exc)
+                continue
+            try:
+                task_data = parse_queue_file(claimed)
                 prompt = task_data["prompt"]
                 if not prompt:
                     raise ValueError("Prompt is empty")
@@ -148,16 +164,15 @@ class QueueWatcher:
                 )
                 logger.info("Ingested queued task %s from %s", task.id, filepath.name)
 
-                # Move to processed
-                dest = processed_dir / f"{ts}_{filepath.name}"
-                shutil.move(str(filepath), str(dest))
+                dest = processed_dir / claimed.name
+                shutil.move(str(claimed), str(dest))
                 processed_tasks.append(task.id)
             except Exception as exc:
                 logger.warning("Failed to process queue file %s: %s", filepath.name, exc)
                 try:
-                    dest = failed_dir / f"{ts}_{filepath.name}"
-                    shutil.move(str(filepath), str(dest))
-                    err_file = failed_dir / f"{ts}_{filepath.name}.err.txt"
+                    dest = failed_dir / claimed.name
+                    shutil.move(str(claimed), str(dest))
+                    err_file = failed_dir / f"{claimed.name}.err.txt"
                     err_file.write_text(str(exc), encoding="utf-8")
                 except Exception:
                     pass
