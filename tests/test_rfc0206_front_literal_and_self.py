@@ -20,10 +20,29 @@ from app.agent.self_knowledge import (
     PRODUCT_NAME,
     SNAPSHOT_INCLUDE_KEYS,
     build_self_knowledge_snapshot,
-    forbidden_snapshot_leak,
     snapshot_covers_question,
     snapshot_prompt_addendum,
 )
+
+_FORBIDDEN_PROMPT_FRAGMENTS = (
+    "auth_token",
+    "api_key",
+    "remote_api_key",
+    "voicestudio_api_key",
+    "model_path",
+    "gguf_path",
+    "mmproj_path",
+    "vault_path",
+    "remote_base_url",
+    "mcp_servers",
+    "tool catalog",
+    "tool_catalog",
+)
+
+
+def _forbidden_snapshot_leak(rendered: str) -> list[str]:
+    hay = (rendered or "").lower()
+    return [item for item in _FORBIDDEN_PROMPT_FRAGMENTS if item in hay]
 from app.config import AppSettings, FrontResponderSettings, InferenceSettings, KnowledgeVaultSettings, VoiceSettings
 from app.decision.owner_turn import decide_owner_turn
 from app.agent.planning import route_request
@@ -40,12 +59,12 @@ async def test_say_only_the_word_ready_is_literal_final_basic():
     assert turn.literal_text == "ready"
     assert turn.reply_shape == "literal"
     assert turn.front_action == "final_basic"
-    assert turn.start_worker is False
+    assert worker_required(turn.front_action) is False
     assert classify_front_action("Say only the word ready", decision=turn) == "final_basic"
 
 
 @pytest.mark.asyncio
-async def test_ready_fixture_even_when_model_returns_safe_ack():
+async def test_ready_fixture_short_circuits_provider_to_literal():
     class AckProvider:
         async def chat_stream(self, messages, **kwargs):
             del messages, kwargs
@@ -118,6 +137,8 @@ def test_fallback_does_not_use_safe_ack_for_literal_social_or_clarify():
     assert SAFE_ACK not in fallback_text_for_action("final_basic", reply_shape="social")
     assert fallback_text_for_action("ask_clarification", reply_shape="clarify") != SAFE_ACK
     assert fallback_text_for_action("ack_continue", reply_shape="ack") == SAFE_ACK
+    assert fallback_text_for_action("final_basic", reply_shape="self_status") == ""
+    assert "live self snapshot" not in fallback_text_for_action("final_basic", reply_shape="self_status")
 
 
 def test_enforce_replaces_holding_phrase_on_literal():
@@ -190,7 +211,7 @@ def test_snapshot_include_and_exclude(jarvis_env):
     assert snapshot["context_size"] == 16384
     rendered = snapshot_prompt_addendum(snapshot)
     assert "ANZU Superassistant" in rendered
-    leaks = forbidden_snapshot_leak(rendered)
+    leaks = _forbidden_snapshot_leak(rendered)
     assert leaks == []
     blob = json.dumps(snapshot).lower()
     for forbidden in (
@@ -254,7 +275,7 @@ def test_self_status_envelope_contains_snapshot_not_secrets(jarvis_env):
     )
     joined = "\n".join(item.content for item in messages)
     assert "ANZU Superassistant" in joined
-    assert forbidden_snapshot_leak(joined) == []
+    assert _forbidden_snapshot_leak(joined) == []
     assert "inference-secret" not in joined
 
 
@@ -279,3 +300,66 @@ def test_real_task_may_still_ack():
         "ack_continue",
     }
     assert fallback_text_for_action("ack_continue", reply_shape="ack") == SAFE_ACK
+
+
+@pytest.mark.asyncio
+async def test_failed_self_status_front_falls_through_to_worker():
+    reply = await generate_front_reply(
+        "What profile is loaded?",
+        settings=AppSettings(),
+        provider=object(),
+    )
+    assert reply.action == "ack_continue"
+    assert reply.text == ""
+    assert "live self snapshot" not in (reply.text or "").lower()
+    assert worker_required(reply.action) is True
+
+
+@pytest.mark.asyncio
+async def test_safety_rejected_self_status_falls_through_to_worker():
+    class Unsafe:
+        async def chat_stream(self, messages, **kwargs):
+            del messages, kwargs
+            yield "The configured context size is currently 16."
+
+    reply = await generate_front_reply(
+        "What profile is loaded?",
+        settings=AppSettings(),
+        provider=Unsafe(),
+    )
+    assert reply.action == "ack_continue"
+    assert "live self snapshot" not in (reply.text or "").lower()
+    assert worker_required(reply.action) is True
+
+
+def test_self_status_rejects_digit_substring_of_snapshot_json():
+    snapshot = {"context_size": 16384, "product_name": PRODUCT_NAME}
+    action, text, rejected = enforce_front_safety(
+        "final_basic",
+        "The configured context size is currently 16.",
+        user_text="What is the context size?",
+        heuristic="final_basic",
+        reply_shape="self_status",
+        snapshot=snapshot,
+    )
+    assert rejected is True
+    assert action == "ack_continue"
+    assert text == ""
+
+
+def test_coverage_does_not_call_load_settings_or_resolve_status(monkeypatch):
+    monkeypatch.setattr(
+        "app.config.load_settings",
+        lambda: (_ for _ in ()).throw(AssertionError("load_settings")),
+    )
+    monkeypatch.setattr(
+        "app.decision.tier.resolve_status",
+        lambda: (_ for _ in ()).throw(AssertionError("resolve_status")),
+    )
+    monkeypatch.setattr(
+        "app.licensing.lease.get_stored_lease",
+        lambda: (_ for _ in ()).throw(AssertionError("lease")),
+    )
+    assert snapshot_covers_question("What profile is loaded?") is True
+    assert snapshot_covers_question("What model of car should I buy?") is False
+    assert snapshot_covers_question("what's your context on the Henderson case") is False

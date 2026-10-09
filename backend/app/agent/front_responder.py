@@ -301,6 +301,21 @@ def worker_required(action: str) -> bool:
     return action in {"ack_continue", "handoff_notice", "silent_skip"}
 
 
+def _fall_through_failed_self_status(
+    action: str,
+    text: str,
+    *,
+    reply_shape: str,
+    rejected: bool,
+) -> tuple[str, str]:
+    """A failed self-status front must not become a canned terminal answer."""
+    if (reply_shape or "").strip() != "self_status":
+        return action, text
+    if rejected or not (text or "").strip():
+        return "ack_continue", ""
+    return action, text
+
+
 def terminal_front_completes_turn(action: str) -> bool:
     """True when the front lane alone finishes the owner turn (no worker)."""
     return action in {"final_basic", "ask_clarification"}
@@ -336,8 +351,11 @@ def is_unsafe_front_claim(
                 return True
             leak = None
         if invented:
+            from .self_knowledge import snapshot_numeric_tokens
+
             numbers = re.findall(r"\d+(?:\.\d+)?", sample)
-            if numbers and any(number not in blob for number in numbers):
+            allowed = snapshot_numeric_tokens(snapshot)
+            if numbers and any(number not in allowed for number in numbers):
                 return True
             invented = None
         return False
@@ -401,21 +419,13 @@ def fallback_text_for_action(
         return SAFE_CLARIFY
     if action == "silent_skip":
         return ""
-    if shape == "self_status" or (action == "final_basic" and shape == "self_status"):
-        return "I can report from the live self snapshot."
+    if shape == "self_status":
+        # Never a canned holding line. A failed self-status front falls through
+        # to the worker (see _fall_through_failed_self_status).
+        return ""
     if shape == "social" or action == "final_basic":
         return safe_hello(settings)
     if action == "handoff_notice" or shape == "handoff":
-        return SAFE_HANDOFF
-    if shape in {"literal", "social", "self_status", "clarify"}:
-        if shape == "literal":
-            return (literal_text or "").strip()
-        if shape == "clarify":
-            return SAFE_CLARIFY
-        if shape == "self_status":
-            return "I can report from the live self snapshot."
-        return safe_hello(settings)
-    if action == "handoff_notice":
         return SAFE_HANDOFF
     return SAFE_ACK
 
@@ -480,6 +490,9 @@ def enforce_front_safety(
             reply_shape=reply_shape,
             literal_text=literal_text,
         )
+    resolved, cleaned = _fall_through_failed_self_status(
+        resolved, cleaned, reply_shape=reply_shape, rejected=rejected
+    )
     return resolved, cleaned, rejected
 
 
@@ -506,6 +519,50 @@ def live_text_update(shown: str, reply: str) -> tuple[str, str] | None:
     return None
 
 
+def _early_merge_result(
+    front: str,
+    worker: str,
+    action: str,
+) -> str | None:
+    if action == "silent_skip":
+        return worker or front
+    if action == "final_basic" and not worker:
+        return front or worker
+    if action == "ask_clarification" and not worker:
+        return front
+    if not front:
+        return worker
+    if not worker:
+        return front
+    return None
+
+
+def _apply_arbitration_result(
+    result: Any | None,
+    front: str,
+    worker: str,
+    action: str,
+    reply_shape: str,
+) -> str:
+    from ..decision.surfaces import answer_value
+
+    disposition = ""
+    if result is not None:
+        disposition = str(answer_value(result, "disposition") or "")
+    if disposition not in {"keep_front", "keep_worker", "append_novel"}:
+        disposition = infer_arbitration_disposition(
+            front,
+            worker,
+            front_action=action,
+            reply_shape=reply_shape,
+        )
+    if reply_shape == "literal" or (
+        action == "final_basic" and front and not is_unsafe_front_claim(front)
+    ):
+        disposition = "keep_front"
+    return apply_disposition(disposition, front, worker)
+
+
 def merge_front_and_worker(
     front_text: str,
     worker_text: str,
@@ -519,22 +576,50 @@ def merge_front_and_worker(
     """One owner-facing turn via Reflex arbitration + string executor.
 
     One side empty: return the other side and do not call a provider.
+    Empty / synthetic ``user_message``: rules disposition only (no provider).
     """
     front = _strip_legacy_merge_heading(front_text or "").strip()
     worker = _strip_legacy_merge_heading(worker_text or "").strip()
-    if action == "silent_skip":
-        return worker or front
-    if action == "final_basic" and not worker:
-        return front or worker
-    if action == "ask_clarification" and not worker:
-        return front
-    if not front:
-        return worker
-    if not worker:
-        return front
-    from ..decision.surfaces import answer_value, arbitrate_front_and_worker
+    early = _early_merge_result(front, worker, action)
+    if early is not None:
+        return early
+    result = None
+    if (user_message or "").strip():
+        from ..decision.surfaces import arbitrate_front_and_worker
 
-    result = arbitrate_front_and_worker(
+        result = arbitrate_front_and_worker(
+            user_message=user_message,
+            front_text=front,
+            worker_text=worker,
+            front_action=action,
+            front_spoken=front_spoken,
+            reply_shape=reply_shape,
+            decision_tier=decision_tier,
+        )
+    return _apply_arbitration_result(result, front, worker, action, reply_shape)
+
+
+async def merge_front_and_worker_async(
+    front_text: str,
+    worker_text: str,
+    action: str,
+    *,
+    user_message: str = "",
+    reply_shape: str = "",
+    front_spoken: bool = False,
+    decision_tier: str = "local",
+) -> str:
+    """Bounded arbitration (50 ms, off the event loop) then the string executor."""
+    front = _strip_legacy_merge_heading(front_text or "").strip()
+    worker = _strip_legacy_merge_heading(worker_text or "").strip()
+    early = _early_merge_result(front, worker, action)
+    if early is not None:
+        return early
+    if not (user_message or "").strip():
+        return _apply_arbitration_result(None, front, worker, action, reply_shape)
+    from ..decision.surfaces import arbitrate_front_and_worker_bounded
+
+    result = await arbitrate_front_and_worker_bounded(
         user_message=user_message,
         front_text=front,
         worker_text=worker,
@@ -543,19 +628,7 @@ def merge_front_and_worker(
         reply_shape=reply_shape,
         decision_tier=decision_tier,
     )
-    disposition = str(answer_value(result, "disposition") or "")
-    if disposition not in {"keep_front", "keep_worker", "append_novel"}:
-        disposition = infer_arbitration_disposition(
-            front,
-            worker,
-            front_action=action,
-            reply_shape=reply_shape,
-        )
-    if reply_shape == "literal" or (
-        action == "final_basic" and front and not is_unsafe_front_claim(front)
-    ):
-        disposition = "keep_front"
-    return apply_disposition(disposition, front, worker)
+    return _apply_arbitration_result(result, front, worker, action, reply_shape)
 
 
 def speakable_worker_remainder(merged: str, spoken_through: int) -> str:
@@ -615,7 +688,11 @@ def merge_consecutive_assistant_turns(turns: list[dict[str, Any]]) -> list[dict[
                 continue
             if previous.startswith(content):
                 continue
-            merged[-1]["content"] = merge_front_and_worker(previous, content, "ack_continue")
+            merged[-1]["content"] = apply_disposition(
+                infer_arbitration_disposition(previous, content, front_action="ack_continue"),
+                previous,
+                content,
+            )
             continue
         merged.append(dict(turn))
         merged[-1]["content"] = content
@@ -711,11 +788,11 @@ async def generate_front_reply(
     started = turn_started if turn_started is not None else time.perf_counter()
     decision = turn_decision
     if decision is None:
-        from ..decision.owner_turn import decide_owner_turn
+        from .request_routing import evaluate_request_route
 
-        decision = await decide_owner_turn(
+        decision = await evaluate_request_route(
             user_text,
-            baseline=route,
+            route,
             settings=app,
             decision_tier=str(getattr(getattr(app, "decision", None), "tier", "") or "local"),
         )
@@ -765,6 +842,9 @@ async def generate_front_reply(
             reply_shape=reply_shape,
             literal_text=literal_text,
             snapshot=snapshot,
+        )
+        action, text = _fall_through_failed_self_status(
+            action, text, reply_shape=reply_shape, rejected=rejected
         )
         if heuristic == "silent_skip":
             return FrontReply(
@@ -849,6 +929,9 @@ async def generate_front_reply(
             literal_text=literal_text,
             snapshot=snapshot,
         )
+        action, text = _fall_through_failed_self_status(
+            action, text, reply_shape=reply_shape, rejected=rejected
+        )
         return FrontReply(
             action=action,
             text=text,
@@ -870,9 +953,12 @@ async def generate_front_reply(
         literal_text=literal_text,
         snapshot=snapshot,
     )
+    action, text = _fall_through_failed_self_status(
+        action, text, reply_shape=reply_shape, rejected=rejected
+    )
     complete_ms = max(0.0, (time.perf_counter() - started) * 1000)
     skipped = action == "silent_skip" or not text
-    if skipped and not text and worker_required(heuristic):
+    if skipped and not text and worker_required(heuristic) and action != "ack_continue":
         action = "silent_skip"
     return FrontReply(
         action=action,
@@ -963,11 +1049,11 @@ async def run_two_lane_chat(
     router_started = time.perf_counter()
     decision = turn_decision
     if decision is None:
-        from ..decision.owner_turn import decide_owner_turn
+        from .request_routing import evaluate_request_route
 
-        decision = await decide_owner_turn(
+        decision = await evaluate_request_route(
             user_text,
-            baseline=route,
+            route,
             settings=app,
             decision_tier=str(getattr(getattr(app, "decision", None), "tier", "") or "local"),
         )
@@ -1076,7 +1162,7 @@ async def run_two_lane_chat(
         timing.front_action = "silent_skip"
 
     merge_front = "" if suppress_front else front.text
-    merged = merge_front_and_worker(
+    merged = await merge_front_and_worker_async(
         merge_front,
         "".join(worker_parts).strip(),
         front.action,
@@ -1278,15 +1364,6 @@ def apply_disposition(disposition: str, front_text: str, worker_text: str) -> st
     if not novel:
         return front
     return f"{front}\n\n{' '.join(novel).strip()}"
-
-
-def consolidate_front_and_worker(front: str, worker: str) -> str:
-    """Executor over the rules disposition. No second merge policy."""
-    return apply_disposition(
-        infer_arbitration_disposition(front, worker),
-        front,
-        worker,
-    )
 
 
 def ack_is_held(action: str) -> bool:

@@ -45,9 +45,9 @@ async def main() -> None:
 
             request_routing.decide = observe
             started = time.perf_counter()
-            route = await request_routing.evaluate_request_route(prompt, route_request(prompt))
-            samples.append({"prompt": prompt, "repeat": repeat, "route": route.kind,
-                            "task_class": route.task_class,
+            turn = await request_routing.evaluate_request_route(prompt, route_request(prompt))
+            samples.append({"prompt": prompt, "repeat": repeat, "route": turn.route.kind,
+                            "task_class": turn.route.task_class,
                             "elapsed_ms": round((time.perf_counter() - started) * 1000, 2), **evidence})
     request_routing.decide = original
     print(json.dumps({"fixture": False, "device": status.get("device"),

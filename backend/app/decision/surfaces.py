@@ -5,10 +5,15 @@ Browser operation/target is a typed decision helper only — full fast loop is R
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import time
 from typing import Any
 
 from .reflex import decide
-from .types import Answer, DecisionResult, PrivacyMode, Question
+from .types import Answer, DecisionResult, LatencyBreakdown, PrivacyMode, Question
+
+log = logging.getLogger("jarvis.decision.surfaces")
 
 
 def route_persona_model(
@@ -254,7 +259,86 @@ def privacy_for_tier(decision_tier: str) -> PrivacyMode:
 
 
 ARBITRATION_DEADLINE_MS = 50.0
+ARBITRATION_DEADLINE_S = 0.05
 ARBITRATION_CHOICES = ("keep_front", "keep_worker", "append_novel")
+ARBITRATION_QUESTIONS: list[Question] = [
+    Question(
+        id="disposition",
+        type="choice",
+        prompt="How should the front-lane answer and the worker-lane answer become one owner-facing turn?",
+        choices=ARBITRATION_CHOICES,
+        descriptions=(
+            "Keep the front line; drop a worker paraphrase",
+            "Keep the worker line; it already contains the front line or corrects it",
+            "Keep the front line, then append worker sentences that add new information",
+        ),
+    )
+]
+
+
+def _arbitration_state(
+    *,
+    user_message: str,
+    front_text: str,
+    worker_text: str,
+    front_action: str,
+    front_spoken: bool,
+    reply_shape: str,
+) -> dict[str, Any]:
+    return {
+        "user_message": user_message,
+        "front_text": front_text,
+        "worker_text": worker_text,
+        "front_action": front_action,
+        "front_spoken": bool(front_spoken),
+        "reply_shape": reply_shape,
+    }
+
+
+def _arbitration_deadline_fallback(
+    *,
+    user_message: str,
+    front_text: str,
+    worker_text: str,
+    front_action: str,
+    front_spoken: bool,
+    reply_shape: str,
+    reason: str,
+    spent_ms: float,
+) -> DecisionResult:
+    from .adapters import rules
+    from . import audit, metrics
+
+    base = rules.decide(
+        state=_arbitration_state(
+            user_message=user_message,
+            front_text=front_text,
+            worker_text=worker_text,
+            front_action=front_action,
+            front_spoken=front_spoken,
+            reply_shape=reply_shape,
+        ),
+        questions=ARBITRATION_QUESTIONS,
+        decision_class="arbitration",
+        deadline_ms=ARBITRATION_DEADLINE_MS,
+    )
+    result = DecisionResult(
+        answers=base.answers,
+        source="deadline_fallback",
+        decision_class="arbitration",
+        provider="rules",
+        provider_version=base.provider_version,
+        model=base.model,
+        fallback_used=True,
+        fallback_reason=reason,
+        fallback_source="rules",
+        latency=LatencyBreakdown(total_ms=spent_ms, inference_ms=base.latency.inference_ms),
+        hard_rule=base.hard_rule,
+        meta={"deadline_fallback": True, "arbitration": True},
+    )
+    metrics.record(result)
+    audit.record_event("reflex_deadline_fallback", result.as_dict())
+    return result
 
 
 def arbitrate_front_and_worker(
@@ -272,28 +356,75 @@ def arbitrate_front_and_worker(
     """One Reflex decide() for how front + worker become one owner-facing turn."""
     mode = privacy if privacy is not None else privacy_for_tier(decision_tier)
     return decide(
-        {
-            "user_message": user_message,
-            "front_text": front_text,
-            "worker_text": worker_text,
-            "front_action": front_action,
-            "front_spoken": bool(front_spoken),
-            "reply_shape": reply_shape,
-        },
-        [
-            Question(
-                id="disposition",
-                type="choice",
-                prompt="How should the front-lane answer and the worker-lane answer become one owner-facing turn?",
-                choices=ARBITRATION_CHOICES,
-                descriptions=(
-                    "Keep the front line; drop a worker paraphrase",
-                    "Keep the worker line; it already contains the front line or corrects it",
-                    "Keep the front line, then append worker sentences that add new information",
-                ),
-            )
-        ],
+        _arbitration_state(
+            user_message=user_message,
+            front_text=front_text,
+            worker_text=worker_text,
+            front_action=front_action,
+            front_spoken=front_spoken,
+            reply_shape=reply_shape,
+        ),
+        ARBITRATION_QUESTIONS,
         "arbitration",
         deadline_ms,
         mode,
     )
+
+
+async def arbitrate_front_and_worker_bounded(
+    *,
+    user_message: str,
+    front_text: str,
+    worker_text: str,
+    front_action: str = "",
+    front_spoken: bool = False,
+    reply_shape: str = "",
+    decision_tier: str = "local",
+    deadline_ms: float = ARBITRATION_DEADLINE_MS,
+    privacy: PrivacyMode | None = None,
+) -> DecisionResult:
+    """Same as ``arbitrate_front_and_worker`` with a 50 ms wall-clock cap off the loop."""
+    started = time.perf_counter()
+    timeout_s = max(0.001, float(deadline_ms) / 1000.0)
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(
+                arbitrate_front_and_worker,
+                user_message=user_message,
+                front_text=front_text,
+                worker_text=worker_text,
+                front_action=front_action,
+                front_spoken=front_spoken,
+                reply_shape=reply_shape,
+                decision_tier=decision_tier,
+                deadline_ms=deadline_ms,
+                privacy=privacy,
+            ),
+            timeout=timeout_s,
+        )
+    except TimeoutError:
+        spent = (time.perf_counter() - started) * 1000.0
+        log.info("Arbitration reflex exceeded 50 ms; using rules deadline fallback")
+        return _arbitration_deadline_fallback(
+            user_message=user_message,
+            front_text=front_text,
+            worker_text=worker_text,
+            front_action=front_action,
+            front_spoken=front_spoken,
+            reply_shape=reply_shape,
+            reason="outer wait_for exceeded 50 ms",
+            spent_ms=spent,
+        )
+    except Exception:
+        spent = (time.perf_counter() - started) * 1000.0
+        log.warning("Arbitration reflex unavailable; using rules deadline fallback", exc_info=True)
+        return _arbitration_deadline_fallback(
+            user_message=user_message,
+            front_text=front_text,
+            worker_text=worker_text,
+            front_action=front_action,
+            front_spoken=front_spoken,
+            reply_shape=reply_shape,
+            reason="arbitration provider error",
+            spent_ms=spent,
+        )

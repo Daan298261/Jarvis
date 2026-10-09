@@ -91,16 +91,32 @@ _NEEDS_STRONGER = re.compile(
 _LIVE_FACT_HINT = re.compile(
     r"(?i)\b(weather|forecast|news|score|price|stock|latest|right now|currently|cve-)\b"
 )
+# Second-person / ANZU-referential only. Bare "model" / "context" / "what are you doing"
+# must never fire — those are domain questions, not live self-status.
 _SELF_STATUS = re.compile(
-    r"(?i)\b("
-    r"what profile(?: is loaded)?|which profile|loaded profile|"
-    r"what model|which model|model alias|what(?:'s| is) loaded|"
-    r"who are you|what are you|your (?:name|persona|setup|settings|config|context)|"
-    r"active persona|decision tier|front lane|voice profile|"
-    r"is (?:the )?(?:vault|laya|jev)|laya (?:installed|warm|enabled)|"
-    r"what(?:'s| is) (?:your )?(?:shell|context|verbosity|personality)|"
-    r"about (?:yourself|anzu)|anzu superassistant"
-    r")\b"
+    r"(?i)(?:"
+    r"\bwho are you\b|"
+    r"\bwhat are you(?:\s*[?.!]?\s*$| (?:called|named|running|using|loaded))\b|"
+    r"\b(?:what|which) profile(?: is loaded)?\b|"
+    r"\bloaded profile\b|"
+    r"\b(?:what|which) model(?: is loaded| are you(?: running| using)?| is running| alias)\b|"
+    r"\bmodel alias\b|"
+    r"\bwhat(?:'s| is) loaded\b|"
+    r"\byour (?:name|persona|setup|settings|config|model)\b|"
+    r"\byour context (?:size|window|length)\b|"
+    r"\b(?:what(?:'s| is)|how (?:big|large) is) (?:your )?context (?:size|window)\b|"
+    r"\bactive persona\b|"
+    r"\bdecision tier\b|"
+    r"\bfront lane\b|"
+    r"\bvoice profile\b|"
+    r"\bis (?:laya|jev) (?:installed|warm|enabled|connected|ready)\b|"
+    r"\blaya (?:installed|warm|enabled)\b|"
+    r"\bis (?:the )?(?:knowledge )?vault bound\b|"
+    r"\bis your vault bound\b|"
+    r"\babout (?:yourself|anzu)\b|"
+    r"\banzu superassistant\b|"
+    r"\bwhat(?:'s| is) your (?:shell|verbosity|personality)\b"
+    r")"
 )
 
 
@@ -113,23 +129,8 @@ class OwnerTurnDecision:
     front_action: str
     literal_text: str = ""
     reflex: DecisionResult | None = None
-    start_worker: bool = False
     snapshot_covers: bool = False
     meta: dict[str, Any] = field(default_factory=dict)
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "route_kind": self.route.kind,
-            "task_class": self.route.task_class,
-            "reply_shape": self.reply_shape,
-            "front_action": self.front_action,
-            "literal_text": self.literal_text,
-            "start_worker": self.start_worker,
-            "snapshot_covers": self.snapshot_covers,
-            "source": getattr(self.reflex, "source", ""),
-            "provider": getattr(self.reflex, "provider", ""),
-            "fallback_used": bool(getattr(self.reflex, "fallback_used", False)),
-        }
 
 
 def extract_literal_candidate(user_message: str) -> str:
@@ -173,7 +174,7 @@ def infer_rules_reply_shape(
         return "clarify"
     if is_weather_query(text) or _LIVE_FACT_HINT.search(lowered):
         return "ack"
-    if _SELF_STATUS.search(text):
+    if is_self_status_question(text):
         return "self_status"
     kind = (baseline_route or "").strip() or route_request(text).kind
     if kind == MANAGED_TASK:
@@ -182,9 +183,15 @@ def infer_rules_reply_shape(
         return "ack"
     if _TRIVIAL_CHAT.search(lowered):
         return "social"
-    if kind == DIRECT_REPLY:
-        return "ack"
     return "ack"
+
+
+def is_self_status_question(user_message: str) -> bool:
+    """True only for genuine questions about ANZU itself, not domain uses of the words."""
+    text = (user_message or "").strip()
+    if not text:
+        return False
+    return bool(_SELF_STATUS.search(text))
 
 
 def front_action_for_shape(
@@ -224,13 +231,12 @@ def _answer_choice(result: DecisionResult, question_id: str) -> Answer | None:
     return answer
 
 
-def _snapshot_covers(user_message: str, settings: Any | None, inference_state: Any | None) -> bool:
-    if settings is None:
-        return False
+def _snapshot_covers(user_message: str) -> bool:
+    """Coverage from the snapshot schema only — no load_settings / secret / lease I/O."""
     try:
         from ..agent.self_knowledge import snapshot_covers_question
 
-        return snapshot_covers_question(user_message, settings, inference_state)
+        return snapshot_covers_question(user_message)
     except Exception:
         return False
 
@@ -241,8 +247,6 @@ def _apply_floors(
     baseline: RequestRoute,
     literal: str,
     result: DecisionResult,
-    settings: Any | None,
-    inference_state: Any | None,
 ) -> OwnerTurnDecision:
     route_answer = _answer_choice(result, "request_route")
     shape_answer = _answer_choice(result, "reply_shape")
@@ -276,6 +280,8 @@ def _apply_floors(
             reply_shape = "ack"
     if literal:
         reply_shape = "literal"
+    if reply_shape == "self_status" and not is_self_status_question(user_message):
+        reply_shape = rules_shape if rules_shape != "self_status" else "ack"
 
     if route_kind == DIRECT_LOOKUP:
         task_class = CONVERSATION_CLASS
@@ -292,16 +298,14 @@ def _apply_floors(
 
     covers = False
     if reply_shape == "self_status":
-        covers = _snapshot_covers(user_message, settings, inference_state)
+        covers = _snapshot_covers(user_message)
     action = front_action_for_shape(reply_shape, snapshot_covers=covers)
-    start_worker = action in {"ack_continue", "handoff_notice", "silent_skip"}
     return OwnerTurnDecision(
         route=RequestRoute(route_kind, task_class),
         reply_shape=reply_shape,
         front_action=action,
         literal_text=literal,
         reflex=result,
-        start_worker=start_worker,
         snapshot_covers=covers,
         meta={"rules_shape": rules_shape},
     )
@@ -378,8 +382,6 @@ def _decide_sync(
         baseline=baseline,
         literal=literal,
         result=result,
-        settings=settings,
-        inference_state=inference_state,
     )
 
 
@@ -447,8 +449,6 @@ async def decide_owner_turn(
             baseline=resolved_baseline,
             literal=literal,
             result=result,
-            settings=settings,
-            inference_state=inference_state,
         )
     except Exception:
         spent = (time.perf_counter() - started) * 1000.0
@@ -468,6 +468,4 @@ async def decide_owner_turn(
             baseline=resolved_baseline,
             literal=literal,
             result=result,
-            settings=settings,
-            inference_state=inference_state,
         )

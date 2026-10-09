@@ -8,6 +8,7 @@ import json
 import logging
 import time
 import uuid
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -416,6 +417,9 @@ def _permission_denied_observation(tool_name: str | None, arguments: dict[str, A
     return None
 
 
+_OWNER_TURN_CACHE_MAX = 64
+
+
 class AgentRuntime:
     def __init__(self) -> None:
         self._tasks: dict[str, asyncio.Task] = {}
@@ -423,7 +427,16 @@ class AgentRuntime:
         self._last_heartbeat: dict[str, datetime] = {}
         self._cancel = set()
         self._front_tasks: dict[str, asyncio.Task] = {}
-        self._owner_turns: dict[str, Any] = {}
+        self._owner_turns: OrderedDict[str, Any] = OrderedDict()
+
+    def _remember_owner_turn(self, task_id: str, turn: Any) -> None:
+        self._owner_turns.pop(task_id, None)
+        self._owner_turns[task_id] = turn
+        while len(self._owner_turns) > _OWNER_TURN_CACHE_MAX:
+            self._owner_turns.popitem(last=False)
+
+    def _forget_owner_turn(self, task_id: str) -> None:
+        self._owner_turns.pop(task_id, None)
 
     async def _heartbeat_loop(self, task_id: str) -> None:
         try:
@@ -447,6 +460,7 @@ class AgentRuntime:
             if current:
                 current.cancel()
             self._last_heartbeat[task_id] = utcnow()
+            self._forget_owner_turn(task_id)
 
         runner.add_done_callback(finish)
         return runner
@@ -485,11 +499,11 @@ class AgentRuntime:
                     return existing
         settings = load_settings()
         mode = execution_mode or settings.execution_mode or "balanced"
-        from ..decision.owner_turn import decide_owner_turn
+        from .request_routing import evaluate_request_route
 
-        turn = await decide_owner_turn(
+        turn = await evaluate_request_route(
             prompt,
-            baseline=route_request(prompt),
+            route_request(prompt),
             settings=settings,
             decision_tier=str(getattr(settings.decision, "tier", "") or "local"),
         )
@@ -526,7 +540,7 @@ class AgentRuntime:
         )
         if role == "purple-team":
             init_purple(task.id)
-        self._owner_turns[task.id] = turn
+        self._remember_owner_turn(task.id, turn)
         async with SessionLocal() as session:
             session.add(task)
             await session.commit()
@@ -720,6 +734,7 @@ class AgentRuntime:
         running = self._tasks.get(task_id)
         if running:
             running.cancel()
+        self._forget_owner_turn(task_id)
 
     async def _await_managed_front(self, task_id: str) -> None:
         front = self._front_tasks.pop(task_id, None)
@@ -2297,12 +2312,12 @@ class AgentRuntime:
             if spill:
                 active_prompt = f"{gate_text[:1200]}\n\n{spill}"
         metrics = LiveTaskMetrics()
-        from ..decision.owner_turn import decide_owner_turn as _decide_follow
+        from .request_routing import evaluate_request_route as _evaluate_follow
 
         follow_turn = (
-            await _decide_follow(
+            await _evaluate_follow(
                 extra_prompt,
-                baseline=route_request(extra_prompt),
+                route_request(extra_prompt),
                 settings=settings,
                 decision_tier=str(getattr(settings.decision, "tier", "") or "local"),
             )
@@ -2311,7 +2326,7 @@ class AgentRuntime:
         )
         follow_route = follow_turn.route if follow_turn is not None else None
         if follow_turn is not None:
-            self._owner_turns[task_id] = follow_turn
+            self._remember_owner_turn(task_id, follow_turn)
         if (working.task_class == CONVERSATION_CLASS or (follow_route and follow_route.kind != "managed_task")) and not pending_tool:
             if follow_up_stays_conversation(extra_prompt, security_role=working.security_role):
                 working.task_class = CONVERSATION_CLASS

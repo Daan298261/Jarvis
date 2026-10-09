@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import time
+
+import pytest
+
 from app.agent.front_responder import (
     apply_disposition,
     infer_arbitration_disposition,
     merge_consecutive_assistant_turns,
     merge_front_and_worker,
+    merge_front_and_worker_async,
 )
 from app.decision.types import Answer, DecisionResult
 
@@ -113,3 +118,65 @@ def test_one_sided_merge_skips_provider(monkeypatch):
     assert merge_front_and_worker("", "Worker only.", "ack_continue") == "Worker only."
     assert merge_front_and_worker("Front only.", "", "ack_continue") == "Front only."
     assert merge_front_and_worker("", "Worker.", "silent_skip") == "Worker."
+
+
+def test_empty_user_message_skips_provider(monkeypatch):
+    monkeypatch.setattr(
+        "app.decision.surfaces.arbitrate_front_and_worker",
+        lambda **_k: (_ for _ in ()).throw(AssertionError("no provider on empty user_message")),
+    )
+    merged = merge_front_and_worker(
+        "On it. I'll check the details.",
+        "Mild rain later, sir.",
+        "ack_continue",
+        user_message="",
+        reply_shape="ack",
+    )
+    assert "On it." in merged
+    assert "Mild rain later, sir." in merged
+
+
+def test_consecutive_assistant_turns_do_not_call_provider(monkeypatch):
+    monkeypatch.setattr(
+        "app.decision.surfaces.arbitrate_front_and_worker",
+        lambda **_k: (_ for _ in ()).throw(AssertionError("no provider")),
+    )
+    monkeypatch.setattr(
+        "app.decision.surfaces.decide",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no decide")),
+    )
+    turns = merge_consecutive_assistant_turns(
+        [
+            {"role": "user", "content": "Check the weather"},
+            {"role": "assistant", "content": "On it."},
+            {"role": "assistant", "content": "Mild rain later, sir."},
+        ]
+    )
+    assert "On it." in turns[-1]["content"]
+    assert "Mild rain later" in turns[-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_bounded_arbitration_does_not_stall_event_loop(monkeypatch):
+    def blocking(**_kwargs):
+        time.sleep(0.25)
+        return DecisionResult(
+            answers={"disposition": Answer("disposition", "choice", "keep_front", 0.99)},
+            source="laya",
+            decision_class="arbitration",
+            provider="laya",
+        )
+
+    monkeypatch.setattr("app.decision.surfaces.arbitrate_front_and_worker", blocking)
+    started = time.perf_counter()
+    merged = await merge_front_and_worker_async(
+        "On it. I'll check the details.",
+        "Mild rain later, sir.",
+        "ack_continue",
+        user_message="what is the weather",
+        reply_shape="ack",
+    )
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    assert elapsed_ms < 120.0
+    assert "On it." in merged
+    assert "Deeper result" not in merged

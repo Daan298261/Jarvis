@@ -363,11 +363,11 @@ async def stream_owner_chat(
     settings = load_settings()
     profile = resolve_profile(settings.inference.profile)
     turn_started = time.perf_counter()
-    from ..decision.owner_turn import decide_owner_turn
+    from ..agent.request_routing import evaluate_request_route
 
-    turn = await decide_owner_turn(
+    turn = await evaluate_request_route(
         cleaned,
-        baseline=route_request(cleaned),
+        route_request(cleaned),
         settings=settings,
         decision_tier=str(getattr(settings.decision, "tier", "") or "local"),
     )

@@ -7,32 +7,35 @@ from pathlib import Path
 
 import pytest
 
+from app.agent.front_responder import worker_required
 from app.agent.planning import MANAGED_TASK, DIRECT_REPLY, route_request
 from app.decision.audit import list_events, reset_audit
 from app.decision.owner_turn import (
     OWNER_TURN_DEADLINE_MS,
     decide_owner_turn,
+    infer_rules_reply_shape,
+    is_self_status_question,
 )
 from app.decision.types import Answer, DecisionResult
 from app.persona.owner_chat import stream_owner_chat
 
 
-def test_owner_chat_source_calls_decide_owner_turn():
+def test_owner_chat_source_calls_evaluate_request_route():
     source = Path("backend/app/persona/owner_chat.py").read_text(encoding="utf-8")
-    assert "decide_owner_turn(" in source
-    assert source.count("route_request(") == 1
-    assert "baseline=route_request(" in source
+    assert "evaluate_request_route(" in source
+    assert "route_request(cleaned)" in source
 
 
 def test_classify_and_two_lane_do_not_call_route_request():
     front = Path("backend/app/agent/front_responder.py").read_text(encoding="utf-8")
-    assert "route_request(" not in front
-    assert "decide_owner_turn(" in front
+    assert "route_request(" not in front.replace("evaluate_request_route(", "")
+    assert "evaluate_request_route(" in front
 
 
-def test_loop_intake_calls_decide_owner_turn():
+def test_loop_intake_calls_evaluate_request_route():
     source = Path("backend/app/agent/loop.py").read_text(encoding="utf-8")
-    assert "decide_owner_turn(" in source
+    assert "evaluate_request_route(" in source
+    assert "decide_owner_turn(" not in source
 
 
 @pytest.mark.asyncio
@@ -195,3 +198,188 @@ async def test_low_confidence_route_keeps_rules_baseline(monkeypatch):
     )
     turn = await decide_owner_turn("Hello there", baseline=route_request("Hello there"), decision_tier="local")
     assert turn.route.kind == DIRECT_REPLY
+
+
+DOMAIN_UTTERANCES_MUST_NOT_SELF_STATUS = (
+    "What model of car should I buy?",
+    "Which model is best for coding?",
+    "what are you doing tomorrow",
+    "is the vault locked?",
+    "what's your context on the Henderson case",
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("utterance", DOMAIN_UTTERANCES_MUST_NOT_SELF_STATUS)
+async def test_domain_questions_do_not_route_to_self_status(utterance):
+    assert is_self_status_question(utterance) is False
+    assert infer_rules_reply_shape(utterance) != "self_status"
+    turn = await decide_owner_turn(
+        utterance,
+        baseline=route_request(utterance),
+        decision_tier="local",
+    )
+    assert turn.reply_shape != "self_status"
+    assert worker_required(turn.front_action) is True
+    assert turn.front_action in {"ack_continue", "handoff_notice", "silent_skip"}
+
+
+@pytest.mark.asyncio
+async def test_self_status_decision_does_not_load_settings(monkeypatch):
+    monkeypatch.setattr(
+        "app.config.load_settings",
+        lambda: (_ for _ in ()).throw(AssertionError("load_settings in decide")),
+    )
+    monkeypatch.setattr(
+        "app.decision.tier.resolve_status",
+        lambda: (_ for _ in ()).throw(AssertionError("resolve_status in decide")),
+    )
+    turn = await decide_owner_turn(
+        "What profile is loaded?",
+        baseline=route_request("What profile is loaded?"),
+        decision_tier="local",
+    )
+    assert turn.reply_shape == "self_status"
+    assert turn.front_action == "final_basic"
+
+
+@pytest.mark.asyncio
+async def test_laya_fixture_via_set_decide_fn_is_labelled(jarvis_env, monkeypatch):
+    from app.decision.laya import pins as laya_pins
+    from app.decision.laya import runtime as laya_runtime
+    from app.decision.types import Answer
+
+    tmp = jarvis_env["tmp"]
+    monkeypatch.setattr("app.decision.laya.pins.data_dir", lambda: tmp)
+    laya_runtime.reset_runtime()
+    laya_pins.clear_install()
+    laya_pins.write_test_install()
+    laya_runtime.enable(warm=True)
+
+    def fixture_decide(*, state, questions, decision_class):
+        del state, questions, decision_class
+        return {
+            "request_route": Answer("request_route", "choice", DIRECT_REPLY, 0.95),
+            "reply_shape": Answer("reply_shape", "choice", "social", 0.95),
+        }
+
+    laya_runtime.set_decide_fn(fixture_decide)
+    try:
+        turn = await decide_owner_turn(
+            "Hello there",
+            baseline=route_request("Hello there"),
+            decision_tier="local",
+        )
+        assert turn.reflex is not None
+        assert turn.reflex.source == "laya"
+        assert turn.reflex.fixture is True
+        assert turn.reflex.fallback_used is False
+        assert turn.reply_shape == "social"
+    finally:
+        laya_runtime.reset_runtime()
+        laya_pins.clear_install()
+
+
+@pytest.mark.asyncio
+async def test_stub_jev_on_connected_optional_is_source_jev(jarvis_env, monkeypatch):
+    from app.decision.jev_client import reset_http_post, set_http_post
+    from app.decision.laya import runtime as laya_runtime
+    from app.decision.tier import bind_typesafe_key, probe_jev, set_decision_tier
+    from app.licensing.store import reset_licensing_store
+
+    tmp = jarvis_env["tmp"]
+    monkeypatch.setattr("app.config.data_dir", lambda: tmp)
+    monkeypatch.setattr("app.licensing.cluster.data_dir", lambda: tmp)
+    reset_licensing_store()
+    reset_http_post()
+    laya_runtime.reset_runtime()
+
+    def jev_post(_url, _headers, body, _timeout):
+        questions = body.get("questions") or {}
+        answers = {}
+        if "ready" in questions:
+            answers["ready"] = {"type": "noul", "noul": 0.91, "confidence": 0.94}
+        if "request_route" in questions:
+            answers["request_route"] = {"type": "choice", "choice": DIRECT_REPLY, "confidence": 0.96}
+        if "reply_shape" in questions:
+            answers["reply_shape"] = {"type": "choice", "choice": "social", "confidence": 0.94}
+        return 200, {"model": "jev-latest", "answers": answers}, ""
+
+    set_http_post(jev_post, fixture=True)
+    set_decision_tier("jev_optional")
+    bind_typesafe_key("sk-rfc0206-fixture")
+    probed = probe_jev()
+    assert probed["ok"] is True
+    assert probed["jev_availability"] == "connected"
+    try:
+        turn = await decide_owner_turn(
+            "Hello there",
+            baseline=route_request("Hello there"),
+            decision_tier="jev_optional",
+            settings=jarvis_env["settings"],
+        )
+        assert turn.reflex is not None
+        assert turn.reflex.source == "jev"
+        assert turn.reflex.provider == "jev"
+        assert turn.reflex.fallback_used is False
+        assert turn.reflex.fixture is True
+    finally:
+        reset_http_post()
+        laya_runtime.reset_runtime()
+        set_decision_tier("local")
+
+
+@pytest.mark.asyncio
+async def test_cold_laya_does_not_stall_the_turn(jarvis_env):
+    from app.decision.laya import runtime as laya_runtime
+
+    laya_runtime.reset_runtime()
+    started = time.perf_counter()
+    turn = await decide_owner_turn(
+        "Hello there",
+        baseline=route_request("Hello there"),
+        decision_tier="local",
+    )
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    assert elapsed_ms < 120.0
+    assert turn.reflex is not None
+    assert turn.reflex.source != "laya"
+    assert turn.route.kind == DIRECT_REPLY
+
+
+@pytest.mark.asyncio
+async def test_slow_laya_fixture_falls_back_inside_deadline(jarvis_env, monkeypatch):
+    from app.decision.laya import pins as laya_pins
+    from app.decision.laya import runtime as laya_runtime
+    from app.decision.types import Answer
+
+    tmp = jarvis_env["tmp"]
+    monkeypatch.setattr("app.decision.laya.pins.data_dir", lambda: tmp)
+    laya_runtime.reset_runtime()
+    laya_pins.clear_install()
+    laya_pins.write_test_install()
+    laya_runtime.enable(warm=True)
+
+    def slow_decide(**_kwargs):
+        time.sleep(0.25)
+        return {
+            "request_route": Answer("request_route", "choice", DIRECT_REPLY, 0.99),
+            "reply_shape": Answer("reply_shape", "choice", "social", 0.99),
+        }
+
+    laya_runtime.set_decide_fn(slow_decide)
+    try:
+        started = time.perf_counter()
+        turn = await decide_owner_turn(
+            "Hello there",
+            baseline=route_request("Hello there"),
+            decision_tier="local",
+        )
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        assert elapsed_ms < 120.0
+        assert turn.reflex is not None
+        assert turn.reflex.source != "laya" or turn.reflex.fallback_used is True
+        assert turn.reflex.source in {"rules", "generative", "deadline_fallback"} or turn.reflex.fallback_used
+    finally:
+        laya_runtime.reset_runtime()
+        laya_pins.clear_install()

@@ -31,7 +31,7 @@ async def test_intake_uses_bounded_provider_before_returning_parser(monkeypatch)
 
     monkeypatch.setattr("app.decision.owner_turn.decide", decide)
     result = await request_routing.evaluate_request_route("hello", route_request("hello"))
-    assert result.kind == MANAGED_TASK
+    assert result.route.kind == MANAGED_TASK
     assert seen[0][2] == "request_routing"
     assert seen[0][3] == OWNER_TURN_DEADLINE_MS
     assert {q.id for q in seen[0][1]} == {"request_route", "reply_shape"}
@@ -45,7 +45,7 @@ async def test_encoder_cannot_drop_explicit_action(monkeypatch):
         lambda *args: _laya_route(DIRECT_REPLY, "social"),
     )
     result = await request_routing.evaluate_request_route("open steam", route_request("open steam"))
-    assert result.kind == MANAGED_TASK
+    assert result.route.kind == MANAGED_TASK
 
 
 @pytest.mark.asyncio
@@ -60,7 +60,7 @@ async def test_deadline_does_not_block_event_loop(monkeypatch):
     task = asyncio.create_task(request_routing.evaluate_request_route("hello", baseline))
     await asyncio.sleep(0.02)
     assert not task.done()
-    assert await task == baseline
+    assert (await task).route == baseline
     assert time.perf_counter() - started < 0.3
 
 
@@ -71,7 +71,7 @@ async def test_missing_provider_preserves_parser(monkeypatch):
 
     monkeypatch.setattr("app.decision.owner_turn._decide_sync", unavailable)
     baseline = route_request("open steam")
-    assert await request_routing.evaluate_request_route("open steam", baseline) == baseline
+    assert (await request_routing.evaluate_request_route("open steam", baseline)).route == baseline
 
 
 def test_default_is_fast_q6_and_never_silent_27b(tmp_path, monkeypatch):

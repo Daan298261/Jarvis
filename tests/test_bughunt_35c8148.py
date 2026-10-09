@@ -9,7 +9,8 @@ import pytest
 
 from app.agent.front_responder import (
     SAFE_HELLO,
-    consolidate_front_and_worker,
+    apply_disposition,
+    infer_arbitration_disposition,
     live_text_update,
     safe_hello,
     speakable_worker_remainder,
@@ -126,7 +127,7 @@ def test_live_text_update_appends_a_continuation_and_replaces_a_correction():
     assert live_text_update(QUICK, REPLACEMENT) == ("replace", REPLACEMENT)
     assert live_text_update("", REPLACEMENT) == ("append", REPLACEMENT)
     assert live_text_update(QUICK, QUICK) is None
-    assert consolidate_front_and_worker(QUICK, REPLACEMENT) == REPLACEMENT
+    assert apply_disposition(infer_arbitration_disposition(QUICK, REPLACEMENT), QUICK, REPLACEMENT) == REPLACEMENT
 
 
 @pytest.mark.asyncio

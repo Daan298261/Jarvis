@@ -65,21 +65,6 @@ _PATH_KEY_FRAGMENTS = (
     "remote_base_url",
     "path",
 )
-_FORBIDDEN_PROMPT_FRAGMENTS = (
-    "auth_token",
-    "api_key",
-    "remote_api_key",
-    "voicestudio_api_key",
-    "model_path",
-    "gguf_path",
-    "mmproj_path",
-    "vault_path",
-    "remote_base_url",
-    "mcp_servers",
-    "tool catalog",
-    "tool_catalog",
-)
-
 _ABSENT_ASK = re.compile(
     r"(?i)\b("
     r"api key|secret|token|password|pid|process id|tool catalog|"
@@ -88,18 +73,38 @@ _ABSENT_ASK = re.compile(
 )
 
 _FIELD_HINTS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
-    (re.compile(r"(?i)\bprofile\b"), ("inference_profile", "front_profile", "voice_profile_id", "loaded", "model_alias")),
-    (re.compile(r"(?i)\bmodel\b"), ("model_alias", "inference_profile", "family", "loaded")),
-    (re.compile(r"(?i)\b(loaded|running)\b"), ("loaded", "inference_profile", "model_alias")),
-    (re.compile(r"(?i)\bpersona\b"), ("active_persona_id",)),
-    (re.compile(r"(?i)\bcontext\b"), ("context_size", "server_n_ctx")),
+    (re.compile(r"(?i)\b(?:your |loaded |inference |which |what )?profile(?: is loaded)?\b"), ("inference_profile", "front_profile", "voice_profile_id", "loaded", "model_alias")),
+    (
+        re.compile(
+            r"(?i)("
+            r"\byour model\b|"
+            r"\bmodel alias\b|"
+            r"\b(?:what|which) model(?: is loaded| are you(?: running| using)?| is running)\b|"
+            r"\bwhat(?:'s| is) loaded\b|"
+            r"\binference (?:profile|model)\b"
+            r")"
+        ),
+        ("model_alias", "inference_profile", "family", "loaded"),
+    ),
+    (re.compile(r"(?i)\b(?:loaded profile|is loaded|currently loaded)\b"), ("loaded", "inference_profile", "model_alias")),
+    (re.compile(r"(?i)\b(?:your |active )?persona\b"), ("active_persona_id",)),
+    (
+        re.compile(
+            r"(?i)("
+            r"\byour context (?:size|window|length)\b|"
+            r"\b(?:configured |live |server )?n_ctx\b|"
+            r"\bcontext (?:size|window)\b"
+            r")"
+        ),
+        ("context_size", "server_n_ctx"),
+    ),
     (re.compile(r"(?i)\b(front lane|front responder)\b"), ("front_lane_enabled", "front_profile", "front_device", "front_timeout_ms")),
     (re.compile(r"(?i)\b(jev|laya|decision tier)\b"), ("decision_tier", "jev_availability", "laya_installed", "laya_warm", "laya_enabled")),
-    (re.compile(r"(?i)\bvoice\b"), ("voice_profile_id", "tts_engine", "tts_quality_engine")),
+    (re.compile(r"(?i)\b(?:your )?voice(?: profile)?\b"), ("voice_profile_id", "tts_engine", "tts_quality_engine")),
     (re.compile(r"(?i)\b(verbosity|personality|language)\b"), ("dialogue_verbosity", "personality_preset", "output_language")),
-    (re.compile(r"(?i)\bshell\b"), ("shell",)),
-    (re.compile(r"(?i)\bvault\b"), ("vault_bound",)),
-    (re.compile(r"(?i)\b(who are you|what are you|your name|anzu)\b"), ("product_name", "active_persona_id")),
+    (re.compile(r"(?i)\b(?:your )?shell\b"), ("shell",)),
+    (re.compile(r"(?i)\b(?:your |knowledge )?vault bound\b"), ("vault_bound",)),
+    (re.compile(r"(?i)\b(who are you|what are you(?:\s*[?.!]?\s*$| (?:called|named))|your name|anzu)\b"), ("product_name", "active_persona_id")),
 )
 
 
@@ -130,29 +135,21 @@ def build_self_knowledge_snapshot(settings: Any, inference_state: Any | None = N
     personas = getattr(settings, "named_personas", None)
     decision = getattr(settings, "decision", None)
 
+    # In-memory labels only. Never call resolve_status() / load_settings() / lease /
+    # secret-store here — those belong off the owner-turn decision path (RFC-0206 §1).
     jev_label = _label(getattr(decision, "last_availability", "") or "unavailable")
     laya_installed = False
     laya_warm = False
     laya_enabled = bool(getattr(decision, "laya_enabled", False))
     try:
-        from ..decision.tier import resolve_status
+        from ..decision.laya import runtime as laya_runtime
 
-        status = resolve_status()
-        jev_label = _label(status.get("jev_availability") or jev_label)
-        laya_block = status.get("laya") if isinstance(status.get("laya"), dict) else {}
-        laya_installed = bool(laya_block.get("installed"))
-        laya_warm = bool(laya_block.get("warm"))
-        laya_enabled = bool(laya_block.get("enabled"))
+        laya = laya_runtime.status()
+        laya_installed = bool(laya.get("installed"))
+        laya_warm = bool(laya.get("warm"))
+        laya_enabled = bool(laya.get("enabled")) if laya.get("enabled") is not None else laya_enabled
     except Exception:
-        try:
-            from ..decision.laya import runtime as laya_runtime
-
-            laya = laya_runtime.status()
-            laya_installed = bool(laya.get("installed"))
-            laya_warm = bool(laya.get("warm"))
-            laya_enabled = bool(laya.get("enabled"))
-        except Exception:
-            pass
+        pass
 
     server_n_ctx = int(getattr(state, "server_n_ctx", 0) or 0) if state is not None else 0
     snapshot: dict[str, Any] = {
@@ -204,20 +201,27 @@ def snapshot_prompt_addendum(snapshot: dict[str, Any]) -> str:
 
 def snapshot_covers_question(
     user_message: str,
-    settings: Any,
+    settings: Any = None,
     inference_state: Any | None = None,
     snapshot: dict[str, Any] | None = None,
 ) -> bool:
+    """True when the snapshot schema (or a provided snapshot) has the asked field.
+
+    Does not call ``load_settings``, ``resolve_status``, or the secret store.
+    ``settings`` / ``inference_state`` are accepted for call-site compatibility
+    and unused unless a caller already built ``snapshot``.
+    """
+    del settings, inference_state
     text = (user_message or "").strip()
     if not text:
         return False
     if _ABSENT_ASK.search(text):
         return False
-    payload = snapshot if snapshot is not None else build_self_knowledge_snapshot(settings, inference_state)
-    if not payload:
+    available = snapshot if snapshot is not None else {key: True for key in SNAPSHOT_INCLUDE_KEYS}
+    if not available:
         return False
     for pattern, keys in _FIELD_HINTS:
-        if pattern.search(text) and any(key in payload for key in keys):
+        if pattern.search(text) and any(key in available for key in keys):
             return True
     return False
 
@@ -228,7 +232,16 @@ def snapshot_blob(snapshot: dict[str, Any] | None) -> str:
     return json.dumps(snapshot, ensure_ascii=True, default=str)
 
 
-def forbidden_snapshot_leak(rendered: str) -> list[str]:
-    """Return deny-list fragments found in a rendered prompt (case-insensitive)."""
-    hay = (rendered or "").lower()
-    return [item for item in _FORBIDDEN_PROMPT_FRAGMENTS if item in hay]
+def snapshot_numeric_tokens(snapshot: dict[str, Any] | None) -> set[str]:
+    """Exact numeric field values, not digit substrings of the JSON blob."""
+    tokens: set[str] = set()
+    for value in (snapshot or {}).values():
+        if isinstance(value, bool) or value is None:
+            continue
+        if isinstance(value, int):
+            tokens.add(str(value))
+        elif isinstance(value, float):
+            tokens.add(str(value))
+            if value.is_integer():
+                tokens.add(str(int(value)))
+    return tokens
