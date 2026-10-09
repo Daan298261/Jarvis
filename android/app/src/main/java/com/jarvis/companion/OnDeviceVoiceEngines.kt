@@ -91,8 +91,8 @@ class PocketTtsEngine(
     private val nativeUnload: () -> Unit = { VoiceNativeBridge.nativeTtsUnload() },
 ) : OnDeviceTtsEngine {
     override val runtimeName: String = CompanionVoicePackCatalog.POCKET_TTS_ENGINE
-    private var loadedDir: String? = null
-    private var engineId: String = ""
+    @Volatile private var loadedDir: String? = null
+    @Volatile private var engineId: String = ""
 
     override fun isRuntimeAvailable(): Boolean = runtimeAvailable()
 
@@ -119,7 +119,10 @@ class PocketTtsEngine(
             return Result.failure(IllegalArgumentException("Nothing to speak"))
         }
         val audio = nativeSynthesize(text)
-        if (audio == null || audio.isEmpty()) {
+        if (audio != null && audio.isEmpty()) {
+            return Result.failure(CancellationException("TTS cancelled"))
+        }
+        if (audio == null) {
             return Result.failure(IllegalStateException("On-device TTS produced no audio"))
         }
         // Reject near-silent buffers that would look like soft-fail success.
@@ -283,8 +286,8 @@ class ChunkedTtsSession(
         previous?.cancel()
         onStopPlayback()
         val launched = scope.launch {
-            previous?.join()
             try {
+                previous?.join()
                 ChunkedTtsPlayer.speak(
                     chunks = chunks,
                     synthesize = synthesize,
@@ -297,8 +300,8 @@ class ChunkedTtsSession(
                 onError(e)
             } finally {
                 if (token == generation.get()) {
-                    job = null
                     withContext(NonCancellable) { onIdle() }
+                    if (token == generation.get()) job = null
                 }
             }
         }

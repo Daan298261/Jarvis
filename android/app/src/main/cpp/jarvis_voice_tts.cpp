@@ -109,6 +109,10 @@ Java_com_jarvis_companion_VoiceNativeBridge_nativeTtsSynthesize(JNIEnv *env, jcl
         if (!g_pocket) return nullptr;
         try {
             const std::vector<uint8_t> wav = g_pocket->synthesize(utterance, &g_tts_cancel);
+            if (g_tts_cancel.load(std::memory_order_relaxed)) {
+                // Non-null empty array: cancelled, never a synth failure.
+                return env->NewByteArray(0);
+            }
             if (wav.size() <= 44) return nullptr;
             jbyteArray out = env->NewByteArray(static_cast<jsize>(wav.size()));
             if (!out) return nullptr;
