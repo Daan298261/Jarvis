@@ -96,7 +96,7 @@ _LIVE_FACT_HINT = re.compile(
 _SELF_STATUS = re.compile(
     r"(?i)(?:"
     r"\bwho are you\b|"
-    r"\bwhat are you(?:\s*[?.!]?\s*$| (?:called|named|running|using|loaded))\b|"
+    r"\bwhat are you(?:\s*[?.!]?\s*$| (?:called|named|running|using|loaded)\b)|"
     r"\b(?:what|which) profile(?: is loaded)?\b|"
     r"\bloaded profile\b|"
     r"\b(?:what|which) model(?: is loaded| are you(?: running| using)?| is running| alias)\b|"
@@ -116,6 +116,18 @@ _SELF_STATUS = re.compile(
     r"\babout (?:yourself|anzu)\b|"
     r"\banzu superassistant\b|"
     r"\bwhat(?:'s| is) your (?:shell|verbosity|personality)\b"
+    r")"
+)
+
+# Narrow domain veto from the first review — not an allow-list. A confident
+# provider self_status stands unless the utterance is one of these misroutes.
+_SELF_STATUS_VETO = re.compile(
+    r"(?i)("
+    r"what model of car|"
+    r"which model is best|"
+    r"what are you doing|"
+    r"is the vault locked|"
+    r"your context on"
     r")"
 )
 
@@ -174,7 +186,7 @@ def infer_rules_reply_shape(
         return "clarify"
     if is_weather_query(text) or _LIVE_FACT_HINT.search(lowered):
         return "ack"
-    if is_self_status_question(text):
+    if is_self_status_question(text) and not is_self_status_domain_misroute(text):
         return "self_status"
     kind = (baseline_route or "").strip() or route_request(text).kind
     if kind == MANAGED_TASK:
@@ -187,11 +199,19 @@ def infer_rules_reply_shape(
 
 
 def is_self_status_question(user_message: str) -> bool:
-    """True only for genuine questions about ANZU itself, not domain uses of the words."""
+    """Rules-adapter hint for ANZU-referential phrasing. Not a provider floor."""
     text = (user_message or "").strip()
     if not text:
         return False
     return bool(_SELF_STATUS.search(text))
+
+
+def is_self_status_domain_misroute(user_message: str) -> bool:
+    """True for the domain phrasings that must never become snapshot-only answers."""
+    text = (user_message or "").strip()
+    if not text:
+        return False
+    return bool(_SELF_STATUS_VETO.search(text))
 
 
 def front_action_for_shape(
@@ -280,7 +300,7 @@ def _apply_floors(
             reply_shape = "ack"
     if literal:
         reply_shape = "literal"
-    if reply_shape == "self_status" and not is_self_status_question(user_message):
+    if reply_shape == "self_status" and is_self_status_domain_misroute(user_message):
         reply_shape = rules_shape if rules_shape != "self_status" else "ack"
 
     if route_kind == DIRECT_LOOKUP:

@@ -72,6 +72,7 @@ def test_explicit_action_and_weather_floors():
     assert infer_rules_reply_shape("When is my meeting tomorrow?") == "ack"
     assert infer_rules_reply_shape("Say only the word ready") == "literal"
     assert infer_rules_reply_shape("What profile is loaded?") == "self_status"
+    assert infer_rules_reply_shape("what are you?") == "self_status"
     assert infer_rules_reply_shape("do it") == "clarify"
     assert infer_rules_reply_shape("Refactor this architecture and run pytest") == "handoff"
 

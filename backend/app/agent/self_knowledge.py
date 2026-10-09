@@ -44,27 +44,6 @@ SNAPSHOT_INCLUDE_KEYS = (
     "vault_bound",
 )
 
-# Must never appear as keys or values in the dict or the rendered prompt.
-_SECRET_KEY_FRAGMENTS = (
-    "auth_token",
-    "api_key",
-    "remote_api_key",
-    "voicestudio_api_key",
-    "typesafe",
-    "license",
-    "lease",
-    "secret",
-    "password",
-    "credential",
-)
-_PATH_KEY_FRAGMENTS = (
-    "model_path",
-    "gguf_path",
-    "mmproj_path",
-    "vault_path",
-    "remote_base_url",
-    "path",
-)
 _ABSENT_ASK = re.compile(
     r"(?i)\b("
     r"api key|secret|token|password|pid|process id|tool catalog|"
@@ -91,6 +70,7 @@ _FIELD_HINTS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
     (
         re.compile(
             r"(?i)("
+            r"\bhow much context\b|"
             r"\byour context (?:size|window|length)\b|"
             r"\b(?:configured |live |server )?n_ctx\b|"
             r"\bcontext (?:size|window)\b"
@@ -104,7 +84,7 @@ _FIELD_HINTS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
     (re.compile(r"(?i)\b(verbosity|personality|language)\b"), ("dialogue_verbosity", "personality_preset", "output_language")),
     (re.compile(r"(?i)\b(?:your )?shell\b"), ("shell",)),
     (re.compile(r"(?i)\b(?:your |knowledge )?vault bound\b"), ("vault_bound",)),
-    (re.compile(r"(?i)\b(who are you|what are you(?:\s*[?.!]?\s*$| (?:called|named))|your name|anzu)\b"), ("product_name", "active_persona_id")),
+    (re.compile(r"(?i)(?:\bwho are you\b|\bwhat are you(?:\s*[?.!]?\s*$| (?:called|named)\b)|\byour name\b|\banzu\b)"), ("product_name", "active_persona_id")),
 )
 
 
@@ -201,17 +181,12 @@ def snapshot_prompt_addendum(snapshot: dict[str, Any]) -> str:
 
 def snapshot_covers_question(
     user_message: str,
-    settings: Any = None,
-    inference_state: Any | None = None,
     snapshot: dict[str, Any] | None = None,
 ) -> bool:
     """True when the snapshot schema (or a provided snapshot) has the asked field.
 
     Does not call ``load_settings``, ``resolve_status``, or the secret store.
-    ``settings`` / ``inference_state`` are accepted for call-site compatibility
-    and unused unless a caller already built ``snapshot``.
     """
-    del settings, inference_state
     text = (user_message or "").strip()
     if not text:
         return False

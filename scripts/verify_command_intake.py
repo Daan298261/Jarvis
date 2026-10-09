@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 from app.agent import request_routing
 from app.agent.planning import route_request
+from app.decision import owner_turn
 from app.decision.laya import runtime
 
 
@@ -31,25 +32,27 @@ async def main() -> None:
         print(json.dumps({"verified": False, "reason": "Real Laya is not ready",
                           "enabled": status.get("enabled"), "error": status.get("load_error")}, indent=2))
         raise SystemExit(1)
-    original = request_routing.decide
+    original = owner_turn.decide
     samples = []
-    for prompt in ("hello", "open steam", "read C:/example.txt", "what is the weather tomorrow?"):
-        for repeat in range(3):
-            evidence = {}
+    try:
+        for prompt in ("hello", "open steam", "read C:/example.txt", "what is the weather tomorrow?"):
+            for repeat in range(3):
+                evidence = {}
 
-            def observe(*args, _evidence=evidence, **kwargs):
-                result = original(*args, **kwargs)
-                _evidence.update(provider=result.provider, source=result.source,
-                                 fallback=result.fallback_used, provider_ms=result.latency.total_ms)
-                return result
+                def observe(*args, _evidence=evidence, **kwargs):
+                    result = original(*args, **kwargs)
+                    _evidence.update(provider=result.provider, source=result.source,
+                                     fallback=result.fallback_used, provider_ms=result.latency.total_ms)
+                    return result
 
-            request_routing.decide = observe
-            started = time.perf_counter()
-            turn = await request_routing.evaluate_request_route(prompt, route_request(prompt))
-            samples.append({"prompt": prompt, "repeat": repeat, "route": turn.route.kind,
-                            "task_class": turn.route.task_class,
-                            "elapsed_ms": round((time.perf_counter() - started) * 1000, 2), **evidence})
-    request_routing.decide = original
+                owner_turn.decide = observe
+                started = time.perf_counter()
+                turn = await request_routing.evaluate_request_route(prompt, route_request(prompt))
+                samples.append({"prompt": prompt, "repeat": repeat, "route": turn.route.kind,
+                                "task_class": turn.route.task_class,
+                                "elapsed_ms": round((time.perf_counter() - started) * 1000, 2), **evidence})
+    finally:
+        owner_turn.decide = original
     print(json.dumps({"fixture": False, "device": status.get("device"),
                       "version": status.get("version"), "samples": samples}, indent=2))
 

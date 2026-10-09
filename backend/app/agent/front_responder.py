@@ -573,30 +573,14 @@ def merge_front_and_worker(
     front_spoken: bool = False,
     decision_tier: str = "local",
 ) -> str:
-    """One owner-facing turn via Reflex arbitration + string executor.
-
-    One side empty: return the other side and do not call a provider.
-    Empty / synthetic ``user_message``: rules disposition only (no provider).
-    """
+    """Rules-only executor. Production merge uses ``merge_front_and_worker_async``."""
+    del user_message, front_spoken, decision_tier
     front = _strip_legacy_merge_heading(front_text or "").strip()
     worker = _strip_legacy_merge_heading(worker_text or "").strip()
     early = _early_merge_result(front, worker, action)
     if early is not None:
         return early
-    result = None
-    if (user_message or "").strip():
-        from ..decision.surfaces import arbitrate_front_and_worker
-
-        result = arbitrate_front_and_worker(
-            user_message=user_message,
-            front_text=front,
-            worker_text=worker,
-            front_action=action,
-            front_spoken=front_spoken,
-            reply_shape=reply_shape,
-            decision_tier=decision_tier,
-        )
-    return _apply_arbitration_result(result, front, worker, action, reply_shape)
+    return _apply_arbitration_result(None, front, worker, action, reply_shape)
 
 
 async def merge_front_and_worker_async(

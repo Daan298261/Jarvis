@@ -230,9 +230,9 @@ def test_snapshot_include_and_exclude(jarvis_env):
 
 
 def test_snapshot_covers_profile_question(jarvis_env):
-    settings = jarvis_env["settings"]
-    assert snapshot_covers_question("What profile is loaded?", settings, jarvis_env["manager"].state) is True
-    assert snapshot_covers_question("What is the TypeSafe API key?", settings) is False
+    del jarvis_env
+    assert snapshot_covers_question("What profile is loaded?") is True
+    assert snapshot_covers_question("What is the TypeSafe API key?") is False
 
 
 @pytest.mark.asyncio

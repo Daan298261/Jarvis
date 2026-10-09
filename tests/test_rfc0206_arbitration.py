@@ -16,67 +16,105 @@ from app.agent.front_responder import (
 from app.decision.types import Answer, DecisionResult
 
 
-def test_provider_keep_front_drops_novel_worker(monkeypatch):
-    def forced(*_args, **_kwargs):
-        return DecisionResult(
-            answers={"disposition": Answer("disposition", "choice", "keep_front", 0.99)},
-            source="laya",
-            decision_class="arbitration",
-            provider="laya",
-        )
+def _enable_laya_fixture(jarvis_env, monkeypatch):
+    from app.decision.laya import pins as laya_pins
+    from app.decision.laya import runtime as laya_runtime
 
-    monkeypatch.setattr("app.decision.surfaces.decide", forced)
-    merged = merge_front_and_worker(
-        "On it. I'll check the details.",
-        "Mild rain later, sir.",
-        "ack_continue",
-        user_message="what is the weather",
-        reply_shape="ack",
+    tmp = jarvis_env["tmp"]
+    monkeypatch.setattr("app.decision.laya.pins.data_dir", lambda: tmp)
+    laya_runtime.reset_runtime()
+    laya_pins.clear_install()
+    laya_pins.write_test_install()
+    laya_runtime.enable(warm=True)
+    return laya_pins, laya_runtime
+
+
+def _observe_surfaces_decide(monkeypatch):
+    import app.decision.surfaces as surfaces_mod
+
+    seen: list[DecisionResult] = []
+    real = surfaces_mod.decide
+
+    def spy(*args, **kwargs):
+        result = real(*args, **kwargs)
+        seen.append(result)
+        return result
+
+    monkeypatch.setattr(surfaces_mod, "decide", spy)
+    return seen
+
+
+@pytest.mark.asyncio
+async def test_provider_keep_front_drops_novel_worker(jarvis_env, monkeypatch):
+    laya_pins, laya_runtime = _enable_laya_fixture(jarvis_env, monkeypatch)
+    laya_runtime.set_decide_fn(
+        lambda **_kw: {"disposition": Answer("disposition", "choice", "keep_front", 0.99)}
     )
-    assert merged == "On it. I'll check the details."
-    assert "Mild rain" not in merged
-
-
-def test_provider_append_novel_keeps_new_sentence(monkeypatch):
-    def forced(*_args, **_kwargs):
-        return DecisionResult(
-            answers={"disposition": Answer("disposition", "choice", "append_novel", 0.99)},
-            source="laya",
-            decision_class="arbitration",
-            provider="laya",
+    seen = _observe_surfaces_decide(monkeypatch)
+    try:
+        merged = await merge_front_and_worker_async(
+            "On it. I'll check the details.",
+            "Mild rain later, sir.",
+            "ack_continue",
+            user_message="what is the weather",
+            reply_shape="ack",
         )
+        assert merged == "On it. I'll check the details."
+        assert "Mild rain" not in merged
+        assert seen
+        assert seen[0].source == "laya"
+        assert seen[0].fixture is True
+        assert seen[0].answers["disposition"].value == "keep_front"
+    finally:
+        laya_runtime.reset_runtime()
+        laya_pins.clear_install()
 
-    monkeypatch.setattr("app.decision.surfaces.decide", forced)
-    merged = merge_front_and_worker(
-        "On it. I'll check the details.",
-        "Mild rain later, sir.",
-        "ack_continue",
-        user_message="what is the weather",
-        reply_shape="ack",
+
+@pytest.mark.asyncio
+async def test_provider_append_novel_keeps_new_sentence(jarvis_env, monkeypatch):
+    laya_pins, laya_runtime = _enable_laya_fixture(jarvis_env, monkeypatch)
+    laya_runtime.set_decide_fn(
+        lambda **_kw: {"disposition": Answer("disposition", "choice", "append_novel", 0.99)}
     )
-    assert merged.startswith("On it.")
-    assert "Mild rain later, sir." in merged
-    assert "Deeper result" not in merged
-
-
-def test_literal_guard_forces_keep_front(monkeypatch):
-    def forced(*_args, **_kwargs):
-        return DecisionResult(
-            answers={"disposition": Answer("disposition", "choice", "keep_worker", 0.99)},
-            source="laya",
-            decision_class="arbitration",
-            provider="laya",
+    seen = _observe_surfaces_decide(monkeypatch)
+    try:
+        merged = await merge_front_and_worker_async(
+            "On it. I'll check the details.",
+            "Mild rain later, sir.",
+            "ack_continue",
+            user_message="what is the weather",
+            reply_shape="ack",
         )
+        assert merged.startswith("On it.")
+        assert "Mild rain later, sir." in merged
+        assert "Deeper result" not in merged
+        assert seen
+        assert seen[0].source == "laya"
+        assert seen[0].fixture is True
+        assert seen[0].answers["disposition"].value == "append_novel"
+    finally:
+        laya_runtime.reset_runtime()
+        laya_pins.clear_install()
 
-    monkeypatch.setattr("app.decision.surfaces.decide", forced)
-    merged = merge_front_and_worker(
-        "ready",
-        "I can start with the short version while I check the details.",
-        "final_basic",
-        user_message="Say only the word ready",
-        reply_shape="literal",
+
+@pytest.mark.asyncio
+async def test_literal_guard_forces_keep_front(jarvis_env, monkeypatch):
+    laya_pins, laya_runtime = _enable_laya_fixture(jarvis_env, monkeypatch)
+    laya_runtime.set_decide_fn(
+        lambda **_kw: {"disposition": Answer("disposition", "choice", "keep_worker", 0.99)}
     )
-    assert merged == "ready"
+    try:
+        merged = await merge_front_and_worker_async(
+            "ready",
+            "I can start with the short version while I check the details.",
+            "final_basic",
+            user_message="Say only the word ready",
+            reply_shape="literal",
+        )
+        assert merged == "ready"
+    finally:
+        laya_runtime.reset_runtime()
+        laya_pins.clear_install()
 
 
 def test_append_novel_degrades_when_worker_only_restates():

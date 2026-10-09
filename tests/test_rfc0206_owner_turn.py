@@ -14,10 +14,21 @@ from app.decision.owner_turn import (
     OWNER_TURN_DEADLINE_MS,
     decide_owner_turn,
     infer_rules_reply_shape,
+    is_self_status_domain_misroute,
     is_self_status_question,
 )
 from app.decision.types import Answer, DecisionResult
 from app.persona.owner_chat import stream_owner_chat
+
+
+def test_verify_command_intake_hooks_owner_turn_decide():
+    source = Path("scripts/verify_command_intake.py").read_text(encoding="utf-8")
+    assert "owner_turn.decide" in source
+    assert "request_routing.decide" not in source
+    from app.decision import owner_turn as owner_turn_mod
+
+    assert hasattr(owner_turn_mod, "decide")
+    assert callable(owner_turn_mod.decide)
 
 
 def test_owner_chat_source_calls_evaluate_request_route():
@@ -212,7 +223,7 @@ DOMAIN_UTTERANCES_MUST_NOT_SELF_STATUS = (
 @pytest.mark.asyncio
 @pytest.mark.parametrize("utterance", DOMAIN_UTTERANCES_MUST_NOT_SELF_STATUS)
 async def test_domain_questions_do_not_route_to_self_status(utterance):
-    assert is_self_status_question(utterance) is False
+    assert is_self_status_domain_misroute(utterance) is True
     assert infer_rules_reply_shape(utterance) != "self_status"
     turn = await decide_owner_turn(
         utterance,
@@ -222,6 +233,68 @@ async def test_domain_questions_do_not_route_to_self_status(utterance):
     assert turn.reply_shape != "self_status"
     assert worker_required(turn.front_action) is True
     assert turn.front_action in {"ack_continue", "handoff_notice", "silent_skip"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("utterance", DOMAIN_UTTERANCES_MUST_NOT_SELF_STATUS)
+async def test_domain_veto_overrides_confident_provider_self_status(utterance, monkeypatch):
+    monkeypatch.setattr(
+        "app.decision.owner_turn.decide",
+        lambda *args: DecisionResult(
+            answers={
+                "request_route": Answer("request_route", "choice", DIRECT_REPLY, 0.95),
+                "reply_shape": Answer("reply_shape", "choice", "self_status", 0.95),
+            },
+            source="laya",
+            decision_class="request_routing",
+            provider="laya",
+        ),
+    )
+    turn = await decide_owner_turn(
+        utterance,
+        baseline=route_request(utterance),
+        decision_tier="local",
+    )
+    assert turn.reply_shape != "self_status"
+    assert worker_required(turn.front_action) is True
+
+
+PROVIDER_KEEPS_SELF_STATUS = (
+    "how much context do you have?",
+    "which voice are you using?",
+    "what are you?",
+)
+
+
+def test_what_are_you_matches_self_status_regex():
+    assert is_self_status_question("what are you?") is True
+    assert is_self_status_question("what are you") is True
+    assert is_self_status_question("what are you doing tomorrow") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("utterance", PROVIDER_KEEPS_SELF_STATUS)
+async def test_confident_provider_self_status_is_kept(utterance, monkeypatch):
+    monkeypatch.setattr(
+        "app.decision.owner_turn.decide",
+        lambda *args: DecisionResult(
+            answers={
+                "request_route": Answer("request_route", "choice", DIRECT_REPLY, 0.95),
+                "reply_shape": Answer("reply_shape", "choice", "self_status", 0.95),
+            },
+            source="laya",
+            decision_class="request_routing",
+            provider="laya",
+        ),
+    )
+    turn = await decide_owner_turn(
+        utterance,
+        baseline=route_request(utterance),
+        decision_tier="local",
+    )
+    assert turn.reply_shape == "self_status"
+    assert turn.front_action == "final_basic"
+    assert worker_required(turn.front_action) is False
 
 
 @pytest.mark.asyncio
