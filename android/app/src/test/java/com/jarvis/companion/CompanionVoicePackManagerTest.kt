@@ -172,6 +172,7 @@ class CompanionVoicePackManagerTest {
                 ""
             },
             nativeSynthesize = { audibleWav() },
+            nativeUnload = {},
         )
         val local = CompanionVoicePackManager(context, ttsEngine = engine)
         seedReadyTts(local)
@@ -196,6 +197,7 @@ class CompanionVoicePackManagerTest {
                 ""
             },
             nativeSynthesize = { audibleWav() },
+            nativeUnload = {},
         )
         val local = CompanionVoicePackManager(context, ttsEngine = engine)
         seedReadyTts(local)
