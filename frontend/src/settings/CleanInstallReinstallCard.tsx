@@ -1,3 +1,4 @@
+import { CollapsibleSection } from "../components/CollapsibleSection"
 import { useEffect, useRef, useState } from "react"
 import {
   cleanReinstallDurableLogPath,
@@ -195,8 +196,8 @@ export function CleanInstallReinstallCard() {
       : null
 
   return (
-    <div className="card grid settings-pane-card auth-card">
-      <h2>Clean Install / Reinstall</h2>
+    <CollapsibleSection className="card grid settings-pane-card auth-card" storageKey="CleanInstallReinstallCard-Clean-Install-Reinstall" title={<span>Clean Install / Reinstall</span>}>
+
       <p className="lede" style={{ margin: "0 0 12px" }}>
         Permanently removes Jarvis application files, models, chats, logs, and other <strong>Jarvis-owned</strong> data
         on this PC, then runs Setup again. Your Documents, Desktop, and folders you added under Allowed directories are
@@ -349,6 +350,6 @@ export function CleanInstallReinstallCard() {
           )}
         </div>
       )}
-    </div>
+    </CollapsibleSection>
   )
 }

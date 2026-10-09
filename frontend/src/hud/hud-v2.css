@@ -851,7 +851,7 @@ html[data-session-mode] .hud-app {
   flex: 0 0 auto;
   position: relative;
   display: grid;
-  grid-template-columns: minmax(140px, var(--hud-menu-track)) minmax(0, 1fr);
+  grid-template-columns: minmax(40px, var(--hud-menu-track)) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto;
   align-items: stretch;
   gap: clamp(12px, 1.6vh, 24px) 8px;
@@ -860,6 +860,10 @@ html[data-session-mode] .hud-app {
 
 .hud-home:has(.jarvis-presence-controls-table.open) {
   --hud-menu-track: min(400px, calc(100vw - 28px));
+}
+
+.hud-home:has(.jarvis-presence-controls-table.collapsed) {
+  --hud-menu-track: 40px;
 }
 
 .hud-home > .jarvis-presence-controls-split {
@@ -949,7 +953,7 @@ html[data-session-mode] .hud-app {
 .hud-home:has(.jarvis-presence-stage) {
     position: relative;
     display: grid;
-    grid-template-columns: minmax(140px, var(--hud-menu-track)) minmax(0, 1fr);
+    grid-template-columns: minmax(40px, var(--hud-menu-track)) minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) auto;
     height: 100%;
     min-height: 0;
@@ -1041,7 +1045,7 @@ html[data-session-mode] .hud-app {
 .hud-home.hexstrike-active {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(140px, var(--hud-menu-track)) minmax(0, 1fr);
+  grid-template-columns: minmax(40px, var(--hud-menu-track)) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) auto;
   height: 100%;
   min-height: 0;
