@@ -107,17 +107,69 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _cache_ready(pack: dict[str, Any]) -> bool:
-    path = pack_cache_path(pack)
-    if not path.is_file() or path.stat().st_size <= 0:
+def _verified_marker_path(path: Path) -> Path:
+    return path.with_suffix(path.suffix + ".verified")
+
+
+def _write_verified_marker(path: Path, digest: str) -> None:
+    marker = _verified_marker_path(path)
+    try:
+        marker.write_text(
+            json.dumps({"sha256": digest.lower(), "size_bytes": path.stat().st_size}),
+            encoding="utf-8",
+        )
+    except OSError:
+        log.debug("Could not write companion pack verified marker for %s", path, exc_info=True)
+
+
+def _marker_matches(path: Path, expected: str) -> bool:
+    marker = _verified_marker_path(path)
+    if not marker.is_file():
         return False
+    try:
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        if str(payload.get("sha256") or "").lower() != expected.lower():
+            return False
+        return int(payload.get("size_bytes") or -1) == path.stat().st_size
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return False
+
+
+def _cache_ready(pack: dict[str, Any]) -> bool:
+    """True when the pack file exists at the expected size and has been verified.
+
+    Full SHA-256 of a ~1GB GGUF must not run on every /api/companion/models poll —
+    that stalls the asyncio event loop. After the first successful verify we trust a
+    sidecar marker until size or expected digest changes.
+    """
+    path = pack_cache_path(pack)
     expected = (pack.get("sha256") or "").lower()
     if not expected or set(expected) == {"0"}:
         return False
     try:
-        return _sha256_file(path).lower() == expected
+        if not path.is_file():
+            return False
+        size = path.stat().st_size
+        if size <= 0:
+            return False
+        expected_size = int(pack.get("size_bytes") or 0)
+        if expected_size > 0 and size != expected_size:
+            return False
+        if _marker_matches(path, expected):
+            return True
+        # Incomplete downloads stay as .partial; a full-size file without a marker
+        # still needs one hash (off hot path when possible).
+        return False
     except OSError:
         return False
+
+
+def _verify_and_mark(path: Path, expected: str) -> bool:
+    digest = _sha256_file(path).lower()
+    if digest != expected.lower():
+        return False
+    _write_verified_marker(path, digest)
+    return True
 
 
 def leader_cache_status(pack_id: str | None = None) -> dict[str, Any]:
@@ -185,6 +237,20 @@ async def _download_recommended() -> None:
         _CACHE.update(state="ready", pack_id=pack["id"], bytes_done=pack["size_bytes"], size_bytes=pack["size_bytes"], last_error="")
         return
     target = pack_cache_path(pack)
+    expected = str(pack.get("sha256") or "").lower()
+    expected_size = int(pack.get("size_bytes") or 0)
+    # One-time off-loop verify for an already-complete file that lacks a marker.
+    if target.is_file() and expected and (expected_size <= 0 or target.stat().st_size == expected_size):
+        ok = await asyncio.to_thread(_verify_and_mark, target, expected)
+        if ok:
+            _CACHE.update(
+                state="ready",
+                pack_id=pack["id"],
+                bytes_done=expected_size or target.stat().st_size,
+                size_bytes=expected_size or target.stat().st_size,
+                last_error="",
+            )
+            return
     partial = pack_partial_path(pack)
     size_bytes = int(pack["size_bytes"])
     _CACHE.update(state="downloading", pack_id=pack["id"], bytes_done=partial.stat().st_size if partial.is_file() else 0,
@@ -213,11 +279,22 @@ async def _download_recommended() -> None:
                     handle.write(chunk)
                     resume_at += len(chunk)
                     _CACHE["bytes_done"] = resume_at
-        digest = _sha256_file(partial).lower()
-        if digest != pack["sha256"].lower():
+                    # Yield so health/task routes stay responsive during multi-GB cache.
+                    await asyncio.sleep(0)
+        expected = str(pack["sha256"]).lower()
+        ok = await asyncio.to_thread(_verify_and_mark, partial, expected)
+        if not ok:
             partial.unlink(missing_ok=True)
+            _verified_marker_path(partial).unlink(missing_ok=True)
             raise RuntimeError("Downloaded pack failed SHA-256 verification")
         partial.replace(target)
+        # Move marker with the final filename.
+        partial_marker = _verified_marker_path(partial)
+        final_marker = _verified_marker_path(target)
+        if partial_marker.is_file():
+            partial_marker.replace(final_marker)
+        else:
+            _write_verified_marker(target, expected)
         _CACHE.update(state="ready", bytes_done=size_bytes, last_error="")
     except Exception as exc:
         log.warning("Companion pack cache download failed: %s", exc)
