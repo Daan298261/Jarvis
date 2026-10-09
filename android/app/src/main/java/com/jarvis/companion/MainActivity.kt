@@ -357,6 +357,11 @@ class MainActivity : ComponentActivity() {
                                 if (state.onDeviceVoiceActive) {
                                     Text("On-device voice", color = Gold, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
                                 }
+                                if (state.requestExactAlarms) {
+                                    TextButton(onClick = { model.openExactAlarmSettings() }) {
+                                        Text("Allow exact alarms in system settings")
+                                    }
+                                }
                                 ConversationPickers(state, model::selectModel, model::selectVoice)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     TextButton(onClick = { model.openConversation(null) }) { Text("New conversation") }

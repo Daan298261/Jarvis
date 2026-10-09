@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
 import android.os.Build
 import android.provider.OpenableColumns
 import android.app.Notification
@@ -60,10 +61,19 @@ object StandaloneActions {
     fun reminderOnThisPhoneCopy(at: ZonedDateTime, inexact: Boolean): String {
         val whenText = at.format(DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault()))
         return if (inexact) {
-            "Reminder set on this phone around $whenText. The time may move slightly because exact alarms are not allowed."
+            "Reminder set on this phone around $whenText. The time is approximate because exact alarms are not allowed. Open Alarms & reminders in system settings to allow exact alarms."
         } else {
             "Reminder set on this phone for $whenText."
         }
+    }
+
+    fun exactAlarmSettingsIntent(context: Context): Intent {
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+        } else {
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+        }
+        return intent.setData(Uri.fromParts("package", context.packageName, null))
     }
 
     fun noteAckCopy(): String = "Saved as a note on this phone. I will sync it when the ANZU desktop is back."
