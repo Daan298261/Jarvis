@@ -12,8 +12,10 @@ import {
   type PersonaAppearance,
 } from "./namedPersonas"
 import { SpecialistShapeMark } from "./SpecialistShapeMark"
+import { PersonaVisualSliders } from "./PersonaVisualSliders"
 import { updatePresentation, usePresentationSettings } from "../presence/presentationSettings"
 import {
+  MYTHIC_LIVING_AVATAR_ID,
   MYTHIC_LIVE_B_AVATAR_ID,
   MYTHIC_PORTRAIT_A_AVATAR_ID,
   usesMythicLiveVariantB,
@@ -140,8 +142,8 @@ export function NamedPersonaControls() {
         </button>
         <button
           type="button"
-          className={usesMythicLiveVariantB(presentation.avatarId) ? "active" : ""}
-          aria-pressed={usesMythicLiveVariantB(presentation.avatarId)}
+          className={presentation.avatarId === MYTHIC_LIVE_B_AVATAR_ID ? "active" : ""}
+          aria-pressed={presentation.avatarId === MYTHIC_LIVE_B_AVATAR_ID}
           disabled={busy}
           onClick={() => void run(() => updatePresentation({
             shell: "hud",
@@ -150,6 +152,13 @@ export function NamedPersonaControls() {
           }))}
         >
           B · live gaze
+        </button>
+        <button type="button" disabled={busy}
+          className={presentation.avatarId === MYTHIC_LIVING_AVATAR_ID ? "active" : ""}
+          aria-pressed={presentation.avatarId === MYTHIC_LIVING_AVATAR_ID}
+          onClick={() => void run(() => updatePresentation({ shell: "hud", requestedPresence: "particle_bust", avatarId: MYTHIC_LIVING_AVATAR_ID }))}
+        >
+          Living body · Anzu / Nabu
         </button>
       </div>
       <div className="named-persona-roster" role="group" aria-label="Named persona avatars">
@@ -299,34 +308,7 @@ export function NamedPersonaControls() {
               onChange={(event) => void patch({ accent_color: event.target.value })}
             />
           </label>
-          <label>
-            Brightness
-            <input
-              type="range"
-              min={0.35}
-              max={1}
-              step={0.05}
-              disabled={busy}
-              value={appearance.glow}
-              aria-label="Persona brightness"
-              onChange={(event) => void patch({ glow: Number(event.target.value) })}
-            />
-            <output>{Math.round(appearance.glow * 100)}%</output>
-          </label>
-          <label>
-            Particle detail
-            <input
-              type="range"
-              min={0.35}
-              max={1}
-              step={0.05}
-              disabled={busy}
-              value={appearance.detail ?? 0.68}
-              aria-label="Persona particle detail"
-              onChange={(event) => void patch({ detail: Number(event.target.value) })}
-            />
-            <output>{Math.round((appearance.detail ?? 0.68) * 100)}%</output>
-          </label>
+          <PersonaVisualSliders />
           <label>
             Animation
             <input

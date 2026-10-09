@@ -4,6 +4,7 @@ import { applyRuntimeProfile } from "../hud/applyRuntimeProfile"
 import { useHexStrikeSuiteActive } from "../hud/hexstrikeSuite"
 import { useHudOverlayOptional } from "../hud/hudOverlayContext"
 import { NamedPersonaControls } from "../persona/NamedPersonaControls"
+import { PersonaVisualSliders } from "../persona/PersonaVisualSliders"
 import { SessionPersonalityControls } from "../personality/SessionPersonalityControls"
 import { CustomPresencePanel } from "../presence/CustomPresencePanel"
 import { PresenceModePreview } from "../presence/PresenceModePreview"
@@ -11,6 +12,7 @@ import { updatePresentation } from "../presence/presentationSettings"
 import type { PresentationSettings } from "../presence/presenceTypes"
 import { MUSCULAR_HUMANOID_AVATAR_ID } from "../presence/renderers/HumanoidPresence"
 import {
+  MYTHIC_LIVING_AVATAR_ID,
   MYTHIC_LIVE_B_AVATAR_ID,
   MYTHIC_PORTRAIT_A_AVATAR_ID,
 } from "../presence/mythicPersonaVariant"
@@ -66,6 +68,8 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
         ? "hexstrike"
         : settings.requestedPresence === "humanoid" && settings.avatarId === MUSCULAR_HUMANOID_AVATAR_ID
           ? "muscular_humanoid"
+          : settings.requestedPresence === "particle_bust" && settings.avatarId === MYTHIC_LIVING_AVATAR_ID
+            ? "mythic_living_b"
           : settings.requestedPresence === "particle_bust" && settings.avatarId === MYTHIC_LIVE_B_AVATAR_ID
             ? "mythic_live_b"
           : settings.requestedPresence
@@ -151,12 +155,20 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
           onClick={() =>
             apply(
               { shell: "hud", requestedPresence: "particle_bust", avatarId: MYTHIC_LIVE_B_AVATAR_ID },
-              "Mythic persona B active: procedural live particles, direct gaze, pointer and camera attention.",
+              "Mythic persona B active: detailed particle artwork with live gaze.",
             )
           }
         >
           <PresenceModePreview mode="mythic_live_b" />
           Mythic persona B · live gaze
+        </button>
+        <button type="button" disabled={busy}
+          className={selected === "mythic_living_b" ? "active" : ""}
+          onClick={() => apply({ shell: "hud", requestedPresence: "particle_bust", avatarId: MYTHIC_LIVING_AVATAR_ID },
+            "Anzu and Nabu emerge from the window edge with breathing bodies and settling wings. Other personas retain their detailed B avatars.")}
+        >
+          <PresenceModePreview mode="mythic_live_b" />
+          Living body · Anzu / Nabu
         </button>
         <button
           type="button"
@@ -188,6 +200,7 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
       </p>
       </CollapsibleSection>
 
+      {!showPersona && <PersonaVisualSliders />}
       {showPersona && (
         <>
           <CollapsibleSection title="Personality" storageKey="appearance-personality"><SessionPersonalityControls /></CollapsibleSection>

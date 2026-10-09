@@ -1,3 +1,4 @@
+export const MYTHIC_LIVING_AVATAR_ID = "mythic_living_b"
 export const MYTHIC_LIVE_B_AVATAR_ID = "mythic_live_b"
 export const MYTHIC_PORTRAIT_A_AVATAR_ID = "mythic_portrait_a"
 export const SETTINGS_CLOUD_SHAPE_ID = "settings_cloud"
@@ -9,5 +10,5 @@ export function mythicLiveVariantShapeId(shapeId: string | undefined | null): st
 }
 
 export function usesMythicLiveVariantB(avatarId: string | undefined | null): boolean {
-  return avatarId === MYTHIC_LIVE_B_AVATAR_ID
+  return avatarId === MYTHIC_LIVE_B_AVATAR_ID || avatarId === MYTHIC_LIVING_AVATAR_ID
 }

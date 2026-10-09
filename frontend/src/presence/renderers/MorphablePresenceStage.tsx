@@ -15,6 +15,7 @@ import {
 } from "../presenceLifecycle"
 import type { PersonaCloudVisual, PresencePhase, PresenceSnapshot, PresentationSettings } from "../presenceTypes"
 import { readVoiceMeter } from "../../tts/voiceAnalyser"
+import { avatarMotionProfile, sampleAvatarMotion } from "../avatarMotion"
 import {
   AutoPresenceQuality,
   motifSafeAccentHex,
@@ -146,6 +147,7 @@ export function MorphablePresenceStage({
       uRestRemap: { value: 1 },
       uPhaseKind: { value: 0 },
       uGlow: { value: 1 },
+      uPortraitExposure: { value: 1 },
       uPointScale: { value: 1 },
       uDepthSoftness: { value: 0 },
       uBreath: { value: 0 },
@@ -154,6 +156,8 @@ export function MorphablePresenceStage({
       uPointer: { value: new THREE.Vector2(0, 0) },
       uPointerStrength: { value: 0 },
       uGesture: { value: 0 },
+      uLivingRig: { value: new THREE.Vector4(0, 0, 0, 0) },
+      uAvatarDeform: { value: new THREE.Vector2(0, 0) },
       uColor: { value: new THREE.Color(PHASE_COLOR.idle) },
       uGold: { value: new THREE.Color(0xff941f) },
       uAccent: { value: new THREE.Color(0xd4a017) },
@@ -228,10 +232,17 @@ export function MorphablePresenceStage({
       const aPos = system.figure.geometry.getAttribute("aPos")
       const bPos = system.figure.geometry.getAttribute("bPos")
       // Union rest + engaged so idle scatter cannot crop crown/chin off look-at.
-      const positions = unionPresencePositions(
+      let positions = unionPresencePositions(
         aPos.array as ArrayLike<number>,
         bPos.array as ArrayLike<number>,
       )
+      if (profile.framing?.cropBelow !== undefined) {
+        const framed: number[] = []
+        for (let i = 0; i < positions.length; i += 3) {
+          if (positions[i + 1] >= profile.framing.cropBelow) framed.push(positions[i], positions[i + 1], positions[i + 2])
+        }
+        positions = new Float32Array(framed)
+      }
       const fitYaw = profile.framing?.yaw ?? PRESENCE_DEFAULT_FRAMING_YAW
       const fit = normalizedPresenceFitScale(
         positions, aspect, camera.fov, camera.position.z,
@@ -354,11 +365,10 @@ export function MorphablePresenceStage({
       const listenTarget = phase === "listening" && !reduced ? 1 : 0
       uniforms.uListen.value += (listenTarget - uniforms.uListen.value) * Math.min(1, delta * 4)
       const shapeDef = resolvePresenceShape(system.currentShapeId)
-      const liveBGlow = system.currentShapeId.endsWith("_b") && typeof visual?.glow === "number"
-        ? Math.min(1.05, visual.glow * 1.18)
-        : visual?.glow
-      const appearance = resolveDotAppearance(shapeDef.appearance, { ...visual, glow: liveBGlow })
+      const appearance = resolveDotAppearance(shapeDef.appearance, visual)
       uniforms.uGlow.value = appearance.glow
+      uniforms.uPortraitExposure.value = shapeDef.appearance?.portraitExposure ?? 1
+      stage.dataset.presenceExposure = uniforms.uPortraitExposure.value.toFixed(3)
       const personaScale = visual?.scale && visual.scale > 0 ? visual.scale : 1
       bust.scale.setScalar(framingScale * personaScale)
       uniforms.uActivity.value += (activity - uniforms.uActivity.value)
@@ -438,14 +448,23 @@ export function MorphablePresenceStage({
       const follow = !reduced && mode !== "off"
       const att = attentionRef.current
       const morphNow = system.morphValue()
-      const yawGain = THREE.MathUtils.degToRad(3.2)
-      const pitchGain = THREE.MathUtils.degToRad(1.35)
+      const volumetricPersona = system.currentShapeId.startsWith("portrait_") && system.currentShapeId.endsWith("_b")
+      const livingBody = system.currentShapeId.endsWith("_living_b")
+      const yawGain = THREE.MathUtils.degToRad(volumetricPersona ? 18 : 3.2)
+      const pitchGain = THREE.MathUtils.degToRad(volumetricPersona ? 9 : 1.35)
+      const idleMotion = reduced ? 0 : Math.max(0, animation)
+      const motionProfile = avatarMotionProfile(system.currentShapeId)
+      const motion = sampleAvatarMotion(motionProfile, animationTime, animation, reduced)
+      bust.scale.setScalar(fitScale * motion.scale)
+      bust.rotation.z = motion.roll
+      // Deform only the detailed persona relief. Humanoid artwork remains solid.
+      uniforms.uAvatarDeform.value.set(volumetricPersona ? motion.flutter : 0, volumetricPersona ? motion.ripple : 0)
       const rotationLerp = 1 - Math.exp(-delta * 3.4)
       if (!follow) {
-        bust.rotation.set(0, baseYaw, 0)
+        bust.rotation.set(motion.pitch, baseYaw + motion.yaw, motion.roll)
         bust.position.set(
-          framedX,
-          framedY + (reduced ? 0 : Math.sin(animationTime * 1.05) * 0.016),
+          framedX + motion.x,
+          framedY + motion.y,
           framedZ,
         )
         uniforms.uPointerStrength.value = 0
@@ -454,11 +473,11 @@ export function MorphablePresenceStage({
         const ax = att.x
         const ay = att.y
         const yawFollow = morphNow
-        bust.rotation.y += ((baseYaw + ax * yawGain * yawFollow) - bust.rotation.y) * rotationLerp
-        bust.rotation.x += ((-ay * pitchGain * yawFollow) - bust.rotation.x) * rotationLerp
-        bust.position.x = framedX
+        bust.rotation.y += ((baseYaw + motion.yaw + ax * yawGain * yawFollow) - bust.rotation.y) * rotationLerp
+        bust.rotation.x += ((motion.pitch - ay * pitchGain * yawFollow) - bust.rotation.x) * rotationLerp
+        bust.position.x = framedX + motion.x
         bust.position.z = framedZ
-        bust.position.y = framedY + Math.sin(animationTime * 1.05) * 0.016
+        bust.position.y = framedY + motion.y
         uniforms.uPointer.value.set(ax * 1.45, 0.12 - ay * 1.35)
         const pointerTarget = THREE.MathUtils.clamp(att.confidence, 0, 1) * restAttractGain(morphNow)
         uniforms.uPointerStrength.value += (pointerTarget - uniforms.uPointerStrength.value)
@@ -466,6 +485,22 @@ export function MorphablePresenceStage({
         const gestureTarget = att.source === "camera" ? att.gesture : 0
         uniforms.uGesture.value += (gestureTarget - uniforms.uGesture.value) * Math.min(1, delta * 4)
       }
+      // The chest stays rooted while the neck tracks attention independently.
+      const headYaw = livingBody
+        ? uniforms.uLivingRig.value.y + ((motion.yaw + (follow ? att.x * yawGain * morphNow : 0)) - uniforms.uLivingRig.value.y) * (reduced ? 1 : rotationLerp)
+        : bust.rotation.y - baseYaw
+      const headPitch = livingBody
+        ? uniforms.uLivingRig.value.z + ((motion.pitch - (follow ? att.y * pitchGain * morphNow : 0)) - uniforms.uLivingRig.value.z) * (reduced ? 1 : rotationLerp)
+        : bust.rotation.x
+      uniforms.uLivingRig.value.set(livingBody ? 1 : 0, headYaw, headPitch, reduced ? 0 : Math.sqrt(Math.max(0, animation)))
+      if (livingBody) bust.rotation.set(motion.pitch * 0.25, baseYaw + motion.yaw * 0.25, motion.roll * 0.35)
+      stage.dataset.presenceBody = livingBody ? "articulated" : "head"
+      stage.dataset.presenceHeadYaw = headYaw.toFixed(3)
+      stage.dataset.presenceYaw = bust.rotation.y.toFixed(3)
+      stage.dataset.presencePitch = bust.rotation.x.toFixed(3)
+      stage.dataset.presenceMotion = String(idleMotion)
+      stage.dataset.presenceAnimation = motionProfile.name
+      stage.dataset.presenceHover = motion.y.toFixed(4)
       try {
         if (composer && bloomPass.enabled) composer.render()
         else renderer.render(scene, camera)
