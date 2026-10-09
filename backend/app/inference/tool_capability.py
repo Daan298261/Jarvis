@@ -47,12 +47,19 @@ def capability_status(provider: ModelProvider | None) -> dict:
 
 
 async def probe_tool_capability(provider: ModelProvider, *, thinking: bool = False, force: bool = False) -> dict:
+    # Only cache successful certifications. Transient Connection/timeouts must
+    # re-probe on the next task — a sticky "failed" blocks the whole agent loop.
     if not force and provider in _results:
-        return _results[provider].as_dict()
+        cached = _results[provider]
+        if cached.status == "ready":
+            return cached.as_dict()
     lock = _locks.setdefault(provider, asyncio.Lock())
     async with lock:
         if not force and provider in _results:
-            return _results[provider].as_dict()
+            cached = _results[provider]
+            if cached.status == "ready":
+                return cached.as_dict()
+
         token = secrets.token_hex(6)
         messages = [
             ChatMessage(role="system", content="For this diagnostic, call diagnostic_echo with the exact token supplied by the user. Do not answer before the tool responds."),

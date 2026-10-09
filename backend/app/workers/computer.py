@@ -363,6 +363,7 @@ class UFOBackend(ComputerUseBackend):
         if kind.startswith("checkout:"):
             cwd = kind.split(":", 1)[1]
             env["PYTHONPATH"] = cwd + os.pathsep + env.get("PYTHONPATH", "")
+            self._sync_local_llm_config(Path(cwd), env)
         try:
             stdout, stderr, code = await self._invoke(command, timeout, env=env, cwd=cwd)
         except Exception as exc:
@@ -373,7 +374,11 @@ class UFOBackend(ComputerUseBackend):
             )
         output = (stdout or stderr or "").strip()
         data = {"backend": self.id, "kind": kind, "command": command, "exit_code": code, "app": app}
-        if code != 0:
+        # UFO² often returns a non-zero process code after a finished Host/App
+        # session (evaluation / teardown). Prefer the EvaluationAgent verdict.
+        completed = code == 0 or self._ufo_session_completed(output)
+        data["session_completed"] = completed
+        if not completed:
             return ToolResult(
                 False,
                 output,
@@ -383,6 +388,20 @@ class UFOBackend(ComputerUseBackend):
         reminder = "\n\nJarvis must independently inspect the UI (desktop snapshot or named control) after UFO returns."
         return ToolResult(True, (output or "UFO finished.") + reminder, data=data)
 
+    @staticmethod
+    def _ufo_session_completed(output: str) -> bool:
+        text = output or ""
+        lowered = text.lower()
+        if "task is complete" in lowered and re.search(r"task is complete[^\n]*\n\|?\s*yes\b", text, re.I):
+            return True
+        if re.search(r"\|\s*FINISH\s*\|", text) and "successfully" in lowered:
+            return True
+        if "evaluationagent response" in lowered and re.search(
+            r"task is complete[\s\S]{0,120}\byes\b", text, re.I
+        ):
+            return True
+        return False
+
     def _openai_env(self) -> dict[str, str]:
         """Point UFO² at the local OpenAI-compatible llama.cpp endpoint (>=20k ctx)."""
         env = direct_child_env()
@@ -391,12 +410,77 @@ class UFOBackend(ComputerUseBackend):
 
             inf = load_settings().inference
             base = f"http://{inf.host}:{int(inf.port)}/v1"
+            model = str(getattr(inf, "model", "") or getattr(inf, "profile", "") or "").strip()
         except Exception:
             base = "http://127.0.0.1:8088/v1"
+            model = ""
+        if not model:
+            model = self._discover_local_model(base) or "Qwen3.5-9B"
         env.setdefault("OPENAI_BASE_URL", base)
         env.setdefault("OPENAI_API_BASE", base)
         env.setdefault("OPENAI_API_KEY", env.get("OPENAI_API_KEY") or "local")
+        env.setdefault("JARVIS_UFO_API_MODEL", model)
         return env
+
+    @staticmethod
+    def _discover_local_model(base: str) -> str | None:
+        """Best-effort model id from the live OpenAI-compatible /v1/models listing."""
+        try:
+            import json
+            import urllib.request
+
+            root = base.rstrip("/")
+            if root.endswith("/v1"):
+                url = f"{root}/models"
+            else:
+                url = f"{root}/v1/models"
+            with urllib.request.urlopen(url, timeout=3) as resp:
+                payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+            rows = payload.get("data") or payload.get("models") or []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                name = str(row.get("id") or row.get("name") or row.get("model") or "").strip()
+                if name:
+                    return name
+        except Exception:
+            return None
+        return None
+
+    def _sync_local_llm_config(self, checkout: Path, env: dict[str, str]) -> None:
+        """Rewrite UFO agents.yaml so Host/App agents use Jarvis's local /v1 endpoint.
+
+        UFO² defaults / stale templates can route through Azure AD and fail with
+        \"AAD API scope base and tenant ID must be specified\" even when the
+        checkout is present. Keep API_TYPE=openai and the loaded local model.
+        """
+        path = checkout / "config" / "ufo" / "agents.yaml"
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return
+        base = (env.get("OPENAI_API_BASE") or env.get("OPENAI_BASE_URL") or "http://127.0.0.1:8088/v1").rstrip(
+            "/"
+        )
+        if base.endswith("/chat/completions"):
+            base = base[: -len("/chat/completions")]
+        model = env.get("JARVIS_UFO_API_MODEL") or "Qwen3.5-9B"
+        key = env.get("OPENAI_API_KEY") or "local"
+        block = (
+            "  VISUAL_MODE: false\n"
+            "  REASONING_MODEL: false\n"
+            '  API_TYPE: "openai"\n'
+            f'  API_BASE: "{base}"\n'
+            f'  API_KEY: "{key}"\n'
+            f'  API_MODEL: "{model}"\n'
+            '  API_VERSION: "2024-02-15-preview"\n'
+        )
+        agents = ("HOST_AGENT", "APP_AGENT", "BACKUP_AGENT", "EVALUATION_AGENT", "OPERATOR")
+        body = "\n".join(f"{name}:\n{block}" for name in agents) + "\n"
+        try:
+            path.write_text(body, encoding="utf-8")
+        except OSError:
+            return
 
     async def _invoke(
         self,

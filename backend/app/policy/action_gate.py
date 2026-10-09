@@ -18,6 +18,12 @@ from .reversibility_gate import SideEffectDecision, evaluate_side_effect
 
 log = logging.getLogger("jarvis.policy.action_gate")
 
+# Live Laya harm-veto on CPU is typically ~100–150 ms once warm, plus Reflex
+# preamble. An 80 ms budget expired before Laya could answer; 500 ms still
+# saw low-confidence fallthrough to generative on this host. 800 ms matches
+# Laya's own warm infer budget and yields provider=laya without fallback.
+HARM_VETO_DEADLINE_MS = 800.0
+
 
 def _as_cancel(value: object) -> bool | None:
     if isinstance(value, bool):
@@ -104,7 +110,7 @@ def gate_side_effect(
         "destructive": decision.effect.destructive_effect,
     }
     try:
-        reflex = decide(state, [HARM_QUESTION], "harm_veto", 80.0, "local_only")
+        reflex = decide(state, [HARM_QUESTION], "harm_veto", HARM_VETO_DEADLINE_MS, "local_only")
         answer = reflex.answers.get("cancel")
         cancel = _as_cancel(answer.value) if answer is not None else None
     except Exception as exc:  # noqa: BLE001
