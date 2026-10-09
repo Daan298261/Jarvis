@@ -334,6 +334,10 @@ async def startup() -> None:
             logging.exception("Failed to read JARVIS_LAUNCH_PROMPT_FILE %s", launch_prompt_file)
 
     QUEUE_WATCHER.start()
+    if not os.environ.get("JARVIS_SKIP_MODEL"):
+        from .inference.running_models import RUNNING_MODELS
+
+        RUNNING_MODELS.start()
     mobile_runtime.start()
     try:
         from .inference.status_monitor import STATUS_MONITOR
@@ -423,6 +427,9 @@ async def shutdown() -> None:
 
     await INVESTIGATIONS.shutdown()
     QUEUE_WATCHER.stop()
+    from .inference.running_models import RUNNING_MODELS
+
+    RUNNING_MODELS.stop()
     try:
         from .inference.status_monitor import STATUS_MONITOR
 
@@ -466,6 +473,16 @@ async def shutdown() -> None:
 
 
 async def _autoload_model(current) -> None:
+    if current.inference.backend in {"llama.cpp", "local"}:
+        from .inference.running_models import RUNNING_MODELS
+
+        try:
+            inventory = await RUNNING_MODELS.scan()
+            if any(not row["choice"] for row in inventory["servers"]):
+                logging.info("Worker auto-load waiting for the owner's running-model choice")
+                return
+        except Exception:
+            logging.exception("Running model discovery failed before auto-load")
     try:
         await MANAGER.load(current, preferred_startup_profile(current.inference.profile))
     except Exception:

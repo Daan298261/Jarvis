@@ -1979,3 +1979,21 @@ html[data-session-mode] .hud-app {
   color: rgba(215, 234, 242, 0.7);
   font-size: 12px;
 }
+.running-model-offer {
+  position: fixed;
+  z-index: 90;
+  bottom: 24px;
+  right: 24px;
+  width: min(500px, calc(100vw - 48px));
+  max-height: 55vh;
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid #c08d51;
+  border-radius: 16px;
+  background: #15120ff5;
+  color: #eee6db;
+  box-shadow: 0 12px 48px #0008;
+}
+.running-model-row { margin-top: 16px; }
+.running-model-row small { display: block; overflow-wrap: anywhere; opacity: .75; }
+.running-model-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
