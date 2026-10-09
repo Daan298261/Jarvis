@@ -251,3 +251,49 @@ def privacy_for_tier(decision_tier: str) -> PrivacyMode:
     if decision_tier in {"jev_optional", "jev_plus"}:
         return "allow_cloud"
     return "local_only"
+
+
+ARBITRATION_DEADLINE_MS = 50.0
+ARBITRATION_CHOICES = ("keep_front", "keep_worker", "append_novel")
+
+
+def arbitrate_front_and_worker(
+    *,
+    user_message: str,
+    front_text: str,
+    worker_text: str,
+    front_action: str = "",
+    front_spoken: bool = False,
+    reply_shape: str = "",
+    decision_tier: str = "local",
+    deadline_ms: float = ARBITRATION_DEADLINE_MS,
+    privacy: PrivacyMode | None = None,
+) -> DecisionResult:
+    """One Reflex decide() for how front + worker become one owner-facing turn."""
+    mode = privacy if privacy is not None else privacy_for_tier(decision_tier)
+    return decide(
+        {
+            "user_message": user_message,
+            "front_text": front_text,
+            "worker_text": worker_text,
+            "front_action": front_action,
+            "front_spoken": bool(front_spoken),
+            "reply_shape": reply_shape,
+        },
+        [
+            Question(
+                id="disposition",
+                type="choice",
+                prompt="How should the front-lane answer and the worker-lane answer become one owner-facing turn?",
+                choices=ARBITRATION_CHOICES,
+                descriptions=(
+                    "Keep the front line; drop a worker paraphrase",
+                    "Keep the worker line; it already contains the front line or corrects it",
+                    "Keep the front line, then append worker sentences that add new information",
+                ),
+            )
+        ],
+        "arbitration",
+        deadline_ms,
+        mode,
+    )

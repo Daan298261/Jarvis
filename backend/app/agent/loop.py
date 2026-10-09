@@ -423,6 +423,7 @@ class AgentRuntime:
         self._last_heartbeat: dict[str, datetime] = {}
         self._cancel = set()
         self._front_tasks: dict[str, asyncio.Task] = {}
+        self._owner_turns: dict[str, Any] = {}
 
     async def _heartbeat_loop(self, task_id: str) -> None:
         try:
@@ -484,9 +485,15 @@ class AgentRuntime:
                     return existing
         settings = load_settings()
         mode = execution_mode or settings.execution_mode or "balanced"
-        from .request_routing import evaluate_request_route
+        from ..decision.owner_turn import decide_owner_turn
 
-        route = await evaluate_request_route(prompt, route_request(prompt))
+        turn = await decide_owner_turn(
+            prompt,
+            baseline=route_request(prompt),
+            settings=settings,
+            decision_tier=str(getattr(settings.decision, "tier", "") or "local"),
+        )
+        route = turn.route
         task_class = route.task_class
         from ..security.security_agents import (
             assert_mode_entitled,
@@ -519,6 +526,7 @@ class AgentRuntime:
         )
         if role == "purple-team":
             init_purple(task.id)
+        self._owner_turns[task.id] = turn
         async with SessionLocal() as session:
             session.add(task)
             await session.commit()
@@ -1102,15 +1110,17 @@ class AgentRuntime:
         watch = open_worker_sentence_watch(task_id)
         try:
             await self._publish_front_events(task_id, "front_response_started", "Front response started")
+            turn = self._owner_turns.get(task_id)
             front = await generate_front_reply(
                 prompt,
                 history=history,
                 settings=settings,
+                turn_decision=turn,
                 turn_started=turn_started,
             )
             if front.action == "silent_skip" or not front.text:
                 await self._publish_front_events(task_id, "front_response_skipped", "Front response skipped")
-                heuristic = classify_front_action(prompt)
+                heuristic = classify_front_action(prompt, decision=turn)
                 _action, ack_text, _rejected = enforce_front_safety(
                     heuristic,
                     fallback_text_for_action(heuristic),
@@ -1362,7 +1372,13 @@ class AgentRuntime:
 
         from ..memory.obsidian_vault import vault_ask_requires_working_set as _vault_required
 
-        if should_prefetch_turn_retrieval(user_text, vault_required=_vault_required(user_text)):
+        turn = self._owner_turns.get(task_id)
+        if should_prefetch_turn_retrieval(
+            user_text,
+            vault_required=_vault_required(user_text),
+            action=str(getattr(turn, "front_action", "") or ""),
+            decision=turn,
+        ):
 
             async def _prefetch_conversation_ws():
                 return await compose_turn_working_set(
@@ -1375,7 +1391,13 @@ class AgentRuntime:
 
             retrieval_task = asyncio.create_task(_prefetch_conversation_ws())
 
-        if front_worker_should_overlap(settings, user_text, strategy="direct"):
+        if front_worker_should_overlap(
+            settings,
+            user_text,
+            strategy="direct",
+            action=str(getattr(turn, "front_action", "") or ""),
+            decision=turn,
+        ):
             overlap_task = asyncio.create_task(_produce_conversation_worker())
             sentence_watch = QueueSentenceWatch(overlap_queue)
             sentence_watch.start()
@@ -1384,6 +1406,7 @@ class AgentRuntime:
             user_text,
             history=prior,
             settings=settings,
+            turn_decision=turn,
             turn_started=turn_started,
         )
         stream_key = f"task:{task_id}"
@@ -1769,6 +1792,7 @@ class AgentRuntime:
                 user_text,
                 history=prior,
                 settings=settings,
+                turn_decision=turn,
                 turn_started=turn_started or model_started,
                 worker_stream=worker_stream,
                 on_delta=on_delta,
@@ -2273,9 +2297,21 @@ class AgentRuntime:
             if spill:
                 active_prompt = f"{gate_text[:1200]}\n\n{spill}"
         metrics = LiveTaskMetrics()
-        from .request_routing import evaluate_request_route
+        from ..decision.owner_turn import decide_owner_turn as _decide_follow
 
-        follow_route = await evaluate_request_route(extra_prompt, route_request(extra_prompt)) if extra_prompt else None
+        follow_turn = (
+            await _decide_follow(
+                extra_prompt,
+                baseline=route_request(extra_prompt),
+                settings=settings,
+                decision_tier=str(getattr(settings.decision, "tier", "") or "local"),
+            )
+            if extra_prompt
+            else None
+        )
+        follow_route = follow_turn.route if follow_turn is not None else None
+        if follow_turn is not None:
+            self._owner_turns[task_id] = follow_turn
         if (working.task_class == CONVERSATION_CLASS or (follow_route and follow_route.kind != "managed_task")) and not pending_tool:
             if follow_up_stays_conversation(extra_prompt, security_role=working.security_role):
                 working.task_class = CONVERSATION_CLASS

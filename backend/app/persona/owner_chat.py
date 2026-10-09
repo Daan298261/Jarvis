@@ -44,7 +44,7 @@ from ..agent.front_responder import (
     terminal_front_completes_turn,
     wait_for_late_ack,
 )
-from ..agent.planning import requests_agent_tools
+from ..agent.planning import requests_agent_tools, route_request
 from ..agent.segmented_input import condense_segments
 from .inference_context import ensure_context_for_messages, model_lane_event_payload
 from ..agent.background_verify import schedule_background_verification
@@ -363,6 +363,14 @@ async def stream_owner_chat(
     settings = load_settings()
     profile = resolve_profile(settings.inference.profile)
     turn_started = time.perf_counter()
+    from ..decision.owner_turn import decide_owner_turn
+
+    turn = await decide_owner_turn(
+        cleaned,
+        baseline=route_request(cleaned),
+        settings=settings,
+        decision_tier=str(getattr(settings.decision, "tier", "") or "local"),
+    )
     stream_key = f"owner:{cid}"
     clear_stream_speak_state(stream_key)
     early_tts_ids: list[str] = []
@@ -386,6 +394,8 @@ async def stream_owner_chat(
     if should_prefetch_turn_retrieval(
         cleaned,
         vault_required=vault_ask_requires_working_set(cleaned),
+        action=turn.front_action,
+        decision=turn,
     ):
 
         async def _prefetch_owner_working_set():
@@ -417,13 +427,20 @@ async def stream_owner_chat(
         sentence_watch = QueueSentenceWatch(overlap_queue)
         sentence_watch.start()
 
-    if front_worker_should_overlap(settings, cleaned, strategy=intake.strategy):
+    if front_worker_should_overlap(
+        settings,
+        cleaned,
+        strategy=intake.strategy,
+        action=turn.front_action,
+        decision=turn,
+    ):
         _arm_worker_overlap()
 
     prefetched_front = await generate_front_reply(
         cleaned,
         history=history,
         settings=settings,
+        turn_decision=turn,
         turn_started=turn_started,
     )
     front_safe = bool(
@@ -791,6 +808,7 @@ async def stream_owner_chat(
             cleaned,
             history=history,
             settings=settings,
+            turn_decision=turn,
             turn_started=turn_started,
             worker_stream=worker_stream,
             on_delta=on_delta,
@@ -927,17 +945,14 @@ async def stream_owner_chat(
         front_action = (done or {}).get("front_action") or prefetched_front.action
         verify_scheduled = False
         if not terminal_front_completes_turn(str(front_action or "")):
-            from ..agent.planning import route_request
-
-            route = route_request(cleaned)
             verify_scheduled = schedule_background_verification(
                 cleaned,
                 reply,
                 source="owner_chat",
                 speak=True,
                 conversation_id=cid,
-                route_kind=route.kind,
-                task_class=route.task_class,
+                route_kind=turn.route.kind,
+                task_class=turn.route.task_class,
             )
         yield {
             "type": "done",
