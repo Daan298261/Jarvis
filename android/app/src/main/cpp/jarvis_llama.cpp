@@ -101,6 +101,7 @@ Java_com_jarvis_companion_CompanionNativeBridge_nativeGenerate(JNIEnv *env, jcla
     if (!g_model || !g_ctx) {
         return to_jstring(env, "error:Model is not loaded");
     }
+    llama_kv_cache_clear(g_ctx);
     const std::string user = jstring_to_std(env, prompt);
     if (user.empty()) return to_jstring(env, "error:Prompt is empty");
 
