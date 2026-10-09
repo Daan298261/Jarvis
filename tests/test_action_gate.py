@@ -65,7 +65,7 @@ def test_harm_veto_deadline_leaves_room_for_warm_laya(monkeypatch):
     result = gate_tool_call("filesystem", action="read", arguments={"path": "notes.txt"})
     assert result.allowed is True
     assert seen["decision_class"] == "harm_veto"
-    assert seen["deadline_ms"] >= 500.0
+    assert seen["deadline_ms"] >= 800.0
     assert seen["deadline_ms"] == gate.HARM_VETO_DEADLINE_MS
 
 

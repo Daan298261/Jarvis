@@ -18,10 +18,11 @@ from .reversibility_gate import SideEffectDecision, evaluate_side_effect
 
 log = logging.getLogger("jarvis.policy.action_gate")
 
-# Live Laya harm-veto on CPU is typically ~100–150 ms once warm. The previous
-# 80 ms budget expired before Laya could answer, so every allow fell through to
-# generative fallback and metrics never showed provider=laya.
-HARM_VETO_DEADLINE_MS = 500.0
+# Live Laya harm-veto on CPU is typically ~100–150 ms once warm, plus Reflex
+# preamble. An 80 ms budget expired before Laya could answer; 500 ms still
+# saw low-confidence fallthrough to generative on this host. 800 ms matches
+# Laya's own warm infer budget and yields provider=laya without fallback.
+HARM_VETO_DEADLINE_MS = 800.0
 
 
 def _as_cancel(value: object) -> bool | None:
