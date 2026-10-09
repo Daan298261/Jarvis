@@ -12,6 +12,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -119,5 +121,68 @@ class ChunkedTtsSessionTest {
         session.stop()
         delay(20)
         assertEquals("a second stop must not rerun cleanup", 1, idle.get())
+    }
+
+    @Test
+    fun startDuringIdleJoinsUnloadThenLoadsAgain() = runBlocking {
+        val loads = AtomicInteger(0)
+        val synths = CopyOnWriteArrayList<String>()
+        val inIdle = CountDownLatch(1)
+        val finishIdle = CountDownLatch(1)
+        val engine = PocketTtsEngine(
+            runtimeAvailable = { true },
+            nativeLoad = { _, _ ->
+                loads.incrementAndGet()
+                ""
+            },
+            nativeSynthesize = { text ->
+                synths += text
+                audibleWav()
+            },
+            nativeUnload = {
+                inIdle.countDown()
+                finishIdle.await()
+            },
+        )
+        val dir = "/pack"
+        val engineId = CompanionVoicePackCatalog.POCKET_TTS_ENGINE
+        val errors = CopyOnWriteArrayList<Throwable>()
+        try {
+            val session = ChunkedTtsSession(
+                scope = this,
+                synthesize = { text ->
+                    engine.load(dir, engineId)?.let { error(it) }
+                    engine.synthesize(text).getOrThrow()
+                },
+                play = {},
+                onError = { errors += it },
+                onIdle = { engine.unload() },
+            )
+            session.start(listOf("aaa."))
+            assertTrue(inIdle.await(2, TimeUnit.SECONDS))
+            assertEquals(1, loads.get())
+            session.start(listOf("bbb."))
+            delay(40)
+            assertEquals("B must join A's unload before loading", 1, loads.get())
+            finishIdle.countDown()
+            session.job?.join()
+            assertTrue(errors.isEmpty())
+            assertEquals(2, loads.get())
+            assertTrue(synths.contains("bbb."))
+        } finally {
+            finishIdle.countDown()
+        }
+    }
+
+    private fun audibleWav(): ByteArray {
+        val samples = 240
+        val wav = ByteArray(44 + samples * 2)
+        var i = 44
+        while (i + 1 < wav.size) {
+            wav[i] = 0
+            wav[i + 1] = 40
+            i += 2
+        }
+        return wav
     }
 }

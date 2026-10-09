@@ -14,6 +14,9 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(RobolectricTestRunner::class)
@@ -139,6 +142,9 @@ class CompanionVoicePackManagerTest {
         piper.mkdirs()
         val leftover = File(piper, "en_US-lessac-medium.onnx")
         leftover.writeBytes(ByteArray(2048) { 1 })
+        val future = File(context.filesDir, "voice-packs/desktop-catalog-tts")
+        future.mkdirs()
+        File(future, "model.onnx").writeBytes(ByteArray(16) { 2 })
         val digest = "ab".repeat(32)
         manager.digestCache.remember(leftover, digest)
         val digestPrefs = context.getSharedPreferences("companion_voice_digest", Context.MODE_PRIVATE)
@@ -148,6 +154,7 @@ class CompanionVoicePackManagerTest {
         assertTrue(before >= leftover.length())
         kotlinx.coroutines.runBlocking { manager.refreshStatus() }
         assertFalse(piper.exists())
+        assertTrue("non-retired desktop-catalog dirs must survive cold-start prune", future.exists())
         assertTrue(manager.storageBytes() < before)
         assertFalse(digestPrefs.contains(persistKey))
     }
@@ -174,6 +181,63 @@ class CompanionVoicePackManagerTest {
             chunks.forEach { local.synthesize(it) }
         }
         assertEquals(1, loads.get())
+    }
+
+    @Test
+    fun synthesizeLoadsAgainAfterUnload() {
+        val loads = AtomicInteger(0)
+        val engine = PocketTtsEngine(
+            runtimeAvailable = { true },
+            nativeLoad = { _, _ ->
+                loads.incrementAndGet()
+                ""
+            },
+            nativeSynthesize = { audibleWav() },
+        )
+        val local = CompanionVoicePackManager(context, ttsEngine = engine)
+        seedReadyTts(local)
+        kotlinx.coroutines.runBlocking {
+            local.synthesize("First spoken chunk.")
+            assertEquals(1, loads.get())
+            local.unloadIdle()
+            local.synthesize("Second spoken chunk.")
+        }
+        assertEquals(2, loads.get())
+    }
+
+    @Test
+    fun cancelledSynthesizeKeepsReadyAndDoesNotCallOnError() = kotlinx.coroutines.runBlocking {
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val engine = object : OnDeviceTtsEngine {
+            override val runtimeName = "fake"
+            override fun isRuntimeAvailable() = true
+            override fun load(packDirectory: String, engineId: String): String? = null
+            override fun synthesize(text: String): Result<ByteArray> {
+                started.countDown()
+                release.await()
+                return Result.failure(IllegalStateException("produced no audio"))
+            }
+            override fun unload() {}
+        }
+        val local = CompanionVoicePackManager(context, ttsEngine = engine)
+        seedReadyTts(local)
+        local.refreshStatus()
+        val errors = CopyOnWriteArrayList<Throwable>()
+        val session = ChunkedTtsSession(
+            scope = this,
+            synthesize = { local.synthesize(it) },
+            play = {},
+            onError = { errors += it },
+        )
+        session.start(listOf("hello there."))
+        assertTrue(started.await(2, TimeUnit.SECONDS))
+        session.stop()
+        release.countDown()
+        session.job?.join()
+        assertTrue("session onError must not run for a cancelled synth", errors.isEmpty())
+        assertEquals(CompanionVoicePackStatus.READY, local.ttsStatus())
+        assertEquals("", local.lastError())
     }
 
     private fun seedReadyTts(target: CompanionVoicePackManager) {
