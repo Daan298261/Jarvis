@@ -157,8 +157,9 @@ function Invoke-ForceStopSingleRoot {
         return $false
     }
 
-    function Register-JarvisPythonPid([int]$Pid) {
-        if ($Pid -gt 0) { [void]$script:JarvisPythonPids.Add($Pid) }
+    function Register-JarvisPythonPid([int]$ProcessId) {
+        # Do not name this parameter $Pid — PowerShell reserves that automatic variable.
+        if ($ProcessId -gt 0) { [void]$script:JarvisPythonPids.Add($ProcessId) }
     }
 
     function Test-IsJarvisUvicornBackend {
