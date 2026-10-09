@@ -7,6 +7,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
+from uuid import uuid4
 
 from ..agent.planning import (
     CONVERSATION_CLASS,
@@ -65,11 +66,12 @@ OWNER_TURN_QUESTIONS: list[Question] = [
 
 # Closed literal patterns. Longer forms first so "say only the word X" wins.
 _LITERAL_WORD = re.compile(
-    r"(?i)\b(?:say only the word|say only|reply with only|just say)\s+([A-Za-z0-9-]{1,80})\b"
+    r"(?i)^\s*(?:say only the word|say only|reply with only|just say)\s+([A-Za-z0-9-]{1,80})\s*[.!?]*\s*$"
 )
 _LITERAL_QUOTED = re.compile(
-    r'(?i)\b(?:respond|reply) with exactly\s+"([^"]{1,80})"'
+    r'(?i)^\s*(?:respond|reply) with exactly\s+"([^"]{1,80})"\s*[.!?]*\s*$'
 )
+_LITERAL_PHRASE = re.compile(r"(?i)^\s*just say\s+([A-Za-z0-9 -]{1,80})\s*$")
 _VAGUE_PROMPT = re.compile(
     r"(?i)^(do it|fix it|handle it|you know|the thing|this|that|please|go|ok then)\s*[.!?]*$"
 )
@@ -154,6 +156,9 @@ def extract_literal_candidate(user_message: str) -> str:
     word = _LITERAL_WORD.search(text)
     if word:
         return word.group(1)
+    phrase = _LITERAL_PHRASE.fullmatch(text)
+    if phrase and not re.search(r"(?i)\b(?:then|and)\b", phrase.group(1)):
+        return phrase.group(1).strip()
     return ""
 
 
@@ -286,12 +291,17 @@ def _apply_floors(
     else:
         route_kind = str(route_answer.value)
 
-    if shape_answer is None or shape_answer.value not in REPLY_SHAPES:
+    if (
+        result.fallback_used
+        or shape_answer is None
+        or shape_answer.value not in REPLY_SHAPES
+        or (shape_answer.confidence or 0) < ROUTE_CONFIDENCE_FLOOR
+    ):
         reply_shape = rules_shape
     else:
         reply_shape = str(shape_answer.value)
 
-    if is_explicit_action(user_message):
+    if is_explicit_action(user_message) and not literal:
         route_kind = MANAGED_TASK
         reply_shape = "handoff"
     if is_weather_query(user_message):
@@ -339,6 +349,7 @@ def _deadline_rules_result(
     decision_tier: str,
     reason: str,
     spent_ms: float,
+    request_id: str,
 ) -> DecisionResult:
     from .adapters import rules
 
@@ -366,6 +377,7 @@ def _deadline_rules_result(
         fallback_source="rules",
         latency=LatencyBreakdown(total_ms=spent_ms, inference_ms=base.latency.inference_ms),
         hard_rule=base.hard_rule,
+        request_id=request_id,
         meta={"deadline_fallback": True, "owner_turn": True},
     )
     from . import audit, metrics
@@ -381,10 +393,12 @@ def _decide_sync(
     decision_tier: str,
     settings: Any | None,
     inference_state: Any | None,
+    request_id: str,
 ) -> OwnerTurnDecision:
     literal = extract_literal_candidate(user_message)
     tier = _resolved_tier(decision_tier, settings)
     state = {
+        "_owner_turn_request_id": request_id,
         "user_message": user_message,
         "baseline_route": baseline.kind,
         "literal_candidate": literal,
@@ -439,6 +453,7 @@ async def decide_owner_turn(
     text = user_message or ""
     resolved_baseline = baseline or route_request(text)
     started = time.perf_counter()
+    request_id = uuid4().hex
     try:
         return await asyncio.wait_for(
             asyncio.to_thread(
@@ -448,6 +463,7 @@ async def decide_owner_turn(
                 decision_tier,
                 settings,
                 inference_state,
+                request_id,
             ),
             timeout=OWNER_TURN_DEADLINE_S,
         )
@@ -463,6 +479,7 @@ async def decide_owner_turn(
             decision_tier=tier,
             reason="outer wait_for exceeded 50 ms",
             spent_ms=spent,
+            request_id=request_id,
         )
         return _apply_floors(
             user_message=text,
@@ -482,6 +499,7 @@ async def decide_owner_turn(
             decision_tier=tier,
             reason="owner-turn provider error",
             spent_ms=spent,
+            request_id=request_id,
         )
         return _apply_floors(
             user_message=text,

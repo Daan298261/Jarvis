@@ -216,7 +216,9 @@ def decide(
     rules run only for hard safety (policy deny/approval, technical-speak fence).
     """
     started = time.perf_counter()
-    rid = request_id or uuid4().hex
+    raw_state = dict(state or {})
+    owner_request_id = raw_state.pop("_owner_turn_request_id", None)
+    rid = request_id or owner_request_id or uuid4().hex
     deadline = float(deadline_ms if deadline_ms is not None else DEFAULT_DEADLINE_MS)
     if deadline <= 0:
         deadline = DEFAULT_DEADLINE_MS
@@ -226,7 +228,7 @@ def decide(
     if dclass not in REFLEX_DECISION_CLASSES:
         log.warning("Reflex decide() called with unlisted decision_class %r", dclass)
     qlist = normalize_questions(questions)
-    projection = compact_state(state)
+    projection = compact_state(raw_state)
 
     # Hard safety only: policy deny/approval and the technical-speak fence.
     rules_result = rules.decide(
@@ -253,7 +255,9 @@ def decide(
         return guarded
 
     laya_ready = laya_runtime.is_ready()
-    jev_ready = jev_adapter.available(privacy=privacy, decision_class=dclass)[0]
+    # Jev is only a candidate here. Check its entitlement/key/WAN gate when
+    # actually trying it, after a warm Laya result has had the first chance.
+    jev_ready = privacy == "allow_cloud"
     order = quartermaster.select_provider_order(
         dclass,
         privacy=privacy,

@@ -51,6 +51,21 @@ _ABSENT_ASK = re.compile(
     r")\b"
 )
 
+# Coverage means the whole request is about a reading we possess. Keyword
+# overlap ("ANZU", "voice", "profile") is not enough to answer domain work.
+_SETUP_QUESTION = re.compile(
+    r"(?ix)^\s*(?:please\s+)?(?:"
+    r"who\s+are\s+you|what\s+are\s+you(?:\s+(?:called|named|running|using|loaded))?|"
+    r"(?:what|which)\s+(?:is\s+)?(?:your\s+|the\s+)?(?:loaded\s+|active\s+|inference\s+)?(?:profile|model|model\s+alias|persona|voice(?:\s+profile)?|shell|verbosity|personality|language|decision\s+tier)(?:\s+(?:is\s+loaded|is\s+running|are\s+you\s+(?:running|using)))?|"
+    r"what(?:'s|\s+is)\s+your\s+(?:name|setup|settings|config|context\s+(?:size|window|length))|"
+    r"how\s+much\s+context\s+do\s+you\s+have|"
+    r"(?:what(?:'s|\s+is)|how\s+(?:big|large)\s+is)\s+(?:your\s+)?context\s+(?:size|window)|"
+    r"is\s+(?:laya|jev)\s+(?:installed|warm|enabled|connected|ready)|"
+    r"is\s+(?:your\s+|the\s+)?(?:knowledge\s+)?vault\s+bound|"
+    r"(?:tell\s+me\s+)?about\s+yourself"
+    r")\s*[?.!]*\s*$"
+)
+
 _FIELD_HINTS: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
     (re.compile(r"(?i)\b(?:your |loaded |inference |which |what )?profile(?: is loaded)?\b"), ("inference_profile", "front_profile", "voice_profile_id", "loaded", "model_alias")),
     (
@@ -191,6 +206,8 @@ def snapshot_covers_question(
     if not text:
         return False
     if _ABSENT_ASK.search(text):
+        return False
+    if not _SETUP_QUESTION.fullmatch(text):
         return False
     available = snapshot if snapshot is not None else {key: True for key in SNAPSHOT_INCLUDE_KEYS}
     if not available:

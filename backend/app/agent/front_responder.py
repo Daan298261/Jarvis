@@ -111,22 +111,12 @@ _REASONING_LEAK = re.compile(
 _TOOL_CLAIM = re.compile(
     r"(?i)\b(i\s+(?:ran|called|executed|used)\s+(?:the\s+)?(?:tool|command|pytest|nmap|powershell))\b"
 )
-_VAGUE_PROMPT = re.compile(
-    r"(?i)^(do it|fix it|handle it|you know|the thing|this|that|please|go|ok then)\s*[.!?]*$"
-)
 _TRIVIAL_CHAT = re.compile(
     r"(?i)\b("
     r"hi|hello|hey|yo|thanks|thank you|cheers|bye|goodbye|"
     r"good\s+(?:morning|afternoon|evening|night)|"
     r"how are you|how(?:'s| is) it going|what'?s up|"
     r"tell me a (?:quick )?hello"
-    r")\b"
-)
-_NEEDS_STRONGER = re.compile(
-    r"(?i)\b("
-    r"refactor|security|hexstrike|vulnerability|cve-|forensic|"
-    r"architecture|codebase|implement|deploy|migrate|pytest|"
-    r"debug this|source code|pull request"
     r")\b"
 )
 _LIVE_FACT_HINT = re.compile(
@@ -465,6 +455,8 @@ def enforce_front_safety(
     cleaned = (text or "").strip()
     resolved = action if action in FRONT_ACTIONS else heuristic
     rejected = False
+    if resolved == "final_basic" and cleaned in {SAFE_ACK, SAFE_HANDOFF, SAFE_PROGRESS_MODEL, SAFE_PROGRESS_TOOLS, SAFE_PROGRESS_GENERIC}:
+        resolved, cleaned, rejected = "ack_continue", "", True
     if heuristic != "final_basic" and resolved == "final_basic":
         resolved = "ack_continue" if heuristic != "ask_clarification" else heuristic
         rejected = True
@@ -784,13 +776,11 @@ async def generate_front_reply(
     reply_shape = str(getattr(decision, "reply_shape", "") or "")
     literal_text = str(getattr(decision, "literal_text", "") or "")
     snapshot: dict[str, Any] | None = None
-    if reply_shape == "self_status":
+    if reply_shape == "self_status" and bool(getattr(decision, "snapshot_covers", False)):
         from .self_knowledge import build_self_knowledge_snapshot
 
         snapshot = build_self_knowledge_snapshot(app)
     model_id = resolve_front_model_id(app)
-    if not app.front_responder.enabled:
-        return FrontReply(action="silent_skip", text="", model=model_id, skipped=True, max_tokens=cfg.max_tokens)
     if reply_shape == "literal" and literal_text:
         elapsed_ms = max(0.0, (time.perf_counter() - started) * 1000)
         action, text, rejected = enforce_front_safety(
@@ -813,6 +803,8 @@ async def generate_front_reply(
             first_text_ms=elapsed_ms,
             complete_ms=elapsed_ms,
         )
+    if not app.front_responder.enabled:
+        return FrontReply(action="silent_skip", text="", model=model_id, skipped=True, max_tokens=cfg.max_tokens)
     chat = provider or front_provider(app)
     if chat is None or not hasattr(chat, "chat_stream"):
         action, text, rejected = enforce_front_safety(
