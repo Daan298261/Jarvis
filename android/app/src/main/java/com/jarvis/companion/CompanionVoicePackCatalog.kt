@@ -177,7 +177,11 @@ object CompanionVoicePackCatalog {
                 sha256 = item.optString("sha256", base?.sha256 ?: ""),
                 url = item.optString("url", base?.url ?: ""),
                 recommended = item.optBoolean("recommended", base?.recommended ?: false),
-                attribution = item.optString("attribution", base?.attribution ?: ""),
+                attribution = if (id == POCKET_TTS_ID) {
+                    POCKET_VOICE_ATTRIBUTION
+                } else {
+                    item.optString("attribution", base?.attribution ?: "")
+                },
                 artifacts = artifacts.ifEmpty {
                     listOf(
                         CompanionVoiceArtifact(

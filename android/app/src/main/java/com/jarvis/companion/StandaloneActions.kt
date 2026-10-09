@@ -426,12 +426,6 @@ object StandaloneActions {
             .put("text", text)
             .put("origin", origin)
 
-    fun openDocumentIntent(): Intent =
-        Intent(Intent.ACTION_OPEN_DOCUMENT)
-            .addCategory(Intent.CATEGORY_OPENABLE)
-            .setType("*/*")
-            .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("text/plain", "text/markdown"))
-
     private fun activityWakeIntent(context: Context, id: String): Intent {
         val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
             ?: Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)

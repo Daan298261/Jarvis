@@ -1,10 +1,17 @@
 package com.jarvis.companion
 
+import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class CompanionVoicePackCatalogTest {
     @Test
     fun builtInPacksHavePinnedHttpsUrlsAndHashes() {
@@ -70,6 +77,27 @@ class CompanionVoicePackCatalogTest {
         assertTrue(pocket.attribution.contains("https://huggingface.co/kyutai/tts-voices#alba-mackenna"))
         assertTrue(pocket.attribution.contains("Kyutai Pocket TTS"))
         assertEquals(CompanionVoicePackCatalog.POCKET_VOICE_ATTRIBUTION, pocket.attribution)
+    }
+
+    @Test
+    fun mergePinsPocketTtsAttributionAgainstLeaderOverride() {
+        fun leaderPack(attribution: String): JSONObject {
+            val pack = JSONObject()
+                .put("id", CompanionVoicePackCatalog.POCKET_TTS_ID)
+                .put("role", "tts")
+                .put("engine", CompanionVoicePackCatalog.POCKET_TTS_ENGINE)
+                .put("attribution", attribution)
+            return JSONObject().put("packs", JSONArray().put(pack))
+        }
+        for (sent in listOf("", "something else")) {
+            val pocket = CompanionVoicePackCatalog.merge(leaderPack(sent))
+                .first { it.id == CompanionVoicePackCatalog.POCKET_TTS_ID }
+            assertEquals(
+                "leader attribution=$sent must not replace Kyutai/Alba credit",
+                CompanionVoicePackCatalog.POCKET_VOICE_ATTRIBUTION,
+                pocket.attribution,
+            )
+        }
     }
 }
 
