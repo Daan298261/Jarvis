@@ -188,6 +188,7 @@ export const particleVertexShader = `
 
 export const particleFragmentShader = `
   varying vec4 vPortraitColor;
+  uniform float uPortraitExposure;
   uniform vec3 uColor;
   uniform vec3 uGold;
   uniform vec3 uAccent;
@@ -264,7 +265,7 @@ export const particleFragmentShader = `
     // RFC-0195: keep edge contrast — a white-hot additive core must not blow
     // the silhouette into a slab even when glow/bloom are high.
     float coreHot = core * (0.18 + hot * 0.42) * mix(1.0, 0.62, smoothstep(1.15, 1.9, vLight) * uGlow);
-    color = mix(color + vec3(coreHot), vPortraitColor.rgb * 1.5, vPortraitColor.a);
+    color = mix(color + vec3(coreHot), vPortraitColor.rgb * 1.5 * uPortraitExposure, vPortraitColor.a);
     // #541 halved the additive draw budget (82000 → 42000). Points still blend
     // ONE, ONE, so that cut read as a ~50% dark veil. Restore the pre-cut
     // energy on the samples that are still drawn. Do not raise the draw count.

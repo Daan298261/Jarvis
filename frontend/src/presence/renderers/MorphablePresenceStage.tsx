@@ -147,6 +147,7 @@ export function MorphablePresenceStage({
       uRestRemap: { value: 1 },
       uPhaseKind: { value: 0 },
       uGlow: { value: 1 },
+      uPortraitExposure: { value: 1 },
       uPointScale: { value: 1 },
       uDepthSoftness: { value: 0 },
       uBreath: { value: 0 },
@@ -356,11 +357,10 @@ export function MorphablePresenceStage({
       const listenTarget = phase === "listening" && !reduced ? 1 : 0
       uniforms.uListen.value += (listenTarget - uniforms.uListen.value) * Math.min(1, delta * 4)
       const shapeDef = resolvePresenceShape(system.currentShapeId)
-      const liveBGlow = system.currentShapeId.endsWith("_b") && typeof visual?.glow === "number"
-        ? Math.min(1.05, visual.glow * 1.18)
-        : visual?.glow
-      const appearance = resolveDotAppearance(shapeDef.appearance, { ...visual, glow: liveBGlow })
+      const appearance = resolveDotAppearance(shapeDef.appearance, visual)
       uniforms.uGlow.value = appearance.glow
+      uniforms.uPortraitExposure.value = shapeDef.appearance?.portraitExposure ?? 1
+      stage.dataset.presenceExposure = uniforms.uPortraitExposure.value.toFixed(3)
       const personaScale = visual?.scale && visual.scale > 0 ? visual.scale : 1
       bust.scale.setScalar(framingScale * personaScale)
       uniforms.uActivity.value += (activity - uniforms.uActivity.value)

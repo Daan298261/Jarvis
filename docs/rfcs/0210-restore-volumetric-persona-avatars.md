@@ -19,6 +19,7 @@ Restore the original artwork in both A and B. B uses a closed particle relief wi
 - Live gaze and idle motion respect reduced motion and animation intensity.
 - All fourteen personas and both humanoids have restrained authored idle motion profiles; portrait surfaces are softened and excessive bloom is reduced.
 - Brightness and density are immediately visible, persistent, and previewable in Appearance.
+- Portrait exposure is calibrated to production humanoid light output so equally set brightness does not leave dark-coloured personas dim; shading and hue remain intact.
 - Rapid A/B changes cannot be undone by older settings responses.
 - Geometry/selection regression tests, frontend build/lint and pytest pass.
 - Verify all persona artwork in the browser harness; record installed-artifact limits separately.

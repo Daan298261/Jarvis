@@ -47,6 +47,8 @@ export type PresenceShapeFraming = {
 
 /** Shared shader appearance values; geometry remains owned by each shape. */
 export type DotAppearanceProfile = {
+  /** Artwork exposure calibrated to the humanoid; applies only to authored RGB. */
+  portraitExposure?: number
   pointScale?: number
   depthSoftness?: number
   /** Glow / emission multiplier. Capped so bloom cannot wash motif edges. */

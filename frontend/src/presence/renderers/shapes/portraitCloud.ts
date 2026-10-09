@@ -2,6 +2,7 @@ import { registerPresenceShape } from "./catalog"
 import { buildHumanoidBustField } from "./humanoidBust"
 import type { ParticleOrb } from "../particleTypes"
 import { buildPortraitVolume } from "./portraitVolume"
+import { calibratedPortraitExposure } from "./portraitLighting"
 
 const pending = new Map<string, Promise<string>>()
 let terrain: Promise<ParticleOrb[]> | undefined
@@ -100,7 +101,10 @@ export function preparePortraitCloud(url: string, persona: string, volumetric = 
       buildFigure: () => figure,
       buildField: field ? () => field : buildHumanoidBustField,
       framing: { yaw: 0, position: [0, 0, 0], fitMargin: 0.83 },
-      appearance: { pointScale: 1, depthSoftness: 1, bloomStrength: volumetric ? 0.14 : undefined },
+      appearance: {
+        pointScale: 1, depthSoftness: 1, bloomStrength: volumetric ? 0.14 : undefined,
+        portraitExposure: persona === "humanoid" || persona === "humanoid_muscular" ? 1 : calibratedPortraitExposure(figure),
+      },
     })
     return id
   })()
