@@ -12,6 +12,7 @@ data class GenerateOutcome(
 data class GenerateResult(
     val truncated: Boolean = false,
     val sectioned: Boolean = false,
+    val clipped: Boolean = false,
 )
 
 internal suspend fun <T> withOfflineAnswerCleanup(

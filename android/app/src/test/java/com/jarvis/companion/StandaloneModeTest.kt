@@ -421,6 +421,7 @@ class StandaloneModeTest {
         }
         assertEquals(false, engine.loadOnMain)
         assertEquals(false, engine.generateOnMain)
+        assertFalse("normal finish must not call requestCancel", engine.cancelled)
     }
 
     @Test
@@ -550,6 +551,54 @@ class StandaloneModeTest {
         assertTrue(tokenize(plan.prompt) <= 400)
         val cap = (400 / 2).coerceAtLeast(64)
         assertTrue(tokenize(StandalonePrompt.build(plan.history, "latest question", null)) <= cap)
+        assertFalse(plan.clipped)
+    }
+
+    @Test
+    fun latestAloneOverHalfBudgetIsClippedWithNotice() {
+        val denseTokenize = { text: String -> ((text.length * 2) / 5).coerceAtLeast(1) }
+        val latest = "latest question " + "word ".repeat(2000)
+        val plan = OfflinePromptPlanner.plan(
+            history = emptyList(),
+            latest = latest,
+            pickedText = null,
+            tokenize = denseTokenize,
+            promptBudget = 400,
+        )
+        val cap = (400 / 2).coerceAtLeast(64)
+        assertTrue(plan.clipped)
+        assertTrue(plan.latest.length < latest.length)
+        assertTrue(latest.startsWith(plan.latest))
+        assertTrue(denseTokenize(StandalonePrompt.build(emptyList(), plan.latest, null)) <= cap)
+        assertTrue(plan.prompt.contains(plan.latest))
+        assertFalse(plan.prompt.contains("word ".repeat(400)))
+        val engine = object : ScriptedInferenceEngine("Clipped-path answer.") {
+            override fun tokenize(text: String): Int = denseTokenize(text)
+        }
+        val manager = CompanionPackManager(context, engine)
+        val pack = CompanionPackCatalog.builtIn.first()
+        manager.selectPack(pack.id)
+        val file = manager.packFile(pack)
+        file.parentFile?.mkdirs()
+        file.writeBytes("gguf-fixture".toByteArray())
+        val out = StringBuilder()
+        val result = kotlinx.coroutines.runBlocking {
+            manager.generate(
+                prompt = StandalonePrompt.build(emptyList(), latest, null),
+                maxTokens = 256,
+                onToken = { out.append(it) },
+                history = emptyList(),
+                latest = latest,
+                pickedText = null,
+            )
+        }
+        assertTrue(result.clipped)
+        assertFalse(result.sectioned)
+        assertFalse("normal finish must not call requestCancel", engine.cancelled)
+        var reply = out.toString()
+        if (result.clipped) reply = OfflinePromptPlanner.CLIPPED_NOTE + reply
+        assertTrue(reply.startsWith(OfflinePromptPlanner.CLIPPED_NOTE))
+        assertTrue(reply.contains("Clipped-path answer."))
     }
 
     @Test
@@ -626,7 +675,7 @@ class StandaloneModeTest {
     }
 
     @Test
-    fun exactAlarmDeniedUsesApproximateCopyAndSettingsIntent() {
+    fun exactAlarmDeniedUsesApproximateCopy() {
         ShadowAlarmManager.setCanScheduleExactAlarms(false)
         val at = now.plusHours(2)
         val denied = StandaloneActions.scheduleReminder(context, "Remind me at 7:30 pm", at).getOrThrow()
@@ -635,10 +684,7 @@ class StandaloneModeTest {
         assertTrue(denied.message.contains("system settings"))
         val copy = StandaloneActions.reminderOnThisPhoneCopy(at, inexact = true)
         assertTrue(copy.contains("approximate"))
-        val intent = StandaloneActions.exactAlarmSettingsIntent(context)
-        assertEquals(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, intent.action)
-        assertEquals("package", intent.data?.scheme)
-        assertTrue(intent.dataString!!.contains(context.packageName))
+        assertTrue(copy.contains("Alarms & reminders"))
     }
 
     @Test

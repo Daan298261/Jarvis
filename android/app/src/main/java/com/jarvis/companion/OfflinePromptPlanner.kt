@@ -11,6 +11,8 @@ object OfflinePromptPlanner {
     const val N_CTX_MAX = 4096
     const val SECTIONED_NOTE =
         "I summarized the picked text in sections because it was too long for one pass on this phone.\n\n"
+    const val CLIPPED_NOTE =
+        "Your last message was shortened because it was too long for one pass on this phone.\n\n"
     const val TRUNCATED_NOTE =
         "\n\n(Answer truncated — reached the on-device context or length limit.)"
 
@@ -92,6 +94,43 @@ object OfflinePromptPlanner {
         return kept
     }
 
+    /**
+     * If the latest user turn alone (empty history) exceeds half the prompt budget,
+     * shorten it so the skeleton fits. Returns the (possibly clipped) text and whether
+     * a visible notice should be shown.
+     */
+    fun clipLatestToHalfBudget(
+        latest: String,
+        tokenize: (String) -> Int,
+        promptBudget: Int,
+    ): Pair<String, Boolean> {
+        val cap = (promptBudget / 2).coerceAtLeast(64)
+        fun tokens(text: String) = tokenize(StandalonePrompt.build(emptyList(), text, pickedText = null))
+        if (latest.isEmpty() || tokens(latest) <= cap) return latest to false
+        var lo = 0
+        var hi = latest.length
+        var best = ""
+        while (lo <= hi) {
+            val mid = (lo + hi) ushr 1
+            val candidate = latest.substring(0, mid)
+            if (tokens(candidate) <= cap) {
+                best = candidate
+                lo = mid + 1
+            } else {
+                hi = mid - 1
+            }
+        }
+        val trimmed = best.trimEnd()
+        val space = trimmed.lastIndexOf(' ')
+        val wordCut = if (space >= 32) trimmed.substring(0, space).trimEnd() else trimmed
+        val clipped = when {
+            wordCut.isNotEmpty() && tokens(wordCut) <= cap -> wordCut
+            trimmed.isNotEmpty() -> trimmed
+            else -> latest.take(1)
+        }
+        return clipped to true
+    }
+
     fun sectionSummaryMaxTokens(promptBudget: Int, skeletonTokens: Int, sectionCount: Int): Int =
         ((promptBudget - skeletonTokens) / sectionCount.coerceAtLeast(1)).coerceIn(32, 128)
 
@@ -118,6 +157,8 @@ object OfflinePromptPlanner {
         val history: List<JSONObject> = emptyList(),
         val skeletonTokens: Int = 0,
         val summaryMaxTokens: Int = 128,
+        val latest: String = "",
+        val clipped: Boolean = false,
     )
 
     fun plan(
@@ -127,8 +168,9 @@ object OfflinePromptPlanner {
         tokenize: (String) -> Int,
         promptBudget: Int,
     ): Plan {
-        val trimmed = trimHistory(history, latest, tokenize, promptBudget)
-        val skeleton = StandalonePrompt.build(trimmed, latest, pickedText = null)
+        val (usedLatest, clipped) = clipLatestToHalfBudget(latest, tokenize, promptBudget)
+        val trimmed = trimHistory(history, usedLatest, tokenize, promptBudget)
+        val skeleton = StandalonePrompt.build(trimmed, usedLatest, pickedText = null)
         val skeletonTokens = tokenize(skeleton)
         val picked = pickedText?.takeIf { it.isNotBlank() }
         if (picked == null) {
@@ -137,18 +179,22 @@ object OfflinePromptPlanner {
                 sectioned = false,
                 history = trimmed,
                 skeletonTokens = skeletonTokens,
+                latest = usedLatest,
+                clipped = clipped,
             )
         }
         val remaining = (promptBudget - skeletonTokens).coerceAtLeast(0)
         val pickedTokens = tokenize(picked)
         if (pickedTokens <= remaining && remaining > 0) {
-            val full = StandalonePrompt.build(trimmed, latest, picked)
+            val full = StandalonePrompt.build(trimmed, usedLatest, picked)
             if (tokenize(full) <= promptBudget) {
                 return Plan(
                     prompt = full,
                     sectioned = false,
                     history = trimmed,
                     skeletonTokens = skeletonTokens,
+                    latest = usedLatest,
+                    clipped = clipped,
                 )
             }
         }
@@ -160,6 +206,8 @@ object OfflinePromptPlanner {
             history = trimmed,
             skeletonTokens = skeletonTokens,
             summaryMaxTokens = sectionSummaryMaxTokens(promptBudget, skeletonTokens, sections.size),
+            latest = usedLatest,
+            clipped = clipped,
         )
     }
 

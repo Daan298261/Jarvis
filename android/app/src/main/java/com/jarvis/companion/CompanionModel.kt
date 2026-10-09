@@ -599,6 +599,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                     )
                     var reply = assistantText.toString()
                     if (result.sectioned) reply = OfflinePromptPlanner.SECTIONED_NOTE + reply
+                    if (result.clipped) reply = OfflinePromptPlanner.CLIPPED_NOTE + reply
                     if (result.truncated) reply += OfflinePromptPlanner.TRUNCATED_NOTE
                     reply.ifBlank { error("On-device model returned no tokens") }
                 }

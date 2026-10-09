@@ -3,12 +3,9 @@ package com.jarvis.companion
 import android.content.Context
 import android.content.SharedPreferences
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -129,7 +126,6 @@ class CompanionPackManager(
     private val errorRef = AtomicReference("")
     private var catalog: List<CompanionPack> = CompanionPackCatalog.builtIn
     private val llamaDispatcher = Dispatchers.IO.limitedParallelism(1)
-    private val lifetime = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     fun selectedPackId(): String = prefs.getString("selected_pack_id", CompanionPackCatalog.builtIn.first().id) ?: CompanionPackCatalog.builtIn.first().id
 
@@ -285,11 +281,11 @@ class CompanionPackManager(
         statusRef.set(CompanionPackStatus.RUNNING)
         val nCtx = DeviceInferenceGuard.contextTokens(app, pack)
         val parentJob = coroutineContext[Job]!!
-        val cancelWatch = CoroutineScope(Dispatchers.Default).launch {
+        val cancelWatch = launch(Dispatchers.Default) {
             try {
-                while (parentJob.isActive) delay(8)
+                awaitCancellation()
             } finally {
-                engine.requestCancel()
+                if (parentJob.isCancelled) engine.requestCancel()
             }
         }
         try {
@@ -313,6 +309,7 @@ class CompanionPackManager(
                 OfflinePromptPlanner.Plan(prompt = prompt, sectioned = false, history = history)
             }
             val sectioned = plan.sectioned
+            val latestText = plan.latest.ifBlank { latest.ifBlank { prompt } }
             val toRun = if (plan.sectioned && plan.sections.isNotEmpty()) {
                 var summaries = summarizeSections(
                     sections = plan.sections,
@@ -320,7 +317,7 @@ class CompanionPackManager(
                 )
                 var finalPrompt = OfflinePromptPlanner.finalPromptFromSummaries(
                     plan.history,
-                    latest.ifBlank { prompt },
+                    latestText,
                     summaries,
                 )
                 var reduceGuard = 0
@@ -334,7 +331,7 @@ class CompanionPackManager(
                     summaries = summarizeSections(merged, maxTokens.coerceAtMost(cap))
                     finalPrompt = OfflinePromptPlanner.finalPromptFromSummaries(
                         plan.history,
-                        latest.ifBlank { prompt },
+                        latestText,
                         summaries,
                     )
                 }
@@ -356,7 +353,7 @@ class CompanionPackManager(
             if (!produced && !outcome.truncated) {
                 failGenerate("On-device model returned no tokens")
             }
-            GenerateResult(truncated = outcome.truncated, sectioned = sectioned)
+            GenerateResult(truncated = outcome.truncated, sectioned = sectioned, clipped = plan.clipped)
         } finally {
             cancelWatch.cancel()
         }
@@ -392,13 +389,6 @@ class CompanionPackManager(
     fun unload() {
         engine.unload()
         if (statusRef.get() == CompanionPackStatus.RUNNING) statusRef.set(CompanionPackStatus.READY)
-    }
-
-    fun requestCancelAndUnloadAsync() {
-        engine.requestCancel()
-        lifetime.launch {
-            withContext(NonCancellable) { unload() }
-        }
     }
 
 }

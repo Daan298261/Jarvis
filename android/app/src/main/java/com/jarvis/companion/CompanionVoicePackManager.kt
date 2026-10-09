@@ -248,10 +248,6 @@ class CompanionVoicePackManager(
         downloadPack(tts.id, onProgress)
     }
 
-    fun deletePack(packId: String) {
-        kotlinx.coroutines.runBlocking { deletePackAwait(packId) }
-    }
-
     private fun deletePackUnlocked(packId: String) {
         val pack = catalog.firstOrNull { it.id == packId } ?: return
         if (pack.role == "stt") sttEngine.unload() else ttsEngine.unload()
@@ -269,9 +265,6 @@ class CompanionVoicePackManager(
             deletePackUnlocked(packId)
         }
     }
-
-    fun deleteSelectedStt() = deletePack(selectedSttPackId())
-    fun deleteSelectedTts() = deletePack(selectedTtsPackId())
 
     private fun migrateTtsSelection() {
         val stored = prefs.getString("selected_tts_pack_id", null) ?: return
