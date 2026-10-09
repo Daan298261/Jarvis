@@ -45,10 +45,79 @@ object OfflinePromptPlanner {
         return out
     }
 
+    fun splitUntilTokenBudget(
+        text: String,
+        tokenize: (String) -> Int,
+        promptBudget: Int,
+    ): List<String> {
+        val seedChars = ((promptBudget.coerceAtLeast(64)) * 4).coerceAtLeast(256)
+        var sections = splitSections(text, seedChars)
+        var i = 0
+        var safety = 0
+        while (i < sections.size && safety++ < 512) {
+            val section = sections[i]
+            val tokens = tokenize(summarizeSectionPrompt(section))
+            if (tokens <= promptBudget || section.length <= 64) {
+                i++
+                continue
+            }
+            val parts = splitSections(section, (section.length / 2).coerceAtLeast(64))
+            if (parts.size <= 1) {
+                i++
+                continue
+            }
+            sections = sections.take(i) + parts + sections.drop(i + 1)
+        }
+        return sections
+    }
+
+    fun trimHistory(
+        history: List<JSONObject>,
+        latest: String,
+        tokenize: (String) -> Int,
+        promptBudget: Int,
+    ): List<JSONObject> {
+        val cap = (promptBudget / 2).coerceAtLeast(64)
+        var kept = history
+        fun overBudget(): Boolean =
+            tokenize(StandalonePrompt.build(kept, latest, pickedText = null)) > cap
+        while (kept.size > 1 && overBudget()) {
+            kept = kept.drop(1)
+        }
+        if (kept.size == 1 && overBudget()) {
+            val only = kept[0]
+            val isLatestUser = only.optString("role") == "user" && only.optString("text") == latest
+            if (!isLatestUser) kept = emptyList()
+        }
+        return kept
+    }
+
+    fun sectionSummaryMaxTokens(promptBudget: Int, skeletonTokens: Int, sectionCount: Int): Int =
+        ((promptBudget - skeletonTokens) / sectionCount.coerceAtLeast(1)).coerceIn(32, 128)
+
+    fun mergeAdjacent(summaries: List<String>): List<String> {
+        if (summaries.size <= 1) return summaries
+        val out = ArrayList<String>(summaries.size)
+        var i = 0
+        while (i < summaries.size) {
+            if (i + 1 < summaries.size) {
+                out.add(summaries[i] + "\n" + summaries[i + 1])
+                i += 2
+            } else {
+                out.add(summaries[i])
+                i++
+            }
+        }
+        return out
+    }
+
     data class Plan(
         val prompt: String,
         val sectioned: Boolean,
         val sections: List<String> = emptyList(),
+        val history: List<JSONObject> = emptyList(),
+        val skeletonTokens: Int = 0,
+        val summaryMaxTokens: Int = 128,
     )
 
     fun plan(
@@ -58,23 +127,39 @@ object OfflinePromptPlanner {
         tokenize: (String) -> Int,
         promptBudget: Int,
     ): Plan {
-        val skeleton = StandalonePrompt.build(history, latest, pickedText = null)
+        val trimmed = trimHistory(history, latest, tokenize, promptBudget)
+        val skeleton = StandalonePrompt.build(trimmed, latest, pickedText = null)
         val skeletonTokens = tokenize(skeleton)
         val picked = pickedText?.takeIf { it.isNotBlank() }
         if (picked == null) {
-            return Plan(prompt = skeleton, sectioned = false)
+            return Plan(
+                prompt = skeleton,
+                sectioned = false,
+                history = trimmed,
+                skeletonTokens = skeletonTokens,
+            )
         }
         val remaining = (promptBudget - skeletonTokens).coerceAtLeast(0)
         val pickedTokens = tokenize(picked)
         if (pickedTokens <= remaining && remaining > 0) {
-            return Plan(prompt = StandalonePrompt.build(history, latest, picked), sectioned = false)
+            val full = StandalonePrompt.build(trimmed, latest, picked)
+            if (tokenize(full) <= promptBudget) {
+                return Plan(
+                    prompt = full,
+                    sectioned = false,
+                    history = trimmed,
+                    skeletonTokens = skeletonTokens,
+                )
+            }
         }
-        val sectionChars = ((remaining.coerceAtLeast(64)) * 4).coerceAtLeast(256)
-        val sections = splitSections(picked, sectionChars)
+        val sections = splitUntilTokenBudget(picked, tokenize, promptBudget)
         return Plan(
-            prompt = StandalonePrompt.build(history, latest, pickedText = null),
+            prompt = skeleton,
             sectioned = true,
             sections = sections,
+            history = trimmed,
+            skeletonTokens = skeletonTokens,
+            summaryMaxTokens = sectionSummaryMaxTokens(promptBudget, skeletonTokens, sections.size),
         )
     }
 

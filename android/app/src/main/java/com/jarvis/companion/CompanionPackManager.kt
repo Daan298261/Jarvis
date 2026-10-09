@@ -3,8 +3,14 @@ package com.jarvis.companion
 import android.content.Context
 import android.content.SharedPreferences
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -123,6 +129,7 @@ class CompanionPackManager(
     private val errorRef = AtomicReference("")
     private var catalog: List<CompanionPack> = CompanionPackCatalog.builtIn
     private val llamaDispatcher = Dispatchers.IO.limitedParallelism(1)
+    private val lifetime = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     fun selectedPackId(): String = prefs.getString("selected_pack_id", CompanionPackCatalog.builtIn.first().id) ?: CompanionPackCatalog.builtIn.first().id
 
@@ -277,7 +284,14 @@ class CompanionPackManager(
         if (!path.isFile) error("Install the companion model pack first")
         statusRef.set(CompanionPackStatus.RUNNING)
         val nCtx = DeviceInferenceGuard.contextTokens(app, pack)
-        val cancelHandle = coroutineContext[kotlinx.coroutines.Job]?.invokeOnCompletion { engine.requestCancel() }
+        val parentJob = coroutineContext[Job]!!
+        val cancelWatch = CoroutineScope(Dispatchers.Default).launch {
+            try {
+                while (parentJob.isActive) delay(8)
+            } finally {
+                engine.requestCancel()
+            }
+        }
         try {
             val loadError = engine.load(path.absolutePath, nCtx)
             if (loadError != null) {
@@ -296,28 +310,41 @@ class CompanionPackManager(
                     promptBudget = promptBudget,
                 )
             } else {
-                OfflinePromptPlanner.Plan(prompt = prompt, sectioned = false)
+                OfflinePromptPlanner.Plan(prompt = prompt, sectioned = false, history = history)
             }
             val sectioned = plan.sectioned
             val toRun = if (plan.sectioned && plan.sections.isNotEmpty()) {
-                val summaries = ArrayList<String>()
-                for (section in plan.sections) {
-                    if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
-                    val piece = StringBuilder()
-                    val outcome = engine.generate(
-                        OfflinePromptPlanner.summarizeSectionPrompt(section),
-                        maxTokens.coerceAtMost(128),
-                    ) { piece.append(it) }
-                    if (outcome.cancelled) throw CancellationException("generate cancelled")
-                    outcome.error?.let { failGenerate(it) }
-                    summaries.add(piece.toString().ifBlank { section.take(240) })
+                var summaries = summarizeSections(
+                    sections = plan.sections,
+                    maxTokens = maxTokens.coerceAtMost(plan.summaryMaxTokens),
+                )
+                var finalPrompt = OfflinePromptPlanner.finalPromptFromSummaries(
+                    plan.history,
+                    latest.ifBlank { prompt },
+                    summaries,
+                )
+                var reduceGuard = 0
+                while (engine.tokenize(finalPrompt) > promptBudget && summaries.size > 1 && reduceGuard++ < 4) {
+                    val merged = OfflinePromptPlanner.mergeAdjacent(summaries)
+                    val cap = OfflinePromptPlanner.sectionSummaryMaxTokens(
+                        promptBudget,
+                        plan.skeletonTokens,
+                        merged.size,
+                    )
+                    summaries = summarizeSections(merged, maxTokens.coerceAtMost(cap))
+                    finalPrompt = OfflinePromptPlanner.finalPromptFromSummaries(
+                        plan.history,
+                        latest.ifBlank { prompt },
+                        summaries,
+                    )
                 }
-                OfflinePromptPlanner.finalPromptFromSummaries(history, latest.ifBlank { prompt }, summaries)
+                finalPrompt
             } else {
                 plan.prompt
             }
             if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
             var produced = false
+            engine.beginPass()
             val outcome = engine.generate(toRun, maxTokens) { chunk ->
                 produced = true
                 onToken(chunk)
@@ -331,8 +358,25 @@ class CompanionPackManager(
             }
             GenerateResult(truncated = outcome.truncated, sectioned = sectioned)
         } finally {
-            cancelHandle?.dispose()
+            cancelWatch.cancel()
         }
+    }
+
+    private suspend fun summarizeSections(sections: List<String>, maxTokens: Int): ArrayList<String> {
+        val summaries = ArrayList<String>()
+        for (section in sections) {
+            if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
+            engine.beginPass()
+            val piece = StringBuilder()
+            val outcome = engine.generate(
+                OfflinePromptPlanner.summarizeSectionPrompt(section),
+                maxTokens,
+            ) { piece.append(it) }
+            if (outcome.cancelled) throw CancellationException("generate cancelled")
+            outcome.error?.let { failGenerate(it) }
+            summaries.add(piece.toString().ifBlank { section.take(240) })
+        }
+        return summaries
     }
 
     private fun failGenerate(message: String): Nothing {
@@ -341,9 +385,20 @@ class CompanionPackManager(
         error(message)
     }
 
+    fun requestCancel() {
+        engine.requestCancel()
+    }
+
     fun unload() {
         engine.unload()
         if (statusRef.get() == CompanionPackStatus.RUNNING) statusRef.set(CompanionPackStatus.READY)
+    }
+
+    fun requestCancelAndUnloadAsync() {
+        engine.requestCancel()
+        lifetime.launch {
+            withContext(NonCancellable) { unload() }
+        }
     }
 
 }
