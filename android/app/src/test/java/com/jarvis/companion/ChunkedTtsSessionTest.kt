@@ -2,6 +2,7 @@ package com.jarvis.companion
 
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -147,9 +148,10 @@ class ChunkedTtsSessionTest {
         val dir = "/pack"
         val engineId = CompanionVoicePackCatalog.POCKET_TTS_ENGINE
         val errors = CopyOnWriteArrayList<Throwable>()
+        val supervisor = SupervisorJob()
         try {
             val session = ChunkedTtsSession(
-                scope = this,
+                scope = CoroutineScope(Dispatchers.Default + supervisor),
                 synthesize = { text ->
                     engine.load(dir, engineId)?.let { error(it) }
                     engine.synthesize(text).getOrThrow()
@@ -171,6 +173,7 @@ class ChunkedTtsSessionTest {
             assertTrue(synths.contains("bbb."))
         } finally {
             finishIdle.countDown()
+            supervisor.cancel()
         }
     }
 

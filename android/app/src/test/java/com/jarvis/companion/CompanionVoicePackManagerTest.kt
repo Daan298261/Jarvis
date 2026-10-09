@@ -10,6 +10,9 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.File
@@ -224,20 +227,26 @@ class CompanionVoicePackManagerTest {
         seedReadyTts(local)
         local.refreshStatus()
         val errors = CopyOnWriteArrayList<Throwable>()
+        val supervisor = SupervisorJob()
         val session = ChunkedTtsSession(
-            scope = this,
+            scope = CoroutineScope(Dispatchers.Default + supervisor),
             synthesize = { local.synthesize(it) },
             play = {},
             onError = { errors += it },
         )
-        session.start(listOf("hello there."))
-        assertTrue(started.await(2, TimeUnit.SECONDS))
-        session.stop()
-        release.countDown()
-        session.job?.join()
-        assertTrue("session onError must not run for a cancelled synth", errors.isEmpty())
-        assertEquals(CompanionVoicePackStatus.READY, local.ttsStatus())
-        assertEquals("", local.lastError())
+        try {
+            session.start(listOf("hello there."))
+            assertTrue(started.await(2, TimeUnit.SECONDS))
+            session.stop()
+            release.countDown()
+            session.job?.join()
+            assertTrue("session onError must not run for a cancelled synth", errors.isEmpty())
+            assertEquals(CompanionVoicePackStatus.READY, local.ttsStatus())
+            assertEquals("", local.lastError())
+        } finally {
+            release.countDown()
+            supervisor.cancel()
+        }
     }
 
     private fun seedReadyTts(target: CompanionVoicePackManager) {
