@@ -71,9 +71,26 @@ function Test-LogonTaskRegistered {
 function Test-JarvisBackendHealthy {
     try {
         $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:4780/api/health" -TimeoutSec 3
-        return ($response.StatusCode -eq 200)
+        if ($response.StatusCode -ne 200) { return $false }
+        # A wedged event loop can still answer /api/health intermittently while
+        # POST /api/tasks hangs. Require a second cheap endpoint before adopt.
+        $laya = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:4780/api/decision/laya" -TimeoutSec 3
+        return ($laya.StatusCode -eq 200)
     } catch {
         return $false
+    }
+}
+
+function Test-ForceRestartRequested {
+    $flag = Join-Path $Root "data\force_restart.request"
+    return (Test-Path -LiteralPath $flag)
+}
+
+function Clear-ForceRestartRequest {
+    $flag = Join-Path $Root "data\force_restart.request"
+    if (Test-Path -LiteralPath $flag) {
+        Remove-Item -LiteralPath $flag -Force -ErrorAction SilentlyContinue
+        Write-Host "Cleared data\\force_restart.request after applying restart." -ForegroundColor Cyan
     }
 }
 
@@ -324,16 +341,21 @@ if ($LanAccess) {
 }
 $log = Join-Path $Root "logs\backend.log"
 
-$adoptExistingBackend = Test-JarvisBackendHealthy
+$forceRestart = Test-ForceRestartRequested
+$adoptExistingBackend = (-not $forceRestart) -and (Test-JarvisBackendHealthy)
+if ($forceRestart) {
+    Write-Host "Force restart requested (data\\force_restart.request); will not adopt the existing backend." -ForegroundColor Yellow
+}
 if ($adoptExistingBackend) {
     Write-Host "Healthy Jarvis API already listening on port 4780; adopting existing backend." -ForegroundColor Green
+    Clear-ForceRestartRequest
 } else {
     $forceScript = Join-Path $Root "installer\windows\force-stop-jarvis.ps1"
     if (-not (Test-Path -LiteralPath $forceScript)) {
         throw "force-stop-jarvis.ps1 not found at $forceScript (cannot clear hung listeners before bind)."
     }
     $portOccupied = @(Get-NetTCPConnection -LocalPort 4780 -State Listen -ErrorAction SilentlyContinue).Count -gt 0
-    if ($portOccupied) {
+    if ($portOccupied -or $forceRestart) {
         Write-Host "Port 4780 is occupied by an unhealthy Jarvis backend; clearing it..."
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $forceScript -InstallRoot $Root -IncludeTray -StartupCleanup -MaxWaitSeconds 90
         if ($LASTEXITCODE -ne 0) {
@@ -343,6 +365,7 @@ if ($adoptExistingBackend) {
     $backend = Start-Process -FilePath $python -ArgumentList "-m","uvicorn","app.main:app","--host",$bindHost,"--port","4780","--app-dir","backend" -WorkingDirectory $Root -PassThru -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError (Join-Path $Root "logs\backend.err.log")
     "$($backend.Id)" | Set-Content $pidFile
     Write-Host "Backend PID $($backend.Id)"
+    Clear-ForceRestartRequest
 }
 
 Write-Step "Waiting for http://127.0.0.1:4780/api/health"
