@@ -40,6 +40,7 @@ from .vault_memory import VaultMemoryTool
 from .intelligence import IntelligenceTool
 from .blackgrid_studio import BlackGridStudioTool
 from .dcc_tools import BlenderTool, FreecadTool, OpenScadTool
+from .self_development import SelfDevelopmentTool
 
 
 class ToolRegistry:
@@ -93,6 +94,7 @@ class ToolRegistry:
             ChatProjectsTool(),
             VaultMemoryTool(),
             IntelligenceTool(),
+            SelfDevelopmentTool(),
             BlenderTool(getter),
             OpenScadTool(getter),
             FreecadTool(getter),
