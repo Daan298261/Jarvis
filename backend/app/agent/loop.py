@@ -2143,7 +2143,9 @@ class AgentRuntime:
             arguments["content"] = content
         await self._update(task_id, stage="act", current_action=f"{action} {path}", current_tool="filesystem")
         await BUS.publish(task_id, "stage", "Acting", stage="act")
-        await speak_progress(task_id, "filesystem", arguments)
+        # Do not await TTS before the write — Kokoro/persona resolve can starve the
+        # event loop and leave the filesystem step wedged under companion load.
+        asyncio.create_task(speak_progress(task_id, "filesystem", arguments))
         observation, _ = await self._execute_tool_ex(
             task_id,
             "filesystem",
@@ -3629,7 +3631,9 @@ class AgentRuntime:
             return denied_write, None
         # Prefer gate_tool_call (via _tool_authorization) so existing hooks/tests that
         # monkeypatch app.agent.loop.gate_tool_call still observe the deny/allow boundary.
-        authz = _tool_authorization(
+        # Harm-veto / Laya decide() is sync CPU work — keep it off the event loop.
+        authz = await asyncio.to_thread(
+            _tool_authorization,
             name,
             arguments,
             approved=approved,
@@ -3639,7 +3643,8 @@ class AgentRuntime:
         )
         if not authz.allowed:
             return _authorization_observation(authz), None
-        decision = _side_effect_decision(
+        decision = await asyncio.to_thread(
+            _side_effect_decision,
             name,
             arguments,
             grant_id=grant_id,
