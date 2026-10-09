@@ -247,3 +247,51 @@ def test_investigation_api_requires_owner_auth(investigation_env, monkeypatch):
     client = TestClient(app)
     for method, url in [("GET", "/api/investigations"), ("GET", "/api/investigations/readiness"), ("POST", "/api/investigations/setup")]:
         assert client.request(method, url).status_code == 401
+
+
+def test_android_readiness_no_setup(tmp_path, monkeypatch):
+    from app.reverse_engineering import android
+    monkeypatch.setattr("app.reverse_engineering.android.root", lambda: tmp_path)
+    assert android.readiness() == {"status": "not_installed"}
+
+
+def test_android_readiness_failed_unchanged(tmp_path, monkeypatch):
+    from app.reverse_engineering import android
+    monkeypatch.setattr("app.reverse_engineering.android.root", lambda: tmp_path)
+    stored = {"status": "failed", "stage": "Android setup stopped", "error": "command failed"}
+    (tmp_path / "setup.json").write_text(json.dumps(stored), encoding="utf-8")
+    assert android.readiness() == stored
+
+
+def test_android_readiness_all_components_ready(tmp_path, monkeypatch):
+    from app.reverse_engineering import android
+    monkeypatch.setattr("app.reverse_engineering.android.root", lambda: tmp_path)
+    stored = {"status": "ready", "stage": "Android emulator installed"}
+    (tmp_path / "setup.json").write_text(json.dumps(stored), encoding="utf-8")
+    (tmp_path / "sdk" / "platform-tools" / "adb.exe").parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "sdk" / "platform-tools" / "adb.exe").write_text("fixture", encoding="utf-8")
+    (tmp_path / "sdk" / "emulator" / "emulator.exe").parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "sdk" / "emulator" / "emulator.exe").write_text("fixture", encoding="utf-8")
+    (tmp_path / "avd" / "anzu_rea.ini").parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "avd" / "anzu_rea.ini").write_text("fixture", encoding="utf-8")
+    (tmp_path / "jdk" / "zulu-17" / "bin" / "java.exe").parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "jdk" / "zulu-17" / "bin" / "java.exe").write_text("fixture", encoding="utf-8")
+    assert android.readiness() == stored
+
+
+def test_android_readiness_missing_components_needs_repair(tmp_path, monkeypatch):
+    from app.reverse_engineering import android
+    monkeypatch.setattr("app.reverse_engineering.android.root", lambda: tmp_path)
+    stored = {"status": "ready", "stage": "Android emulator installed"}
+    setup_file = tmp_path / "setup.json"
+    setup_file.write_text(json.dumps(stored), encoding="utf-8")
+    (tmp_path / "sdk" / "emulator" / "emulator.exe").parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "sdk" / "emulator" / "emulator.exe").write_text("fixture", encoding="utf-8")
+    (tmp_path / "jdk" / "zulu-17" / "bin" / "java.exe").parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "jdk" / "zulu-17" / "bin" / "java.exe").write_text("fixture", encoding="utf-8")
+    res = android.readiness()
+    assert res["status"] == "needs_repair"
+    assert "adb" in res["error"]
+    assert "AVD ini" in res["error"]
+    assert res["stage"] == "Android setup needs repair"
+    assert json.loads(setup_file.read_text(encoding="utf-8"))["status"] == "ready"

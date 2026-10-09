@@ -27,9 +27,34 @@ def root() -> Path:
     return p
 
 
+def _missing_components(base: Path) -> list[str]:
+    checks = [
+        ("adb", (base / "sdk" / "platform-tools" / "adb.exe").is_file()),
+        ("emulator", (base / "sdk" / "emulator" / "emulator.exe").is_file()),
+        ("AVD ini", (base / "avd" / "anzu_rea.ini").is_file()),
+        ("JDK", any((base / "jdk").glob("*/bin/java.exe"))),
+    ]
+    return [name for name, ok in checks if not ok]
+
+
 def readiness() -> dict:
-    p = root() / "setup.json"
-    return json.loads(p.read_text()) if p.exists() else {"status": "not_installed"}
+    try:
+        r = root()
+        p = r / "setup.json"
+        if not p.exists():
+            return {"status": "not_installed"}
+        stored = json.loads(p.read_text(encoding="utf-8"))
+        if not isinstance(stored, dict):
+            return {"status": "needs_repair", "error": "Android setup.json is corrupted"}
+        if stored.get("status") != "ready":
+            return stored
+        missing = _missing_components(r)
+        if missing:
+            return {**stored, "status": "needs_repair", "stage": "Android setup needs repair",
+                    "error": f"Android tools missing: {', '.join(missing)}; run Reverse Engineering setup to repair"}
+        return stored
+    except Exception as exc:
+        return {"status": "needs_repair", "error": str(exc)}
 
 
 def _state(**values):
