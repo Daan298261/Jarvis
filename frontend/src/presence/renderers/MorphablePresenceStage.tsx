@@ -156,6 +156,7 @@ export function MorphablePresenceStage({
       uPointer: { value: new THREE.Vector2(0, 0) },
       uPointerStrength: { value: 0 },
       uGesture: { value: 0 },
+      uLivingRig: { value: new THREE.Vector4(0, 0, 0, 0) },
       uAvatarDeform: { value: new THREE.Vector2(0, 0) },
       uColor: { value: new THREE.Color(PHASE_COLOR.idle) },
       uGold: { value: new THREE.Color(0xff941f) },
@@ -231,10 +232,17 @@ export function MorphablePresenceStage({
       const aPos = system.figure.geometry.getAttribute("aPos")
       const bPos = system.figure.geometry.getAttribute("bPos")
       // Union rest + engaged so idle scatter cannot crop crown/chin off look-at.
-      const positions = unionPresencePositions(
+      let positions = unionPresencePositions(
         aPos.array as ArrayLike<number>,
         bPos.array as ArrayLike<number>,
       )
+      if (profile.framing?.cropBelow !== undefined) {
+        const framed: number[] = []
+        for (let i = 0; i < positions.length; i += 3) {
+          if (positions[i + 1] >= profile.framing.cropBelow) framed.push(positions[i], positions[i + 1], positions[i + 2])
+        }
+        positions = new Float32Array(framed)
+      }
       const fitYaw = profile.framing?.yaw ?? PRESENCE_DEFAULT_FRAMING_YAW
       const fit = normalizedPresenceFitScale(
         positions, aspect, camera.fov, camera.position.z,
@@ -441,6 +449,7 @@ export function MorphablePresenceStage({
       const att = attentionRef.current
       const morphNow = system.morphValue()
       const volumetricPersona = system.currentShapeId.startsWith("portrait_") && system.currentShapeId.endsWith("_b")
+      const livingBody = system.currentShapeId.endsWith("_living_b")
       const yawGain = THREE.MathUtils.degToRad(volumetricPersona ? 18 : 3.2)
       const pitchGain = THREE.MathUtils.degToRad(volumetricPersona ? 9 : 1.35)
       const idleMotion = reduced ? 0 : Math.max(0, animation)
@@ -476,6 +485,17 @@ export function MorphablePresenceStage({
         const gestureTarget = att.source === "camera" ? att.gesture : 0
         uniforms.uGesture.value += (gestureTarget - uniforms.uGesture.value) * Math.min(1, delta * 4)
       }
+      // The chest stays rooted while the neck tracks attention independently.
+      const headYaw = livingBody
+        ? uniforms.uLivingRig.value.y + ((motion.yaw + (follow ? att.x * yawGain * morphNow : 0)) - uniforms.uLivingRig.value.y) * (reduced ? 1 : rotationLerp)
+        : bust.rotation.y - baseYaw
+      const headPitch = livingBody
+        ? uniforms.uLivingRig.value.z + ((motion.pitch - (follow ? att.y * pitchGain * morphNow : 0)) - uniforms.uLivingRig.value.z) * (reduced ? 1 : rotationLerp)
+        : bust.rotation.x
+      uniforms.uLivingRig.value.set(livingBody ? 1 : 0, headYaw, headPitch, reduced ? 0 : Math.sqrt(Math.max(0, animation)))
+      if (livingBody) bust.rotation.set(motion.pitch * 0.25, baseYaw + motion.yaw * 0.25, motion.roll * 0.35)
+      stage.dataset.presenceBody = livingBody ? "articulated" : "head"
+      stage.dataset.presenceHeadYaw = headYaw.toFixed(3)
       stage.dataset.presenceYaw = bust.rotation.y.toFixed(3)
       stage.dataset.presencePitch = bust.rotation.x.toFixed(3)
       stage.dataset.presenceMotion = String(idleMotion)

@@ -75,7 +75,7 @@ test("B samples the authored artwork into a separate volume, never the procedura
     assert.ok(points.some(p => p.z > 0.4))
     assert.ok(points.every(p => p.color[3] === 1 && p.flow === 0))
     const mount = await readFile(new URL("./src/presence/renderers/HumanoidPresence.tsx", import.meta.url), "utf8")
-    assert.match(mount, /preparePortraitCloud\(portraitUrl, portraitId, volumetric\)/)
+    assert.match(mount, /preparePortraitCloud\(portraitUrl, portraitId, volumetric, living\)/)
     assert.doesNotMatch(mount, /mythicLiveVariantShapeId\(shapeId\)/)
   } finally {
     globalThis.Image = previousImage
@@ -273,7 +273,7 @@ test("persona selection activates mythic mode on the shared morphable stage", as
   assert.match(settings, /Mythic persona A · portrait cloud/)
   assert.match(settings, /Mythic persona B · live gaze/)
   assert.match(activation, /requestedPresence: "particle_bust"/)
-  assert.match(activation, /avatarId: MYTHIC_LIVE_B_AVATAR_ID/)
+  assert.match(activation, /avatarId: readPresentationBootstrap\(\).avatarId === MYTHIC_LIVING_AVATAR_ID \? MYTHIC_LIVING_AVATAR_ID : MYTHIC_LIVE_B_AVATAR_ID/)
   assert.match(activation, /Promise\.allSettled/)
   assert.match(controls, /chooseRevision\.current/)
   assert.doesNotMatch(controls, /className={`named-persona-card\$\{selected \? " active" : ""}`}[\s\S]{0,180}disabled={busy}/)

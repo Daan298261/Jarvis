@@ -2,6 +2,7 @@ import { registerPresenceShape } from "./catalog"
 import { buildHumanoidBustField } from "./humanoidBust"
 import type { ParticleOrb } from "../particleTypes"
 import { buildPortraitVolume } from "./portraitVolume"
+import { buildLivingBird } from "./livingBird"
 import { calibratedPortraitExposure } from "./portraitLighting"
 
 const pending = new Map<string, Promise<string>>()
@@ -56,8 +57,8 @@ function prepareTerrain(): Promise<ParticleOrb[]> {
 const linear = (v: number) => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
 
 /** Decode once; every visible pixel becomes a luminous sample in the shared cloud. */
-export function preparePortraitCloud(url: string, persona: string, volumetric = false): Promise<string> {
-  const key = `${persona}:${url}:${volumetric}`
+export function preparePortraitCloud(url: string, persona: string, volumetric = false, living = false): Promise<string> {
+  const key = `${persona}:${url}:${volumetric}:${living}`
   const cached = pending.get(key)
   if (cached) return cached
   const promise = (async () => {
@@ -93,17 +94,19 @@ export function preparePortraitCloud(url: string, persona: string, volumetric = 
       }
     }
     if (!points.length) throw new Error("Avatar artwork contains no visible particles")
-    const figure = volumetric ? buildPortraitVolume(pixels, resolution, height) : points
+    const head = volumetric ? buildPortraitVolume(pixels, resolution, height) : points
+    const hasBody = living && (persona === "anzu" || persona === "nabu")
+    const figure = hasBody ? buildLivingBird(head, persona) : head
     const field = persona === "humanoid" ? await prepareTerrain().catch(() => undefined) : undefined
-    const id = `portrait_${persona}${volumetric ? "_b" : ""}`
+    const id = `portrait_${persona}${hasBody ? "_living_b" : volumetric ? "_b" : ""}`
     registerPresenceShape({
       id, label: `${persona} particle avatar`,
       buildFigure: () => figure,
       buildField: field ? () => field : buildHumanoidBustField,
-      framing: { yaw: 0, position: [0, 0, 0], fitMargin: 0.83 },
+      framing: { yaw: 0, position: [0, 0, 0], fitMargin: hasBody ? 0.9 : 0.83, ...(hasBody ? { cropBelow: -2.3 } : {}) },
       appearance: {
         pointScale: 1, depthSoftness: 1, bloomStrength: volumetric ? 0.14 : undefined,
-        portraitExposure: persona === "humanoid" || persona === "humanoid_muscular" ? 1 : calibratedPortraitExposure(figure),
+        portraitExposure: persona === "humanoid" || persona === "humanoid_muscular" ? 1 : calibratedPortraitExposure(head),
       },
     })
     return id

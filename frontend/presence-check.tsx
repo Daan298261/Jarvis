@@ -111,6 +111,7 @@ export function Check() {
             onChange={(e) => setSettings((s) => ({ ...s, avatarId: e.target.value }))}>
             <option value="mythic_portrait_a">A · portrait</option>
             <option value="mythic_live_b">B · 3D live gaze</option>
+            <option value="mythic_living_b">Living body · Anzu / Nabu</option>
             <option value="humanoid_bust">Humanoid</option>
             <option value="humanoid_muscular">Muscular humanoid</option>
           </select>

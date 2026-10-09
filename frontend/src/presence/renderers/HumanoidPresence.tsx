@@ -5,6 +5,7 @@ import { readVoiceMeter } from "../../tts/voiceAnalyser"
 import { MorphablePresenceStage } from "./MorphablePresenceStage"
 import { preparePortraitCloud } from "./shapes/portraitCloud"
 import {
+  MYTHIC_LIVING_AVATAR_ID,
   SETTINGS_CLOUD_SHAPE_ID,
   usesMythicLiveVariantB,
 } from "../mythicPersonaVariant"
@@ -47,7 +48,8 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
       ? MUSCULAR_HUMANOID_AVATAR_ID
       : "humanoid"
   const volumetric = mythic && liveVariantB
-  const artworkKey = `${portraitId}:${portraitUrl}:${volumetric}`
+  const living = volumetric && settings.avatarId === MYTHIC_LIVING_AVATAR_ID
+  const artworkKey = `${portraitId}:${portraitUrl}:${volumetric}:${living}`
   const [artwork, setArtwork] = useState<{ key: string; shapeId: string }>()
   const [failedArtworkKey, setFailedArtworkKey] = useState<string>()
   const portraitBacked = !galaxy && !settingsCloud
@@ -56,7 +58,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
   useEffect(() => {
     let cancelled = false
     if (!portraitBacked) return () => { cancelled = true }
-    preparePortraitCloud(portraitUrl, portraitId, volumetric)
+    preparePortraitCloud(portraitUrl, portraitId, volumetric, living)
       .then(shapeId => {
         if (cancelled) return
         setArtwork({ key: artworkKey, shapeId })
@@ -68,7 +70,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
         console.warn("Presence artwork unavailable; retaining the current particle figure", error)
       })
     return () => { cancelled = true }
-  }, [artworkKey, portraitBacked, portraitId, portraitUrl, volumetric])
+  }, [artworkKey, portraitBacked, portraitId, portraitUrl, volumetric, living])
   const [meter, setMeter] = useState({ level: 0, attached: false })
 
   useEffect(() => {

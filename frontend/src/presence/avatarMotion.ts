@@ -37,7 +37,7 @@ const SHAPE_PERSONAS: Record<string, string> = {
 }
 
 export function avatarMotionProfile(shapeId: string): AvatarMotionProfile {
-  const key = shapeId.replace(/^portrait_/, "").replace(/_b$/, "")
+  const key = shapeId.replace(/^portrait_/, "").replace(/_(?:living_)?b$/, "")
   return AVATAR_MOTION_PROFILES[SHAPE_PERSONAS[key] ?? key] ?? AVATAR_MOTION_PROFILES.humanoid
 }
 

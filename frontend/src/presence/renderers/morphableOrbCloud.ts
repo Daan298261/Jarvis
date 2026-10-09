@@ -60,6 +60,7 @@ export const particleVertexShader = `
   uniform float uPointerStrength;
   uniform float uGesture;
   uniform vec2 uAvatarDeform;
+  uniform vec4 uLivingRig;
   varying float vGold;
   varying float vLight;
   varying float vFlow;
@@ -92,6 +93,32 @@ export const particleVertexShader = `
     p.z += cos(aSeed * 23.0 + m * 3.0) * flight * 0.3 * uMotion;
     p.y += restPulse * 0.018 * smoothstep(-1.0, 0.15, p.y);
     float flow = mix(aFlow, bFlow, m);
+    if (uLivingRig.x > 0.5 && vPortraitColor.a > 0.5) {
+      if (flow > -0.5 && flow < 0.2) {
+        // Head turns around the neck, independently of the rooted breast.
+        float neckWeight = smoothstep(-1.25, -0.5, p.y);
+        vec3 q = p - vec3(0.0, -0.85, 0.0);
+        float yaw = uLivingRig.y * neckWeight;
+        float pitch = uLivingRig.z * neckWeight;
+        q.xz = mat2(cos(yaw), -sin(yaw), sin(yaw), cos(yaw)) * q.xz;
+        q.yz = mat2(cos(pitch), sin(pitch), -sin(pitch), cos(pitch)) * q.yz;
+        p = q + vec3(0.0, -0.85, 0.0);
+      } else if (flow < -0.5) {
+        float breath = sin(uTime * 1.4) * 0.025 * uLivingRig.w;
+        if (flow > -1.5) {
+          p.x *= 1.0 + breath;
+          p.z += breath * smoothstep(-3.5, -1.2, p.y);
+        } else {
+          float side = flow > -2.5 ? -1.0 : 1.0;
+          vec2 shoulder = vec2(side * 0.55, -1.22);
+          vec2 q = p.xy - shoulder;
+          float settle = (sin(uTime * 1.1 + side * 0.7) * 0.065
+            + sin(uTime * 0.37) * 0.025) * uLivingRig.w * side;
+          p.xy = mat2(cos(settle), sin(settle), -sin(settle), cos(settle)) * q + shoulder;
+          p.z += sin(uTime * 1.1 + side) * 0.04 * uLivingRig.w;
+        }
+      }
+    }
     float size = mix(aSize, bSize, m);
     float t = uTime;
     if (flow > 0.8 && flow < 1.5) {

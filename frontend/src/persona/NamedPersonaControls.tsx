@@ -15,6 +15,7 @@ import { SpecialistShapeMark } from "./SpecialistShapeMark"
 import { PersonaVisualSliders } from "./PersonaVisualSliders"
 import { updatePresentation, usePresentationSettings } from "../presence/presentationSettings"
 import {
+  MYTHIC_LIVING_AVATAR_ID,
   MYTHIC_LIVE_B_AVATAR_ID,
   MYTHIC_PORTRAIT_A_AVATAR_ID,
   usesMythicLiveVariantB,
@@ -141,8 +142,8 @@ export function NamedPersonaControls() {
         </button>
         <button
           type="button"
-          className={usesMythicLiveVariantB(presentation.avatarId) ? "active" : ""}
-          aria-pressed={usesMythicLiveVariantB(presentation.avatarId)}
+          className={presentation.avatarId === MYTHIC_LIVE_B_AVATAR_ID ? "active" : ""}
+          aria-pressed={presentation.avatarId === MYTHIC_LIVE_B_AVATAR_ID}
           disabled={busy}
           onClick={() => void run(() => updatePresentation({
             shell: "hud",
@@ -151,6 +152,13 @@ export function NamedPersonaControls() {
           }))}
         >
           B · live gaze
+        </button>
+        <button type="button" disabled={busy}
+          className={presentation.avatarId === MYTHIC_LIVING_AVATAR_ID ? "active" : ""}
+          aria-pressed={presentation.avatarId === MYTHIC_LIVING_AVATAR_ID}
+          onClick={() => void run(() => updatePresentation({ shell: "hud", requestedPresence: "particle_bust", avatarId: MYTHIC_LIVING_AVATAR_ID }))}
+        >
+          Living body · Anzu / Nabu
         </button>
       </div>
       <div className="named-persona-roster" role="group" aria-label="Named persona avatars">

@@ -14,6 +14,7 @@ Restore the original artwork in both A and B. B uses a closed particle relief wi
 
 ## Acceptance criteria
 
+- Optional Anzu/Nabu upper-body prototype emerges from the window edge, with independent neck tracking, chest breathing and folded-wing settling. Head-only B remains available; other personas fall back to B.
 - All fourteen named personas use their detailed artwork in B, with measurable depth and a rear surface; A remains available.
 - Humanoid artwork and terrain remain unchanged.
 - Live gaze and idle motion respect reduced motion and animation intensity.

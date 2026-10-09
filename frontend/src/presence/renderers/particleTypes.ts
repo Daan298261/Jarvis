@@ -6,7 +6,8 @@ export type ParticleOrb = {
   /** 0 = cyan field, 1 = warm gold/brain accent */
   gold: number
   light: number
-  /** 0 solid contour, ~0.4 dissolve, ~1 field drift, ~2 core pulse */
+  /** Negative values reserve solid living-bird chest/wing articulation.
+   * 0 solid contour, ~0.4 dissolve, ~1 field drift, ~2 core pulse */
   flow: number
   size: number
   /** Linear RGB and authored-colour weight; absent uses the persona palette. */
@@ -38,6 +39,8 @@ export type PresenceShapeFraming = {
   position?: readonly [number, number, number]
   /** Fraction of the stage viewport reserved for the projected shape (0.5–0.96). */
   fitMargin?: number
+  /** Intentional lower-body crop for a presence emerging from the window edge. */
+  cropBelow?: number
   /**
    * Identity landmarks for AABB + camera look-at (RFC-0195 / RFC-0069 amend).
    * Missing fields are derived from figure samples at fit time.
