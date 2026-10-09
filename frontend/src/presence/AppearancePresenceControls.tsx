@@ -4,6 +4,7 @@ import { VoiceProfilePicker } from "../tts/VoiceProfilePicker"
 import { HudCybersecurityModule } from "../hud/HudCybersecurityModule"
 import { AppearanceSettingsPane } from "../settings/AppearanceSettingsPane"
 import { NamedPersonaControls } from "../persona/NamedPersonaControls"
+import { CollapsibleSection } from "../components/CollapsibleSection"
 import { appearanceSettingsPath, voiceSettingsPath } from "../settings/settingsSubmenus"
 import type { PresentationSettings } from "./presenceTypes"
 
@@ -25,14 +26,14 @@ function panelForMenu(id: PresenceMenu, settings: PresentationSettings): ReactNo
   if (id === "persona") {
     return (
       <div className="jarvis-presence-controls-body jarvis-presence-controls-body-persona">
-        <NamedPersonaControls />
+        <CollapsibleSection title="Persona options" storageKey="hud-persona-options"><NamedPersonaControls /></CollapsibleSection>
       </div>
     )
   }
   if (id === "voice") {
     return (
       <div className="jarvis-presence-controls-body jarvis-presence-controls-body-voice">
-        <VoiceProfilePicker />
+        <CollapsibleSection title="Voice profiles" storageKey="hud-voice-profiles"><VoiceProfilePicker /></CollapsibleSection>
         <p className="lede" style={{ margin: "8px 0 0", fontSize: 13 }}>
           <Link to={voiceSettingsPath()}>Open full Voice settings</Link>
         </p>
@@ -42,7 +43,7 @@ function panelForMenu(id: PresenceMenu, settings: PresentationSettings): ReactNo
   if (id === "appearance") {
     return (
       <div className="jarvis-presence-controls-body">
-        <AppearanceSettingsPane settings={settings} showPersona={false} />
+        <CollapsibleSection title="Appearance options" storageKey="hud-appearance-options"><AppearanceSettingsPane settings={settings} showPersona={false} /></CollapsibleSection>
         <p className="lede" style={{ margin: "8px 0 0", fontSize: 13 }}>
           <Link to={appearanceSettingsPath()}>Open full Appearance settings</Link>
         </p>
@@ -51,13 +52,16 @@ function panelForMenu(id: PresenceMenu, settings: PresentationSettings): ReactNo
   }
   return (
     <div className="jarvis-presence-controls-body jarvis-cyber-module-body">
-      <HudCybersecurityModule />
+      <CollapsibleSection title="Cybersecurity options" storageKey="hud-cybersecurity-options"><HudCybersecurityModule /></CollapsibleSection>
     </div>
   )
 }
 
 export function AppearancePresenceControls({ settings, onOpenChange }: AppearancePresenceControlsProps) {
   const [openMenu, setOpenMenu] = useState<PresenceMenu | null>(null)
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem("anzu.hud.menus.collapsed") === "true" } catch { return false }
+  })
 
   useEffect(() => {
     onOpenChange?.(openMenu !== null, openMenu)
@@ -68,10 +72,18 @@ export function AppearancePresenceControls({ settings, onOpenChange }: Appearanc
     setOpenMenu((current) => (current === menu ? null : menu))
   }
 
+  function toggleRail() {
+    const next = !collapsed
+    setCollapsed(next)
+    if (next) setOpenMenu(null)
+    try { localStorage.setItem("anzu.hud.menus.collapsed", String(next)) } catch { /* Storage is optional. */ }
+  }
+
   return (
-    <table className={`jarvis-presence-controls-table${openMenu ? " open" : ""}`} role="presentation" aria-label="HUD menus">
+    <table className={`jarvis-presence-controls-table${openMenu ? " open" : ""}${collapsed ? " collapsed" : ""}`} role="presentation" aria-label="HUD menus">
       <tbody>
-        {MENUS.map((menu) => {
+        <tr><td><button type="button" className="jarvis-presence-controls-toggle" aria-label={collapsed ? "Expand menus" : "Collapse menus"} aria-expanded={!collapsed} onClick={toggleRail}>{collapsed ? "☰" : "‹ Menus"}</button></td></tr>
+        {!collapsed && MENUS.map((menu) => {
           const open = openMenu === menu.id
           return (
             <Fragment key={menu.id}>
@@ -83,7 +95,7 @@ export function AppearancePresenceControls({ settings, onOpenChange }: Appearanc
                     aria-expanded={open}
                     onClick={() => toggle(menu.id)}
                   >
-                    {open ? "▾" : "▸"} {menu.label}
+                    <span aria-hidden="true">{open ? "▾" : "▸"}</span> {menu.label}
                   </button>
                 </td>
               </tr>

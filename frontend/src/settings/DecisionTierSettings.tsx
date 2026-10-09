@@ -1,3 +1,4 @@
+import { CollapsibleSection } from "../components/CollapsibleSection"
 import { useEffect, useState } from "react"
 import {
   bindJevApiKey,
@@ -93,8 +94,8 @@ export function DecisionTierSettings({ save, setMsg }: DecisionTierSettingsProps
   const connected = status?.jev_availability === "connected"
 
   return (
-    <div className="card grid settings-pane-card">
-      <h2>Decision accelerator (Reflex / Jev / Laya)</h2>
+    <CollapsibleSection className="card grid settings-pane-card" storageKey="DecisionTierSettings-Decision-accelerator-Reflex-Jev-Laya-" title={<span>Decision accelerator (Reflex / Jev / Laya)</span>}>
+
       <p className="lede" style={{ margin: "0 0 12px" }}>
         RFC-0171 Reflex Lane: local rules and optional Laya first, then TypeSafe Jev when you opt in
         with a real API key and probe. Used for tool pick, routing, memory relevance, and computer-use
@@ -156,6 +157,6 @@ export function DecisionTierSettings({ save, setMsg }: DecisionTierSettingsProps
         />
       </label>
       <LayaSettings setMsg={setMsg} />
-    </div>
+    </CollapsibleSection>
   )
 }

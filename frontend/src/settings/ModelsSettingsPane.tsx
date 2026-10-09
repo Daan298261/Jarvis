@@ -1,3 +1,4 @@
+import { CollapsibleSection } from "../components/CollapsibleSection"
 import { Link } from "react-router-dom"
 import { DecisionTierSettings } from "./DecisionTierSettings"
 
@@ -27,8 +28,8 @@ export function ModelsSettingsPane({
 
   return (
     <>
-      <div className="card grid settings-pane-card">
-        <h2>Models / Inference</h2>
+      <CollapsibleSection className="card grid settings-pane-card" storageKey="ModelsSettingsPane-Models-Inference" title={<span>Models / Inference</span>}>
+
         <p className="lede" style={{ margin: "0 0 12px" }}>
           Your models, your PC or LAN box — this is not the Jarvis subscription. Local llama.cpp is started by Jarvis.
           A dedicated LAN GPU box, LM Studio, Ollama, vLLM, or SGLang is health-checked only — point host/port at its
@@ -177,12 +178,12 @@ export function ModelsSettingsPane({
             }}
           />
         </label>
-      </div>
+      </CollapsibleSection>
 
       <DecisionTierSettings save={save} setMsg={setMsg} />
 
-      <div className="card grid settings-pane-card">
-        <h2>Model profile &amp; vision</h2>
+      <CollapsibleSection className="card grid settings-pane-card" storageKey="ModelsSettingsPane-Model-profile-amp-vision" title={<span>Model profile &amp; vision</span>}>
+
         <p className="lede" style={{ margin: "0 0 12px" }}>
           Quality vs speed tradeoffs and vision projector loading.
         </p>
@@ -212,7 +213,7 @@ export function ModelsSettingsPane({
           />
           Load vision projector (uses extra VRAM; leave off for text/tool work)
         </label>
-      </div>
+      </CollapsibleSection>
     </>
   )
 }

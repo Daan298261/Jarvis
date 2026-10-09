@@ -1,3 +1,4 @@
+import { CollapsibleSection } from "../components/CollapsibleSection"
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { getJevDecisionAudit, type JevAuditEvent } from "../api"
@@ -30,8 +31,8 @@ export function AdvancedSettingsPane({ settings, queueStatus, save }: AdvancedSe
 
   return (
     <>
-      <div className="card grid settings-pane-card">
-        <h2>License</h2>
+      <CollapsibleSection className="card grid settings-pane-card" storageKey="AdvancedSettingsPane-License" title={<span>License</span>}>
+
         <p className="lede" style={{ margin: "0 0 12px" }}>
           Local models are yours; the Jarvis subscription is managed on the license page.
         </p>
@@ -40,14 +41,14 @@ export function AdvancedSettingsPane({ settings, queueStatus, save }: AdvancedSe
             Open license page
           </Link>
         </div>
-      </div>
+      </CollapsibleSection>
 
-      <AutonomySection />
+      <CollapsibleSection title="Autonomy" storageKey="advanced-autonomy"><AutonomySection /></CollapsibleSection>
 
       <AutomationBreakerPanel />
 
-      <div className="card grid settings-pane-card">
-        <h2>Agent profiles</h2>
+      <CollapsibleSection className="card grid settings-pane-card" storageKey="AdvancedSettingsPane-Agent-profiles" title={<span>Agent profiles</span>}>
+
         <p className="lede" style={{ margin: "0 0 12px" }}>
           A short interview for how a specialist should behave — mission, tone, what it may do,
           what needs your OK, and how much freedom it has. Not a server console.
@@ -57,10 +58,10 @@ export function AdvancedSettingsPane({ settings, queueStatus, save }: AdvancedSe
             Open agent interview
           </Link>
         </div>
-      </div>
+      </CollapsibleSection>
 
-      <div className="card grid settings-pane-card">
-        <h2>Advisor</h2>
+      <CollapsibleSection className="card grid settings-pane-card" storageKey="AdvancedSettingsPane-Advisor" title={<span>Advisor</span>}>
+
         <p className="lede" style={{ margin: "0 0 12px" }}>
           When a local job is stuck, preview exactly what would leave this PC, then ask for
           recommendations. The advisor has no tools and cannot act. You keep execution.
@@ -70,10 +71,10 @@ export function AdvancedSettingsPane({ settings, queueStatus, save }: AdvancedSe
             Open advisor
           </Link>
         </div>
-      </div>
+      </CollapsibleSection>
 
-      <div className="card grid settings-pane-card">
-        <h2>Trajectories</h2>
+      <CollapsibleSection className="card grid settings-pane-card" storageKey="AdvancedSettingsPane-Trajectories" title={<span>Trajectories</span>}>
+
         <p className="lede" style={{ margin: "0 0 12px" }}>
           Import a Cursor transcript or record a finished Jarvis task. Imported records are
           evidence only — they do not grant capabilities or change policy. Skills stay on Memory.
@@ -83,10 +84,10 @@ export function AdvancedSettingsPane({ settings, queueStatus, save }: AdvancedSe
             Open trajectories
           </Link>
         </div>
-      </div>
+      </CollapsibleSection>
 
-      <div className="card grid settings-pane-card">
-        <h2>Coding isolation</h2>
+      <CollapsibleSection className="card grid settings-pane-card" storageKey="AdvancedSettingsPane-Coding-isolation" title={<span>Coding isolation</span>}>
+
         <p className="lede" style={{ margin: "0 0 12px" }}>
           Parallel coding tasks each get a Git worktree. Integrate is blocked until a verifier or
           you approve — nothing lands silently. Conflicts wait in Decision Inbox.
@@ -96,10 +97,10 @@ export function AdvancedSettingsPane({ settings, queueStatus, save }: AdvancedSe
             Open coding isolation
           </Link>
         </div>
-      </div>
+      </CollapsibleSection>
 
-      <div className="card grid settings-pane-card">
-        <h2>Core execution</h2>
+      <CollapsibleSection className="card grid settings-pane-card" storageKey="AdvancedSettingsPane-Core-execution" title={<span>Core execution</span>}>
+
         <p className="lede" style={{ margin: "0 0 12px" }}>
           How strictly Jarvis asks before risky tools. How long a job stays open, and whether Jarvis
           may start work on its own, is in Stay with a job &amp; Away Mode above. Model profile and vision
@@ -173,14 +174,14 @@ export function AdvancedSettingsPane({ settings, queueStatus, save }: AdvancedSe
           />
           Create backups before overwriting files
         </label>
-      </div>
+      </CollapsibleSection>
 
       <ComputerUsePermissions />
 
       <CleanInstallReinstallCard />
 
-      <div className="card grid settings-pane-card">
-        <h2>Self-development trial budget</h2>
+      <CollapsibleSection className="card grid settings-pane-card" storageKey="AdvancedSettingsPane-Self-development-trial-budget" title={<span>Self-development trial budget</span>}>
+
         <p className="lede" style={{ margin: "0 0 12px" }}>
           Isolated worktrees never auto-merge. Paid workers stay off unless you set a spend or invocation limit above zero.{" "}
           <Link to="/system">System</Link> also shows self-dev status.
@@ -220,11 +221,11 @@ export function AdvancedSettingsPane({ settings, queueStatus, save }: AdvancedSe
             onChange={(e) => save({ self_dev_experimental_port: Number(e.target.value) })}
           />
         </label>
-      </div>
+      </CollapsibleSection>
 
       {queueStatus && (
-        <div className="card grid settings-pane-card">
-          <h2>Launch &amp; Task Queue</h2>
+        <CollapsibleSection className="card grid settings-pane-card" storageKey="AdvancedSettingsPane-Launch-amp-Task-Queue" title={<span>Launch &amp; Task Queue</span>}>
+
           <p className="lede">
             Queue directory: <code>{String(queueStatus.queue_directory ?? "")}</code>. Drop any <code>.json</code> or{" "}
             <code>.prompt</code> file to automatically run on launch or in background.
@@ -234,11 +235,11 @@ export function AdvancedSettingsPane({ settings, queueStatus, save }: AdvancedSe
             <b>Processed files</b><span>{(queueStatus.processed as unknown[])?.length || 0}</span>
             <b>Failed files</b><span>{(queueStatus.failed as unknown[])?.length || 0}</span>
           </div>
-        </div>
+        </CollapsibleSection>
       )}
 
-      <div className="card grid settings-pane-card">
-        <h2>Decision audit</h2>
+      <CollapsibleSection className="card grid settings-pane-card" storageKey="AdvancedSettingsPane-Decision-audit" title={<span>Decision audit</span>}>
+
         <p className="lede" style={{ margin: "0 0 12px" }}>
           Last control-path decisions from the Jev accelerator. This is inspection, not chat PLAN chrome.
         </p>
@@ -255,7 +256,7 @@ export function AdvancedSettingsPane({ settings, queueStatus, save }: AdvancedSe
             ))}
           </div>
         )}
-      </div>
+      </CollapsibleSection>
     </>
   )
 }

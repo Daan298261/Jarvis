@@ -1,3 +1,4 @@
+import { CollapsibleSection } from "../components/CollapsibleSection"
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import {
@@ -60,8 +61,8 @@ export function KnowledgeVaultSettingsSection() {
   }
 
   return (
-    <section id="knowledge-vault" className="settings-section card grid">
-      <h3>Linked Obsidian vault (RFC-0107)</h3>
+    <CollapsibleSection id="knowledge-vault" className="settings-section card grid" storageKey="KnowledgeVaultSettingsSection-Linked-Obsidian-vault-RFC-0107-" title={<span>Linked Obsidian vault (RFC-0107)</span>}>
+
       <p className="lede">
         Binding turns on Jarvis’s durable brain for this PC: watch, index, retrieve, and write
         managed notes against plain Markdown. The owner surface is the{" "}
@@ -118,6 +119,6 @@ export function KnowledgeVaultSettingsSection() {
         </div>
       </form>
       {message && <p className="muted">{message}</p>}
-    </section>
+    </CollapsibleSection>
   )
 }

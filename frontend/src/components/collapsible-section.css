@@ -1,0 +1,9 @@
+.collapsible-section { min-width: 0; }
+.collapsible-section-toggle {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 8px 0; border: 0; background: transparent; color: inherit;
+  text-align: left; font: inherit; font-weight: 600; cursor: pointer;
+}
+.collapsible-section-toggle:focus-visible { outline: 2px solid var(--accent, #67dcff); outline-offset: 3px; border-radius: 4px; }
+.collapsible-section-body { display: grid; gap: 12px; padding-top: 8px; min-width: 0; }
+.collapsible-section-body[hidden] { display: none !important; }

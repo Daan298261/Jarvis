@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { CollapsibleSection } from "../components/CollapsibleSection"
 import { applyRuntimeProfile } from "../hud/applyRuntimeProfile"
 import { useHexStrikeSuiteActive } from "../hud/hexstrikeSuite"
 import { useHudOverlayOptional } from "../hud/hudOverlayContext"
@@ -71,6 +72,7 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
 
   return (
     <div className="settings-appearance-pane">
+      <CollapsibleSection title="Presence style" storageKey="appearance-presence-style">
       <p className="jarvis-presence-mode-lede" id="jarvis-presence-mode-help">
         Presence modes are style and profile controls on one shared renderer. Previews match the live look for each profile.
       </p>
@@ -184,15 +186,17 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
       <p className="jarvis-presence-mode-apex-help" id="jarvis-apex-ui-help">
         {APEX_ASSISTIVE}
       </p>
+      </CollapsibleSection>
 
       {showPersona && (
         <>
-          <SessionPersonalityControls />
-          <NamedPersonaControls />
+          <CollapsibleSection title="Personality" storageKey="appearance-personality"><SessionPersonalityControls /></CollapsibleSection>
+          <CollapsibleSection title="Persona" storageKey="appearance-persona"><NamedPersonaControls /></CollapsibleSection>
         </>
       )}
-      <CustomPresencePanel settings={settings} />
+      <CollapsibleSection title="Custom appearance" storageKey="appearance-custom"><CustomPresencePanel settings={settings} /></CollapsibleSection>
 
+      <CollapsibleSection title="Rendering and motion" storageKey="appearance-rendering">
       <label>
         Rendering
         <select
@@ -242,6 +246,7 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
         </select>
       </label>
 
+      </CollapsibleSection>
       {message && <p className="jarvis-presence-controls-message" role="status">{message}</p>}
     </div>
   )
