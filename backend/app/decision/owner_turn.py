@@ -163,7 +163,8 @@ def infer_rules_reply_shape(
     text = (user_message or "").strip()
     if not text:
         return "ack"
-    if (literal_candidate or "").strip():
+    literal = (literal_candidate or "").strip() or extract_literal_candidate(text)
+    if literal:
         return "literal"
     lowered = text.lower().strip()
     if is_explicit_action(text):
@@ -179,8 +180,10 @@ def infer_rules_reply_shape(
         return "handoff" if _NEEDS_STRONGER.search(lowered) else "ack"
     if kind == DIRECT_LOOKUP:
         return "ack"
-    if _TRIVIAL_CHAT.search(lowered) or kind == DIRECT_REPLY:
+    if _TRIVIAL_CHAT.search(lowered):
         return "social"
+    if kind == DIRECT_REPLY:
+        return "ack"
     return "ack"
 
 

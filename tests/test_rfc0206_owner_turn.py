@@ -145,19 +145,24 @@ async def test_stream_owner_chat_fails_if_decide_skipped(monkeypatch, jarvis_env
     async def no_hydrate(_conversation_id: str):
         return []
 
+    FRONT_RUNTIME.reset_for_tests()
     FRONT_RUNTIME.mark_for_tests(distinct=False, provider=Provider())
     MANAGER.provider = Provider()
     MANAGER.state.loaded = True
     monkeypatch.setattr("app.persona.owner_chat.weather_system_message", no_weather)
     monkeypatch.setattr("app.persona.owner_chat.hydrate_conversation", no_hydrate)
     reset_owner_conversations()
-    events = []
-    async for event in stream_owner_chat("Hello there"):
-        events.append(event)
-    assert "request_routing" in seen
-    assert any(event.get("type") == "done" for event in events)
-    audit = list_events()
-    assert any(row.get("decision_class") == "request_routing" for row in audit)
+    try:
+        events = []
+        async for event in stream_owner_chat("Hello there"):
+            events.append(event)
+        assert "request_routing" in seen
+        assert any(event.get("type") == "done" for event in events)
+        audit = list_events()
+        assert any(row.get("decision_class") == "request_routing" for row in audit)
+    finally:
+        FRONT_RUNTIME.reset_for_tests()
+        MANAGER.provider = None
 
 
 @pytest.mark.asyncio
