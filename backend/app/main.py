@@ -490,41 +490,21 @@ async def _autoload_model(current) -> None:
 
 @app.get("/api/health")
 async def health():
-    """Lightweight liveness. Heavy probes run off the event loop with a hard cap.
+    """Liveness only — must never block the event loop.
 
-    Cold-start and companion clients poll this often; blocking here (schtasks,
-    UFO path walks, pywinauto import) starves every other API route.
+    Elevation / computer-use probes are expensive (schtasks, path walks) and used
+    to run inline here. Cold-start and companion clients poll this endpoint often;
+    any sync stall starves task APIs. Heavy detail lives on /api/system/status.
     """
-    from .runtime.elevation import snapshot as elevation_snapshot
-    from .workers.computer import NativeWindowsBackend, UFOBackend
+    from .runtime.elevation import is_elevated
 
-    def _probe() -> dict[str, object]:
-        return {
-            "ok": True,
-            "pid": os.getpid(),
-            **elevation_snapshot(),
-            "computer_use": {
-                "windows_ui": NativeWindowsBackend().probe(),
-                "ufo": UFOBackend().probe(),
-            },
-        }
-
-    try:
-        return await asyncio.wait_for(asyncio.to_thread(_probe), timeout=2.5)
-    except (TimeoutError, Exception):
-        # Still report process identity so force-stop / starters can adopt.
-        return {
-            "ok": True,
-            "elevated": False,
-            "pid": os.getpid(),
-            "executable": sys.executable,
-            "platform": os.name,
-            "computer_use": {
-                "windows_ui": {"status": "probe_timeout"},
-                "ufo": {"status": "probe_timeout"},
-            },
-            "health_degraded": True,
-        }
+    return {
+        "ok": True,
+        "elevated": is_elevated(),
+        "pid": os.getpid(),
+        "executable": sys.executable,
+        "platform": os.name,
+    }
 
 
 @app.websocket("/api/ws")
