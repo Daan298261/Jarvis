@@ -106,6 +106,11 @@ Java_com_jarvis_companion_VoiceNativeBridge_nativeTtsSynthesize(JNIEnv *env, jcl
     if (g_tts_epoch.load(std::memory_order_relaxed) != epoch) {
         return env->NewByteArray(0);
     }
+    g_tts_cancel.store(false, std::memory_order_relaxed);
+    if (g_tts_epoch.load(std::memory_order_relaxed) != epoch ||
+        g_tts_cancel.load(std::memory_order_relaxed)) {
+        return env->NewByteArray(0);
+    }
     const std::string utterance = jstring_to_std(env, text);
     if (utterance.empty()) return nullptr;
 

@@ -177,6 +177,39 @@ class ChunkedTtsSessionTest {
         }
     }
 
+    @Test
+    fun startBWhileAIsSynthesizingPlaysB() = runBlocking {
+        val aStarted = CountDownLatch(1)
+        val aHold = CountDownLatch(1)
+        val played = CopyOnWriteArrayList<String>()
+        val synths = CopyOnWriteArrayList<String>()
+        val supervisor = SupervisorJob()
+        val session = ChunkedTtsSession(
+            scope = CoroutineScope(Dispatchers.Default + supervisor),
+            synthesize = { text ->
+                synths += text
+                if (text.contains("aaa")) {
+                    aStarted.countDown()
+                    aHold.await(2, TimeUnit.SECONDS)
+                }
+                audibleWav()
+            },
+            play = { played += "clip" },
+            onStopPlayback = { aHold.countDown() },
+        )
+        try {
+            session.start(listOf("aaa."))
+            assertTrue(aStarted.await(2, TimeUnit.SECONDS))
+            session.start(listOf("bbb."))
+            session.job?.join()
+            assertTrue(synths.any { it.contains("bbb") })
+            assertTrue("barge-in replacement must still play B", played.isNotEmpty())
+        } finally {
+            aHold.countDown()
+            supervisor.cancel()
+        }
+    }
+
     private fun audibleWav(): ByteArray {
         val samples = 240
         val wav = ByteArray(44 + samples * 2)
