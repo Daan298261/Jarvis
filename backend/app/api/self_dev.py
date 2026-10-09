@@ -17,8 +17,85 @@ from ..agent.self_dev import (
     start_trial,
 )
 from ..agent.worktrees import WorktreeError, discard_worktree, get_worktree, worktree_status
+from ..agent.development_scheduler import DEVELOPMENT, DevelopmentConfig
 
 router = APIRouter(prefix="/api/self-dev", tags=["self-dev"])
+
+
+class RfcSelection(BaseModel):
+    revision: str
+    queued: bool = True
+
+
+class DriveRfcImport(BaseModel):
+    file_id: str
+    title: str
+    content: str
+
+
+class MissionDecision(BaseModel):
+    task_id: str
+    expected_payload: str
+    approved: bool
+
+
+@router.get("/scheduler")
+async def scheduler_status():
+    return DEVELOPMENT.public()
+
+
+@router.put("/scheduler")
+async def scheduler_config(body: DevelopmentConfig):
+    try:
+        return await DEVELOPMENT.configure(body)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/scheduler/scan")
+async def scheduler_scan():
+    try:
+        return await DEVELOPMENT.scan()
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/scheduler/drive-import")
+async def scheduler_drive_import(body: DriveRfcImport):
+    try:
+        return await DEVELOPMENT.import_drive(body.file_id, body.title, body.content)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/scheduler/items/{item_id}")
+async def scheduler_select(item_id: str, body: RfcSelection):
+    try:
+        return await DEVELOPMENT.select(item_id, body.revision, body.queued)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/scheduler/run")
+async def scheduler_run():
+    try:
+        await DEVELOPMENT.scan()
+        return await DEVELOPMENT.launch()
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/scheduler/stop")
+async def scheduler_stop():
+    return await DEVELOPMENT.stop()
+
+
+@router.post("/scheduler/runs/{run_id}/decision")
+async def scheduler_decision(run_id: str, body: MissionDecision):
+    try:
+        return await DEVELOPMENT.command(run_id, body.task_id, body.expected_payload, body.approved)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 class StartBody(BaseModel):

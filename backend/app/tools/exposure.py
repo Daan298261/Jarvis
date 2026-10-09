@@ -78,6 +78,7 @@ CAPABILITY_ALIASES: dict[str, str] = {
 }
 
 NATIVE_TOOLS = (
+    "self_development",
     "reverse_engineer",
     "filesystem",
     "terminal",

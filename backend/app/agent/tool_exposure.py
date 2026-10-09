@@ -192,6 +192,9 @@ def tool_names_for(
     if lta_protected_folder_path(prompt or "") and "lta_protected_folder" not in wanted:
         wanted.append("lta_protected_folder")
     lowered_prompt = (prompt or "").lower()
+    if any(term in lowered_prompt for term in ("self-development", "self development", "develop anzu", "rfc scheduler", "schedule rfcs")):
+        if "self_development" not in wanted:
+            wanted.append("self_development")
     from ..memory.owner_facts import is_memory_recall_request, is_memory_store_request
 
     if is_memory_store_request(prompt or "") or is_memory_recall_request(prompt or ""):

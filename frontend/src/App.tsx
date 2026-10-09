@@ -28,6 +28,7 @@ import { ContextRepoPage } from "./pages/ContextRepo"
 import { TrajectoriesPage } from "./pages/Trajectories"
 import { PortabilityPage } from "./pages/Portability"
 import { CodingPage } from "./pages/Coding"
+import { SelfDevelopmentPage } from "./pages/SelfDevelopment"
 import { SkillForgePage } from "./pages/SkillForge"
 import { CapabilityLabPage } from "./pages/CapabilityLab"
 import { AgentRoomsPage } from "./pages/AgentRooms"
@@ -100,6 +101,7 @@ const ADMIN_LINKS = [
   { to: "/trajectories", label: "Trajectories" },
   { to: "/environments", label: "Environments" },
   { to: "/coding", label: "Coding" },
+  { to: "/self-development", label: "Self-development" },
   { to: "/skills", label: "Modules / Skills" },
   { to: "/capability-lab", label: "Capability Lab" },
   { to: "/packs", label: "Packs" },
@@ -493,6 +495,7 @@ function OwnerPortal() {
       <Route path="/environments" element={<WorkerEnvironmentsPage />} />
       <Route path="/environments/:environmentId" element={<WorkerEnvironmentsPage />} />
       <Route path="/coding" element={<CodingPage />} />
+      <Route path="/self-development" element={<SelfDevelopmentPage />} />
       <Route path="/coding/:taskId" element={<CodingPage />} />
       <Route path="/skills" element={<SkillForgePage />} />
       <Route path="/skills/:candidateId" element={<SkillForgePage />} />
