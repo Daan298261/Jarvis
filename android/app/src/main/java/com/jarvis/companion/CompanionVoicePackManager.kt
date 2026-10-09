@@ -41,7 +41,10 @@ class CompanionVoicePackManager(
     private val progressRef = AtomicReference(0)
     private val errorRef = AtomicReference("")
     private var catalog: List<CompanionVoicePack> = CompanionVoicePackCatalog.builtIn
-    private val packMutex = Mutex()
+    private val sttMutex = Mutex()
+    private val ttsMutex = Mutex()
+
+    private fun mutexFor(role: String) = if (role == "stt") sttMutex else ttsMutex
 
     init {
         CompanionVoicePackCatalog.validateBuiltIn()
@@ -169,9 +172,10 @@ class CompanionVoicePackManager(
         }
     }
 
-    suspend fun downloadPack(packId: String, onProgress: (Int) -> Unit = {}) = packMutex.withLock {
-        withContext(Dispatchers.IO) {
+    suspend fun downloadPack(packId: String, onProgress: (Int) -> Unit = {}) {
         val pack = catalog.firstOrNull { it.id == packId } ?: error("Unknown voice pack: $packId")
+        mutexFor(pack.role).withLock {
+        withContext(Dispatchers.IO) {
         require(pack.url.isNotBlank()) { "Leader has not published a download URL for voice pack ${pack.id}" }
         DeviceVoiceGuard.blockReason(app, pack)?.let { error(it) }
         if (pack.role == "stt") sttEngine.unload() else ttsEngine.unload()
@@ -222,6 +226,7 @@ class CompanionVoicePackManager(
         statusRef.set(CompanionVoicePackStatus.READY)
         progressRef.set(100)
         }
+        }
     }
 
     suspend fun downloadSelectedStt(onProgress: (Int) -> Unit = {}) =
@@ -244,7 +249,7 @@ class CompanionVoicePackManager(
     }
 
     fun deletePack(packId: String) {
-        deletePackUnlocked(packId)
+        kotlinx.coroutines.runBlocking { deletePackAwait(packId) }
     }
 
     private fun deletePackUnlocked(packId: String) {
@@ -258,8 +263,11 @@ class CompanionVoicePackManager(
         progressRef.set(0)
     }
 
-    suspend fun deletePackAwait(packId: String) = packMutex.withLock {
-        deletePackUnlocked(packId)
+    suspend fun deletePackAwait(packId: String) {
+        val pack = catalog.firstOrNull { it.id == packId } ?: return
+        mutexFor(pack.role).withLock {
+            deletePackUnlocked(packId)
+        }
     }
 
     fun deleteSelectedStt() = deletePack(selectedSttPackId())
@@ -304,7 +312,7 @@ class CompanionVoicePackManager(
         text
     }
 
-    suspend fun synthesize(text: String): ByteArray = packMutex.withLock {
+    suspend fun synthesize(text: String): ByteArray = ttsMutex.withLock {
         withContext(Dispatchers.IO) {
         val pack = selectedTtsPack() ?: error("No TTS pack selected")
         DeviceVoiceGuard.blockReason(app, pack)?.let { error(it) }

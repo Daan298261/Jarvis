@@ -65,7 +65,6 @@ data class CompanionState(
     val lanStatus: String = "idle",
     val lanLabel: String = "",
     val pendingApproval: Boolean = false,
-    val requestExactAlarms: Boolean = false,
 )
 
 fun JSONArray.objects(): List<JSONObject> = (0 until length()).mapNotNull { optJSONObject(it) }
@@ -341,14 +340,6 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun openExactAlarmSettings() {
-        val app = getApplication<Application>()
-        val intent = StandaloneActions.exactAlarmSettingsIntent(app)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        app.startActivity(intent)
-        mutable.value = mutable.value.copy(requestExactAlarms = false)
-    }
-
     private fun publishVoiceRoute() {
         val state = mutable.value
         val voiceCaps = state.capabilities.optJSONObject("voice")
@@ -556,7 +547,6 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         val assistantId = UUID.randomUUID().toString()
         val userMessage = StandaloneActions.chatMessage(userId, "user", text, StandaloneActions.ORIGIN_USER)
         val prior = mutable.value.messages + userMessage
-        var requestExact = false
         val outcome = withOfflineAnswerCleanup(
             packManager = packManager,
             clearPicked = { pickedTextForPrompt = null },
@@ -573,7 +563,6 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                     offlineAnswering = false,
                     activity = "Ready when you are",
                     localPackStatus = packManager.status(),
-                    requestExactAlarms = requestExact,
                 )
             },
         ) {
@@ -583,7 +572,6 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                     val scheduled = StandaloneActions.scheduleReminder(getApplication(), text, at)
                     scheduled.fold(
                         onSuccess = { result ->
-                            requestExact = result.inexact
                             result.message
                         },
                         onFailure = { err ->
@@ -1285,8 +1273,16 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         runCatching { audioRecord?.stop() }; audioRecord?.release()
         realtime?.close()
         recorder?.release(); recordingFile?.delete(); releasePlayer()
-        packManager.unload()
-        voicePackManager.unloadIdle()
+        packManager.requestCancel()
+        VoiceNativeBridge.requestTtsCancel()
+        val packs = packManager
+        val voice = voicePackManager
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob()).launch {
+            withContext(NonCancellable) {
+                packs.unload()
+                voice.unloadIdle()
+            }
+        }
         super.onCleared()
     }
 }

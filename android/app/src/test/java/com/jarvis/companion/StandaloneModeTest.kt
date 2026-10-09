@@ -17,6 +17,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows
@@ -41,8 +42,11 @@ open class ScriptedInferenceEngine(
     var generateOnMain: Boolean? = null
     var truncateNext: Boolean = false
     @Volatile var cancelled: Boolean = false
+    var kvClears: Int = 0
+    var generateCalls: Int = 0
     override fun isRuntimeAvailable(): Boolean = true
     override fun requestCancel() { cancelled = true }
+    override fun beginPass() { kvClears += 1 }
     open override fun tokenize(text: String): Int = (text.length + 3) / 4
 
     open override fun load(modelPath: String, contextTokens: Int): String? {
@@ -54,6 +58,7 @@ open class ScriptedInferenceEngine(
         lastPrompt = prompt
         lastMaxTokens = maxTokens
         generateOnMain = android.os.Looper.myLooper() == android.os.Looper.getMainLooper()
+        generateCalls += 1
         val text = if (prompt.contains("Summarize this section")) {
             "Section summary of picked text."
         } else {
@@ -420,12 +425,19 @@ class StandaloneModeTest {
 
     @Test
     fun generateCancelBetweenTokensAborts() = runBlocking(Dispatchers.Default) {
+        val started = java.util.concurrent.CountDownLatch(1)
         val engine = object : ScriptedInferenceEngine("abcdefghij") {
             override fun generate(prompt: String, maxTokens: Int, onToken: (String) -> Unit): GenerateOutcome {
                 lastPrompt = prompt
                 lastMaxTokens = maxTokens
                 generateOnMain = android.os.Looper.myLooper() == android.os.Looper.getMainLooper()
+                generateCalls += 1
                 onToken("abc")
+                started.countDown()
+                val deadline = System.nanoTime() + 3_000_000_000L
+                while (!cancelled && System.nanoTime() < deadline) {
+                    Thread.sleep(10)
+                }
                 if (cancelled) return GenerateOutcome(cancelled = true)
                 onToken("def")
                 return GenerateOutcome()
@@ -438,15 +450,23 @@ class StandaloneModeTest {
         file.parentFile?.mkdirs()
         file.writeBytes("gguf-fixture".toByteArray())
         val out = StringBuilder()
-        val thrown = runCatching {
-            manager.generate("hello", DeviceInferenceGuard.BUDGET_CLEAR) {
-                out.append(it)
-                engine.requestCancel()
+        var thrown: Throwable? = null
+        val job = launch {
+            try {
+                manager.generate("hello", DeviceInferenceGuard.BUDGET_CLEAR) { out.append(it) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                thrown = e
+                throw e
             }
-        }.exceptionOrNull()
+        }
+        assertTrue(started.await(2, java.util.concurrent.TimeUnit.SECONDS))
+        job.cancel()
+        job.join()
+        assertTrue("requestCancel must run while generate is blocked", engine.cancelled)
         assertTrue(thrown is kotlinx.coroutines.CancellationException)
-        assertEquals("abc", out.toString())
+        assertTrue(job.isCancelled)
         assertFalse(out.toString().contains("def"))
+        assertEquals("abc", out.toString())
     }
 
     @Test
@@ -487,6 +507,49 @@ class StandaloneModeTest {
         }
         assertTrue(result.sectioned)
         assertTrue(out.toString().contains("Final answer from summaries."))
+        assertTrue("sectioned path must run 2+ section passes plus final", engine.generateCalls >= 3)
+        assertEquals("KV cache must be cleared before every generate pass", engine.generateCalls, engine.kvClears)
+    }
+
+    @Test
+    fun denseTokenizerReSplitsSectionsUnderBudget() {
+        val tokenize = { text: String -> ((text.length * 2) / 5).coerceAtLeast(1) }
+        val picked = "fn".repeat(4000)
+        val plan = OfflinePromptPlanner.plan(
+            history = emptyList(),
+            latest = "Summarize this file",
+            pickedText = picked,
+            tokenize = tokenize,
+            promptBudget = 400,
+        )
+        assertTrue(plan.sectioned)
+        assertTrue(plan.sections.size >= 2)
+        plan.sections.forEach { section ->
+            assertTrue(
+                tokenize(OfflinePromptPlanner.summarizeSectionPrompt(section)) <= 400,
+            )
+        }
+        assertTrue(plan.summaryMaxTokens in 32..128)
+    }
+
+    @Test
+    fun longHistoryIsTrimmedOldestFirstKeepingLatest() {
+        val tokenize = { text: String -> ((text.length * 2) / 5).coerceAtLeast(1) }
+        val history = (1..12).map { i ->
+            JSONObject().put("role", "user").put("text", "turn-$i " + "word ".repeat(80))
+        }
+        val plan = OfflinePromptPlanner.plan(
+            history = history,
+            latest = "latest question",
+            pickedText = null,
+            tokenize = tokenize,
+            promptBudget = 400,
+        )
+        assertTrue(plan.prompt.contains("latest question"))
+        assertFalse(plan.prompt.contains("turn-1 "))
+        assertTrue(tokenize(plan.prompt) <= 400)
+        val cap = (400 / 2).coerceAtLeast(64)
+        assertTrue(tokenize(StandalonePrompt.build(plan.history, "latest question", null)) <= cap)
     }
 
     @Test
