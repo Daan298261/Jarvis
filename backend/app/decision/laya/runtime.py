@@ -158,35 +158,51 @@ def _load_agent() -> None:
     """Background load of the pinned checkpoint; Laya re-verifies digests before parsing weights."""
     global _AGENT
     started = time.perf_counter()
-    try:
-        pins.ensure_package()
-        import laya  # type: ignore[import-not-found]
+    last_exc: BaseException | None = None
+    # Concurrent first-imports of transformers can raise
+    # "cannot import name 'AutoTokenizer'" transiently; retry before failing warm.
+    for attempt in range(1, 4):
+        try:
+            pins.ensure_package()
+            # Pre-bind AutoTokenizer so Laya does not race a half-initialized transformers.
+            from transformers import AutoTokenizer as _AutoTokenizer  # noqa: F401
 
-        directory = pins.model_dir()
-        if directory is None:
-            raise RuntimeError("Managed Laya model_dir is missing")
-        agent = laya.load(str(directory), expected_sha256=pins.expected_digests())
-        # One warm-up pass so the first owner decision does not pay graph/kernel setup.
-        agent.predict("warm up", {"ready": {"type": "noul", "instructions": "Is this a test?"}})
-        _calibrate(agent)
-        device = str(getattr(agent, "device", "") or "")
-        with _LOCK:
-            _AGENT = agent
-            _STATE.warm = True
-            _STATE.loading = False
-            _STATE.load_error = ""
-            _STATE.device = device
-            _STATE.version = f"laya-{pins.LAYA_PACKAGE_VERSION}@{pins.LAYA_REVISION[:12]}"
-            _STATE.loaded_at = time.time()
-            _STATE.load_ms = (time.perf_counter() - started) * 1000.0
-        log.info("Laya warm on %s in %.0f ms", device or "default device", _STATE.load_ms)
-    except Exception as exc:  # noqa: BLE001 — surfaced in status, never raised into a turn
-        with _LOCK:
-            _AGENT = None
-            _STATE.warm = False
-            _STATE.loading = False
-            _STATE.load_error = str(exc)[:400]
-        log.warning("Laya warm-up failed: %s", exc)
+            import laya  # type: ignore[import-not-found]
+
+            directory = pins.model_dir()
+            if directory is None:
+                raise RuntimeError("Managed Laya model_dir is missing")
+            agent = laya.load(str(directory), expected_sha256=pins.expected_digests())
+            # One warm-up pass so the first owner decision does not pay graph/kernel setup.
+            agent.predict("warm up", {"ready": {"type": "noul", "instructions": "Is this a test?"}})
+            _calibrate(agent)
+            device = str(getattr(agent, "device", "") or "")
+            with _LOCK:
+                _AGENT = agent
+                _STATE.warm = True
+                _STATE.loading = False
+                _STATE.load_error = ""
+                _STATE.device = device
+                _STATE.version = f"laya-{pins.LAYA_PACKAGE_VERSION}@{pins.LAYA_REVISION[:12]}"
+                _STATE.loaded_at = time.time()
+                _STATE.load_ms = (time.perf_counter() - started) * 1000.0
+            log.info("Laya warm on %s in %.0f ms", device or "default device", _STATE.load_ms)
+            return
+        except Exception as exc:  # noqa: BLE001 — surfaced in status, never raised into a turn
+            last_exc = exc
+            msg = str(exc)
+            retryable = "AutoTokenizer" in msg or "partially initialized" in msg.lower()
+            if retryable and attempt < 3:
+                log.warning("Laya warm-up retry %s/3 after import race: %s", attempt, exc)
+                time.sleep(0.5 * attempt)
+                continue
+            break
+    with _LOCK:
+        _AGENT = None
+        _STATE.warm = False
+        _STATE.loading = False
+        _STATE.load_error = str(last_exc or "Laya warm-up failed")[:400]
+    log.warning("Laya warm-up failed: %s", last_exc)
 
 
 def _calibrate(agent: Any) -> None:

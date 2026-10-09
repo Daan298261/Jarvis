@@ -162,6 +162,26 @@ function Invoke-ForceStopSingleRoot {
         if ($ProcessId -gt 0) { [void]$script:JarvisPythonPids.Add($ProcessId) }
     }
 
+    function Register-RecordedJarvisPids {
+        param([string]$RootNorm)
+        # data/jarvis.pids is written by start-jarvis.ps1. Elevated backends often
+        # hide CommandLine/ExecutablePath from a non-elevated WMI scan, so the
+        # recorded PID is the durable identity for port-4780 owners.
+        $pidFile = Join-Path $RootNorm "data\jarvis.pids"
+        if (-not (Test-Path -LiteralPath $pidFile)) { return }
+        try {
+            foreach ($line in @(Get-Content -LiteralPath $pidFile -ErrorAction Stop)) {
+                $token = ([string]$line).Trim()
+                if ($token -match '^\d+$') {
+                    Register-JarvisPythonPid ([int]$token)
+                    Write-StopLog ("recorded-jarvis-pid PID={0} from jarvis.pids" -f $token)
+                }
+            }
+        } catch {
+            Write-StopLog ("recorded-jarvis-pid read-failed error={0}" -f $_.Exception.Message)
+        }
+    }
+
     function Test-IsJarvisUvicornBackend {
         param($Proc)
         $leaf = Get-ProcessNameLeaf ([string]$Proc.Name)
@@ -169,6 +189,30 @@ function Invoke-ForceStopSingleRoot {
         $cmd = [string]$Proc.CommandLine
         if ($cmd -match 'uvicorn\s+app\.main:app') { return $true }
         if ($cmd -match '-m\s+uvicorn' -and $cmd -match 'app\.main:app') { return $true }
+        try {
+            if ($script:JarvisPythonPids.Contains([int]$Proc.ProcessId)) { return $true }
+        } catch { }
+        return $false
+    }
+
+    function Test-IsBlankElevatedPortOwner {
+        # Non-elevated WMI often returns empty CommandLine + ExecutablePath for an
+        # elevated python listener. Treat that port owner as Jarvis identity so
+        # force-stop can kill it (elevated) or attempt kill instead of stranger-bail.
+        param($Proc, [array]$Bindings)
+        $leaf = Get-ProcessNameLeaf ([string]$Proc.Name)
+        if ($leaf -notmatch '^(python|pythonw)$') { return $false }
+        $cmd = [string]$Proc.CommandLine
+        $exePath = Get-ProcExecutablePath $Proc
+        if ($cmd -or $exePath) { return $false }
+        $procId = 0
+        try { $procId = [int]$Proc.ProcessId } catch { return $false }
+        if ($procId -le 0) { return $false }
+        foreach ($b in $Bindings) {
+            if ([int]$b.Pid -eq $procId -and [string]$b.State -in @('Listen', 'CloseWait')) {
+                return $true
+            }
+        }
         return $false
     }
 
@@ -269,7 +313,7 @@ function Invoke-ForceStopSingleRoot {
     }
 
     function Test-IsJarvisIdentityProcess {
-        param($Proc, [string]$RootNorm)
+        param($Proc, [string]$RootNorm, [array]$Bindings = @())
         if (Test-IsProtectedInstallerProcess $Proc) { return $false }
         # A startup cleanup must never terminate a second launcher while it is
         # starting the backend. Full installer/uninstall stops still kill it.
@@ -277,6 +321,7 @@ function Invoke-ForceStopSingleRoot {
         if (Test-ProcessUnderInstall $Proc $RootNorm) { return $true }
         if (Test-IsJarvisUvicornBackend $Proc) { return $true }
         if (Test-IsJarvisMobileGateway $Proc) { return $true }
+        if (Test-IsBlankElevatedPortOwner $Proc $Bindings) { return $true }
         if (Test-IsJarvisTrayProcess $Proc) { return $true }
         if (Test-IsJarvisStartScriptProcess $Proc) { return $true }
         if (Test-IsJarvisLlamaServer $Proc $RootNorm) { return $true }
@@ -404,7 +449,7 @@ function Invoke-ForceStopSingleRoot {
             if (-not $owner) {
                 continue
             }
-            if (Test-IsJarvisIdentityProcess $owner $RootNorm) {
+            if (Test-IsJarvisIdentityProcess $owner $RootNorm $Bindings) {
                 continue
             }
             $StrangerFound.Value = $true
@@ -428,22 +473,23 @@ function Invoke-ForceStopSingleRoot {
             return @()
         }
 
+        Register-RecordedJarvisPids $RootNorm
         Refresh-JarvisPythonPidSet $procs $RootNorm
+
+        $bindings = Get-PortBindings ([ref]$TcpLookupFailed)
+        if ($TcpLookupFailed.Value) {
+            Write-StopLog "tcp-lookup-failed: Get-NetTCPConnection and netstat both failed"
+        }
 
         $killMap = @{}
         foreach ($proc in $procs) {
             try {
-                if (Test-IsJarvisIdentityProcess $proc $RootNorm) {
+                if (Test-IsJarvisIdentityProcess $proc $RootNorm $bindings) {
                     $killMap[[int]$proc.ProcessId] = $proc
                 }
             } catch {
                 Write-StopLog ("locker-scan-skip PID={0} error={1}" -f $proc.ProcessId, $_.Exception.Message)
             }
-        }
-
-        $bindings = Get-PortBindings ([ref]$TcpLookupFailed)
-        if ($TcpLookupFailed.Value) {
-            Write-StopLog "tcp-lookup-failed: Get-NetTCPConnection and netstat both failed"
         }
 
         $stranger = $false
@@ -458,7 +504,7 @@ function Invoke-ForceStopSingleRoot {
             if ($b.Pid -le 0) { continue }
             $owner = Get-ProcessByIdFromList $b.Pid $procs
             if (-not $owner) { continue }
-            if (-not (Test-IsJarvisIdentityProcess $owner $RootNorm)) { continue }
+            if (-not (Test-IsJarvisIdentityProcess $owner $RootNorm $bindings)) { continue }
             $reason = "port-$($b.Port)"
             if ([string]$b.State -eq 'CloseWait') { $reason = "close-wait" }
             if ($b.Port -eq 4780 -and -not $healthLogged) {
@@ -484,7 +530,7 @@ function Invoke-ForceStopSingleRoot {
             if ([string]$b.State -notin @('Listen', 'CloseWait')) { continue }
             $owner = Get-ProcessByIdFromList $b.Pid $Procs
             if (-not $owner) { continue }
-            if (Test-IsJarvisIdentityProcess $owner $RootNorm) {
+            if (Test-IsJarvisIdentityProcess $owner $RootNorm $bindings) {
                 $blocked = $true
                 Write-StopLog ("post-kill-tcp-recheck jarvis-still-owns port={0} PID={1} state={2}" -f $b.Port, $b.Pid, $b.State)
                 continue

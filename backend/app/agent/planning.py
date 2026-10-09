@@ -379,13 +379,13 @@ def simple_app_control(prompt: str) -> tuple[str, str] | None:
 _SIMPLE_WRITE = re.compile(
     r"(?i)^\s{0,16}(?:(?:please|can you|could you|jarvis|anzu)[,\s]{1,16}){0,4}"
     r"(?:write|save|put)\s{1,8}[\"'](.{1,400}?)[\"']\s{1,8}(?:to|into|in)\s{1,8}"
-    r"(.{1,400}?\.(?:txt|md))"
+    r"(.{1,400}?\.(?:txt|md|py))"
     r"(?:\s{1,8}(?:for me|please|now)){0,3}\s{0,8}[.!?]?\s{0,8}$"
 )
 _SIMPLE_READ = re.compile(
     r"(?i)^\s{0,16}(?:(?:please|can you|could you|jarvis|anzu)[,\s]{1,16}){0,4}"
     r"(?:read|show(?:\s{1,8}me)?)\s{1,8}(?:the\s{1,8})?(?:file\s{1,8})?"
-    r"(.{1,400}?\.(?:txt|md))"
+    r"(.{1,400}?\.(?:txt|md|py))"
     r"(?:\s{1,8}(?:to me|aloud|please|now)){0,3}\s{0,8}[.!?]?\s{0,8}$"
 )
 _UNSAFE_FILE_PATH = re.compile(r"(?i)(?:\.\.|system32|windows[/\\]system)")

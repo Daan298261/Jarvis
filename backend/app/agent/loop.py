@@ -2143,7 +2143,9 @@ class AgentRuntime:
             arguments["content"] = content
         await self._update(task_id, stage="act", current_action=f"{action} {path}", current_tool="filesystem")
         await BUS.publish(task_id, "stage", "Acting", stage="act")
-        await speak_progress(task_id, "filesystem", arguments)
+        # Do not await TTS before the write — Kokoro/persona resolve can starve the
+        # event loop and leave the filesystem step wedged under companion load.
+        asyncio.create_task(speak_progress(task_id, "filesystem", arguments))
         observation, _ = await self._execute_tool_ex(
             task_id,
             "filesystem",
@@ -2490,13 +2492,55 @@ class AgentRuntime:
                 f"Working brief:\n{brief}"
             )
         if isinstance(provider, OpenAICompatProvider) and working.ingress_needs_tools is not False and working.task_class != "conversation":
-            capability = await probe_tool_capability(provider, thinking=profile.thinking)
+            capability = {"status": "untested", "detail": ""}
+            for probe_attempt in range(1, 4):
+                capability = await probe_tool_capability(
+                    provider, thinking=profile.thinking, force=(probe_attempt > 1)
+                )
+                if capability["status"] == "ready":
+                    break
+                detail = str(capability.get("detail") or "")
+                transient = any(
+                    token in detail.lower()
+                    for token in ("connection error", "timeout", "timed out", "connect", "503", "unavailable")
+                )
+                if not transient:
+                    break
+                await BUS.publish(
+                    task_id,
+                    "progress",
+                    f"Tool-call probe retry {probe_attempt}/3",
+                    detail[:500],
+                    stage="model",
+                )
+                await asyncio.sleep(0.8 * probe_attempt)
             if capability["status"] != "ready":
-                detail = capability["detail"]
-                await self._update(task_id, status="failed", stage="failed", error=detail, result=detail,
-                                   current_action="Agent tools unavailable for selected model")
-                await BUS.publish(task_id, "failed", "Model tool-call check failed", detail, stage="model")
-                return
+                detail = str(capability.get("detail") or "Tool-call probe failed")
+                transient = any(
+                    token in detail.lower()
+                    for token in ("connection error", "timeout", "timed out", "connect", "503", "unavailable")
+                )
+                if transient:
+                    # Do not fail the owner task when llama.cpp hiccups mid-probe;
+                    # the act loop will surface real tool failures if the model is down.
+                    await BUS.publish(
+                        task_id,
+                        "progress",
+                        "Tool-call probe skipped after transient model errors",
+                        detail[:800],
+                        stage="model",
+                    )
+                else:
+                    await self._update(
+                        task_id,
+                        status="failed",
+                        stage="failed",
+                        error=detail,
+                        result=detail,
+                        current_action="Agent tools unavailable for selected model",
+                    )
+                    await BUS.publish(task_id, "failed", "Model tool-call check failed", detail, stage="model")
+                    return
         await BUS.publish(
             task_id,
             "progress",
@@ -3587,7 +3631,9 @@ class AgentRuntime:
             return denied_write, None
         # Prefer gate_tool_call (via _tool_authorization) so existing hooks/tests that
         # monkeypatch app.agent.loop.gate_tool_call still observe the deny/allow boundary.
-        authz = _tool_authorization(
+        # Harm-veto / Laya decide() is sync CPU work — keep it off the event loop.
+        authz = await asyncio.to_thread(
+            _tool_authorization,
             name,
             arguments,
             approved=approved,
@@ -3597,7 +3643,8 @@ class AgentRuntime:
         )
         if not authz.allowed:
             return _authorization_observation(authz), None
-        decision = _side_effect_decision(
+        decision = await asyncio.to_thread(
+            _side_effect_decision,
             name,
             arguments,
             grant_id=grant_id,

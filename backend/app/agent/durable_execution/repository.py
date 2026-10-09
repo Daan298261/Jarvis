@@ -305,6 +305,47 @@ async def expire_abandoned_attempts(now: datetime | None = None) -> list[int]:
     return abandoned
 
 
+async def reset_orphaned_in_flight_steps(now: datetime | None = None) -> list[int]:
+    """Fail RUNNING/PENDING steps whose worker lease is gone (process crash / force-stop).
+
+    Without this, a killed elevated backend leaves steps mid-flight and the next
+    owner task can stall inside durable execution after force_restart.
+    """
+    now = now or utcnow()
+    reset_ids: list[int] = []
+    async with SessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(ExecutionStep).where(
+                    ExecutionStep.status.in_(
+                        [StepStatus.RUNNING.value, StepStatus.PENDING.value]
+                    )
+                )
+            )
+        ).scalars().all()
+        for step in rows:
+            attempts = (
+                await session.execute(
+                    select(ExecutionAttempt).where(ExecutionAttempt.step_id == step.id)
+                )
+            ).scalars().all()
+            has_live_lease = False
+            for attempt in attempts:
+                if attempt.status != AttemptStatus.ACTIVE.value:
+                    continue
+                expires = _utc(attempt.lease_expires_at)
+                if expires and expires > now:
+                    has_live_lease = True
+                    break
+            if has_live_lease:
+                continue
+            step.status = StepStatus.FAILED.value
+            step.updated_at = now
+            reset_ids.append(step.id)
+        await session.commit()
+    return reset_ids
+
+
 async def last_committed_step_key(run_id: str) -> str | None:
     steps = await list_steps(run_id)
     for step in reversed(steps):

@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import uuid
 from pathlib import Path
 
@@ -341,7 +342,10 @@ async def startup() -> None:
         STATUS_MONITOR.start()
     except Exception:
         logging.debug("Model status monitor start skipped", exc_info=True)
-    await QUEUE_WATCHER.process_pending()
+    # Never await queue ingest on the startup path — create_task / routing can
+    # stall (model/network) and leave Uvicorn stuck at "Waiting for application
+    # startup" with nothing listening on :4780.
+    asyncio.create_task(QUEUE_WATCHER.process_pending())
     try:
         from .tts.warm_start import schedule_tts_warm_start
 
@@ -489,16 +493,20 @@ async def _autoload_model(current) -> None:
 
 @app.get("/api/health")
 async def health():
-    from .runtime.elevation import snapshot as elevation_snapshot
-    from .workers.computer import NativeWindowsBackend, UFOBackend
+    """Liveness only — must never block the event loop.
+
+    Elevation / computer-use probes are expensive (schtasks, path walks) and used
+    to run inline here. Cold-start and companion clients poll this endpoint often;
+    any sync stall starves task APIs. Heavy detail lives on /api/system/status.
+    """
+    from .runtime.elevation import is_elevated
 
     return {
         "ok": True,
-        **elevation_snapshot(),
-        "computer_use": {
-            "windows_ui": NativeWindowsBackend().probe(),
-            "ufo": UFOBackend().probe(),
-        },
+        "elevated": is_elevated(),
+        "pid": os.getpid(),
+        "executable": sys.executable,
+        "platform": os.name,
     }
 
 

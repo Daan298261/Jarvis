@@ -55,7 +55,8 @@ def enqueue_prompt_file(
 
 
 def parse_queue_file(path: Path) -> dict[str, Any]:
-    text = path.read_text(encoding="utf-8").strip()
+    # PowerShell Set-Content often writes a UTF-8 BOM; utf-8-sig strips it.
+    text = path.read_text(encoding="utf-8-sig").strip()
     if path.suffix.lower() == ".json":
         data = json.loads(text)
         if not isinstance(data, dict) or "prompt" not in data:

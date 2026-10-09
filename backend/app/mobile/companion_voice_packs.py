@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 from pathlib import Path
 from typing import Any, Literal
@@ -260,17 +261,46 @@ def validate_catalog_urls() -> None:
                 raise ValueError(f"Voice pack {pack.get('id')} artifact {art.get('filename')} missing real sha256")
 
 
+def _verified_marker_path(path: Path) -> Path:
+    return path.with_suffix(path.suffix + ".verified")
+
+
+def _write_verified_marker(path: Path, digest: str) -> None:
+    marker = _verified_marker_path(path)
+    try:
+        marker.write_text(
+            json.dumps({"sha256": digest.lower(), "size_bytes": path.stat().st_size}),
+            encoding="utf-8",
+        )
+    except OSError:
+        log.debug("Could not write voice-pack verified marker for %s", path, exc_info=True)
+
+
+def _marker_matches(path: Path, expected: str) -> bool:
+    marker = _verified_marker_path(path)
+    if not marker.is_file():
+        return False
+    try:
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        if str(payload.get("sha256") or "").lower() != expected.lower():
+            return False
+        return int(payload.get("size_bytes") or -1) == path.stat().st_size
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return False
+
+
 def _artifact_ready(pack: dict[str, Any], artifact: dict[str, Any]) -> bool:
+    # Hot-path readiness: size + sidecar only (never re-hash multi-GB artifacts on poll).
     path = artifact_cache_path(pack, artifact)
     if not path.is_file() or path.stat().st_size <= 0:
         return False
     expected = (artifact.get("sha256") or "").lower()
     if not expected or set(expected) == {"0"}:
         return False
-    try:
-        return _sha256_file(path).lower() == expected
-    except OSError:
+    expected_size = int(artifact.get("size_bytes") or 0)
+    if expected_size > 0 and path.stat().st_size != expected_size:
         return False
+    return _marker_matches(path, expected)
 
 
 def _cache_ready(pack: dict[str, Any]) -> bool:
@@ -405,11 +435,28 @@ async def _download_artifact(pack: dict[str, Any], artifact: dict[str, Any]) -> 
                 handle.write(chunk)
                 resume_at += len(chunk)
                 _CACHE["bytes_done"] = int(_CACHE.get("bytes_done", 0)) + len(chunk)
-    digest = _sha256_file(partial).lower()
-    if digest != artifact["sha256"].lower():
+                await asyncio.sleep(0)
+    expected = str(artifact["sha256"]).lower()
+
+    def _verify() -> bool:
+        digest = _sha256_file(partial).lower()
+        if digest != expected:
+            return False
+        _write_verified_marker(partial, digest)
+        return True
+
+    ok = await asyncio.to_thread(_verify)
+    if not ok:
         partial.unlink(missing_ok=True)
+        _verified_marker_path(partial).unlink(missing_ok=True)
         raise RuntimeError(f"Downloaded {artifact['filename']} failed SHA-256 verification")
     partial.replace(target)
+    partial_marker = _verified_marker_path(partial)
+    final_marker = _verified_marker_path(target)
+    if partial_marker.is_file():
+        partial_marker.replace(final_marker)
+    else:
+        _write_verified_marker(target, expected)
 
 
 async def _download_recommended_voice_packs() -> None:

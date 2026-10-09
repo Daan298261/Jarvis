@@ -46,6 +46,10 @@ def test_force_stop_binds_ciminstance_not_managementobject():
     assert "4780" in text
     assert "exit-reason=ok" in text
     assert "force-stop complete: no lockers under install tree" not in text
+    assert "jarvis.pids" in text
+    assert "recorded-jarvis-pid" in text
+    assert "Test-IsBlankElevatedPortOwner" in text
+    assert "Register-RecordedJarvisPids" in text
 
 
 def test_jarvis_iss_wires_force_stop_before_prepare():
