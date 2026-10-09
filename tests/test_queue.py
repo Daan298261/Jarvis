@@ -20,6 +20,16 @@ def test_enqueue_and_parse_prompt_file(jarvis_env):
     assert parsed["execution_mode"] == "reliable"
 
 
+def test_parse_queue_file_strips_utf8_bom(jarvis_env, tmp_path):
+    path = tmp_path / "bom_task.json"
+    path.write_bytes(
+        b"\xef\xbb\xbf"
+        + json.dumps({"prompt": "hello from bom", "autonomy": "autonomous"}).encode("utf-8")
+    )
+    parsed = parse_queue_file(path)
+    assert parsed["prompt"] == "hello from bom"
+
+
 async def test_queue_watcher_processes_pending_and_moves_to_processed(jarvis_env):
     from app.agent.loop import AGENT
     from app.providers.base import ChatResult
