@@ -54,6 +54,7 @@ object CompanionVoicePackCatalog {
         "https://huggingface.co/soniqo/Pocket-TTS-100M-ONNX-INT8/resolve/v1.0.0"
     const val POCKET_TTS_ID = "pocket-tts-en"
     const val POCKET_TTS_ENGINE = "pocket-tts-onnx"
+    val RETIRED_PACK_IDS = setOf("piper-en-lessac-medium")
     const val POCKET_VOICE_ATTRIBUTION =
         "Voice: Alba MacKenna (CC BY 4.0). https://huggingface.co/kyutai/tts-voices#alba-mackenna — Kyutai Pocket TTS checkpoint (CC BY 4.0)."
 

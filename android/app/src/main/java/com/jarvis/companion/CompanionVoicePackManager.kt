@@ -1,7 +1,9 @@
 package com.jarvis.companion
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -9,6 +11,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.coroutineContext
 
 /**
  * RFC-0140 on-device STT/TTS pack lifecycle.
@@ -129,11 +132,10 @@ class CompanionVoicePackManager(
     }
 
     fun pruneUnknownPackDirs() {
-        val known = catalog.map { it.id }.toHashSet()
         val dirs = packRoot.listFiles() ?: return
         for (dir in dirs) {
             if (!dir.isDirectory) continue
-            if (dir.name in known) continue
+            if (dir.name !in CompanionVoicePackCatalog.RETIRED_PACK_IDS) continue
             dir.walkTopDown().filter { it.isFile }.forEach { digestCache.invalidate(it) }
             dir.deleteRecursively()
         }
@@ -168,6 +170,7 @@ class CompanionVoicePackManager(
         val pack = catalog.firstOrNull { it.id == packId } ?: error("Unknown voice pack: $packId")
         require(pack.url.isNotBlank()) { "Leader has not published a download URL for voice pack ${pack.id}" }
         DeviceVoiceGuard.blockReason(app, pack)?.let { error(it) }
+        if (pack.role == "stt") sttEngine.unload() else ttsEngine.unload()
         val statusRef = if (pack.role == "stt") sttStatusRef else ttsStatusRef
         statusRef.set(CompanionVoicePackStatus.DOWNLOADING)
         progressRef.set(0)
@@ -308,6 +311,10 @@ class CompanionVoicePackManager(
             error(loadError)
         }
         val result = ttsEngine.synthesize(text)
+        if (!coroutineContext.isActive || result.exceptionOrNull() is CancellationException) {
+            ttsStatusRef.set(CompanionVoicePackStatus.READY)
+            throw CancellationException("TTS cancelled")
+        }
         ttsStatusRef.set(CompanionVoicePackStatus.READY)
         result.exceptionOrNull()?.let {
             ttsStatusRef.set(CompanionVoicePackStatus.ERROR)
