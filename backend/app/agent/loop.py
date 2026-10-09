@@ -2490,13 +2490,55 @@ class AgentRuntime:
                 f"Working brief:\n{brief}"
             )
         if isinstance(provider, OpenAICompatProvider) and working.ingress_needs_tools is not False and working.task_class != "conversation":
-            capability = await probe_tool_capability(provider, thinking=profile.thinking)
+            capability = {"status": "untested", "detail": ""}
+            for probe_attempt in range(1, 4):
+                capability = await probe_tool_capability(
+                    provider, thinking=profile.thinking, force=(probe_attempt > 1)
+                )
+                if capability["status"] == "ready":
+                    break
+                detail = str(capability.get("detail") or "")
+                transient = any(
+                    token in detail.lower()
+                    for token in ("connection error", "timeout", "timed out", "connect", "503", "unavailable")
+                )
+                if not transient:
+                    break
+                await BUS.publish(
+                    task_id,
+                    "progress",
+                    f"Tool-call probe retry {probe_attempt}/3",
+                    detail[:500],
+                    stage="model",
+                )
+                await asyncio.sleep(0.8 * probe_attempt)
             if capability["status"] != "ready":
-                detail = capability["detail"]
-                await self._update(task_id, status="failed", stage="failed", error=detail, result=detail,
-                                   current_action="Agent tools unavailable for selected model")
-                await BUS.publish(task_id, "failed", "Model tool-call check failed", detail, stage="model")
-                return
+                detail = str(capability.get("detail") or "Tool-call probe failed")
+                transient = any(
+                    token in detail.lower()
+                    for token in ("connection error", "timeout", "timed out", "connect", "503", "unavailable")
+                )
+                if transient:
+                    # Do not fail the owner task when llama.cpp hiccups mid-probe;
+                    # the act loop will surface real tool failures if the model is down.
+                    await BUS.publish(
+                        task_id,
+                        "progress",
+                        "Tool-call probe skipped after transient model errors",
+                        detail[:800],
+                        stage="model",
+                    )
+                else:
+                    await self._update(
+                        task_id,
+                        status="failed",
+                        stage="failed",
+                        error=detail,
+                        result=detail,
+                        current_action="Agent tools unavailable for selected model",
+                    )
+                    await BUS.publish(task_id, "failed", "Model tool-call check failed", detail, stage="model")
+                    return
         await BUS.publish(
             task_id,
             "progress",
