@@ -15,6 +15,7 @@ from sqlalchemy import select
 from ..auth import require_owner_private_key, require_owner_private_key_for_pairing
 from ..mobile.companion_onboarding import companion_onboarding_snapshot
 from ..mobile.pairing_payload import enrich_pairing_session
+from ..mobile.connectivity import CONNECTIVITY
 from ..db.models import Task
 from ..db.session import SessionLocal
 from ..mobile import companion_offline, companion_voice_packs, identity, realtime_voice, scheduler, service
@@ -64,6 +65,7 @@ class Confirm(BaseModel):
 
 
 class PairingCodeRequest(BaseModel):
+    prepare_connection: bool = False
     ttl_minutes: int = Field(default=identity.DEFAULT_PAIRING_TTL_MINUTES,
                              ge=identity.MIN_PAIRING_TTL_MINUTES,
                              le=identity.MAX_PAIRING_TTL_MINUTES)
@@ -491,12 +493,16 @@ def invitation():
 
 
 @owner_router.post("/pairing-codes", dependencies=[Depends(require_owner_private_key_for_pairing)])
-def create_pairing_code(body: PairingCodeRequest):
+async def create_pairing_code(body: PairingCodeRequest):
+    if body.prepare_connection:
+        await CONNECTIVITY.prepare_pairing()
     return enrich_pairing_session(identity.generate_pairing_code(body.ttl_minutes))
 
 
 @owner_router.post("/pairing-codes/regenerate", dependencies=[Depends(require_owner_private_key_for_pairing)])
-def regenerate_pairing_code(body: PairingCodeRequest):
+async def regenerate_pairing_code(body: PairingCodeRequest):
+    if body.prepare_connection:
+        await CONNECTIVITY.prepare_pairing()
     return enrich_pairing_session(identity.regenerate_pairing_code(body.ttl_minutes))
 
 

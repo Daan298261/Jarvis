@@ -3,8 +3,35 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import zipfile
 
 import pytest
+
+
+def test_apk_without_voice_runtimes_is_rejected(tmp_path):
+    module = _load_build_android()
+    apk = tmp_path / "missing-voice.apk"
+    with zipfile.ZipFile(apk, "w") as archive:
+        archive.writestr("lib/arm64-v8a/libjarvis_llama.so", b"runtime")
+    with pytest.raises(RuntimeError, match="libjarvis_whisper.so"):
+        module.verify_apk_native_runtimes(apk)
+
+
+def test_apk_requires_nonempty_runtimes_for_both_abis(tmp_path):
+    module = _load_build_android()
+    apk = tmp_path / "complete.apk"
+    with zipfile.ZipFile(apk, "w") as archive:
+        for abi in ("arm64-v8a", "x86_64"):
+            for runtime in ("jarvis_llama", "jarvis_whisper", "jarvis_voice_tts", "onnxruntime"):
+                archive.writestr(f"lib/{abi}/lib{runtime}.so", b"runtime")
+    module.verify_apk_native_runtimes(apk)
+    with zipfile.ZipFile(apk, "w") as archive:
+        for abi in ("arm64-v8a", "x86_64"):
+            for runtime in ("jarvis_llama", "jarvis_whisper", "jarvis_voice_tts", "onnxruntime"):
+                contents = b"" if abi == "x86_64" and runtime == "jarvis_whisper" else b"runtime"
+                archive.writestr(f"lib/{abi}/lib{runtime}.so", contents)
+    with pytest.raises(RuntimeError, match="libjarvis_whisper.so"):
+        module.verify_apk_native_runtimes(apk)
 from fastapi.testclient import TestClient
 
 from app.config import AppSettings

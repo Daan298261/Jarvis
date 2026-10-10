@@ -79,7 +79,19 @@ async def test_leader_pack_cache_ready_when_hash_matches(mobile_env, monkeypatch
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(b"cached-pack-bytes")
     pack["sha256"] = companion_offline._sha256_file(target)
-    companion_offline.COMPANION_PACK_CATALOG[0] = pack
+    pack["size_bytes"] = target.stat().st_size
+    monkeypatch.setattr(companion_offline, "COMPANION_PACK_CATALOG", [
+        pack if entry["id"] == pack["id"] else entry
+        for entry in companion_offline.COMPANION_PACK_CATALOG
+    ])
+    assert companion_offline._cache_ready(pack) is False
+    import asyncio
+    assert await asyncio.to_thread(companion_offline._verify_and_mark, target, pack["sha256"])
+
+    def unexpected_hash(_path):
+        raise AssertionError("Pack status polling must not hash model weights")
+
+    monkeypatch.setattr(companion_offline, "_sha256_file", unexpected_hash)
     status = companion_offline.leader_cache_status(pack["id"])
     assert status["state"] == "ready"
     assert status["bytes_done"] == pack["size_bytes"]

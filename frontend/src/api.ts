@@ -4697,12 +4697,12 @@ export async function getActiveCompanionPairingCode(): Promise<CompanionPairingA
 }
 
 export async function createCompanionPairingCode(): Promise<CompanionPairingApiResult> {
-  const result = await companionPairingRequest("/api/mobile/manage/pairing-codes", { method: "POST", body: "{}" })
+  const result = await companionPairingRequest("/api/mobile/manage/pairing-codes", { method: "POST", body: JSON.stringify({ prepare_connection: true }) })
   return result
 }
 
 export async function regenerateCompanionPairingCode(): Promise<CompanionPairingApiResult> {
-  const result = await companionPairingRequest("/api/mobile/manage/pairing-codes/regenerate", { method: "POST", body: "{}" })
+  const result = await companionPairingRequest("/api/mobile/manage/pairing-codes/regenerate", { method: "POST", body: JSON.stringify({ prepare_connection: true }) })
   return result
 }
 

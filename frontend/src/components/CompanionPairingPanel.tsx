@@ -109,7 +109,7 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
       setMsg("")
       try {
         let result = await getActiveCompanionPairingCode()
-        if (!result.available && result.reason === "not_found" && createIfMissing) {
+        if (createIfMissing && ((!result.available && result.reason === "not_found") || (result.available && !qrPayload(result.pairing)))) {
           result = await createCompanionPairingCode()
         }
         applyResult(result)
@@ -294,20 +294,20 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
         ))}
       </div>
 
-      {!compact && state.mode === "ready" && (
+      {state.mode === "ready" && (
         <div className="companion-pairing-qr-block">
           {qrValue ? (
             <>
               <div className="companion-pairing-qr" aria-label="Companion pairing QR code">
-                <QRCodeSVG value={qrValue} size={232} level="M" marginSize={2} />
+                <QRCodeSVG value={qrValue} size={compact ? 180 : 232} level="M" marginSize={2} />
               </div>
               <p className="companion-pairing-hint">
-                Scan with the Jarvis companion app, or type the 6-digit code. Same session as the digits above.
+                In ANZU on your phone, tap Scan desktop QR. You can scan before this desktop detects your phone.
               </p>
             </>
           ) : (
             <p className="companion-pairing-hint">
-              QR appears after Prepare connection is ready (HTTPS endpoint + server pin). The 6-digit code still works.
+              Connect this desktop to Wi-Fi or Ethernet, then regenerate to prepare the pairing QR.
             </p>
           )}
         </div>
@@ -345,7 +345,7 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
       {!compact && (
         <>
           <ol className="companion-pairing-steps">
-            <li>Open the Jarvis companion on this Wi‑Fi. It scans for this PC and asks you to approve.</li>
+            <li>Open ANZU on the same Wi‑Fi. Tap Scan desktop QR or Scan this Wi‑Fi again.</li>
             <li>Or scan the QR code / enter the 6-digit code.</li>
             <li>Approve the phone fingerprint below. Pairing stays pending until you confirm.</li>
           </ol>

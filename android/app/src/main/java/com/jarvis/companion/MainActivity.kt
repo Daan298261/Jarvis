@@ -11,7 +11,7 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -49,7 +49,12 @@ private val Ink = Color(0xFF070B12)
 private val Panel = Color(0xFF111B28)
 private val Muted = Color(0xFF8C9CAF)
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
+    private lateinit var accessLock: AppAccessLock
+    override fun onStop() {
+        if (::accessLock.isInitialized) accessLock.background()
+        super.onStop()
+    }
     private var latestIntent by mutableStateOf<Intent?>(null)
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -59,12 +64,23 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         setTheme(R.style.AppTheme)
         super.onCreate(savedInstanceState)
+        accessLock = AppAccessLock(this)
         latestIntent = intent
         setContent {
+            val savedUi = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+            if (accessLock.locked) {
+                MaterialTheme(colorScheme = darkColorScheme(primary = Gold, background = Ink, surface = Panel)) {
+                    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                        AppLockedScreen(accessLock)
+                    }
+                }
+                return@setContent
+            }
+            savedUi.SaveableStateProvider("app") {
             var showSplash by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
             if (showSplash) {
                 AnzuSplash(onFinished = { showSplash = false })
-                return@setContent
+                return@SaveableStateProvider
             }
             val model: CompanionModel = viewModel()
             val state by model.state.collectAsStateWithLifecycle()
@@ -417,10 +433,11 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                             "Studio" -> StudioScreen(model, state)
-                            "More" -> MoreScreen(model, state, deviceChrome, devicePack, pairingScanRequest) { pairingScanRequest = false }
+                            "More" -> MoreScreen(model, state, deviceChrome, devicePack, accessLock, pairingScanRequest) { pairingScanRequest = false }
                         }
                     }
                 }
+            }
             }
         }
     }
@@ -854,6 +871,7 @@ private fun formatStorageBytes(bytes: Long): String {
     state: CompanionState,
     deviceChrome: CompanionDeviceModelChrome,
     devicePack: DevicePackChromeState,
+    accessLock: AppAccessLock,
     openPairingScanner: Boolean = false,
     onPairingScannerConsumed: () -> Unit = {},
 ) {
@@ -883,6 +901,7 @@ private fun formatStorageBytes(bytes: Long): String {
         }
     }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item { AppAccessSettings(accessLock) }
         item {
             Text("Connection", fontSize = 25.sp, modifier = Modifier.padding(vertical = 12.dp))
             OutlinedTextField(endpoint, { endpoint = it }, label = { Text(stringResource(R.string.anzu_https_endpoint)) }, modifier = Modifier.fillMaxWidth())

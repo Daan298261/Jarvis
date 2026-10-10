@@ -75,6 +75,18 @@ invitations out of Git. On the phone, use More to enter settings if not bundled.
 
 ## Connect
 
+For first pairing, open **Settings → Phone Pairing** on the desktop. Opening the
+pairing panel prepares the LAN TLS gateway and shows the QR even with no detected
+phones. Put the phone on the same Wi-Fi and tap **Scan desktop QR** in ANZU, or
+**Scan this Wi-Fi again**. Compare and approve the phone fingerprint on the desktop.
+
+On the phone, **More → App access → Require phone PIN or biometric** optionally
+protects every app screen. Enable/disable requires Android authentication. Android
+11+ supports strong biometrics or the phone screen-lock credential; Android 10
+uses the screen-lock credential. The app locks when backgrounded and prevents
+screenshots while protection is enabled. ANZU stores only the protection setting.
+
+
 Start the normal Jarvis backend on localhost. Start the separate TLS ingress:
 
 ```powershell

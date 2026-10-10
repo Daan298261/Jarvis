@@ -61,6 +61,14 @@ jobs:
             -PbootstrapFile="$(pwd)/bootstrap-generic.json" \
             --console=plain
         working-directory: android
+      - name: Verify packaged offline model and voice runtimes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from scripts.build_android import verify_apk_native_runtimes
+          for variant in ("debug", "release"):
+              verify_apk_native_runtimes(Path(f"android/app/build/outputs/apk/{variant}/app-{variant}.apk"))
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: jarvis-android-debug
