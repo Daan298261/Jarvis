@@ -70,7 +70,9 @@ class MainActivity : FragmentActivity() {
             val savedUi = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
             if (accessLock.locked) {
                 MaterialTheme(colorScheme = darkColorScheme(primary = Gold, background = Ink, surface = Panel)) {
-                    AppLockedScreen(accessLock)
+                    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                        AppLockedScreen(accessLock)
+                    }
                 }
                 return@setContent
             }

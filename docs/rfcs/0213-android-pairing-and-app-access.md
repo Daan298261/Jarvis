@@ -1,6 +1,6 @@
 # RFC-0213: Android pairing and app access
 
-**Status:** accepted
+**Status:** implemented (code; physical-phone sign-off pending)
 **Author:** Codex, owner request
 **Date:** 2026-10-10
 
@@ -27,3 +27,10 @@ The desktop can mint a pairing code without preparing a usable QR endpoint. Firs
 ## Files
 
 `backend/app/mobile/connectivity.py`, `backend/app/api/companion.py`, frontend pairing API/panel, Android activity/access lock/manifest/Gradle, focused tests.
+
+## Delivery
+
+Implementation: PR #591 against `development`. Backend CI: 2,864 passed, 2 skipped;
+Android debug/release build, lint and 124 unit tests passed. A signed generic APK
+was built with the existing owner signing identity. Camera pairing, live biometrics,
+calls and real on-device inference/audio still require physical-phone acceptance.
