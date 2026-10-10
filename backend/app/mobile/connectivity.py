@@ -246,6 +246,29 @@ class Connectivity:
             await self.apply_remote(config)
         return self.snapshot()
 
+    async def prepare_pairing(self):
+        """Owner pair intent prepares LAN ingress without device discovery or WAN setup."""
+        if GUARD.cooldown_active():
+            raise HTTPException(409, "Pairing is paused during the security cooldown")
+        async with self.lock:
+            if GUARD.cooldown_active():
+                raise HTTPException(409, "Pairing is paused during the security cooldown")
+            snapshot = self.snapshot()
+            if (self.config().get("enabled") and snapshot.get("local_verified")
+                    and snapshot.get("endpoints") and snapshot.get("server_pin")
+                    and self.server_task and not self.server_task.done()):
+                return snapshot
+            config = self.config()
+            if not config.get("enabled"):
+                config.update(enabled=True, remote=False)
+                with database() as db:
+                    put(db, "network", "config", config)
+            await self.ensure_gateway_listening()
+            snapshot = self.snapshot()
+            if not snapshot.get("endpoints") or not snapshot.get("server_pin"):
+                raise HTTPException(409, "Connect this desktop to Wi-Fi or Ethernet, then generate the pairing QR again")
+            return snapshot
+
     async def stop_gateway(self, beacons: bool = True):
         if beacons:
             await self.stop_lan_beacon()

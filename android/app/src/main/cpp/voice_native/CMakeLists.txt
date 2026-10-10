@@ -17,6 +17,7 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/ggerganov/whisper.cpp.git
     GIT_TAG v1.7.5
     GIT_SHALLOW TRUE
+    GIT_CONFIG core.longpaths=true
 )
 FetchContent_MakeAvailable(whisper)
 

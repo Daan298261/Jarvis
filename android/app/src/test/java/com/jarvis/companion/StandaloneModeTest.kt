@@ -77,7 +77,7 @@ open class ScriptedInferenceEngine(
 }
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [33])
+@Config(sdk = [33], shadows = [ReplaceAtomicFileShadow::class])
 class StandaloneModeTest {
     private lateinit var context: Context
     private val now: ZonedDateTime =

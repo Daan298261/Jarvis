@@ -190,7 +190,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                 mutable.value = mutable.value.copy(
                     lanStatus = "idle",
                     lanLabel = "",
-                    error = "No ANZU desktop found on this Wi-Fi. On the PC open Settings → Phone Pairing and tap Prepare connection, then try again.",
+                    error = "No ANZU desktop found on this Wi-Fi. On the PC open Settings → Phone Pairing to generate a QR, then scan it in this app.",
                 )
                 return@launch
             }

@@ -74,6 +74,8 @@ val bootstrap by tasks.registering {
 tasks.named("preBuild") { dependsOn(bootstrap) }
 
 dependencies {
+    implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.compose.material3:material3")
