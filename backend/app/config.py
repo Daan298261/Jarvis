@@ -1005,7 +1005,7 @@ def is_ephemeral_workspace_path(path: str) -> bool:
 def sanitize_allowed_directories(existing: list[str] | None) -> list[str]:
     cleaned: list[str] = []
     seen: set[str] = set()
-    testing = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+    testing = bool(os.environ.get("PYTEST_CURRENT_TEST")) or bool(os.environ.get("ANZU_DEVELOPMENT_MISSION"))
     for raw in existing or []:
         text = str(raw or "").strip()
         if not text:

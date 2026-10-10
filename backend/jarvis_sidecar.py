@@ -49,6 +49,13 @@ def main() -> None:
     if str(bundled) not in sys.path:
         sys.path.insert(0, str(bundled))
 
+    if "--development-worker" in sys.argv:
+        from app.agent.development_worker import main as development_main
+        position = sys.argv.index("--development-worker")
+        sys.argv = [sys.argv[0], sys.argv[position + 1]]
+        development_main()
+        return
+
     host = os.environ.get("JARVIS_BIND_HOST", "127.0.0.1")
     port = int(os.environ.get("JARVIS_BIND_PORT", "4780"))
 

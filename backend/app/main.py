@@ -194,6 +194,8 @@ async def auth_middleware(request: Request, call_next):
 async def startup() -> None:
     app.state.startup_id = str(uuid.uuid4())
     await init_db()
+    from .agent.development_scheduler import DEVELOPMENT
+    await DEVELOPMENT.start()
     try:
         from .recovery.hooks import startup_recovery
 
@@ -417,6 +419,8 @@ async def _auto_start_crucix() -> None:
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
+    from .agent.development_scheduler import DEVELOPMENT
+    await DEVELOPMENT.close()
     try:
         from .inference.front_runtime import FRONT_RUNTIME
 
