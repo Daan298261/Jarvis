@@ -67,16 +67,18 @@ class MainActivity : FragmentActivity() {
         accessLock = AppAccessLock(this)
         latestIntent = intent
         setContent {
+            val savedUi = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
             if (accessLock.locked) {
                 MaterialTheme(colorScheme = darkColorScheme(primary = Gold, background = Ink, surface = Panel)) {
                     AppLockedScreen(accessLock)
                 }
                 return@setContent
             }
+            savedUi.SaveableStateProvider("app") {
             var showSplash by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
             if (showSplash) {
                 AnzuSplash(onFinished = { showSplash = false })
-                return@setContent
+                return@SaveableStateProvider
             }
             val model: CompanionModel = viewModel()
             val state by model.state.collectAsStateWithLifecycle()
@@ -433,6 +435,7 @@ class MainActivity : FragmentActivity() {
                         }
                     }
                 }
+            }
             }
         }
     }
