@@ -25,6 +25,9 @@ data class CompanionPack(
 }
 
 object CompanionPackCatalog {
+    const val INSTRUCT_15B_ID = "qwen2.5-1.5b-instruct-q4"
+    const val INSTRUCT_3B_ID = "qwen2.5-3b-instruct-q4"
+
     /** Built-in allowlist; Leader catalog merges by id (URLs/hashes from host). */
     private const val URL_15B =
         "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"
@@ -33,7 +36,7 @@ object CompanionPackCatalog {
 
     val builtIn: List<CompanionPack> = listOf(
         CompanionPack(
-            id = "qwen2.5-1.5b-instruct-q4",
+            id = INSTRUCT_15B_ID,
             label = "Qwen2.5 1.5B Instruct (Q4_K_M)",
             filename = "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf",
             sizeBytes = 1_117_320_736L,
@@ -43,7 +46,7 @@ object CompanionPackCatalog {
             recommended = true,
         ),
         CompanionPack(
-            id = "qwen2.5-3b-instruct-q4",
+            id = INSTRUCT_3B_ID,
             label = "Qwen2.5 3B Instruct (Q4_K_M)",
             filename = "Qwen2.5-3B-Instruct-Q4_K_M.gguf",
             sizeBytes = 2_104_932_768L,
@@ -81,5 +84,36 @@ object CompanionPackCatalog {
             )
         }
         return byId.values.sortedByDescending { it.recommended }
+    }
+
+    fun isLegalAllowlistRow(pack: CompanionPack): Boolean =
+        pack.url.isNotBlank() &&
+            pack.sha256.length == 64 &&
+            pack.sha256.any { it != '0' } &&
+            pack.filename.isNotBlank() &&
+            pack.sizeBytes > 0L
+
+    /**
+     * Generic abliterated candidate: a legal catalog row that is not one of the
+     * two Instruct fallbacks. No unnamed placeholder row is ever synthesized.
+     */
+    fun isAbliteratedCandidate(pack: CompanionPack): Boolean =
+        isLegalAllowlistRow(pack) && pack.id != INSTRUCT_15B_ID && pack.id != INSTRUCT_3B_ID
+
+    /**
+     * Offline load order (RFC-0204 §2.1): abliterated if a legal row exists and
+     * loads, else 1.5B Instruct, else the owner's selected 3B Instruct.
+     */
+    fun resolveOfflinePack(
+        catalog: List<CompanionPack>,
+        selectedId: String,
+        canLoad: (CompanionPack) -> Boolean,
+    ): CompanionPack? {
+        catalog.firstOrNull { isAbliteratedCandidate(it) && canLoad(it) }?.let { return it }
+        catalog.firstOrNull { it.id == INSTRUCT_15B_ID && canLoad(it) }?.let { return it }
+        if (selectedId == INSTRUCT_3B_ID) {
+            catalog.firstOrNull { it.id == INSTRUCT_3B_ID && canLoad(it) }?.let { return it }
+        }
+        return null
     }
 }

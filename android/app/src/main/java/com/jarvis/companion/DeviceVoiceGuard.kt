@@ -15,7 +15,7 @@ object DeviceVoiceGuard {
         val memory = ActivityManager.MemoryInfo()
         activity.getMemoryInfo(memory)
         val availMb = memory.availMem / (1024 * 1024)
-        if (availMb < pack.minRamMb) {
+        if (availMb > 0L && availMb < pack.minRamMb) {
             return "Need about ${pack.minRamMb} MiB free RAM for ${pack.label} (have ~$availMb MiB)."
         }
         val battery = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))

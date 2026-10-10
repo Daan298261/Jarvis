@@ -20,7 +20,7 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags += "-std=c++17"
-                arguments += listOf("-DANDROID_STL=c++_shared")
+                arguments += listOf("-DANDROID_STL=c++_shared", "-DJARVIS_BUILD_VOICE_NATIVE=ON")
             }
         }
     }
@@ -53,6 +53,11 @@ android {
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("bootstrap"))
+    packaging {
+        jniLibs {
+            excludes += "**/libonnxruntime4j_jni.so"
+        }
+    }
 }
 
 val bootstrap by tasks.registering {
@@ -89,6 +94,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("com.google.firebase:firebase-messaging:24.1.0")
     implementation("io.github.webrtc-sdk:android:125.6422.07")
+    // ONNX Runtime Mobile is linked from CMake (hashed Maven AAR), not Gradle,
+    // so the APK does not ship libonnxruntime4j_jni.so or a duplicate .so.
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.14.1")
     testImplementation("androidx.test:core:1.6.1")
