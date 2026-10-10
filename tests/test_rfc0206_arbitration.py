@@ -1,0 +1,220 @@
+"""RFC-0206 slice 3: arbitration replaces the hardcoded merge policy."""
+
+from __future__ import annotations
+
+import time
+
+import pytest
+
+from app.agent.front_responder import (
+    apply_disposition,
+    infer_arbitration_disposition,
+    merge_consecutive_assistant_turns,
+    merge_front_and_worker,
+    merge_front_and_worker_async,
+)
+from app.decision.types import Answer, DecisionResult
+
+
+def _enable_laya_fixture(jarvis_env, monkeypatch):
+    from app.decision.laya import pins as laya_pins
+    from app.decision.laya import runtime as laya_runtime
+
+    tmp = jarvis_env["tmp"]
+    monkeypatch.setattr("app.decision.laya.pins.data_dir", lambda: tmp)
+    laya_runtime.reset_runtime()
+    laya_pins.clear_install()
+    laya_pins.write_test_install()
+    laya_runtime.enable(warm=True)
+    return laya_pins, laya_runtime
+
+
+def _observe_surfaces_decide(monkeypatch):
+    import app.decision.surfaces as surfaces_mod
+
+    seen: list[DecisionResult] = []
+    real = surfaces_mod.decide
+
+    def spy(*args, **kwargs):
+        result = real(*args, **kwargs)
+        seen.append(result)
+        return result
+
+    monkeypatch.setattr(surfaces_mod, "decide", spy)
+    return seen
+
+
+@pytest.mark.asyncio
+async def test_provider_keep_front_drops_novel_worker(jarvis_env, monkeypatch):
+    laya_pins, laya_runtime = _enable_laya_fixture(jarvis_env, monkeypatch)
+    laya_runtime.set_decide_fn(
+        lambda **_kw: {"disposition": Answer("disposition", "choice", "keep_front", 0.99)}
+    )
+    seen = _observe_surfaces_decide(monkeypatch)
+    try:
+        merged = await merge_front_and_worker_async(
+            "On it. I'll check the details.",
+            "Mild rain later, sir.",
+            "ack_continue",
+            user_message="what is the weather",
+            reply_shape="ack",
+        )
+        assert merged == "On it. I'll check the details."
+        assert "Mild rain" not in merged
+        assert seen
+        assert seen[0].source == "laya"
+        assert seen[0].fixture is True
+        assert seen[0].answers["disposition"].value == "keep_front"
+    finally:
+        laya_runtime.reset_runtime()
+        laya_pins.clear_install()
+
+
+@pytest.mark.asyncio
+async def test_provider_append_novel_keeps_new_sentence(jarvis_env, monkeypatch):
+    laya_pins, laya_runtime = _enable_laya_fixture(jarvis_env, monkeypatch)
+    laya_runtime.set_decide_fn(
+        lambda **_kw: {"disposition": Answer("disposition", "choice", "append_novel", 0.99)}
+    )
+    seen = _observe_surfaces_decide(monkeypatch)
+    try:
+        merged = await merge_front_and_worker_async(
+            "On it. I'll check the details.",
+            "Mild rain later, sir.",
+            "ack_continue",
+            user_message="what is the weather",
+            reply_shape="ack",
+        )
+        assert merged.startswith("On it.")
+        assert "Mild rain later, sir." in merged
+        assert "Deeper result" not in merged
+        assert seen
+        assert seen[0].source == "laya"
+        assert seen[0].fixture is True
+        assert seen[0].answers["disposition"].value == "append_novel"
+    finally:
+        laya_runtime.reset_runtime()
+        laya_pins.clear_install()
+
+
+@pytest.mark.asyncio
+async def test_literal_guard_forces_keep_front(jarvis_env, monkeypatch):
+    laya_pins, laya_runtime = _enable_laya_fixture(jarvis_env, monkeypatch)
+    laya_runtime.set_decide_fn(
+        lambda **_kw: {"disposition": Answer("disposition", "choice", "keep_worker", 0.99)}
+    )
+    try:
+        merged = await merge_front_and_worker_async(
+            "ready",
+            "I can start with the short version while I check the details.",
+            "final_basic",
+            user_message="Say only the word ready",
+            reply_shape="literal",
+        )
+        assert merged == "ready"
+    finally:
+        laya_runtime.reset_runtime()
+        laya_pins.clear_install()
+
+
+def test_append_novel_degrades_when_worker_only_restates():
+    front = "On it. I'll check the details."
+    worker = "On it — I will check the details."
+    text = apply_disposition("append_novel", front, worker)
+    assert text == front
+
+
+def test_merge_consecutive_assistant_turns_uses_arbitration_helper():
+    turns = merge_consecutive_assistant_turns(
+        [
+            {"role": "user", "content": "Check the weather"},
+            {"role": "assistant", "content": "On it."},
+            {"role": "assistant", "content": "Mild rain later, sir."},
+        ]
+    )
+    assert [item["role"] for item in turns] == ["user", "assistant"]
+    assert "On it." in turns[-1]["content"]
+    assert "Mild rain later" in turns[-1]["content"]
+    assert "Deeper result" not in turns[-1]["content"]
+
+
+def test_rules_disposition_for_correction_is_keep_worker():
+    assert (
+        infer_arbitration_disposition(
+            "The meeting is at 3.",
+            "The meeting was moved to 4:30, and it's in the north conference room.",
+        )
+        == "keep_worker"
+    )
+
+
+def test_one_sided_merge_skips_provider(monkeypatch):
+    monkeypatch.setattr(
+        "app.decision.surfaces.arbitrate_front_and_worker",
+        lambda **_k: (_ for _ in ()).throw(AssertionError("no provider")),
+    )
+    assert merge_front_and_worker("", "Worker only.", "ack_continue") == "Worker only."
+    assert merge_front_and_worker("Front only.", "", "ack_continue") == "Front only."
+    assert merge_front_and_worker("", "Worker.", "silent_skip") == "Worker."
+
+
+def test_empty_user_message_skips_provider(monkeypatch):
+    monkeypatch.setattr(
+        "app.decision.surfaces.arbitrate_front_and_worker",
+        lambda **_k: (_ for _ in ()).throw(AssertionError("no provider on empty user_message")),
+    )
+    merged = merge_front_and_worker(
+        "On it. I'll check the details.",
+        "Mild rain later, sir.",
+        "ack_continue",
+        user_message="",
+        reply_shape="ack",
+    )
+    assert "On it." in merged
+    assert "Mild rain later, sir." in merged
+
+
+def test_consecutive_assistant_turns_do_not_call_provider(monkeypatch):
+    monkeypatch.setattr(
+        "app.decision.surfaces.arbitrate_front_and_worker",
+        lambda **_k: (_ for _ in ()).throw(AssertionError("no provider")),
+    )
+    monkeypatch.setattr(
+        "app.decision.surfaces.decide",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no decide")),
+    )
+    turns = merge_consecutive_assistant_turns(
+        [
+            {"role": "user", "content": "Check the weather"},
+            {"role": "assistant", "content": "On it."},
+            {"role": "assistant", "content": "Mild rain later, sir."},
+        ]
+    )
+    assert "On it." in turns[-1]["content"]
+    assert "Mild rain later" in turns[-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_bounded_arbitration_does_not_stall_event_loop(monkeypatch):
+    def blocking(**_kwargs):
+        time.sleep(0.25)
+        return DecisionResult(
+            answers={"disposition": Answer("disposition", "choice", "keep_front", 0.99)},
+            source="laya",
+            decision_class="arbitration",
+            provider="laya",
+        )
+
+    monkeypatch.setattr("app.decision.surfaces.arbitrate_front_and_worker", blocking)
+    started = time.perf_counter()
+    merged = await merge_front_and_worker_async(
+        "On it. I'll check the details.",
+        "Mild rain later, sir.",
+        "ack_continue",
+        user_message="what is the weather",
+        reply_shape="ack",
+    )
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    assert elapsed_ms < 120.0
+    assert "On it." in merged
+    assert "Deeper result" not in merged

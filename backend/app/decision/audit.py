@@ -27,7 +27,11 @@ def record_event(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         **payload,
     }
     with _LOCK:
-        events = list_events()
+        events = list_events(_MAX_EVENTS)
+        if kind in {"reflex_decision", "reflex_deadline_fallback", "reflex_cache_hit"} and payload.get("request_id"):
+            prior = next((item for item in events if item.get("request_id") == payload["request_id"] and item.get("kind") in {"reflex_decision", "reflex_deadline_fallback", "reflex_cache_hit"}), None)
+            if prior is not None:
+                return prior
         events.insert(0, event)
         _path().write_text(json.dumps({"events": events[:_MAX_EVENTS]}, indent=2) + "\n", encoding="utf-8")
     return event

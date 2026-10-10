@@ -71,9 +71,12 @@ _DECIDE_FN: Callable[..., dict[str, Answer]] | None = None  # test injection
 
 
 def set_decide_fn(fn) -> None:
-    """Tests may inject a labeled Laya decide transport. Production leaves this None."""
+    """Tests may inject a labeled Laya decide transport. Always fixture=True."""
     global _DECIDE_FN
     _DECIDE_FN = fn
+    with _LOCK:
+        if fn is not None:
+            _STATE.fixture = True
 
 
 def _executor() -> ThreadPoolExecutor:

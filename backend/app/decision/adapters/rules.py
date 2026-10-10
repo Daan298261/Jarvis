@@ -96,7 +96,45 @@ def decide(
         if question.type == "choice":
             if qid == "request_route":
                 baseline = str(state.get("baseline_route") or "managed_task")
-                pick = baseline if baseline in question.choices else question.choices[-1]
+                from ...agent.planning import (
+                    MANAGED_TASK,
+                    is_weather_query,
+                    lta_protected_folder_path,
+                    requests_agent_tools,
+                    simple_app_control,
+                    simple_file_control,
+                )
+
+                prompt_text = prompt
+                if requests_agent_tools(prompt_text) or simple_app_control(prompt_text) or simple_file_control(prompt_text) or lta_protected_folder_path(prompt_text):
+                    pick = MANAGED_TASK if MANAGED_TASK in question.choices else baseline
+                elif is_weather_query(prompt_text) and "direct_lookup" in question.choices:
+                    pick = "direct_lookup"
+                else:
+                    pick = baseline if baseline in question.choices else question.choices[-1]
+                answers[qid] = _answer_choice(qid, pick, 0.9)
+            elif qid == "reply_shape" or (decision_class == "request_routing" and qid == "reply_shape"):
+                from ..owner_turn import infer_rules_reply_shape
+
+                pick = infer_rules_reply_shape(
+                    prompt,
+                    baseline_route=str(state.get("baseline_route") or ""),
+                    literal_candidate=str(state.get("literal_candidate") or ""),
+                )
+                if pick not in question.choices:
+                    pick = question.choices[0]
+                answers[qid] = _answer_choice(qid, pick, 0.9)
+            elif qid == "disposition" or decision_class == "arbitration":
+                from ...agent.front_responder import infer_arbitration_disposition
+
+                pick = infer_arbitration_disposition(
+                    str(state.get("front_text") or ""),
+                    str(state.get("worker_text") or ""),
+                    front_action=str(state.get("front_action") or ""),
+                    reply_shape=str(state.get("reply_shape") or ""),
+                )
+                if pick not in question.choices:
+                    pick = question.choices[0] if question.choices else "keep_front"
                 answers[qid] = _answer_choice(qid, pick, 0.9)
             elif qid in {"tool_select", "tool_shortlist"} or decision_class in {
                 "tool_selection",
