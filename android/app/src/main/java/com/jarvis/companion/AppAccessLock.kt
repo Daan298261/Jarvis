@@ -36,7 +36,7 @@ class AppAccessLock(private val activity: FragmentActivity) {
     private val credential = activity.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         credentialActivityOpen = false
         if (result.resultCode == android.app.Activity.RESULT_OK) complete()
-        else { pending = null; error = "Unlock cancelled. Your app stays locked." }
+        else { pending = null; error = "Authentication cancelled. App protection was not changed." }
     }
     private val prompt = BiometricPrompt(activity, ContextCompat.getMainExecutor(activity),
         object : BiometricPrompt.AuthenticationCallback() {
