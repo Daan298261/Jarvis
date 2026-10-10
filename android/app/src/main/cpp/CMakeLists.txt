@@ -31,10 +31,9 @@ if(JARVIS_BUILD_VOICE_NATIVE)
     include(ExternalProject)
     # Isolated configure so whisper.cpp's ggml targets do not collide with llama.cpp.
     # Must be part of the default ninja graph or AGP never builds the voice .so files.
-    set(_voice_lib_dir "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
-    if(NOT _voice_lib_dir)
-        set(_voice_lib_dir "${CMAKE_CURRENT_BINARY_DIR}")
-    endif()
+    # Keep imported inputs outside AGP's object output cleanup. Declared shared
+    # dependencies are included in both fresh and incremental APKs.
+    set(_voice_lib_dir "${CMAKE_CURRENT_BINARY_DIR}/voice_native_ext/exported")
     # Private JNI dir: do not dump whisper's ggml .so next to llama.cpp's ggml.
     set(_voice_jni "${CMAKE_CURRENT_BINARY_DIR}/voice_native_ext/jni")
     ExternalProject_Add(
@@ -70,4 +69,10 @@ if(JARVIS_BUILD_VOICE_NATIVE)
     )
     add_custom_target(jarvis_voice_native ALL DEPENDS jarvis_voice_native_ext)
     add_dependencies(jarvis_llama jarvis_voice_native_ext)
+    foreach(_voice_runtime jarvis_whisper jarvis_voice_tts onnxruntime)
+        add_library(${_voice_runtime} SHARED IMPORTED)
+        set_target_properties(${_voice_runtime} PROPERTIES
+            IMPORTED_LOCATION "${_voice_lib_dir}/lib${_voice_runtime}.so")
+        target_link_libraries(jarvis_llama ${_voice_runtime})
+    endforeach()
 endif()
