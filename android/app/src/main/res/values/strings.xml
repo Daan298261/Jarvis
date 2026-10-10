@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ANZU</string>
+    <string name="anzu_is_calling">ANZU is calling</string>
+    <string name="anzu_has_update">ANZU has an update</string>
+    <string name="open_anzu_to_view_task">Open ANZU to view the task</string>
+    <string name="calling_anzu">Calling ANZU</string>
+    <string name="anzu_call_unavailable">ANZU call unavailable</string>
+    <string name="anzu_calls_channel">ANZU calls</string>
+    <string name="pair_with_anzu">Pair with ANZU</string>
+    <string name="pair_with_anzu_desktop">Pair with ANZU on your desktop to connect.</string>
+    <string name="talk_to_anzu">Talk to ANZU</string>
+    <string name="chat_empty_hint">One conversation across your phone and ANZU. Send a message, file, or voice note.</string>
+    <string name="tasks_empty_hint">Tasks appear here as soon as ANZU starts working.</string>
+    <string name="pending_may_be_working">ANZU may already be working on it. Check Tasks before sending it again. Dismissing does not cancel a task.</string>
+    <string name="auto_anzu_selects">Auto · ANZU selects</string>
+    <string name="studio_wait_for_anzu">Creative tools stay read-only until ANZU reports studio.available=true. No local preview engine runs on the phone.</string>
+    <string name="studio_connect_hint">Connect on the More tab to load live studio status from ANZU.</string>
+    <string name="instructions_for_anzu">Instructions for ANZU</string>
+    <string name="anzu_https_endpoint">ANZU HTTPS endpoint</string>
+    <string name="confirm_fingerprint_anzu_desktop">Confirm this fingerprint on your ANZU desktop to finish pairing.</string>
+    <string name="scan_pairing_qr_anzu_desktop">Scan the pairing QR shown on your ANZU desktop</string>
+    <string name="whatsapp_save_anzu">Save ANZU as a WhatsApp contact on this phone so you can message the linked desktop session.</string>
+    <string name="add_anzu_on_whatsapp">Add ANZU on WhatsApp</string>
+    <string name="push_needs_anzu_service">Background push needs the ANZU push service configured.</string>
+    <string name="audio_via_paired_anzu">Audio is processed by your paired ANZU host and transported through pinned TLS.</string>
+    <string name="what_should_anzu_do">What should ANZU do?</string>
+    <string name="schedule_on_anzu">Schedule on ANZU</string>
+    <string name="about">About</string>
+    <string name="sponsor_open_failed">Could not open Black Grid Publishing in a browser.</string>
+    <string name="critical_call_body">A critical event needs your attention</string>
+</resources>

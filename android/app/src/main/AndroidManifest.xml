@@ -19,10 +19,11 @@
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
-    <application android:name=".JarvisApp" android:label="Jarvis" android:icon="@drawable/ic_jarvis"
+    <application android:name=".JarvisApp" android:label="@string/app_name" android:icon="@drawable/ic_jarvis"
         android:allowBackup="false" android:usesCleartextTraffic="false" android:theme="@style/AppTheme"
         android:supportsRtl="true">
-        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop">
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop"
+            android:theme="@style/Theme.Anzu.Splash">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

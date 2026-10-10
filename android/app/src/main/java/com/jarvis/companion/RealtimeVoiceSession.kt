@@ -91,7 +91,7 @@ class RealtimeVoiceSession(
             }
         }
         if (!open.get()) {
-            throw lastError ?: java.io.IOException("No reachable Jarvis voice endpoint")
+            throw lastError ?: java.io.IOException("No reachable ANZU voice endpoint")
         }
         val hello = JSONObject().put("type", "hello")
         conversationId?.let { hello.put("conversation_id", it) }

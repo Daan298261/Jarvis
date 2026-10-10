@@ -10,11 +10,23 @@ class LanBeaconTest {
     @Test
     fun round_trips_valid_lan_host() {
         val pin = "a".repeat(64)
-        val encoded = LanBeacon.encode(LanHost("https://192.168.1.12:4781", pin, "Jarvis"))
+        val encoded = LanBeacon.encode(LanHost("https://192.168.1.12:4781", pin, AnzuBranding.DISPLAY_NAME))
         val parsed = LanBeacon.parse(encoded)
         assertNotNull(parsed)
         assertEquals("https://192.168.1.12:4781", parsed!!.endpoint)
         assertEquals(pin, parsed.serverPin)
+        assertEquals(AnzuBranding.DISPLAY_NAME, parsed.name)
+    }
+
+    @Test
+    fun default_discovery_name_is_anzu() {
+        val pin = "a".repeat(64)
+        assertEquals("ANZU", LanHost("https://192.168.1.12:4781", pin).name)
+        val parsed = LanBeacon.parse(
+            """{"service":"jarvis-companion","https":"https://192.168.1.12:4781","server_pin":"$pin"}""".toByteArray(),
+        )
+        assertNotNull(parsed)
+        assertEquals("ANZU", parsed!!.name)
     }
 
     @Test
