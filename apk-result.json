@@ -1,0 +1,17 @@
+{
+  "filename": "JarvisCompanion-generic-29861156.apk",
+  "path": "C:\\Users\\daanv\\Documents\\Projects\\Jarvis\\Jarvis\\data\\mobile\\builds\\JarvisCompanion-generic-29861156.apk",
+  "release_path": "C:\\Users\\daanv\\Documents\\Projects\\Jarvis\\Jarvis\\release\\ANZU-Android-1.5.3-beta-29861156.apk",
+  "sha256": "bd9c1d8ae99d3c1f774650b08be563b2641d7ae62eca311a7577e51d78ad697d",
+  "mode": "generic",
+  "features": [
+    "chat",
+    "tasks",
+    "attachments",
+    "realtime_voice",
+    "calls",
+    "schedules",
+    "whatsapp_contact",
+    "apex_orb"
+  ]
+}

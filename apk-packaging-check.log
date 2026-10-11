@@ -1,0 +1,7 @@
+Using JDK at C:\Program Files\Eclipse Adoptium\jdk-17.0.17.10-hotspot
+Using Android SDK at C:\Users\daanv\AppData\Local\Jarvis\android-sdk
+Preparing generic companion bootstrap (pair after install)
+Bundling the shared Apex orb
+Compiling and signing the generic companion APK
+APK signature verified; ready to install
+{'filename': 'JarvisCompanion-generic-29861149.apk', 'path': 'C:\\Users\\daanv\\Documents\\Projects\\Jarvis\\Jarvis\\data\\mobile\\builds\\JarvisCompanion-generic-29861149.apk', 'release_path': 'C:\\Users\\daanv\\.codex\\worktrees\\android-pairing-access\\Jarvis\\release\\JarvisCompanion-generic-29861149.apk', 'sha256': 'dc4abb4468a088489843c26801ce2c5909408d97c1d2acfa208f6eea92bb58f4', 'mode': 'generic', 'features': ['chat', 'tasks', 'attachments', 'realtime_voice', 'calls', 'schedules', 'whatsapp_contact', 'apex_orb']}

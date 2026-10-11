@@ -1,0 +1,16 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+_____________ test_api_health_does_not_invoke_schtasks_on_repeat ______________
+tests\test_elevation.py:153: in test_api_health_does_not_invoke_schtasks_on_repeat
+    assert first["logon_task_registered"] is False
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'logon_task_registered'
+______________ test_api_health_includes_elevation_degrade_fields ______________
+tests\test_elevation_degrade.py:116: in test_api_health_includes_elevation_degrade_fields
+    assert payload["elevation_degraded"] is True
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'elevation_degraded'
+=========================== short test summary info ===========================
+FAILED tests/test_elevation.py::test_api_health_does_not_invoke_schtasks_on_repeat
+FAILED tests/test_elevation_degrade.py::test_api_health_includes_elevation_degrade_fields
+2 failed in 2.91s

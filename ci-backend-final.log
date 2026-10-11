@@ -1,0 +1,861 @@
+pytest	Set up job	﻿2026-10-10T21:56:20.9207303Z Current runner version: '2.337.0'
+pytest	Set up job	2026-10-10T21:56:20.9242360Z ##[group]Runner Image Provisioner
+pytest	Set up job	2026-10-10T21:56:20.9244124Z Hosted Compute Agent
+pytest	Set up job	2026-10-10T21:56:20.9245242Z Version: 20261002.596
+pytest	Set up job	2026-10-10T21:56:20.9246288Z Commit: c3d12f3313a95f25162a1503be624f3b0617f8c0
+pytest	Set up job	2026-10-10T21:56:20.9247622Z Build Date: 2026-10-02T22:28:27Z
+pytest	Set up job	2026-10-10T21:56:20.9248782Z Worker ID: {32fdb5a8-2bb1-4740-be11-2c9f8a91f949}
+pytest	Set up job	2026-10-10T21:56:20.9249941Z Region: eastus
+pytest	Set up job	2026-10-10T21:56:20.9250949Z Cloud: Azure
+pytest	Set up job	2026-10-10T21:56:20.9251842Z ##[endgroup]
+pytest	Set up job	2026-10-10T21:56:20.9254614Z ##[group]Operating System
+pytest	Set up job	2026-10-10T21:56:20.9255711Z Ubuntu
+pytest	Set up job	2026-10-10T21:56:20.9256667Z 24.04.5
+pytest	Set up job	2026-10-10T21:56:20.9257493Z LTS
+pytest	Set up job	2026-10-10T21:56:20.9258339Z ##[endgroup]
+pytest	Set up job	2026-10-10T21:56:20.9259413Z ##[group]Runner Image
+pytest	Set up job	2026-10-10T21:56:20.9260359Z Image: ubuntu-24.04
+pytest	Set up job	2026-10-10T21:56:20.9261385Z Version: 20261004.327.1
+pytest	Set up job	2026-10-10T21:56:20.9263255Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261004.327/images/ubuntu/Ubuntu2404-Readme.md
+pytest	Set up job	2026-10-10T21:56:20.9266604Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261004.327
+pytest	Set up job	2026-10-10T21:56:20.9268290Z ##[endgroup]
+pytest	Set up job	2026-10-10T21:56:20.9270189Z ##[group]GITHUB_TOKEN Permissions
+pytest	Set up job	2026-10-10T21:56:20.9273041Z Contents: read
+pytest	Set up job	2026-10-10T21:56:20.9274542Z Metadata: read
+pytest	Set up job	2026-10-10T21:56:20.9275442Z ##[endgroup]
+pytest	Set up job	2026-10-10T21:56:20.9278422Z Secret source: Actions
+pytest	Set up job	2026-10-10T21:56:20.9279947Z Cache mode: write
+pytest	Set up job	2026-10-10T21:56:20.9281679Z Prepare workflow directory
+pytest	Set up job	2026-10-10T21:56:20.9836644Z Prepare all required actions
+pytest	Set up job	2026-10-10T21:56:20.9906538Z Getting action download info
+pytest	Set up job	2026-10-10T21:56:21.1808567Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+pytest	Set up job	2026-10-10T21:56:21.2640318Z Download action repository 'actions/setup-python@v5' (SHA:a26af69be951a213d495a4c3e4e4022e16d87065)
+pytest	Set up job	2026-10-10T21:56:21.3395168Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+pytest	Set up job	2026-10-10T21:56:21.5334841Z Complete job name: pytest
+pytest	Run actions/checkout@v4	﻿2026-10-10T21:56:21.6111591Z ##[group]Run actions/checkout@v4
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.6112492Z with:
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.6112925Z   repository: Daan298261/Jarvis
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.6116893Z   token: ***
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.6117319Z   ssh-strict: true
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.6117737Z   ssh-user: git
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.6118168Z   persist-credentials: true
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.6118652Z   clean: true
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.6119088Z   sparse-checkout-cone-mode: true
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.6119596Z   fetch-depth: 1
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.6120022Z   fetch-tags: false
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.6120460Z   show-progress: true
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.6120890Z   lfs: false
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.6121288Z   submodules: false
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.6121722Z   set-safe-directory: true
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.6122212Z   allow-unsafe-pr-checkout: false
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.6122952Z env:
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.6123365Z   JARVIS_SKIP_MODEL: 1
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.6124004Z   PYTHONPATH: backend
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.6124481Z ##[endgroup]
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7173053Z Syncing repository: Daan298261/Jarvis
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7175521Z ##[group]Getting Git version info
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7176238Z Working directory is '/home/runner/work/Jarvis/Jarvis'
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7177354Z [command]/usr/bin/git version
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7257999Z git version 2.55.0
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7296938Z ##[endgroup]
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7304523Z Temporarily overriding HOME='/home/runner/work/_temp/daa283e4-8e1a-4636-aef9-736b2bf83b03' before making global git config changes
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7307069Z Adding repository directory to the temporary git global config as a safe directory
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7313762Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Jarvis/Jarvis
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7369888Z Deleting the contents of '/home/runner/work/Jarvis/Jarvis'
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7373495Z ##[group]Initializing the repository
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7379370Z [command]/usr/bin/git init /home/runner/work/Jarvis/Jarvis
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7503306Z hint: Using 'master' as the name for the initial branch. This default branch name
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7505604Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7507246Z hint: to use in all of your new repositories, which will suppress this warning,
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7508588Z hint: call:
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7509256Z hint:
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7510153Z hint: 	git config --global init.defaultBranch <name>
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7511171Z hint:
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7512060Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7513727Z hint: 'development'. The just-created branch can be renamed via this command:
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7514767Z hint:
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7515237Z hint: 	git branch -m <name>
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7515890Z hint:
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7516546Z hint: Disable this message with "git config set advice.defaultBranchName false"
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7518329Z Initialized empty Git repository in /home/runner/work/Jarvis/Jarvis/.git/
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7522156Z [command]/usr/bin/git remote add origin https://github.com/Daan298261/Jarvis
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7580962Z ##[endgroup]
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7582159Z ##[group]Disabling automatic garbage collection
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7585750Z [command]/usr/bin/git config --local gc.auto 0
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7620823Z ##[endgroup]
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7621899Z ##[group]Setting up auth
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7628969Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.7665856Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.8061621Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.8106735Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.8335575Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.8372986Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.8597860Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.8639534Z ##[endgroup]
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.8640343Z ##[group]Fetching the repository
+pytest	Run actions/checkout@v4	2026-10-10T21:56:21.8649998Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +ab2843ee076dd4de780594b21764049ba130856e:refs/remotes/pull/591/merge
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.5912371Z From https://github.com/Daan298261/Jarvis
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.5914789Z  * [new ref]         ab2843ee076dd4de780594b21764049ba130856e -> pull/591/merge
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.5918782Z ##[endgroup]
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.5920274Z ##[group]Determining the checkout info
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.5928626Z ##[endgroup]
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.5929990Z [command]/usr/bin/git sparse-checkout disable
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.5998551Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.6035157Z ##[group]Checking out the ref
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.6038932Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/591/merge
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.7510074Z Note: switching to 'refs/remotes/pull/591/merge'.
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.7511598Z 
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.7512573Z You are in 'detached HEAD' state. You can look around, make experimental
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.7515167Z changes and commit them, and you can discard any commits you make in this
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.7517393Z state without impacting any branches by switching back to a branch.
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.7518782Z 
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.7519719Z If you want to create a new branch to retain commits you create, you may
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.7521684Z do so (now or later) by using -c with the switch command. Example:
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.7522561Z 
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.7522921Z   git switch -c <new-branch-name>
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.7523824Z 
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.7524401Z Or undo this operation with:
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.7525277Z 
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.7525591Z   git switch -
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.7526027Z 
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.7526837Z Turn off this advice by setting config variable advice.detachedHead to false
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.7527959Z 
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.7529159Z HEAD is now at ab2843e Merge e29594520db8cee3a3b1b388a43975fe13b2c777 into f2255cf55861ba11026edf1fead201ae9e8f84a2
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.7533115Z ##[endgroup]
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.7574059Z [command]/usr/bin/git log -1 --format=%H
+pytest	Run actions/checkout@v4	2026-10-10T21:56:22.7602871Z ab2843ee076dd4de780594b21764049ba130856e
+pytest	Run actions/setup-python@v5	﻿2026-10-10T21:56:22.8074250Z ##[group]Run actions/setup-python@v5
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:22.8075643Z with:
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:22.8076630Z   python-version: 3.12
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:22.8077730Z   cache: pip
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:22.8078867Z   cache-dependency-path: backend/requirements.txt
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:22.8080319Z   check-latest: false
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:22.8090746Z   token: ***
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:22.8091799Z   update-environment: true
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:22.8092963Z   allow-prereleases: false
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:22.8094220Z   freethreaded: false
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:22.8095237Z env:
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:22.8096120Z   JARVIS_SKIP_MODEL: 1
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:22.8097183Z   PYTHONPATH: backend
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:22.8098182Z ##[endgroup]
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:22.9499067Z ##[group]Installed versions
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:22.9598043Z (node:2305) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:22.9602099Z (Use `node --trace-deprecation ...` to show where the warning was created)
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:22.9604320Z Successfully set up CPython (3.12.15)
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:22.9606982Z ##[endgroup]
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:22.9971641Z [command]/opt/hostedtoolcache/Python/3.12.15/x64/bin/pip cache dir
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:23.3023218Z /home/runner/.cache/pip
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:23.3947124Z Cache hit for: setup-python-Linux-x64-24.04-Ubuntu-python-3.12.15-pip-77503deef59718ff8a0fa60cb8cff112c233f77139223322d78d7ce0897e6564
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:23.4060033Z (node:2305) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:24.4353374Z Received 226492416 of 3171253271 (7.1%), 214.1 MBs/sec
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:25.4353471Z Received 511705088 of 3171253271 (16.1%), 242.9 MBs/sec
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:26.4360427Z Received 801112064 of 3171253271 (25.3%), 253.9 MBs/sec
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:27.4362956Z Received 1073741824 of 3171253271 (33.9%), 255.4 MBs/sec
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:28.4398887Z Received 1346371584 of 3171253271 (42.5%), 256.1 MBs/sec
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:29.4436997Z Received 1652555776 of 3171253271 (52.1%), 261.9 MBs/sec
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:30.4537071Z Received 1941962752 of 3171253271 (61.2%), 263.6 MBs/sec
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:31.4721218Z Received 2197815296 of 3171253271 (69.3%), 260.5 MBs/sec
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:32.4835044Z Received 2466250752 of 3171253271 (77.8%), 259.9 MBs/sec
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:33.4856381Z Received 2738880512 of 3171253271 (86.4%), 259.7 MBs/sec
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:34.4864654Z Received 3040870400 of 3171253271 (95.9%), 262.2 MBs/sec
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:34.9923100Z Received 3171253271 of 3171253271 (100.0%), 261.5 MBs/sec
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:34.9924791Z Cache Size: ~3024 MB (3171253271 B)
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:34.9967549Z [command]/usr/bin/tar -xf /home/runner/work/_temp/7e96f620-62d1-4240-b6a0-a5596901cd05/cache.tzst -P -C /home/runner/work/Jarvis/Jarvis --use-compress-program unzstd
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:40.9169632Z Cache restored successfully
+pytest	Run actions/setup-python@v5	2026-10-10T21:56:41.2289835Z Cache restored from key: setup-python-Linux-x64-24.04-Ubuntu-python-3.12.15-pip-77503deef59718ff8a0fa60cb8cff112c233f77139223322d78d7ce0897e6564
+pytest	Install Linux test dependencies	﻿2026-10-10T21:56:41.6167488Z ##[group]Run python -m pip install --upgrade pip
+pytest	Install Linux test dependencies	2026-10-10T21:56:41.6168021Z ^[[36;1mpython -m pip install --upgrade pip^[[0m
+pytest	Install Linux test dependencies	2026-10-10T21:56:41.6168594Z ^[[36;1mgrep -Ev '^(pywinauto|pywin32|comtypes)' backend/requirements.txt > /tmp/requirements-linux.txt^[[0m
+pytest	Install Linux test dependencies	2026-10-10T21:56:41.6169196Z ^[[36;1mpython -m pip install -r /tmp/requirements-linux.txt^[[0m
+pytest	Install Linux test dependencies	2026-10-10T21:56:42.7281583Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+pytest	Install Linux test dependencies	2026-10-10T21:56:42.7282044Z env:
+pytest	Install Linux test dependencies	2026-10-10T21:56:42.7282288Z   JARVIS_SKIP_MODEL: 1
+pytest	Install Linux test dependencies	2026-10-10T21:56:42.7282554Z   PYTHONPATH: backend
+pytest	Install Linux test dependencies	2026-10-10T21:56:42.7282892Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Install Linux test dependencies	2026-10-10T21:56:42.7283404Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+pytest	Install Linux test dependencies	2026-10-10T21:56:42.7284123Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Install Linux test dependencies	2026-10-10T21:56:42.7284565Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Install Linux test dependencies	2026-10-10T21:56:42.7285003Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Install Linux test dependencies	2026-10-10T21:56:42.7285569Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+pytest	Install Linux test dependencies	2026-10-10T21:56:42.7285976Z ##[endgroup]
+pytest	Install Linux test dependencies	2026-10-10T21:56:43.2474418Z Requirement already satisfied: pip in /opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/site-packages (26.2.1)
+pytest	Install Linux test dependencies	2026-10-10T21:56:43.8144050Z Collecting fastapi>=0.115.0 (from -r /tmp/requirements-linux.txt (line 1))
+pytest	Install Linux test dependencies	2026-10-10T21:56:43.8158126Z   Using cached fastapi-0.143.0-py3-none-any.whl.metadata (26 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:43.8422767Z Collecting uvicorn>=0.32.0 (from uvicorn[standard]>=0.32.0->-r /tmp/requirements-linux.txt (line 2))
+pytest	Install Linux test dependencies	2026-10-10T21:56:43.8435613Z   Using cached uvicorn-0.54.0-py3-none-any.whl.metadata (6.6 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.1315778Z Collecting sqlalchemy>=2.0.36 (from -r /tmp/requirements-linux.txt (line 3))
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.1331147Z   Using cached sqlalchemy-2.1.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (9.7 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.1479307Z Collecting aiosqlite>=0.20.0 (from -r /tmp/requirements-linux.txt (line 4))
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.1492110Z   Using cached aiosqlite-0.22.1-py3-none-any.whl.metadata (4.3 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.2433768Z Collecting pydantic>=2.10.0 (from -r /tmp/requirements-linux.txt (line 5))
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.2447694Z   Using cached pydantic-2.14.0-py3-none-any.whl.metadata (131 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.2617186Z Collecting pydantic-settings>=2.7.0 (from -r /tmp/requirements-linux.txt (line 6))
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.2630334Z   Using cached pydantic_settings-2.15.0-py3-none-any.whl.metadata (3.9 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.3103965Z Collecting openai>=1.60.0 (from -r /tmp/requirements-linux.txt (line 7))
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.3117466Z   Using cached openai-3.28.0-py3-none-any.whl.metadata (44 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.3292857Z Collecting httpx>=0.28.0 (from -r /tmp/requirements-linux.txt (line 8))
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.3305567Z   Using cached httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.3467304Z Collecting sse-starlette>=2.2.0 (from -r /tmp/requirements-linux.txt (line 9))
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.3479751Z   Using cached sse_starlette-3.5.0-py3-none-any.whl.metadata (15 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.3603095Z Collecting python-multipart>=0.0.18 (from -r /tmp/requirements-linux.txt (line 10))
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.3615672Z   Using cached python_multipart-0.0.32-py3-none-any.whl.metadata (2.1 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.4656774Z Collecting websockets>=14.0 (from -r /tmp/requirements-linux.txt (line 11))
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.4671006Z   Using cached websockets-17.2-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (6.3 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.6340344Z Collecting pillow>=11.0.0 (from -r /tmp/requirements-linux.txt (line 12))
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.6353360Z   Using cached pillow-12.3.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (9.1 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.6966653Z Collecting psutil>=6.1.0 (from -r /tmp/requirements-linux.txt (line 13))
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.6978934Z   Using cached psutil-7.2.2-cp36-abi3-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl.metadata (22 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.7330966Z Collecting playwright>=1.49.0 (from -r /tmp/requirements-linux.txt (line 14))
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.7344093Z   Using cached playwright-1.63.0-py3-none-manylinux1_x86_64.whl.metadata (3.3 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.7445400Z Collecting mss>=10.0.0 (from -r /tmp/requirements-linux.txt (line 15))
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.7457185Z   Using cached mss-10.2.0-py3-none-any.whl.metadata (7.2 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.7639179Z Collecting mcp>=1.12.0 (from -r /tmp/requirements-linux.txt (line 16))
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.7651404Z   Using cached mcp-2.3.0-py3-none-any.whl.metadata (6.6 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.7831125Z Collecting jsonschema<5,>=4.23 (from -r /tmp/requirements-linux.txt (line 17))
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.7843151Z   Using cached jsonschema-4.26.0-py3-none-any.whl.metadata (7.6 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.8261338Z Collecting huggingface_hub>=0.30.0 (from -r /tmp/requirements-linux.txt (line 18))
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.8273857Z   Using cached huggingface_hub-2.2.0-py3-none-any.whl.metadata (16 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.8484104Z Collecting kokoro==0.9.4 (from -r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.8495834Z   Using cached kokoro-0.9.4-py3-none-any.whl.metadata (21 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.8639341Z Collecting soundfile==0.14.0 (from -r /tmp/requirements-linux.txt (line 20))
+pytest	Install Linux test dependencies	2026-10-10T21:56:44.8650934Z   Using cached soundfile-0.14.0-py2.py3-none-manylinux_2_28_x86_64.whl.metadata (18 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.0327418Z Collecting cryptography>=44.0.0 (from -r /tmp/requirements-linux.txt (line 21))
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.0342315Z   Using cached cryptography-50.0.2-cp311-abi3-manylinux_2_34_x86_64.whl.metadata (4.4 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.0465893Z Collecting qwen-agent>=0.0.30 (from -r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.0478961Z   Using cached qwen_agent-0.0.34-py3-none-any.whl.metadata (17 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.2385010Z Collecting numpy>=2.0.0 (from -r /tmp/requirements-linux.txt (line 23))
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.2399768Z   Using cached numpy-2.5.4-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.2941470Z Collecting pyyaml>=6.0.2 (from -r /tmp/requirements-linux.txt (line 24))
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.2955062Z   Using cached pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.3080785Z Collecting openpyxl>=3.1.5 (from -r /tmp/requirements-linux.txt (line 25))
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.3093366Z   Using cached openpyxl-3.1.5-py2.py3-none-any.whl.metadata (2.5 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.3188540Z Collecting python-docx>=1.1.2 (from -r /tmp/requirements-linux.txt (line 26))
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.3201152Z   Using cached python_docx-1.2.0-py3-none-any.whl.metadata (2.0 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.3297223Z Collecting python-pptx>=1.0.2 (from -r /tmp/requirements-linux.txt (line 27))
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.3309503Z   Using cached python_pptx-1.0.2-py3-none-any.whl.metadata (2.5 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.3528071Z Collecting pytest>=8.3.0 (from -r /tmp/requirements-linux.txt (line 28))
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.3540436Z   Using cached pytest-9.1.1-py3-none-any.whl.metadata (7.6 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.3701294Z Collecting pytest-asyncio>=0.25.0 (from -r /tmp/requirements-linux.txt (line 29))
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.3715061Z   Using cached pytest_asyncio-1.4.0-py3-none-any.whl.metadata (4.1 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.3832748Z Collecting tzdata>=2024.2 (from -r /tmp/requirements-linux.txt (line 30))
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.3845004Z   Using cached tzdata-2026.5-py2.py3-none-any.whl.metadata (1.4 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.3953967Z Collecting loguru (from kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.3966013Z   Using cached loguru-0.7.3-py3-none-any.whl.metadata (22 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.4140626Z Collecting misaki>=0.9.4 (from misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.4152059Z   Using cached misaki-0.9.4-py3-none-any.whl.metadata (19 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.4681871Z Collecting torch (from kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.4696299Z   Using cached torch-2.14.1-cp312-cp312-manylinux_2_28_x86_64.whl.metadata (37 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.5090374Z Collecting transformers (from kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.5104222Z   Using cached transformers-5.19.0-py3-none-any.whl.metadata (32 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.6510732Z Collecting cffi>=1.0 (from soundfile==0.14.0->-r /tmp/requirements-linux.txt (line 20))
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.6524379Z   Using cached cffi-2.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.5 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.6674414Z Collecting typing-extensions (from soundfile==0.14.0->-r /tmp/requirements-linux.txt (line 20))
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.6687076Z   Using cached typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.6821286Z Collecting attrs>=22.2.0 (from jsonschema<5,>=4.23->-r /tmp/requirements-linux.txt (line 17))
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.6833937Z   Using cached attrs-26.1.0-py3-none-any.whl.metadata (8.8 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.6948062Z Collecting jsonschema-specifications>=2023.03.6 (from jsonschema<5,>=4.23->-r /tmp/requirements-linux.txt (line 17))
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.6959891Z   Using cached jsonschema_specifications-2025.9.1-py3-none-any.whl.metadata (2.9 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.7130781Z Collecting referencing>=0.28.4 (from jsonschema<5,>=4.23->-r /tmp/requirements-linux.txt (line 17))
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.7142653Z   Using cached referencing-0.37.0-py3-none-any.whl.metadata (2.8 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.9598067Z Collecting rpds-py>=0.25.0 (from jsonschema<5,>=4.23->-r /tmp/requirements-linux.txt (line 17))
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.9612046Z   Using cached rpds_py-2026.9.1-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.1 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.9851538Z Collecting starlette>=0.46.0 (from fastapi>=0.115.0->-r /tmp/requirements-linux.txt (line 1))
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.9863150Z   Using cached starlette-1.7.0-py3-none-any.whl.metadata (6.6 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:45.9996679Z Collecting typing-inspection>=0.4.2 (from fastapi>=0.115.0->-r /tmp/requirements-linux.txt (line 1))
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.0008334Z   Using cached typing_inspection-0.4.4-py3-none-any.whl.metadata (2.6 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.0087224Z Collecting annotated-doc>=0.0.2 (from fastapi>=0.115.0->-r /tmp/requirements-linux.txt (line 1))
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.0099146Z   Using cached annotated_doc-0.0.5-py3-none-any.whl.metadata (6.5 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.0249938Z Collecting opentelemetry-api>=1.44.0 (from fastapi>=0.115.0->-r /tmp/requirements-linux.txt (line 1))
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.0261832Z   Using cached opentelemetry_api-1.45.1-py3-none-any.whl.metadata (1.4 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.0409147Z Collecting click>=7.0 (from uvicorn>=0.32.0->uvicorn[standard]>=0.32.0->-r /tmp/requirements-linux.txt (line 2))
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.0420994Z   Using cached click-8.5.0-py3-none-any.whl.metadata (2.6 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.0512047Z Collecting h11>=0.8 (from uvicorn>=0.32.0->uvicorn[standard]>=0.32.0->-r /tmp/requirements-linux.txt (line 2))
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.0523300Z   Using cached h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.0645304Z Collecting annotated-types>=0.6.0 (from pydantic>=2.10.0->-r /tmp/requirements-linux.txt (line 5))
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.0657051Z   Using cached annotated_types-0.8.0-py3-none-any.whl.metadata (15 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.7324403Z Collecting pydantic-core==2.50.0 (from pydantic>=2.10.0->-r /tmp/requirements-linux.txt (line 5))
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.7339544Z   Using cached pydantic_core-2.50.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.5 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.7527243Z Collecting python-dotenv>=0.21.0 (from pydantic-settings>=2.7.0->-r /tmp/requirements-linux.txt (line 6))
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.7540258Z   Using cached python_dotenv-1.2.4-py3-none-any.whl.metadata (29 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.7726545Z Collecting anyio<5,>=4.10.0 (from openai>=1.60.0->-r /tmp/requirements-linux.txt (line 7))
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.7740075Z   Using cached anyio-4.15.1-py3-none-any.whl.metadata (4.7 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.7847905Z Collecting httpx2<3,>=2.12.0 (from openai>=1.60.0->-r /tmp/requirements-linux.txt (line 7))
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.7860557Z   Using cached httpx2-2.13.1-py3-none-any.whl.metadata (9.8 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.9156816Z Collecting jiter<1,>=0.16.0 (from openai>=1.60.0->-r /tmp/requirements-linux.txt (line 7))
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.9172562Z   Using cached jiter-0.17.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (5.2 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.9361207Z Collecting sniffio (from openai>=1.60.0->-r /tmp/requirements-linux.txt (line 7))
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.9374966Z   Using cached sniffio-1.3.1-py3-none-any.whl.metadata (3.9 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.9525348Z Collecting idna>=2.8 (from anyio<5,>=4.10.0->openai>=1.60.0->-r /tmp/requirements-linux.txt (line 7))
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.9538784Z   Using cached idna-3.20-py3-none-any.whl.metadata (7.2 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.9658147Z Collecting httpcore2==2.13.1 (from httpx2<3,>=2.12.0->openai>=1.60.0->-r /tmp/requirements-linux.txt (line 7))
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.9671061Z   Using cached httpcore2-2.13.1-py3-none-any.whl.metadata (26 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.9815977Z Collecting truststore>=0.10 (from httpx2<3,>=2.12.0->openai>=1.60.0->-r /tmp/requirements-linux.txt (line 7))
+pytest	Install Linux test dependencies	2026-10-10T21:56:46.9828679Z   Using cached truststore-0.10.4-py3-none-any.whl.metadata (4.4 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.0040612Z Collecting certifi (from httpx>=0.28.0->-r /tmp/requirements-linux.txt (line 8))
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.0053670Z   Using cached certifi-2026.7.22-py3-none-any.whl.metadata (2.5 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.0192216Z Collecting httpcore==1.* (from httpx>=0.28.0->-r /tmp/requirements-linux.txt (line 8))
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.0206537Z   Using cached httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.0430788Z Collecting pyee<14,>=13 (from playwright>=1.49.0->-r /tmp/requirements-linux.txt (line 14))
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.0442851Z   Using cached pyee-13.0.1-py3-none-any.whl.metadata (3.0 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.1830165Z Collecting greenlet<4.0.0,>=3.1.1 (from playwright>=1.49.0->-r /tmp/requirements-linux.txt (line 14))
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.1844598Z   Using cached greenlet-3.5.6-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (3.8 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.2008402Z Collecting mcp-types==2.3.0 (from mcp>=1.12.0->-r /tmp/requirements-linux.txt (line 16))
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.2020152Z   Using cached mcp_types-2.3.0-py3-none-any.whl.metadata (1.9 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.2196243Z Collecting pyjwt>=2.10.1 (from pyjwt[crypto]>=2.10.1->mcp>=1.12.0->-r /tmp/requirements-linux.txt (line 16))
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.2207962Z   Using cached pyjwt-2.15.1-py3-none-any.whl.metadata (3.5 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.2532786Z Collecting filelock>=3.10.0 (from huggingface_hub>=0.30.0->-r /tmp/requirements-linux.txt (line 18))
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.2544714Z   Using cached filelock-4.1.0-py3-none-any.whl.metadata (2.0 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.2706160Z Collecting fsspec>=2023.5.0 (from huggingface_hub>=0.30.0->-r /tmp/requirements-linux.txt (line 18))
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.2717905Z   Using cached fsspec-2026.9.0-py3-none-any.whl.metadata (10 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.3264315Z Collecting hf-xet<2.0.0,>=1.6.0 (from huggingface_hub>=0.30.0->-r /tmp/requirements-linux.txt (line 18))
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.3278209Z   Using cached hf_xet-1.7.0-cp38-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (4.9 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.3442223Z Collecting packaging>=20.9 (from huggingface_hub>=0.30.0->-r /tmp/requirements-linux.txt (line 18))
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.3455196Z   Using cached packaging-26.3-py3-none-any.whl.metadata (3.5 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.3742559Z Collecting tqdm>=4.42.1 (from huggingface_hub>=0.30.0->-r /tmp/requirements-linux.txt (line 18))
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.3756135Z   Using cached tqdm-4.70.1-py3-none-any.whl.metadata (57 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.4030078Z Collecting dashscope>=1.11.0 (from qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.4042027Z   Using cached dashscope-1.27.7-py3-none-any.whl.metadata (13 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.4214705Z Collecting eval_type_backport (from qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.4226560Z   Using cached eval_type_backport-0.4.0-py3-none-any.whl.metadata (3.1 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.4376121Z Collecting json5 (from qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.4388463Z   Using cached json5-0.17.3-py3-none-any.whl.metadata (27 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.4489131Z Collecting jsonlines (from qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.4500759Z   Using cached jsonlines-4.0.0-py3-none-any.whl.metadata (1.6 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.4747504Z Collecting requests (from qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.4759867Z   Using cached requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.5130902Z Collecting tiktoken (from qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.5144108Z   Using cached tiktoken-0.14.0-cp312-cp312-manylinux_2_28_x86_64.whl.metadata (6.7 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.5244264Z Collecting dotenv (from qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.5256408Z   Using cached dotenv-0.9.9-py2.py3-none-any.whl.metadata (279 bytes)
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.5371481Z Collecting et-xmlfile (from openpyxl>=3.1.5->-r /tmp/requirements-linux.txt (line 25))
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.5383157Z   Using cached et_xmlfile-2.0.0-py3-none-any.whl.metadata (2.7 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.8172266Z Collecting lxml>=3.1.0 (from python-docx>=1.1.2->-r /tmp/requirements-linux.txt (line 26))
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.8192004Z   Using cached lxml-6.1.3-cp312-cp312-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl.metadata (3.3 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.9984039Z Collecting XlsxWriter>=0.5.7 (from python-pptx>=1.0.2->-r /tmp/requirements-linux.txt (line 27))
+pytest	Install Linux test dependencies	2026-10-10T21:56:47.9998152Z   Using cached xlsxwriter-3.2.9-py3-none-any.whl.metadata (2.7 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:48.1662951Z Collecting iniconfig>=1.0.1 (from pytest>=8.3.0->-r /tmp/requirements-linux.txt (line 28))
+pytest	Install Linux test dependencies	2026-10-10T21:56:48.1676299Z   Using cached iniconfig-2.3.1-py3-none-any.whl.metadata (2.8 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:48.3265182Z Collecting pluggy<2,>=1.5 (from pytest>=8.3.0->-r /tmp/requirements-linux.txt (line 28))
+pytest	Install Linux test dependencies	2026-10-10T21:56:48.3278609Z   Using cached pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:48.4719659Z Collecting pygments>=2.7.2 (from pytest>=8.3.0->-r /tmp/requirements-linux.txt (line 28))
+pytest	Install Linux test dependencies	2026-10-10T21:56:48.4736663Z   Using cached pygments-2.21.0-py3-none-any.whl.metadata (2.5 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:48.4941505Z Collecting pycparser (from cffi>=1.0->soundfile==0.14.0->-r /tmp/requirements-linux.txt (line 20))
+pytest	Install Linux test dependencies	2026-10-10T21:56:48.4953884Z   Using cached pycparser-3.11-py3-none-any.whl.metadata (8.2 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:48.9720295Z Collecting aiohttp (from dashscope>=1.11.0->qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:48.9734795Z   Using cached aiohttp-3.14.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (8.3 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:48.9917738Z Collecting websocket-client (from dashscope>=1.11.0->qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:48.9930884Z   Using cached websocket_client-1.9.2-py3-none-any.whl.metadata (8.3 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.0128962Z Collecting typer>=0.9.0 (from dashscope>=1.11.0->qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.0141758Z   Using cached typer-0.27.3-py3-none-any.whl.metadata (16 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.0419162Z Collecting rich>=13.0.0 (from dashscope>=1.11.0->qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.0431844Z   Using cached rich-15.0.0-py3-none-any.whl.metadata (18 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.0550098Z Collecting httpx-sse>=0.4.0 (from dashscope>=1.11.0->qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.0563384Z   Using cached httpx_sse-0.4.3-py3-none-any.whl.metadata (9.7 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.0769987Z Collecting addict (from misaki>=0.9.4->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.0782033Z   Using cached addict-2.4.0-py3-none-any.whl.metadata (1.0 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.4942143Z Collecting regex (from misaki>=0.9.4->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.4957074Z   Using cached regex-2026.9.29-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (40 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.5120131Z Collecting espeakng-loader (from misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.5132873Z   Using cached espeakng_loader-0.2.4-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (1.3 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.5223976Z Collecting num2words (from misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.5237019Z   Using cached num2words-0.5.14-py3-none-any.whl.metadata (13 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.5352618Z Collecting phonemizer-fork (from misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.5364593Z   Using cached phonemizer_fork-3.3.2-py3-none-any.whl.metadata (48 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.6499891Z Collecting spacy (from misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.6514111Z   Using cached spacy-3.8.16-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (28 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.6698560Z Collecting spacy-curated-transformers (from misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.6710637Z   Using cached spacy_curated_transformers-2.1.2-py2.py3-none-any.whl.metadata (2.8 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.7024001Z Collecting markdown-it-py>=2.2.0 (from rich>=13.0.0->dashscope>=1.11.0->qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.7035029Z   Using cached markdown_it_py-4.2.0-py3-none-any.whl.metadata (7.4 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.7167334Z Collecting mdurl~=0.1 (from markdown-it-py>=2.2.0->rich>=13.0.0->dashscope>=1.11.0->qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.7178839Z   Using cached mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.7359759Z Collecting shellingham>=1.3.0 (from typer>=0.9.0->dashscope>=1.11.0->qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.7371245Z   Using cached shellingham-1.5.4-py2.py3-none-any.whl.metadata (3.5 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.7744614Z Collecting httptools>=0.8.0 (from uvicorn[standard]>=0.32.0->-r /tmp/requirements-linux.txt (line 2))
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.7756718Z   Using cached httptools-0.9.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (3.5 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.8146592Z Collecting uvloop>=0.15.1 (from uvicorn[standard]>=0.32.0->-r /tmp/requirements-linux.txt (line 2))
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.8159057Z   Using cached uvloop-0.23.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (5.1 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.8850646Z Collecting watchfiles>=0.20 (from uvicorn[standard]>=0.32.0->-r /tmp/requirements-linux.txt (line 2))
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.8863287Z   Using cached watchfiles-1.3.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.9 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.9078806Z Collecting aiohappyeyeballs>=2.5.0 (from aiohttp->dashscope>=1.11.0->qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.9090864Z   Using cached aiohappyeyeballs-2.7.1-py3-none-any.whl.metadata (5.9 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.9186531Z Collecting aiosignal>=1.4.0 (from aiohttp->dashscope>=1.11.0->qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:49.9198320Z   Using cached aiosignal-1.4.0-py3-none-any.whl.metadata (3.7 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.0434473Z Collecting frozenlist>=1.1.1 (from aiohttp->dashscope>=1.11.0->qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.0449529Z   Using cached frozenlist-1.8.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (20 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.2895584Z Collecting multidict<7.0,>=4.5 (from aiohttp->dashscope>=1.11.0->qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.2910197Z   Using cached multidict-6.9.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (5.3 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.3538340Z Collecting propcache>=0.2.0 (from aiohttp->dashscope>=1.11.0->qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.3551668Z   Using cached propcache-0.5.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (25 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.5927256Z Collecting yarl<2.0,>=1.25.1 (from aiohttp->dashscope>=1.11.0->qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.5942687Z   Using cached yarl-1.25.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (111 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.6315135Z Collecting docopt>=0.6.2 (from num2words->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.6316650Z   Using cached docopt-0.6.2-py2.py3-none-any.whl
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.6469669Z Collecting dlinfo (from phonemizer-fork->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.6481822Z   Using cached dlinfo-2.0.0-py3-none-any.whl.metadata (1.1 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.6657325Z Collecting joblib (from phonemizer-fork->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.6669100Z   Using cached joblib-1.6.0-py3-none-any.whl.metadata (6.5 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.6785108Z Collecting segments (from phonemizer-fork->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.6796612Z   Using cached segments-2.4.0-py2.py3-none-any.whl.metadata (3.5 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.6932870Z Collecting cloudpickle>=3.0 (from joblib->phonemizer-fork->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.6944959Z   Using cached cloudpickle-3.1.2-py3-none-any.whl.metadata (7.1 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.8809715Z Collecting charset_normalizer<4,>=2 (from requests->qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.8823406Z   Using cached charset_normalizer-3.5.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (46 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.9059129Z Collecting urllib3<3,>=1.26 (from requests->qwen-agent>=0.0.30->-r /tmp/requirements-linux.txt (line 22))
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.9071726Z   Using cached urllib3-2.8.0-py3-none-any.whl.metadata (7.4 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.9406162Z Collecting csvw>=1.5.6 (from segments->phonemizer-fork->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.9418231Z   Using cached csvw-4.1.0-py2.py3-none-any.whl.metadata (10 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.9534072Z Collecting isodate (from csvw>=1.5.6->segments->phonemizer-fork->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.9546215Z   Using cached isodate-0.7.2-py3-none-any.whl.metadata (11 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.9679543Z Collecting python-dateutil (from csvw>=1.5.6->segments->phonemizer-fork->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.9691758Z   Using cached python_dateutil-2.9.0.post0-py2.py3-none-any.whl.metadata (8.4 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.9799638Z Collecting rfc3986<2 (from csvw>=1.5.6->segments->phonemizer-fork->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.9811796Z   Using cached rfc3986-1.5.0-py2.py3-none-any.whl.metadata (6.5 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.9924116Z Collecting uritemplate>=3.0.0 (from csvw>=1.5.6->segments->phonemizer-fork->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:50.9936606Z   Using cached uritemplate-4.2.0-py3-none-any.whl.metadata (2.6 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.0065962Z Collecting babel (from csvw>=1.5.6->segments->phonemizer-fork->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.0078508Z   Using cached babel-2.18.0-py3-none-any.whl.metadata (2.2 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.0181631Z Collecting language-tags (from csvw>=1.5.6->segments->phonemizer-fork->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.0193835Z   Using cached language_tags-1.3.1-py3-none-any.whl.metadata (6.5 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.0331462Z Collecting rdflib (from csvw>=1.5.6->segments->phonemizer-fork->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.0343621Z   Using cached rdflib-7.6.0-py3-none-any.whl.metadata (12 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.0460488Z Collecting termcolor (from csvw>=1.5.6->segments->phonemizer-fork->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.0472617Z   Using cached termcolor-3.3.0-py3-none-any.whl.metadata (6.5 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.0639810Z Collecting six>=1.5 (from python-dateutil->csvw>=1.5.6->segments->phonemizer-fork->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.0653185Z   Using cached six-1.17.0-py2.py3-none-any.whl.metadata (1.7 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.0885208Z Collecting pyparsing<4,>=2.1.0 (from rdflib->csvw>=1.5.6->segments->phonemizer-fork->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.0897560Z   Using cached pyparsing-3.3.3-py3-none-any.whl.metadata (5.9 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.1043304Z Collecting spacy-legacy<3.1.0,>=3.0.11 (from spacy->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.1055351Z   Using cached spacy_legacy-3.0.12-py2.py3-none-any.whl.metadata (2.8 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.1145058Z Collecting spacy-loggers<2.0.0,>=1.0.0 (from spacy->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.1156721Z   Using cached spacy_loggers-1.0.5-py3-none-any.whl.metadata (23 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.1485610Z Collecting murmurhash<1.1.0,>=0.28.0 (from spacy->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.1497770Z   Using cached murmurhash-1.0.15-cp312-cp312-manylinux1_x86_64.manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_5_x86_64.whl.metadata (2.3 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.1806309Z Collecting cymem<2.1.0,>=2.0.2 (from spacy->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.1817636Z   Using cached cymem-2.0.13-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (9.7 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.2115132Z Collecting preshed<3.1.0,>=3.0.2 (from spacy->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.2126816Z   Using cached preshed-3.0.13-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (5.2 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.3353219Z Collecting thinc<8.4.0,>=8.3.12 (from spacy->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.3367596Z   Using cached thinc-8.3.13-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (14 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.3523186Z Collecting wasabi<1.2.0,>=0.9.1 (from spacy->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.3535232Z   Using cached wasabi-1.1.3-py3-none-any.whl.metadata (28 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.3986178Z Collecting srsly<3.0.0,>=2.5.3 (from spacy->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.3998168Z   Using cached srsly-2.5.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (19 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.4110672Z Collecting catalogue<2.1.0,>=2.0.6 (from spacy->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.4122159Z   Using cached catalogue-2.0.10-py3-none-any.whl.metadata (14 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.4240654Z Collecting weasel<2.0.0,>=1.0.0 (from spacy->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.4252252Z   Using cached weasel-1.0.0-py3-none-any.whl.metadata (4.6 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.4359477Z Collecting confection<2.0.0,>=1.3.2 (from spacy->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.4370924Z   Using cached confection-1.3.3-py3-none-any.whl.metadata (19 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.4671584Z Collecting jinja2 (from spacy->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.4683351Z   Using cached jinja2-3.1.6-py3-none-any.whl.metadata (2.9 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.5591305Z Collecting setuptools (from spacy->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.5605675Z   Using cached setuptools-84.0.0-py3-none-any.whl.metadata (6.6 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.6207547Z Collecting blis<1.4.0,>=1.3.0 (from thinc<8.4.0,>=8.3.12->spacy->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.6220335Z   Using cached blis-1.3.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (7.5 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.6472175Z Collecting cloudpathlib>=0.7.0 (from weasel<2.0.0,>=1.0.0->spacy->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.6484413Z   Using cached cloudpathlib-0.26.0-py3-none-any.whl.metadata (16 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.6643913Z Collecting smart-open>=5.2.1 (from weasel<2.0.0,>=1.0.0->spacy->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:51.6656036Z   Using cached smart_open-8.0.2-py3-none-any.whl.metadata (24 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.0712496Z Collecting wrapt (from smart-open>=5.2.1->weasel<2.0.0,>=1.0.0->spacy->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.0726840Z   Using cached wrapt-2.5.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (7.6 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.1253550Z Collecting MarkupSafe>=2.0 (from jinja2->spacy->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.1267705Z   Using cached markupsafe-3.0.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.7 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.1420400Z Collecting curated-transformers<3.0.0,>=2.0.0 (from spacy-curated-transformers->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.1436264Z   Using cached curated_transformers-2.0.1-py2.py3-none-any.whl.metadata (5.3 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.1683227Z Collecting curated-tokenizers<3.0.0,>=2.0.0 (from spacy-curated-transformers->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.1695151Z   Using cached curated_tokenizers-2.0.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (2.0 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.1728120Z INFO: pip is looking at multiple versions of spacy-curated-transformers to determine which version is compatible with other requirements. This could take a while.
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.1734866Z Collecting spacy-curated-transformers (from misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.1746514Z   Using cached spacy_curated_transformers-2.1.1-py2.py3-none-any.whl.metadata (2.8 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.1781943Z Collecting spacy (from misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.1793787Z   Using cached spacy-4.0.0.dev3-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (26 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.1872957Z Collecting spacy-curated-transformers (from misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.1885115Z   Using cached spacy_curated_transformers-2.0.0-py2.py3-none-any.whl.metadata (2.8 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.1937496Z   Using cached spacy_curated_transformers-0.3.1-py2.py3-none-any.whl.metadata (2.7 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.1962560Z Collecting curated-transformers<0.2.0,>=0.1.0 (from spacy-curated-transformers->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.1974137Z   Using cached curated_transformers-0.1.1-py2.py3-none-any.whl.metadata (965 bytes)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.1994874Z Collecting curated-tokenizers<0.1.0,>=0.0.9 (from spacy-curated-transformers->misaki[en]>=0.9.4->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.2006691Z   Using cached curated_tokenizers-0.0.10-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (2.0 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.2268440Z Collecting sympy>=1.13.3 (from torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.2279987Z   Using cached sympy-1.14.0-py3-none-any.whl.metadata (12 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.2510160Z Collecting networkx>=2.5.1 (from torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.2521791Z   Using cached networkx-3.7-py3-none-any.whl.metadata (6.7 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.2681853Z Collecting cuda-toolkit==13.0.3 (from cuda-toolkit[cublas,cudart,cufft,cufile,cupti,curand,cusolver,cusparse,nvjitlink,nvrtc,nvtx]==13.0.3; platform_system == "Linux"->torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.2699093Z   Using cached cuda_toolkit-13.0.3.0-py2.py3-none-any.whl.metadata (17 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.3182150Z Collecting cuda-bindings<14,>=13.0.3 (from torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.3194009Z   Using cached cuda_bindings-13.4.3-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.3319042Z Collecting nvidia-cudnn-cu13==9.24.0.43 (from torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.3330915Z   Using cached nvidia_cudnn_cu13-9.24.0.43-py3-none-manylinux_2_27_x86_64.whl.metadata (1.9 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.3416849Z Collecting nvidia-cusparselt-cu13==0.8.1 (from torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.3428835Z   Using cached nvidia_cusparselt_cu13-0.8.1-py3-none-manylinux2014_x86_64.whl.metadata (12 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.3518747Z Collecting nvidia-nccl-cu13==2.30.7 (from torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.3531850Z   Using cached nvidia_nccl_cu13-2.30.7-py3-none-manylinux_2_18_x86_64.whl.metadata (2.1 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.3622006Z Collecting nvidia-nvshmem-cu13==3.4.5 (from torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.3634885Z   Using cached nvidia_nvshmem_cu13-3.4.5-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.1 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.3798304Z Collecting triton~=3.8.0 (from torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.3811173Z   Using cached triton-3.8.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (978 bytes)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.3997469Z Collecting nvidia-cublas==13.1.1.3.* (from cuda-toolkit[cublas,cudart,cufft,cufile,cupti,curand,cusolver,cusparse,nvjitlink,nvrtc,nvtx]==13.0.3; platform_system == "Linux"->torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.4009481Z   Using cached nvidia_cublas-13.1.1.3-py3-none-manylinux_2_27_x86_64.whl.metadata (1.8 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.4117475Z Collecting nvidia-cuda-nvrtc==13.0.88.* (from cuda-toolkit[cublas,cudart,cufft,cufile,cupti,curand,cusolver,cusparse,nvjitlink,nvrtc,nvtx]==13.0.3; platform_system == "Linux"->torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.4130965Z   Using cached nvidia_cuda_nvrtc-13.0.88-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl.metadata (1.7 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.4249863Z Collecting nvidia-cuda-runtime==13.0.96.* (from cuda-toolkit[cublas,cudart,cufft,cufile,cupti,curand,cusolver,cusparse,nvjitlink,nvrtc,nvtx]==13.0.3; platform_system == "Linux"->torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.4262301Z   Using cached nvidia_cuda_runtime-13.0.96-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (1.7 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.4367301Z Collecting nvidia-cufft==12.0.0.61.* (from cuda-toolkit[cublas,cudart,cufft,cufile,cupti,curand,cusolver,cusparse,nvjitlink,nvrtc,nvtx]==13.0.3; platform_system == "Linux"->torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.4379677Z   Using cached nvidia_cufft-12.0.0.61-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (1.8 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.4495645Z Collecting nvidia-nvjitlink<14,>=13.0.88 (from cuda-toolkit[cublas,cudart,cufft,cufile,cupti,curand,cusolver,cusparse,nvjitlink,nvrtc,nvtx]==13.0.3; platform_system == "Linux"->torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.4508210Z   Using cached nvidia_nvjitlink-13.4.92-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl.metadata (1.8 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.4604442Z Collecting nvidia-cufile==1.15.1.6.* (from cuda-toolkit[cublas,cudart,cufft,cufile,cupti,curand,cusolver,cusparse,nvjitlink,nvrtc,nvtx]==13.0.3; platform_system == "Linux"->torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.4616760Z   Using cached nvidia_cufile-1.15.1.6-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (1.7 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.4720249Z Collecting nvidia-cuda-cupti==13.0.85.* (from cuda-toolkit[cublas,cudart,cufft,cufile,cupti,curand,cusolver,cusparse,nvjitlink,nvrtc,nvtx]==13.0.3; platform_system == "Linux"->torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.4732057Z   Using cached nvidia_cuda_cupti-13.0.85-py3-none-manylinux_2_25_x86_64.whl.metadata (1.7 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.4833085Z Collecting nvidia-curand==10.4.0.35.* (from cuda-toolkit[cublas,cudart,cufft,cufile,cupti,curand,cusolver,cusparse,nvjitlink,nvrtc,nvtx]==13.0.3; platform_system == "Linux"->torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.4845398Z   Using cached nvidia_curand-10.4.0.35-py3-none-manylinux_2_27_x86_64.whl.metadata (1.7 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.4959540Z Collecting nvidia-cusolver==12.0.4.66.* (from cuda-toolkit[cublas,cudart,cufft,cufile,cupti,curand,cusolver,cusparse,nvjitlink,nvrtc,nvtx]==13.0.3; platform_system == "Linux"->torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.4971753Z   Using cached nvidia_cusolver-12.0.4.66-py3-none-manylinux_2_27_x86_64.whl.metadata (1.8 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.5079738Z Collecting nvidia-cusparse==12.6.3.3.* (from cuda-toolkit[cublas,cudart,cufft,cufile,cupti,curand,cusolver,cusparse,nvjitlink,nvrtc,nvtx]==13.0.3; platform_system == "Linux"->torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.5099440Z   Using cached nvidia_cusparse-12.6.3.3-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (1.8 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.5245648Z Collecting nvidia-nvtx==13.0.85.* (from cuda-toolkit[cublas,cudart,cufft,cufile,cupti,curand,cusolver,cusparse,nvjitlink,nvrtc,nvtx]==13.0.3; platform_system == "Linux"->torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.5258012Z   Using cached nvidia_nvtx-13.0.85-py3-none-manylinux1_x86_64.manylinux_2_5_x86_64.whl.metadata (1.8 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.5425645Z Collecting cuda-pathfinder>=1.4.2 (from cuda-bindings<14,>=13.0.3->torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.5438129Z   Using cached cuda_pathfinder-1.8.3-py3-none-any.whl.metadata (1.9 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.5753168Z Collecting mpmath<1.4,>=1.1.0 (from sympy>=1.13.3->torch->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.5765536Z   Using cached mpmath-1.3.0-py3-none-any.whl.metadata (8.6 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.7165151Z Collecting tokenizers<0.24.0,>=0.23.1 (from transformers->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.7180895Z   Using cached tokenizers-0.23.3-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (9.8 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8258063Z Collecting safetensors>=0.8.0 (from transformers->kokoro==0.9.4->-r /tmp/requirements-linux.txt (line 19))
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8272277Z   Using cached safetensors-0.8.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.2 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8503057Z Using cached kokoro-0.9.4-py3-none-any.whl (32 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8515832Z Using cached soundfile-0.14.0-py2.py3-none-manylinux_2_28_x86_64.whl (1.3 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8532135Z Using cached jsonschema-4.26.0-py3-none-any.whl (90 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8543866Z Using cached fastapi-0.143.0-py3-none-any.whl (144 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8556070Z Using cached uvicorn-0.54.0-py3-none-any.whl (87 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8568300Z Using cached sqlalchemy-2.1.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (4.7 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8596719Z Using cached aiosqlite-0.22.1-py3-none-any.whl (17 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8608256Z Using cached pydantic-2.14.0-py3-none-any.whl (487 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8621707Z Using cached pydantic_core-2.50.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.2 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8640731Z Using cached pydantic_settings-2.15.0-py3-none-any.whl (69 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8652519Z Using cached openai-3.28.0-py3-none-any.whl (2.2 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8671882Z Using cached anyio-4.15.1-py3-none-any.whl (132 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8683629Z Using cached httpx2-2.13.1-py3-none-any.whl (95 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8695453Z Using cached httpcore2-2.13.1-py3-none-any.whl (83 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8707429Z Using cached jiter-0.17.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (345 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8720251Z Using cached typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8731838Z Using cached httpx-0.28.1-py3-none-any.whl (73 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8743597Z Using cached httpcore-1.0.9-py3-none-any.whl (78 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8755612Z Using cached sse_starlette-3.5.0-py3-none-any.whl (17 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8767065Z Using cached python_multipart-0.0.32-py3-none-any.whl (30 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8779045Z Using cached websockets-17.2-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (225 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8791197Z Using cached pillow-12.3.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (6.9 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8827484Z Using cached psutil-7.2.2-cp36-abi3-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl (155 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.8841410Z Using cached playwright-1.63.0-py3-none-manylinux1_x86_64.whl (48.2 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9023720Z Using cached greenlet-3.5.6-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (621 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9037878Z Using cached pyee-13.0.1-py3-none-any.whl (15 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9049625Z Using cached mss-10.2.0-py3-none-any.whl (67 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9061617Z Using cached mcp-2.3.0-py3-none-any.whl (368 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9074744Z Using cached mcp_types-2.3.0-py3-none-any.whl (69 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9086610Z Using cached huggingface_hub-2.2.0-py3-none-any.whl (839 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9100979Z Using cached click-8.5.0-py3-none-any.whl (125 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9113254Z Using cached hf_xet-1.7.0-cp38-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (4.2 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9140006Z Using cached cryptography-50.0.2-cp311-abi3-manylinux_2_34_x86_64.whl (4.8 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9168406Z Using cached qwen_agent-0.0.34-py3-none-any.whl (7.1 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9205231Z Using cached numpy-2.5.4-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.7 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9275583Z Using cached pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (807 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9289644Z Using cached openpyxl-3.1.5-py2.py3-none-any.whl (250 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9302064Z Using cached python_docx-1.2.0-py3-none-any.whl (252 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9314418Z Using cached python_pptx-1.0.2-py3-none-any.whl (472 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9327486Z Using cached pytest-9.1.1-py3-none-any.whl (386 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9340664Z Using cached pluggy-1.6.0-py3-none-any.whl (20 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9352716Z Using cached pytest_asyncio-1.4.0-py3-none-any.whl (16 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9364933Z Using cached tzdata-2026.5-py2.py3-none-any.whl (347 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9378065Z Using cached annotated_doc-0.0.5-py3-none-any.whl (5.3 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9390198Z Using cached annotated_types-0.8.0-py3-none-any.whl (13 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9401547Z Using cached attrs-26.1.0-py3-none-any.whl (67 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9413583Z Using cached cffi-2.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (221 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9425926Z Using cached dashscope-1.27.7-py3-none-any.whl (2.0 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9444348Z Using cached filelock-4.1.0-py3-none-any.whl (133 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9456238Z Using cached fsspec-2026.9.0-py3-none-any.whl (221 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9468165Z Using cached h11-0.16.0-py3-none-any.whl (37 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9479755Z Using cached httpx_sse-0.4.3-py3-none-any.whl (9.0 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9490971Z Using cached idna-3.20-py3-none-any.whl (69 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9502510Z Using cached iniconfig-2.3.1-py3-none-any.whl (7.6 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9514029Z Using cached jsonschema_specifications-2025.9.1-py3-none-any.whl (18 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9525840Z Using cached lxml-6.1.3-cp312-cp312-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl (5.2 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9555258Z Using cached misaki-0.9.4-py3-none-any.whl (3.6 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9579391Z Using cached opentelemetry_api-1.45.1-py3-none-any.whl (60 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9590996Z Using cached packaging-26.3-py3-none-any.whl (129 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9602841Z Using cached pygments-2.21.0-py3-none-any.whl (1.3 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9618615Z Using cached pyjwt-2.15.1-py3-none-any.whl (33 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9630042Z Using cached python_dotenv-1.2.4-py3-none-any.whl (23 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9641483Z Using cached referencing-0.37.0-py3-none-any.whl (26 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9652703Z Using cached rich-15.0.0-py3-none-any.whl (310 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9665428Z Using cached markdown_it_py-4.2.0-py3-none-any.whl (91 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9676891Z Using cached mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9688919Z Using cached rpds_py-2026.9.1-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (371 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9701175Z Using cached starlette-1.7.0-py3-none-any.whl (78 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9712917Z Using cached tqdm-4.70.1-py3-none-any.whl (80 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9724780Z Using cached truststore-0.10.4-py3-none-any.whl (18 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9736339Z Using cached typer-0.27.3-py3-none-any.whl (123 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9748039Z Using cached shellingham-1.5.4-py2.py3-none-any.whl (9.8 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9759604Z Using cached typing_inspection-0.4.4-py3-none-any.whl (14 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9771592Z Using cached httptools-0.9.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (552 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9785395Z Using cached uvloop-0.23.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (4.5 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9813175Z Using cached watchfiles-1.3.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (458 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9833991Z Using cached xlsxwriter-3.2.9-py3-none-any.whl (175 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9853316Z Using cached addict-2.4.0-py3-none-any.whl (3.8 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9870663Z Using cached aiohttp-3.14.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.9 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9897154Z Using cached multidict-6.9.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (336 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9916658Z Using cached yarl-1.25.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (117 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9930116Z Using cached aiohappyeyeballs-2.7.1-py3-none-any.whl (15 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9941982Z Using cached aiosignal-1.4.0-py3-none-any.whl (7.5 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9954067Z Using cached frozenlist-1.8.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (242 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9966769Z Using cached propcache-0.5.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (250 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9979062Z Using cached certifi-2026.7.22-py3-none-any.whl (136 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:52.9991137Z Using cached dotenv-0.9.9-py2.py3-none-any.whl (1.9 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0002938Z Using cached espeakng_loader-0.2.4-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (10.1 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0049961Z Using cached et_xmlfile-2.0.0-py3-none-any.whl (18 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0061556Z Using cached eval_type_backport-0.4.0-py3-none-any.whl (6.4 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0072939Z Using cached json5-0.17.3-py3-none-any.whl (34 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0084735Z Using cached jsonlines-4.0.0-py3-none-any.whl (8.7 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0096210Z Using cached loguru-0.7.3-py3-none-any.whl (61 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0107841Z Using cached num2words-0.5.14-py3-none-any.whl (163 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0119780Z Using cached phonemizer_fork-3.3.2-py3-none-any.whl (82 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0131393Z Using cached dlinfo-2.0.0-py3-none-any.whl (3.7 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0142780Z Using cached joblib-1.6.0-py3-none-any.whl (306 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0155668Z Using cached cloudpickle-3.1.2-py3-none-any.whl (22 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0167457Z Using cached pycparser-3.11-py3-none-any.whl (51 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0179561Z Using cached regex-2026.9.29-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (807 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0193589Z Using cached requests-2.34.2-py3-none-any.whl (73 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0206044Z Using cached charset_normalizer-3.5.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (257 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0218127Z Using cached urllib3-2.8.0-py3-none-any.whl (135 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0229934Z Using cached segments-2.4.0-py2.py3-none-any.whl (16 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0241319Z Using cached csvw-4.1.0-py2.py3-none-any.whl (69 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0252869Z Using cached rfc3986-1.5.0-py2.py3-none-any.whl (31 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0264671Z Using cached uritemplate-4.2.0-py3-none-any.whl (11 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0276139Z Using cached babel-2.18.0-py3-none-any.whl (10.2 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0323455Z Using cached isodate-0.7.2-py3-none-any.whl (22 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0335151Z Using cached language_tags-1.3.1-py3-none-any.whl (216 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0347469Z Using cached python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0359619Z Using cached six-1.17.0-py2.py3-none-any.whl (11 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0371490Z Using cached rdflib-7.6.0-py3-none-any.whl (615 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0385702Z Using cached pyparsing-3.3.3-py3-none-any.whl (126 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0397617Z Using cached sniffio-1.3.1-py3-none-any.whl (10 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0409872Z Using cached spacy-3.8.16-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (35.5 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0548162Z Using cached catalogue-2.0.10-py3-none-any.whl (17 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0559799Z Using cached confection-1.3.3-py3-none-any.whl (35 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0572291Z Using cached cymem-2.0.13-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (260 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0586009Z Using cached murmurhash-1.0.15-cp312-cp312-manylinux1_x86_64.manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_5_x86_64.whl (134 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0598704Z Using cached preshed-3.0.13-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (868 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0613749Z Using cached spacy_legacy-3.0.12-py2.py3-none-any.whl (29 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0626326Z Using cached spacy_loggers-1.0.5-py3-none-any.whl (22 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0638805Z Using cached srsly-2.5.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (1.2 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0655680Z Using cached thinc-8.3.13-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (3.9 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0681281Z Using cached blis-1.3.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (11.4 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0732861Z Using cached wasabi-1.1.3-py3-none-any.whl (27 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0745073Z Using cached weasel-1.0.0-py3-none-any.whl (50 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0757117Z Using cached cloudpathlib-0.26.0-py3-none-any.whl (66 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0769153Z Using cached smart_open-8.0.2-py3-none-any.whl (73 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0781465Z Using cached jinja2-3.1.6-py3-none-any.whl (134 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0794747Z Using cached markupsafe-3.0.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (22 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0806986Z Using cached setuptools-84.0.0-py3-none-any.whl (818 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0821881Z Using cached spacy_curated_transformers-0.3.1-py2.py3-none-any.whl (237 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0834734Z Using cached curated_tokenizers-0.0.10-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (6.3 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0868606Z Using cached curated_transformers-0.1.1-py2.py3-none-any.whl (25 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.0880847Z Using cached torch-2.14.1-cp312-cp312-manylinux_2_28_x86_64.whl (554.6 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.2833909Z Using cached cuda_toolkit-13.0.3.0-py2.py3-none-any.whl (2.5 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.2845640Z Using cached nvidia_cudnn_cu13-9.24.0.43-py3-none-manylinux_2_27_x86_64.whl (553.1 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.4827679Z Using cached nvidia_cusparselt_cu13-0.8.1-py3-none-manylinux2014_x86_64.whl (170.1 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.5425070Z Using cached nvidia_nccl_cu13-2.30.7-py3-none-manylinux_2_18_x86_64.whl (216.0 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.6178508Z Using cached nvidia_nvshmem_cu13-3.4.5-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (60.4 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.6399274Z Using cached cuda_bindings-13.4.3-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (7.2 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:53.6436685Z Using cached nvidia_cublas-13.1.1.3-py3-none-manylinux_2_27_x86_64.whl (423.1 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:54.0604226Z Using cached nvidia_cuda_cupti-13.0.85-py3-none-manylinux_2_25_x86_64.whl (10.7 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:54.0833510Z Using cached nvidia_cuda_nvrtc-13.0.88-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl (90.2 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:54.2540995Z Using cached nvidia_cuda_runtime-13.0.96-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (2.2 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:54.2560626Z Using cached nvidia_cufft-12.0.0.61-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (214.1 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:54.7277206Z Using cached nvidia_cufile-1.15.1.6-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (1.2 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:54.7377252Z Using cached nvidia_curand-10.4.0.35-py3-none-manylinux_2_27_x86_64.whl (59.5 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:54.8708609Z Using cached nvidia_cusolver-12.0.4.66-py3-none-manylinux_2_27_x86_64.whl (200.9 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:55.3846779Z Using cached nvidia_cusparse-12.6.3.3-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (145.9 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:55.7824777Z Using cached nvidia_nvjitlink-13.4.92-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl (42.5 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:55.8886727Z Using cached nvidia_nvtx-13.0.85-py3-none-manylinux1_x86_64.manylinux_2_5_x86_64.whl (148 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:55.8898716Z Using cached triton-3.8.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (248.0 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:56.5521983Z Using cached cuda_pathfinder-1.8.3-py3-none-any.whl (62 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:56.5534051Z Using cached networkx-3.7-py3-none-any.whl (2.1 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:56.5637055Z Using cached sympy-1.14.0-py3-none-any.whl (6.3 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:56.5772693Z Using cached mpmath-1.3.0-py3-none-any.whl (536 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:56.5785964Z Using cached termcolor-3.3.0-py3-none-any.whl (7.7 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:56.5797764Z Using cached tiktoken-0.14.0-cp312-cp312-manylinux_2_28_x86_64.whl (1.2 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:56.5813218Z Using cached transformers-5.19.0-py3-none-any.whl (12.6 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:56.6180141Z Using cached tokenizers-0.23.3-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.4 MB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:56.6203677Z Using cached safetensors-0.8.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (516 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:56.6217163Z Using cached websocket_client-1.9.2-py3-none-any.whl (95 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:56.6229330Z Using cached wrapt-2.5.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (250 kB)
+pytest	Install Linux test dependencies	2026-10-10T21:56:59.9102218Z Installing collected packages: rfc3986, nvidia-cusparselt-cu13, mpmath, docopt, cuda-toolkit, addict, XlsxWriter, wrapt, websockets, websocket-client, wasabi, uvloop, urllib3, uritemplate, tzdata, typing-extensions, truststore, triton, tqdm, termcolor, sympy, spacy-loggers, spacy-legacy, sniffio, six, shellingham, setuptools, safetensors, rpds-py, regex, pyyaml, python-multipart, python-dotenv, pyparsing, pyjwt, pygments, pycparser, psutil, propcache, pluggy, pillow, packaging, nvidia-nvtx, nvidia-nvshmem-cu13, nvidia-nvjitlink, nvidia-nccl-cu13, nvidia-curand, nvidia-cufile, nvidia-cuda-runtime, nvidia-cuda-nvrtc, nvidia-cuda-cupti, numpy, num2words, networkx, murmurhash, multidict, mss, mdurl, MarkupSafe, lxml, loguru, language-tags, json5, jiter, isodate, iniconfig, idna, httpx-sse, httptools, hf-xet, h11, greenlet, fsspec, frozenlist, filelock, eval_type_backport, et-xmlfile, espeakng-loader, dlinfo, cymem, cuda-pathfinder, confection, cloudpickle, cloudpathlib, click, charset_normalizer, certifi, catalogue, babel, attrs, annotated-types, annotated-doc, aiosqlite, aiohappyeyeballs, yarl, uvicorn, typing-inspection, srsly, sqlalchemy, smart-open, requests, referencing, rdflib, python-pptx, python-docx, python-dateutil, pytest, pyee, pydantic-core, preshed, opentelemetry-api, openpyxl, nvidia-cusparse, nvidia-cufft, nvidia-cublas, misaki, markdown-it-py, jsonlines, joblib, jinja2, httpcore2, httpcore, dotenv, curated-tokenizers, cuda-bindings, cffi, blis, anyio, aiosignal, watchfiles, tiktoken, starlette, soundfile, rich, pytest-asyncio, pydantic, playwright, nvidia-cusolver, nvidia-cudnn-cu13, jsonschema-specifications, httpx2, httpx, cryptography, aiohttp, typer, thinc, sse-starlette, pydantic-settings, openai, mcp-types, jsonschema, huggingface_hub, fastapi, weasel, torch, tokenizers, mcp, dashscope, csvw, transformers, spacy, segments, qwen-agent, curated-transformers, spacy-curated-transformers, phonemizer-fork, kokoro
+pytest	Install Linux test dependencies	2026-10-10T21:58:00.9723212Z 
+pytest	Install Linux test dependencies	2026-10-10T21:58:00.9853033Z Successfully installed MarkupSafe-3.0.4 XlsxWriter-3.2.9 addict-2.4.0 aiohappyeyeballs-2.7.1 aiohttp-3.14.4 aiosignal-1.4.0 aiosqlite-0.22.1 annotated-doc-0.0.5 annotated-types-0.8.0 anyio-4.15.1 attrs-26.1.0 babel-2.18.0 blis-1.3.3 catalogue-2.0.10 certifi-2026.7.22 cffi-2.1.1 charset_normalizer-3.5.2 click-8.5.0 cloudpathlib-0.26.0 cloudpickle-3.1.2 confection-1.3.3 cryptography-50.0.2 csvw-4.1.0 cuda-bindings-13.4.3 cuda-pathfinder-1.8.3 cuda-toolkit-13.0.3.0 curated-tokenizers-0.0.10 curated-transformers-0.1.1 cymem-2.0.13 dashscope-1.27.7 dlinfo-2.0.0 docopt-0.6.2 dotenv-0.9.9 espeakng-loader-0.2.4 et-xmlfile-2.0.0 eval_type_backport-0.4.0 fastapi-0.143.0 filelock-4.1.0 frozenlist-1.8.0 fsspec-2026.9.0 greenlet-3.5.6 h11-0.16.0 hf-xet-1.7.0 httpcore-1.0.9 httpcore2-2.13.1 httptools-0.9.0 httpx-0.28.1 httpx-sse-0.4.3 httpx2-2.13.1 huggingface_hub-2.2.0 idna-3.20 iniconfig-2.3.1 isodate-0.7.2 jinja2-3.1.6 jiter-0.17.0 joblib-1.6.0 json5-0.17.3 jsonlines-4.0.0 jsonschema-4.26.0 jsonschema-specifications-2025.9.1 kokoro-0.9.4 language-tags-1.3.1 loguru-0.7.3 lxml-6.1.3 markdown-it-py-4.2.0 mcp-2.3.0 mcp-types-2.3.0 mdurl-0.1.2 misaki-0.9.4 mpmath-1.3.0 mss-10.2.0 multidict-6.9.1 murmurhash-1.0.15 networkx-3.7 num2words-0.5.14 numpy-2.5.4 nvidia-cublas-13.1.1.3 nvidia-cuda-cupti-13.0.85 nvidia-cuda-nvrtc-13.0.88 nvidia-cuda-runtime-13.0.96 nvidia-cudnn-cu13-9.24.0.43 nvidia-cufft-12.0.0.61 nvidia-cufile-1.15.1.6 nvidia-curand-10.4.0.35 nvidia-cusolver-12.0.4.66 nvidia-cusparse-12.6.3.3 nvidia-cusparselt-cu13-0.8.1 nvidia-nccl-cu13-2.30.7 nvidia-nvjitlink-13.4.92 nvidia-nvshmem-cu13-3.4.5 nvidia-nvtx-13.0.85 openai-3.28.0 openpyxl-3.1.5 opentelemetry-api-1.45.1 packaging-26.3 phonemizer-fork-3.3.2 pillow-12.3.0 playwright-1.63.0 pluggy-1.6.0 preshed-3.0.13 propcache-0.5.4 psutil-7.2.2 pycparser-3.11 pydantic-2.14.0 pydantic-core-2.50.0 pydantic-settings-2.15.0 pyee-13.0.1 pygments-2.21.0 pyjwt-2.15.1 pyparsing-3.3.3 pytest-9.1.1 pytest-asyncio-1.4.0 python-dateutil-2.9.0.post0 python-docx-1.2.0 python-dotenv-1.2.4 python-multipart-0.0.32 python-pptx-1.0.2 pyyaml-6.0.3 qwen-agent-0.0.34 rdflib-7.6.0 referencing-0.37.0 regex-2026.9.29 requests-2.34.2 rfc3986-1.5.0 rich-15.0.0 rpds-py-2026.9.1 safetensors-0.8.0 segments-2.4.0 setuptools-84.0.0 shellingham-1.5.4 six-1.17.0 smart-open-8.0.2 sniffio-1.3.1 soundfile-0.14.0 spacy-3.8.16 spacy-curated-transformers-0.3.1 spacy-legacy-3.0.12 spacy-loggers-1.0.5 sqlalchemy-2.1.4 srsly-2.5.4 sse-starlette-3.5.0 starlette-1.7.0 sympy-1.14.0 termcolor-3.3.0 thinc-8.3.13 tiktoken-0.14.0 tokenizers-0.23.3 torch-2.14.1 tqdm-4.70.1 transformers-5.19.0 triton-3.8.0 truststore-0.10.4 typer-0.27.3 typing-extensions-4.16.0 typing-inspection-0.4.4 tzdata-2026.5 uritemplate-4.2.0 urllib3-2.8.0 uvicorn-0.54.0 uvloop-0.23.0 wasabi-1.1.3 watchfiles-1.3.0 weasel-1.0.0 websocket-client-1.9.2 websockets-17.2 wrapt-2.5.0 yarl-1.25.1
+pytest	Run actions/setup-node@v4	﻿2026-10-10T21:58:01.6659190Z ##[group]Run actions/setup-node@v4
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:01.6659507Z with:
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:01.6659710Z   node-version: 22
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:01.6659924Z   cache: npm
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:01.6660195Z   cache-dependency-path: frontend/package-lock.json
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:01.6660529Z   always-auth: false
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:01.6660751Z   check-latest: false
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:01.6663225Z   token: ***
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:01.6663446Z env:
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:01.6663890Z   JARVIS_SKIP_MODEL: 1
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:01.6664137Z   PYTHONPATH: backend
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:01.6664436Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:01.6664905Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:01.6665346Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:01.6665746Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:01.6666135Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:01.6666534Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:01.6666904Z ##[endgroup]
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:01.8131283Z Found in cache @ /opt/hostedtoolcache/node/22.23.3/x64
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:01.8135106Z (node:2407) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:01.8135861Z (Use `node --trace-deprecation ...` to show where the warning was created)
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:01.8138458Z ##[group]Environment details
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:02.1980570Z node: v22.23.3
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:02.1980895Z npm: 10.9.9
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:02.1981096Z yarn: 1.22.22
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:02.1981829Z ##[endgroup]
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:02.2005773Z [command]/opt/hostedtoolcache/node/22.23.3/x64/bin/npm config get cache
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:02.3084254Z /home/runner/.npm
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:02.3988296Z Cache hit for: node-cache-Linux-x64-npm-71f519e7a907b4c7d2315bee8355f97e94a67b4f4f46b3087961dc6d3ea8deb9
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:02.4100028Z (node:2407) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:02.8540737Z Received 81882127 of 81882127 (100.0%), 187.3 MBs/sec
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:02.8541520Z Cache Size: ~78 MB (81882127 B)
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:02.8603029Z [command]/usr/bin/tar -xf /home/runner/work/_temp/d5f7441e-975d-4146-bc14-58c2c5c75f7b/cache.tzst -P -C /home/runner/work/Jarvis/Jarvis --use-compress-program unzstd
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:02.9735048Z Cache restored successfully
+pytest	Run actions/setup-node@v4	2026-10-10T21:58:02.9774739Z Cache restored from key: node-cache-Linux-x64-npm-71f519e7a907b4c7d2315bee8355f97e94a67b4f4f46b3087961dc6d3ea8deb9
+pytest	Install frontend dependencies for presence suites	﻿2026-10-10T21:58:02.9964591Z ##[group]Run npm --prefix frontend ci
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:02.9965003Z ^[[36;1mnpm --prefix frontend ci^[[0m
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:03.0064692Z shell: /usr/bin/bash -e {0}
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:03.0064976Z env:
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:03.0065183Z   JARVIS_SKIP_MODEL: 1
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:03.0065430Z   PYTHONPATH: backend
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:03.0065740Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:03.0066215Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:03.0066687Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:03.0067089Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:03.0067511Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:03.0067916Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:03.0068252Z ##[endgroup]
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:05.9310559Z 
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:05.9317582Z added 47 packages, and audited 48 packages in 3s
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:05.9317985Z 
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:05.9318320Z 12 packages are looking for funding
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:05.9318701Z   run `npm fund` for details
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:05.9325710Z 
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:05.9326016Z 1 high severity vulnerability
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:05.9326354Z 
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:05.9326586Z To address all issues, run:
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:05.9327037Z   npm audit fix
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:05.9327201Z 
+pytest	Install frontend dependencies for presence suites	2026-10-10T21:58:05.9327357Z Run `npm audit` for details.
+pytest	Run model and security regression tests	﻿2026-10-10T21:58:05.9980884Z ##[group]Run python -m pytest -q \
+pytest	Run model and security regression tests	2026-10-10T21:58:05.9981262Z ^[[36;1mpython -m pytest -q \^[[0m
+pytest	Run model and security regression tests	2026-10-10T21:58:05.9981553Z ^[[36;1m  tests/test_profiles.py \^[[0m
+pytest	Run model and security regression tests	2026-10-10T21:58:05.9981868Z ^[[36;1m  tests/test_model_stack.py \^[[0m
+pytest	Run model and security regression tests	2026-10-10T21:58:05.9982174Z ^[[36;1m  tests/test_runtime_profiles.py \^[[0m
+pytest	Run model and security regression tests	2026-10-10T21:58:05.9982485Z ^[[36;1m  tests/test_security_gates.py \^[[0m
+pytest	Run model and security regression tests	2026-10-10T21:58:05.9982781Z ^[[36;1m  tests/test_nkeep_context.py \^[[0m
+pytest	Run model and security regression tests	2026-10-10T21:58:05.9983074Z ^[[36;1m  tests/test_tool_exposure.py^[[0m
+pytest	Run model and security regression tests	2026-10-10T21:58:06.0047457Z shell: /usr/bin/bash -e {0}
+pytest	Run model and security regression tests	2026-10-10T21:58:06.0047732Z env:
+pytest	Run model and security regression tests	2026-10-10T21:58:06.0047943Z   JARVIS_SKIP_MODEL: 1
+pytest	Run model and security regression tests	2026-10-10T21:58:06.0048185Z   PYTHONPATH: backend
+pytest	Run model and security regression tests	2026-10-10T21:58:06.0048494Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Run model and security regression tests	2026-10-10T21:58:06.0048943Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+pytest	Run model and security regression tests	2026-10-10T21:58:06.0049399Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Run model and security regression tests	2026-10-10T21:58:06.0049796Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Run model and security regression tests	2026-10-10T21:58:06.0050231Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Run model and security regression tests	2026-10-10T21:58:06.0050644Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+pytest	Run model and security regression tests	2026-10-10T21:58:06.0050979Z ##[endgroup]
+pytest	Run model and security regression tests	2026-10-10T21:58:16.0818189Z ...................................................................      [100%]
+pytest	Run model and security regression tests	2026-10-10T21:58:16.0818961Z 67 passed in 9.08s
+pytest	Run full backend suite (baseline report)	﻿2026-10-10T21:58:16.5005617Z ##[group]Run python -m pytest -q
+pytest	Run full backend suite (baseline report)	2026-10-10T21:58:16.5005980Z ^[[36;1mpython -m pytest -q^[[0m
+pytest	Run full backend suite (baseline report)	2026-10-10T21:58:16.5070852Z shell: /usr/bin/bash -e {0}
+pytest	Run full backend suite (baseline report)	2026-10-10T21:58:16.5071131Z env:
+pytest	Run full backend suite (baseline report)	2026-10-10T21:58:16.5071348Z   JARVIS_SKIP_MODEL: 1
+pytest	Run full backend suite (baseline report)	2026-10-10T21:58:16.5071601Z   PYTHONPATH: backend
+pytest	Run full backend suite (baseline report)	2026-10-10T21:58:16.5071913Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Run full backend suite (baseline report)	2026-10-10T21:58:16.5072398Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+pytest	Run full backend suite (baseline report)	2026-10-10T21:58:16.5072875Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Run full backend suite (baseline report)	2026-10-10T21:58:16.5073289Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Run full backend suite (baseline report)	2026-10-10T21:58:16.5074108Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Run full backend suite (baseline report)	2026-10-10T21:58:16.5074877Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+pytest	Run full backend suite (baseline report)	2026-10-10T21:58:16.5075235Z ##[endgroup]
+pytest	Run full backend suite (baseline report)	2026-10-10T21:58:37.4130284Z ........................................................................ [  2%]
+pytest	Run full backend suite (baseline report)	2026-10-10T21:58:44.2090792Z ........................................................................ [  5%]
+pytest	Run full backend suite (baseline report)	2026-10-10T21:58:49.6682385Z ........................................................................ [  7%]
+pytest	Run full backend suite (baseline report)	2026-10-10T21:58:52.0910323Z ........................................................................ [ 10%]
+pytest	Run full backend suite (baseline report)	2026-10-10T21:58:55.6188171Z ........................................................................ [ 12%]
+pytest	Run full backend suite (baseline report)	2026-10-10T21:58:59.1917655Z ........................................................................ [ 15%]
+pytest	Run full backend suite (baseline report)	2026-10-10T21:59:02.9371582Z ........................................................................ [ 17%]
+pytest	Run full backend suite (baseline report)	2026-10-10T21:59:06.5018096Z ........................................................................ [ 20%]
+pytest	Run full backend suite (baseline report)	2026-10-10T21:59:11.3495850Z ........................................................................ [ 22%]
+pytest	Run full backend suite (baseline report)	2026-10-10T21:59:15.7596333Z ........................................................................ [ 25%]
+pytest	Run full backend suite (baseline report)	2026-10-10T21:59:16.2665888Z ........................................................................ [ 27%]
+pytest	Run full backend suite (baseline report)	2026-10-10T21:59:24.6907077Z ........................................................................ [ 30%]
+pytest	Run full backend suite (baseline report)	2026-10-10T21:59:27.5139993Z ........................................................................ [ 32%]
+pytest	Run full backend suite (baseline report)	2026-10-10T21:59:30.6785175Z ........................................................................ [ 35%]
+pytest	Run full backend suite (baseline report)	2026-10-10T21:59:37.1518996Z ........................................................................ [ 37%]
+pytest	Run full backend suite (baseline report)	2026-10-10T21:59:41.7754841Z ........................................................................ [ 40%]
+pytest	Run full backend suite (baseline report)	2026-10-10T21:59:42.2908234Z ........................................................................ [ 42%]
+pytest	Run full backend suite (baseline report)	2026-10-10T21:59:48.1544147Z ........................................................................ [ 45%]
+pytest	Run full backend suite (baseline report)	2026-10-10T21:59:58.2837720Z ........................................................................ [ 47%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:00:04.6876824Z ........................................................................ [ 50%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:00:09.8837006Z ........................................................................ [ 52%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:00:14.0477910Z ........................................................................ [ 55%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:00:17.9022328Z ........................................................................ [ 57%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:00:22.5362361Z ........................................................................ [ 60%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:00:27.6262877Z ........................................................................ [ 62%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:00:38.8876949Z ........................................................................ [ 65%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:00:46.2421197Z ........................................................................ [ 67%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:01:03.8500707Z ........................................................................ [ 70%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:01:07.0587365Z ........................................................................ [ 72%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:01:16.4671550Z ........................................................................ [ 75%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:01:21.8231386Z ........................................................................ [ 77%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:01:24.8558748Z ........................................................................ [ 80%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:01:34.1539234Z ........................................................................ [ 82%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:01:38.4409079Z ........................................................................ [ 85%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:01:42.5071385Z ........................................................................ [ 87%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:01:47.4474430Z .........................s.............................................. [ 90%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:01:52.6080656Z ........................................................................ [ 92%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:02:02.7546815Z ........................................................................ [ 95%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:02:06.5711643Z ........................................................................ [ 97%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:02:15.3932958Z ...........................................................              [100%]
+pytest	Run full backend suite (baseline report)	2026-10-10T22:02:15.3935001Z =============================== warnings summary ===============================
+pytest	Run full backend suite (baseline report)	2026-10-10T22:02:15.3936483Z tests/test_rfc0137_named_persona.py::test_named_persona_route_is_registered
+pytest	Run full backend suite (baseline report)	2026-10-10T22:02:15.3938861Z   /opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/openapi/utils.py:303: UserWarning: Duplicate Operation ID hexstrike_upstream_api_hexstrike_upstream__path__get for function hexstrike_upstream at /home/runner/work/Jarvis/Jarvis/backend/app/api/hexstrike.py
+pytest	Run full backend suite (baseline report)	2026-10-10T22:02:15.3940632Z     warnings.warn(message, stacklevel=1)
+pytest	Run full backend suite (baseline report)	2026-10-10T22:02:15.3940930Z 
+pytest	Run full backend suite (baseline report)	2026-10-10T22:02:15.3943375Z -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+pytest	Run full backend suite (baseline report)	2026-10-10T22:02:15.3944661Z 2866 passed, 2 skipped, 1 warning in 237.87s (0:03:57)
+pytest	Post Run actions/setup-node@v4	﻿2026-10-10T22:02:22.0037524Z Post job cleanup.
+pytest	Post Run actions/setup-node@v4	2026-10-10T22:02:22.1304442Z (node:6644) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+pytest	Post Run actions/setup-node@v4	2026-10-10T22:02:22.1307953Z (Use `node --trace-deprecation ...` to show where the warning was created)
+pytest	Post Run actions/setup-node@v4	2026-10-10T22:02:22.1309437Z Cache hit occurred on the primary key node-cache-Linux-x64-npm-71f519e7a907b4c7d2315bee8355f97e94a67b4f4f46b3087961dc6d3ea8deb9, not saving cache.
+pytest	Post Run actions/setup-python@v5	﻿2026-10-10T22:02:22.1429439Z Post job cleanup.
+pytest	Post Run actions/setup-python@v5	2026-10-10T22:02:22.2749748Z Cache hit occurred on the primary key setup-python-Linux-x64-24.04-Ubuntu-python-3.12.15-pip-77503deef59718ff8a0fa60cb8cff112c233f77139223322d78d7ce0897e6564, not saving cache.
+pytest	Post Run actions/setup-python@v5	2026-10-10T22:02:22.2751873Z (node:6652) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+pytest	Post Run actions/setup-python@v5	2026-10-10T22:02:22.2753266Z (Use `node --trace-deprecation ...` to show where the warning was created)
+pytest	Post Run actions/checkout@v4	﻿2026-10-10T22:02:22.2907505Z Post job cleanup.
+pytest	Post Run actions/checkout@v4	2026-10-10T22:02:22.3860290Z [command]/usr/bin/git version
+pytest	Post Run actions/checkout@v4	2026-10-10T22:02:22.3916479Z git version 2.55.0
+pytest	Post Run actions/checkout@v4	2026-10-10T22:02:22.3963078Z Temporarily overriding HOME='/home/runner/work/_temp/9fafb63f-8339-4db3-a538-f8066bed22a5' before making global git config changes
+pytest	Post Run actions/checkout@v4	2026-10-10T22:02:22.3965094Z Adding repository directory to the temporary git global config as a safe directory
+pytest	Post Run actions/checkout@v4	2026-10-10T22:02:22.3972066Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Jarvis/Jarvis
+pytest	Post Run actions/checkout@v4	2026-10-10T22:02:22.4026268Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+pytest	Post Run actions/checkout@v4	2026-10-10T22:02:22.4064976Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+pytest	Post Run actions/checkout@v4	2026-10-10T22:02:22.4352270Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+pytest	Post Run actions/checkout@v4	2026-10-10T22:02:22.4394882Z http.https://github.com/.extraheader
+pytest	Post Run actions/checkout@v4	2026-10-10T22:02:22.4402592Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+pytest	Post Run actions/checkout@v4	2026-10-10T22:02:22.4441068Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+pytest	Post Run actions/checkout@v4	2026-10-10T22:02:22.4706488Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+pytest	Post Run actions/checkout@v4	2026-10-10T22:02:22.4750946Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+pytest	Complete job	﻿2026-10-10T22:02:22.5218737Z Cleaning up orphan processes
+pytest	Complete job	2026-10-10T22:02:22.5514123Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4, actions/setup-python@v5. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
