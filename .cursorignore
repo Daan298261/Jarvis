@@ -1,0 +1,15 @@
+# Vendored PyInstaller one-folder extracts — not Jarvis application source.
+# Upstream unfinished-work markers (sklearn, torch, transformers) — not Jarvis backlog.
+frontend/src-tauri/sidecars/jarvis-backend/
+installer/windows/payload/desktop/sidecars/
+runtime/backend/
+runtime/optional-workers/
+
+# Standard noise
+frontend/node_modules/
+frontend/dist/
+frontend/src-tauri/target/
+.venv/
+venv/
+models/
+data/

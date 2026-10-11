@@ -1,0 +1,13 @@
+poll start
+0a3441b0 running act Running filesystem
+5cadf86f running act Running filesystem
+0a3441b0 running act Waiting on model
+5cadf86f running act Running filesystem
+0a3441b0 cancelled cancelled Waiting on model
+RESULT I can start with the short version while I check the details.
+5cadf86f cancelled cancelled Running filesystem
+RESULT I can start with the short version while I check the details.
+final db
+{'status': 'cancelled', 'stage': 'cancelled', 'r': 'I can start with the short version while I check the details.'}
+{'status': 'cancelled', 'stage': 'cancelled', 'r': 'I can start with the short version while I check the details.'}
+harm_veto [{"decision_class": "harm_veto", "provider": "generative", "provider_version": "generative-fallback-1", "hits": 2, "throughput_per_bucket": 2, "fallback_rate": 1.0, "quality_rate": 1.0, "latency_end_to_end_ms": {"p50": 0.1050999853760004, "p95": 0.1265199389308691, "p99": 0.128423934802413}, "latency_inference_ms": {"p50": 0.009599956683814526, "p95": 0.013019982725381851, "p99": 0.013323985040187836}, "confidence": {"mean": 0.4, "p50": 0.4}}, {"decision_class": "harm_veto", "provider": "rules", "provider_version": "rules-1.0", "hits": 4, "throughput_per_bucket": 4, "fallback_rate": 1.0, "quality_rate": 0.0, "latency_end_to_end_ms": {"p50": 96.66969993850216, "p95": 100.04996000789106, "p99": 100.23495201952755}, "latency_inference_ms": {"p50": 0.01669995253905654, "p95": 0.021235027816146612, "p99": 0.02160704461857676}, "confidence": {"mean": 0.4, "p50": 0.4}}]

@@ -1,0 +1,16 @@
+---
+description: Use the configured local Qwen Code worker for implementation tasks
+alwaysApply: true
+---
+
+The local agentic worker is Qwen Code 0.25.0 backed by Ollama's `anzu-qwen-worker:latest` (Qwen3.5 4B, 32768-token context). It can read/write repository files and run tests itself.
+
+For a concrete implementation subtask, invoke it through your terminal:
+
+```powershell
+powershell.exe -NoProfile -File "C:\Users\daanv\Documents\ANZU-Tools\Invoke-QwenWorker.ps1" -Repo "<absolute path to the active checkout or worktree>" -Task "<specific implementation task and acceptance criteria>"
+```
+
+For longer tasks, write a UTF-8 task file and use `-TaskFile "<absolute task file path>"` instead of `-Task`. Delegate actual code changes, not just advice. The worker edits the selected checkout directly. Give it one named ticket/subtask, and avoid concurrent edits to the same files. Inspect its diff and test results before accepting the work. Follow AGENTS.md and docs/PROCESS.md.
+
+The endpoint is local-only, without paid fallback. This is explicit terminal delegation; it does not change Cursor/Grokbot's own model. If terminal access is unavailable or the worker fails, report that plainly.

@@ -1,0 +1,11 @@
+{
+  "engine_id": "kokoro",
+  "model_id": "kokoro-82m",
+  "speaker_ref": "am_michael",
+  "model_rel_path": "models/tts/kokoro-82m",
+  "quality_tier": "baseline",
+  "license": "Apache-2.0",
+  "download_kokoro": true,
+  "pack_id": "synthetic_command_original_v1",
+  "offline": true
+}

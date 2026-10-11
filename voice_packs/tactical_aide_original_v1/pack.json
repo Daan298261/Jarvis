@@ -1,0 +1,11 @@
+{
+  "engine_id": "kokoro",
+  "model_id": "kokoro-82m",
+  "speaker_ref": "af_bella",
+  "model_rel_path": "models/tts/kokoro-82m",
+  "quality_tier": "natural",
+  "license": "Apache-2.0",
+  "download_kokoro": true,
+  "pack_id": "tactical_aide_original_v1",
+  "offline": true
+}
