@@ -1,0 +1,16 @@
+---
+description: Delegate implementation tasks to the configured local Qwen Code worker
+alwaysApply: true
+---
+
+When the owner requests local-worker delegation, use Qwen Code backed by Ollama's `anzu-qwen-worker:latest`. This worker reads and edits the selected checkout and runs tests itself.
+
+From the active checkout, invoke through your terminal:
+
+```powershell
+powershell.exe -NoProfile -File .\tools\qwen-worker\Invoke-QwenWorker.ps1 -Repo "<absolute path to the active checkout or worktree>" -Task "<specific implementation subtask and acceptance criteria>"
+```
+
+For long tasks use `-TaskFile "<absolute UTF-8 task file path>"` instead of `-Task`. Assign actual implementation, not only advice. Follow AGENTS.md and docs/PROCESS.md, name one ticket/subtask, preserve unrelated edits, and avoid editing the same files concurrently with the worker. Inspect its diff and reported test results before accepting the work.
+
+The model and Qwen Code must already be installed and configured as described in tools/qwen-worker/README.md. Do not download or change models automatically. The endpoint is local-only with no paid fallback. Terminal delegation does not redirect Cursor's own model calls. Report missing terminal access or failed delegation plainly.
