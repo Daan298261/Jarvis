@@ -1,0 +1,8 @@
+....................                                                     [100%]
+============================== warnings summary ===============================
+tests/test_rfc0137_named_persona.py::test_named_persona_route_is_registered
+  C:\Users\daanv\AppData\Roaming\Python\Python311\site-packages\fastapi\openapi\utils.py:255: UserWarning: Duplicate Operation ID hexstrike_upstream_api_hexstrike_upstream__path__post for function hexstrike_upstream at C:\Users\daanv\.codex\worktrees\restore-volumetric-avatars\Jarvis\backend\app\api\hexstrike.py
+    warnings.warn(message, stacklevel=1)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+20 passed, 1 warning in 6.04s

@@ -1,0 +1,10 @@
+Selecting a named persona forces version B, which previously bypassed the detailed artwork for procedural masks (#527; bird/owl outline replacements in #533). RFC-0210 restores all fourteen original persona artworks in B as curved particle reliefs with front/rear depth, stronger pointer/camera gaze, breathing and gentle hovering. A and both humanoid assets remain available.
+
+Brightness and Density now share persistent controls in Persona and the HUD Appearance menu. Appearance keeps the avatar visible while adjusting it. Revision guards prevent older presentation responses from undoing newer A/B choices.
+
+Validation: frontend build and lint pass (existing warnings); 61 frontend geometry/presence checks pass, including out-of-order A/B and mount refresh responses; 20 focused Python tests pass. Browser harness verified all fourteen B artwork IDs, A/B switching, density draw counts (16,905 to 48,300), pointer yaw/pitch and reduced-motion freeze. Local full Python suite did not complete and was interrupted; full pytest CI remains the remaining check.
+
+The built frontend was copied to the owner's installed frontend after making a complete backup. Installed-page acceptance remains unverified because the existing local backend timed out on HTTP requests. These are particle depth reconstructions of supplied artwork, not fully rigged anatomical meshes. No installer or backend source changes.
+
+
+Density follow-up: replaced raster-ordered spatial bucket prefixes with deterministic shuffled sampling before resampling and GPU draw-range reduction. Lower density now removes dots spread across the complete silhouette while keeping positions and point sizes unchanged. A regression test reproduced missing rows and 64-dot bars before the fix; both scatter tests now pass. Frontend checks total 63 passing; build/lint pass; minimum-density bird and owl previews verified in-browser. Installed frontend rebuilt and updated with another backup.
