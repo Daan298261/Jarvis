@@ -39,6 +39,13 @@ APK_SUFFIXES = {".apk"} | CONTAINER_SUFFIXES
 OPERATOR = "anzu_apk_sidecar"
 _ANDROID = "{http://schemas.android.com/apk/res/android}"
 _DECOMPILE_SLOTS = threading.BoundedSemaphore(2)
+_CLAIM_LOCK = threading.Lock()
+_CANCEL: dict[str, threading.Event] = {}
+_RUNNING: dict[str, list[str]] = {}
+
+
+class DecompileCancelled(Exception):
+    """The investigation was cancelled while a decompile tool was running."""
 
 HIGH_RISK_PERMISSIONS = {
     "storage": {"READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE", "MANAGE_EXTERNAL_STORAGE"},
@@ -356,15 +363,44 @@ def prepare_apk(target: str, question: str, allowed: list[str], task_id: str | N
 
 # --- Decompile orchestration -----------------------------------------------------------
 
-def _run_tool(name: str, argv: list[str], seconds: int, out: Path) -> dict:
+def cancel(ident: str) -> None:
+    """Stop a running decompile: SIGTERM the tool's process tree in WSL, SIGKILL after 10 s."""
+    import time
+    event = _CANCEL.get(ident)
+    if event is None:
+        return
+    event.set()
+    for signal in ("-TERM", "-KILL"):
+        for marker in list(_RUNNING.get(ident, [])):
+            try:
+                _wsl(["pkill", signal, "-f", marker], 30)
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+        deadline = time.monotonic() + KILL_GRACE
+        while _RUNNING.get(ident) and time.monotonic() < deadline:
+            time.sleep(0.2)
+        if not _RUNNING.get(ident):
+            return
+
+
+def _run_tool(ident: str, name: str, argv: list[str], seconds: int, out: Path, marker: str) -> dict:
     """Run one tool under coreutils timeout: SIGTERM at the deadline, SIGKILL after 10 s."""
+    if _CANCEL[ident].is_set():
+        raise DecompileCancelled(name)
     wrapped = ["timeout", f"--kill-after={KILL_GRACE}s", f"{seconds}s", *argv]
+    _RUNNING.setdefault(ident, []).append(marker)
     try:
         result = _wsl(wrapped, seconds + KILL_GRACE + 30)
         code = result.returncode
         text = (result.stdout + b"\n" + result.stderr).decode("utf-8", errors="replace")
     except subprocess.TimeoutExpired:
         code, text = 124, ""
+    finally:
+        _RUNNING[ident].remove(marker)
+    if _CANCEL[ident].is_set():
+        out.mkdir(parents=True, exist_ok=True)
+        (out / ".incomplete").write_text(f"{name} cancelled\n", encoding="utf-8")
+        raise DecompileCancelled(name)
     if code and "OutOfMemoryError" in text:
         state = "out_of_memory"
     elif code in (124, 137):
@@ -382,25 +418,42 @@ def _run_tool(name: str, argv: list[str], seconds: int, out: Path) -> dict:
 
 
 def preflight(ident: str) -> dict:
-    row = store.load(ident)
-    if not row.get("apk"):
-        raise ValueError("Investigation was not prepared as an APK target")
-    if row["status"] in {"cancelled", "closed", "analyzing"}:
-        raise ValueError(f"Investigation is {row['status']}; cannot start decompilation")
-    store.validate_snapshot(row)
+    """Validate and atomically claim the investigation (status -> analyzing) for one decompile."""
     ready = readiness_static()
     if ready["status"] != "ready":
         raise RuntimeError(ready.get("error") or "Static APK toolchain is not ready")
-    return row
+    with _CLAIM_LOCK:
+        row = store.load(ident)
+        if not row.get("apk"):
+            raise ValueError("Investigation was not prepared as an APK target")
+        if row["status"] in {"cancelled", "closed", "analyzing"}:
+            raise ValueError(f"Investigation is {row['status']}; cannot start decompilation")
+        store.validate_snapshot(row)
+        row["status"] = "analyzing"
+        _CANCEL[ident] = threading.Event()
+        return store.save(row)
 
 
-def decompile(ident: str, skip_jadx: bool = False) -> dict:
-    """apktool (resources/manifest) then jadx (DEX), at most two runs system-wide."""
-    row = preflight(ident)
+def release(ident: str) -> None:
+    """Undo a claim that never reached decompile() (e.g. the task could not be scheduled)."""
+    with _CLAIM_LOCK:
+        row = store.load(ident)
+        if row["status"] == "analyzing":
+            row["status"] = "interrupted"
+            row["last_error"] = "Decompile was claimed but never started"
+            store.save(row)
+        _CANCEL.pop(ident, None)
+
+
+def decompile(ident: str, skip_jadx: bool = False, claimed: dict | None = None) -> dict:
+    """apktool (resources/manifest) then jadx (DEX), at most two runs system-wide.
+
+    ``claimed`` is the row returned by preflight(); without it the claim is taken here.
+    """
+    row = claimed if claimed is not None else preflight(ident)
     with _DECOMPILE_SLOTS:
         work = store.directory(ident) / "apk"
         apktool_out, jadx_out, meta = work / "apktool", work / "jadx", work / "metadata"
-        row["status"] = "analyzing"
         _coc(row, "decompile_started", "apktool/jadx static decompilation started.", {"skip_jadx": skip_jadx})
         store.save(row)
         try:
@@ -410,21 +463,21 @@ def decompile(ident: str, skip_jadx: bool = False) -> dict:
             meta.mkdir(mode=0o700, exist_ok=True)
             base = Path(row["apk"]["base"]["path"])
             unknowns: list[str] = []
-            apktool = _run_tool("apktool", [
+            apktool = _run_tool(ident, "apktool", [
                 "env", f"JAVA_HOME={JAVA_HOME}", f"PATH={JAVA_HOME}/bin:/usr/bin:/bin", JDK, *JVM_HEAP,
                 "-jar", APKTOOL_JAR, "d", "-f", "--no-src", "-o", _linux_path(apktool_out), _linux_path(base)],
-                APKTOOL_TIMEOUT, apktool_out)
+                APKTOOL_TIMEOUT, apktool_out, _linux_path(apktool_out))
             if apktool["state"] != "ok":
                 unknowns.append(f"apktool resource decoding {apktool['state']} (exit {apktool['exit_code']}); "
                                 "manifest, permissions and components may be unavailable.")
             jadx = None
             if not skip_jadx:
                 inputs = [base] + [Path(p["path"]) for p in row["apk"]["parts"] if p["role"] == "split" and p["dex"]]
-                jadx = _run_tool("jadx", [
+                jadx = _run_tool(ident, "jadx", [
                     "env", f"JAVA_HOME={JAVA_HOME}", f"PATH={JAVA_HOME}/bin:/usr/bin:/bin",
                     "JAVA_OPTS=" + " ".join(JVM_HEAP), JADX, "--no-res", "-d", _linux_path(jadx_out),
                     "--threads-count", "4", "--show-bad-code", "--escape-unicode",
-                    *[_linux_path(p) for p in inputs]], JADX_TIMEOUT, jadx_out)
+                    *[_linux_path(p) for p in inputs]], JADX_TIMEOUT, jadx_out, _linux_path(jadx_out))
                 jadx["java_files"] = sum(1 for _ in jadx_out.rglob("*.java")) if jadx_out.exists() else 0
                 jadx["inputs"] = [p.name for p in inputs]
                 if jadx["state"] == "timeout":
@@ -437,6 +490,20 @@ def decompile(ident: str, skip_jadx: bool = False) -> dict:
                                     "some classes were not decompiled.")
             manifest_eid = None
             manifest_file = apktool_out / "AndroidManifest.xml"
+            decoder = f"apktool {toolchain()['apktool']}"
+            if not manifest_file.is_file():
+                try:
+                    with zipfile.ZipFile(base) as z:
+                        info = z.getinfo("AndroidManifest.xml")
+                        if info.file_size > MAX_MANIFEST_BYTES:
+                            raise ValueError("binary manifest exceeds 16 MiB")
+                        text = decode_axml(z.read(info))
+                    manifest_file = meta / "AndroidManifest.decoded.xml"
+                    manifest_file.write_text(text, encoding="utf-8")
+                    decoder = "ANZU host AXML decoder"
+                    unknowns.append("Manifest was decoded by the host AXML decoder; resource references stay unresolved (@0x...).")
+                except (ValueError, KeyError) as exc:
+                    unknowns.append(f"Host AXML decoder could not read the binary manifest: {exc}")
             if manifest_file.is_file():
                 try:
                     manifest, components = parse_manifest(manifest_file, apktool_out / "apktool.yml")
@@ -446,12 +513,10 @@ def decompile(ident: str, skip_jadx: bool = False) -> dict:
                     store.atomic_json(meta / "manifest.json", manifest)
                     store.atomic_json(meta / "components.json", components)
                     manifest_eid = _record(row, "apk_manifest", {"source": "apktool/AndroidManifest.xml"}, {
-                        "provider": f"apktool {toolchain()['apktool']}", "manifest": manifest,
+                        "provider": decoder, "manifest": manifest,
                         "components": components,
                         "limitations": ["Static manifest parsing only; runtime authorization checks in code were not evaluated.",
                                         "Implicit export follows pre-Android 12 rules: an intent-filter without android:exported means exported."]})
-            elif apktool["state"] == "ok":
-                unknowns.append("apktool finished without producing AndroidManifest.xml.")
             succeeded = apktool["state"] == "ok" or bool(jadx and jadx["java_files"])
             decompile_eid = _record(row, "apk_decompile", {"skip_jadx": skip_jadx}, {
                 "provider": "ANZU APK sidecar", "toolchain": toolchain(), "apktool": apktool, "jadx": jadx,
@@ -467,10 +532,117 @@ def decompile(ident: str, skip_jadx: bool = False) -> dict:
             stamp = _now()
             _custody(row, decompiled_at=stamp, completed_at=stamp)
             return store.save(row)
+        except DecompileCancelled as exc:
+            row.update(status="cancelled", last_error=f"Cancelled while {exc} was running")
+            _coc(row, "decompile_cancelled", f"Cancelled during {exc}; partial output marked .incomplete.")
+            store.save(row)
+            raise
         except BaseException as exc:
             row.update(status="interrupted", last_error=str(exc)[:2000])
             store.save(row)
             raise
+        finally:
+            _CANCEL.pop(ident, None)
+            _RUNNING.pop(ident, None)
+
+
+# --- Host binary AXML decoder (fallback when apktool cannot decode the manifest) -------
+
+_AXML_ATTR_IDS = {0x01010003: "name", 0x01010001: "label", 0x01010010: "exported", 0x0101021b: "versionCode",
+                  0x0101021c: "versionName", 0x0101020c: "minSdkVersion", 0x01010270: "targetSdkVersion",
+                  0x01010271: "maxSdkVersion", 0x01010006: "permission", 0x01010018: "authorities",
+                  0x01010007: "readPermission", 0x01010008: "writePermission", 0x01010009: "protectionLevel",
+                  0x0101000f: "debuggable", 0x01010280: "allowBackup", 0x010104ec: "usesCleartextTraffic",
+                  0x01010527: "networkSecurityConfig", 0x01010202: "targetActivity",
+                  0x01010028: "scheme", 0x01010029: "host", 0x0101002a: "path"}
+
+
+def _axml_strings(buf: bytes, off: int) -> list[str]:
+    import struct
+    _, header, size, count, _styles, flags, start, _ = struct.unpack_from("<HHIIIIII", buf, off)
+    utf8 = bool(flags & 0x100)
+    out = []
+    for i in range(count):
+        p = off + start + struct.unpack_from("<I", buf, off + header + 4 * i)[0]
+        if utf8:
+            p += 2 if buf[p] & 0x80 else 1
+            n = buf[p]
+            if n & 0x80:
+                n = ((n & 0x7F) << 8) | buf[p + 1]
+                p += 1
+            p += 1
+            out.append(buf[p:p + n].decode("utf-8", errors="replace"))
+        else:
+            n = struct.unpack_from("<H", buf, p)[0]
+            if n & 0x8000:
+                n = ((n & 0x7FFF) << 16) | struct.unpack_from("<H", buf, p + 2)[0]
+                p += 2
+            out.append(buf[p + 2:p + 2 + 2 * n].decode("utf-16-le", errors="replace"))
+    return out
+
+
+def decode_axml(buf: bytes) -> str:
+    """Decode Android binary XML into text XML; structure only, no resource-table lookups."""
+    import struct
+    from xml.sax.saxutils import escape, quoteattr
+    if len(buf) < 8 or struct.unpack_from("<HH", buf, 0) != (0x0003, 8):
+        raise ValueError("not an Android binary XML document")
+    if len(buf) > MAX_MANIFEST_BYTES:
+        raise ValueError("binary manifest exceeds 16 MiB")
+    strings: list[str] = []
+    res_ids: list[int] = []
+    prefixes: dict[str, str] = {}
+    out = ['<?xml version="1.0" encoding="utf-8"?>']
+    pending_ns: list[tuple[str, str]] = []
+    off = 8
+    try:
+        while off + 8 <= len(buf):
+            ctype, header, size = struct.unpack_from("<HHI", buf, off)
+            if size < 8 or off + size > len(buf):
+                raise ValueError("truncated binary XML chunk")
+            if ctype == 0x0001:
+                strings = _axml_strings(buf, off)
+            elif ctype == 0x0180:
+                res_ids = list(struct.unpack_from(f"<{(size - header) // 4}I", buf, off + header))
+            elif ctype == 0x0100:
+                prefix, uri = struct.unpack_from("<ii", buf, off + 16)
+                prefixes[strings[uri]] = strings[prefix]
+                pending_ns.append((strings[prefix], strings[uri]))
+            elif ctype == 0x0102:
+                ns, name, _attr_start, attr_size, count = struct.unpack_from("<iiHHH", buf, off + 16)[:5]
+                attrs = [f"xmlns:{p}={quoteattr(u)}" for p, u in pending_ns]
+                pending_ns = []
+                base = off + 16 + _attr_start
+                for i in range(count):
+                    a_ns, a_name, a_raw, _vsize, _r, vtype, vdata = struct.unpack_from("<iiiHBBI", buf, base + i * attr_size)
+                    key = strings[a_name] if 0 <= a_name < len(strings) else ""
+                    if not key and 0 <= a_name < len(res_ids):
+                        key = _AXML_ATTR_IDS.get(res_ids[a_name], f"attr_{res_ids[a_name]:08x}")
+                    if a_ns >= 0:
+                        key = f"{prefixes.get(strings[a_ns], 'ns')}:{key}"
+                    if a_raw >= 0:
+                        value = strings[a_raw]
+                    elif vtype == 0x03:
+                        value = strings[vdata]
+                    elif vtype == 0x12:
+                        value = "true" if vdata else "false"
+                    elif vtype == 0x10:
+                        value = str(vdata if vdata < 0x80000000 else vdata - 0x100000000)
+                    elif vtype == 0x11:
+                        value = f"0x{vdata:08x}"
+                    elif vtype == 0x01:
+                        value = f"@0x{vdata:08x}"
+                    else:
+                        value = f"0x{vdata:08x}"
+                    attrs.append(f"{key}={quoteattr(value)}")
+                tag = strings[name]
+                out.append(f"<{tag}{' ' if attrs else ''}{' '.join(attrs)}>")
+            elif ctype == 0x0103:
+                out.append(f"</{strings[struct.unpack_from('<ii', buf, off + 16)[1]]}>")
+            off += size
+    except (struct.error, IndexError) as exc:
+        raise ValueError("malformed binary XML") from exc
+    return "\n".join(out) + "\n"
 
 
 # --- Manifest extraction ---------------------------------------------------------------
@@ -603,11 +775,11 @@ CATALOG = {
 }
 
 
-def call(ident: str, operation: str, arguments: dict) -> dict:
+def call(ident: str, operation: str, arguments: dict, claimed: dict | None = None) -> dict:
     """Execute an admitted catalog operation; decompile writes its own evidence records."""
     if operation == "apk_decompile":
         before = len(store.load(ident)["evidence"])
-        row = decompile(ident, bool(arguments.get("skip_jadx", False)))
+        row = decompile(ident, bool(arguments.get("skip_jadx", False)), claimed)
         return {"status": "evidence", "investigation_status": row["status"],
                 "evidence": row["evidence"][before:], "unknowns": row.get("unknowns", [])}
     if operation == "apk_extract_manifest":

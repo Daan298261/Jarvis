@@ -228,7 +228,9 @@ class Investigations:
         tools = {k: v for k, v in actor.tools.items() if k in STATIC_OPERATIONS | RUNTIME_OPERATIONS}
         tools.update(BUILTIN_SCHEMAS)
         if row["kind"] == "mobile" and Path(row["target"]).suffix.lower() == ".apk":
-            tools["android_decompile"] = {"name": "android_decompile", "inputSchema": {"type": "object", "properties": {}}}
+            if not row.get("apk"):
+                # APK investigations decompile only through the RFC-0207 sidecar (apk_decompile).
+                tools["android_decompile"] = {"name": "android_decompile", "inputSchema": {"type": "object", "properties": {}}}
             from .android import capture_schema
             tools["android_capture"] = capture_schema()
         if row.get("apk"):
@@ -279,6 +281,8 @@ class Investigations:
                 raise ValueError("Investigation is closed; prepare a new target")
             await asyncio.to_thread(store.validate_snapshot, row)
             from .apk_sidecar import CATALOG as APK_CATALOG
+            if operation == "android_decompile" and row.get("apk"):
+                operation, arguments = "apk_decompile", {}
             if operation not in STATIC_OPERATIONS | RUNTIME_OPERATIONS | {"android_decompile"} | BUILTIN_SCHEMAS.keys() | APK_CATALOG.keys():
                 raise PermissionError("Operation is not admitted")
             from ..policy.action_gate import gate_side_effect
@@ -294,9 +298,8 @@ class Investigations:
                 if not row.get("apk"):
                     raise ValueError("Investigation was not prepared as an APK target")
                 from jsonschema import validate
-                from . import apk_sidecar
                 validate(arguments, APK_CATALOG[operation]["inputSchema"])
-                return await asyncio.to_thread(apk_sidecar.call, ident, operation, arguments)
+                return await self.run_apk(ident, operation, arguments)
             row["status"] = "analyzing"
             store.save(row)
             self.active[ident] = asyncio.current_task()
@@ -328,6 +331,25 @@ class Investigations:
                 store.save(row)
                 raise
             finally:
+                self.active.pop(ident, None)
+
+    async def run_apk(self, ident: str, operation: str, arguments: dict, claimed: dict | None = None) -> dict:
+        """Run an RFC-0207 sidecar operation as this investigation's active work, so close/cancel stops it."""
+        from . import apk_sidecar
+        if operation == "apk_decompile" and claimed is None:
+            claimed = await asyncio.to_thread(apk_sidecar.preflight, ident)
+        work = asyncio.ensure_future(asyncio.to_thread(apk_sidecar.call, ident, operation, arguments, claimed))
+        self.active[ident] = asyncio.current_task()
+        try:
+            return await asyncio.shield(work)
+        except asyncio.CancelledError:
+            await asyncio.to_thread(apk_sidecar.cancel, ident)
+            await asyncio.wait([work], timeout=60)
+            if work.done() and not work.cancelled():
+                work.exception()
+            raise
+        finally:
+            if self.active.get(ident) is asyncio.current_task():
                 self.active.pop(ident, None)
 
     def record(self, row: dict, operation: str, arguments: dict, result: dict) -> dict:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
@@ -12,6 +13,7 @@ from ..config import load_settings
 from ..reverse_engineering import apk_sidecar, provision, store
 from ..reverse_engineering.runtime import SERVICE
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/investigations", tags=["investigations"])
 _setup_task: asyncio.Task | None = None
 _apk_tasks: set[asyncio.Task] = set()
@@ -143,12 +145,15 @@ async def apk_prepare(body: ApkPrepareBody):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-async def _apk_decompile_background(ident: str, skip_jadx: bool):
+async def _apk_decompile_background(ident: str, skip_jadx: bool, claimed: dict):
     try:
-        await asyncio.to_thread(apk_sidecar.decompile, ident, skip_jadx)
+        await SERVICE.run_apk(ident, "apk_decompile", {"skip_jadx": skip_jadx}, claimed)
+    except asyncio.CancelledError:
+        logger.info("APK decompile for investigation %s was cancelled", ident)
+        raise
     except Exception:
-        # decompile() persists status "interrupted" and last_error on the investigation row.
-        return
+        # decompile() has already persisted status and last_error on the row; keep the traceback in the log.
+        logger.exception("Background APK decompile failed for investigation %s", ident)
 
 
 @router.post("/{ident}/apk/decompile")
@@ -160,12 +165,13 @@ async def apk_decompile(ident: str, body: ApkDecompileBody):
     except (ValueError, OSError, RuntimeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if body.background:
-        task = asyncio.create_task(_apk_decompile_background(ident, body.skip_jadx))
+        task = asyncio.create_task(_apk_decompile_background(ident, body.skip_jadx, row))
         _apk_tasks.add(task)
         task.add_done_callback(_apk_tasks.discard)
-        return {**public_row(row), "status": "analyzing"}
+        return public_row(row)
     try:
-        return public_row(await asyncio.to_thread(apk_sidecar.decompile, ident, body.skip_jadx))
+        await SERVICE.run_apk(ident, "apk_decompile", {"skip_jadx": body.skip_jadx}, row)
+        return public_row(store.load(ident))
     except (ValueError, OSError, RuntimeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

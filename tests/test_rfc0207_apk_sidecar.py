@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import shutil
 import subprocess
 import zipfile
 from pathlib import Path
@@ -485,3 +487,133 @@ async def test_runtime_catalog_exposes_and_runs_apk_operations(env, monkeypatch)
     assert out["status"] == "evidence" and [e["operation"] for e in out["evidence"]] == ["apk_manifest", "apk_decompile"]
     got = await service.call(row["id"], "apk_extract_manifest", {}, None)
     assert got["evidence_id"] == "E00002" and got["manifest"]["package"] == "org.anzu.test"
+
+
+def _norm(manifest: dict, components: dict) -> dict:
+    keep = {k: manifest[k] for k in ("package", "version_code", "version_name", "min_sdk", "target_sdk", "permissions")}
+    keep["components"] = sorted((c["type"], c["name"], c["exported"], c["exported_source"]) for c in components["components"])
+    return keep
+
+
+def test_host_axml_decoder_matches_source_manifest(tmp_path):
+    with zipfile.ZipFile(FIXTURES / "minimal_valid.apk") as z:
+        text = apk_sidecar.decode_axml(z.read("AndroidManifest.xml"))
+    decoded = tmp_path / "decoded.xml"
+    decoded.write_text(text, encoding="utf-8")
+    got = _norm(*apk_sidecar.parse_manifest(decoded))
+    want = _norm(*apk_sidecar.parse_manifest(FIXTURES / "minimal_valid.AndroidManifest.xml"))
+    assert got == want
+    assert got["package"] == "org.anzu.test" and got["min_sdk"] == "26" and got["target_sdk"] == "35"
+    assert ("activity", "org.anzu.test.MainActivity", True, "explicit") in got["components"]
+    with pytest.raises(ValueError):
+        apk_sidecar.decode_axml(b"\x03\x00\x08\x00" + b"\xff" * 16)
+
+
+def test_apktool_failure_falls_back_to_host_axml(env):
+    src, fake = env
+    copy = src / "minimal_valid.apk"
+    copy.write_bytes((FIXTURES / "minimal_valid.apk").read_bytes())
+    row = prepare(copy)
+    fake.apktool_mode = "fail"
+    out = apk_sidecar.decompile(row["id"], skip_jadx=True)
+    assert out["status"] == "partial" and any("host AXML decoder" in u for u in out["unknowns"])
+    assert evidence(out, "E00002")["result"]["provider"] == "ANZU host AXML decoder"
+    assert apk_sidecar.metadata(row["id"], "manifest")["package"] == "org.anzu.test"
+
+
+def test_preflight_claims_atomically(env):
+    src, _ = env
+    row = prepare(make_apk(src / "a.apk"))
+    claimed = apk_sidecar.preflight(row["id"])
+    assert claimed["status"] == "analyzing" and store.load(row["id"])["status"] == "analyzing"
+    with pytest.raises(ValueError, match="analyzing"):
+        apk_sidecar.preflight(row["id"])
+    apk_sidecar.release(row["id"])
+    assert store.load(row["id"])["status"] == "interrupted"
+
+
+async def test_android_decompile_routes_to_sidecar_and_cancel_stops_it(env, monkeypatch):
+    import asyncio
+    import threading
+    from types import SimpleNamespace
+    from app.reverse_engineering.runtime import Investigations
+    src, fake = env
+    copy = src / "minimal_valid.apk"
+    copy.write_bytes((FIXTURES / "minimal_valid.apk").read_bytes())
+    row = prepare(copy)
+    service = Investigations()
+
+    async def actor(ident):
+        return SimpleNamespace(tools={})
+    monkeypatch.setattr(service, "actor", actor)
+    monkeypatch.setattr("app.policy.action_gate.gate_side_effect",
+                        lambda *a, **k: SimpleNamespace(allowed=True, requires_approval=False, pending_approval_id=None, reason=""))
+    names = {t["name"] for t in (await service.catalog(row["id"], None))["operations"]}
+    assert "android_decompile" not in names and "apk_decompile" in names
+
+    started, killed = threading.Event(), threading.Event()
+    inner = fake.__call__
+
+    def blocking(args, *a, **kw):
+        argv = args[6:] if args and args[0] == "wsl.exe" else []
+        if argv[:1] == ["pkill"]:
+            killed.set()
+            return subprocess.CompletedProcess(args, 0, b"", b"")
+        if argv[:1] == ["timeout"] and apk_sidecar.JADX in argv:
+            started.set()
+            killed.wait(30)
+            return subprocess.CompletedProcess(args, 143, b"", b"Terminated")
+        return inner(args, *a, **kw)
+    monkeypatch.setattr(subprocess, "run", blocking)
+    # The legacy name is redirected to the sidecar for APK investigations.
+    task = asyncio.create_task(service.call(row["id"], "android_decompile", {}, None))
+    assert await asyncio.to_thread(started.wait, 30)
+    assert service.active.get(row["id"]) is task
+    closed = await service.close(row["id"], None, cancelled=True)
+    assert closed["status"] == "cancelled" and killed.is_set() and task.done()
+    assert (store.directory(row["id"]) / "apk" / "jadx" / ".incomplete").read_text(encoding="utf-8") == "jadx cancelled\n"
+    assert store.load(row["id"])["status"] == "cancelled"
+
+
+REAL_JAVA = os.environ.get("ANZU_TEST_JAVA") or shutil.which("java")
+REAL_APKTOOL = os.environ.get("ANZU_TEST_APKTOOL_JAR")
+REAL_JADX = os.environ.get("ANZU_TEST_JADX")
+
+
+@pytest.mark.skipif(not (REAL_JAVA and REAL_APKTOOL and REAL_JADX and Path(REAL_APKTOOL).is_file() and Path(REAL_JADX).is_file()),
+                    reason="real toolchain not available; set ANZU_TEST_JAVA, ANZU_TEST_APKTOOL_JAR and ANZU_TEST_JADX")
+def test_real_toolchain_decompiles_fixture(env, monkeypatch):
+    """Runs the real apktool and jadx on minimal_valid.apk through the sidecar's orchestration, on the host."""
+    src, _ = env
+    copy = src / "minimal_valid.apk"
+    copy.write_bytes((FIXTURES / "minimal_valid.apk").read_bytes())
+    row = prepare(copy)
+    real_run = REAL_RUN
+    mapping = {apk_sidecar.JDK: REAL_JAVA, apk_sidecar.APKTOOL_JAR: REAL_APKTOOL, apk_sidecar.JADX: REAL_JADX}
+
+    def host_wsl(argv, timeout):
+        if argv[0] == "wslpath":
+            return subprocess.CompletedProcess(argv, 0, (argv[-1] + "\n").encode(), b"")
+        if argv[0] == "test":
+            return subprocess.CompletedProcess(argv, 0 if Path(mapping[argv[-1]]).is_file() else 1, b"", b"")
+        if argv[0] == "sha256sum":
+            return subprocess.CompletedProcess(argv, 0, (hashlib.sha256(Path(REAL_APKTOOL).read_bytes()).hexdigest() + "  x").encode(), b"")
+        assert argv[0] == "timeout"
+        cmd, env_vars = argv[3:], dict(os.environ)
+        if cmd[0] == "env":
+            cmd = cmd[1:]
+            while "=" in cmd[0] and not cmd[0].startswith("/"):
+                key, value = cmd.pop(0).split("=", 1)
+                if key == "JAVA_OPTS":
+                    env_vars[key] = value
+            env_vars["JAVA_HOME"] = str(Path(REAL_JAVA).resolve().parents[1])
+        cmd = [mapping.get(c, c) for c in cmd]
+        return real_run(cmd, capture_output=True, timeout=timeout, env=env_vars)
+    monkeypatch.setattr(apk_sidecar, "_wsl", host_wsl)
+    out = apk_sidecar.decompile(row["id"])
+    work = store.directory(row["id"]) / "apk"
+    assert (work / "apktool" / "AndroidManifest.xml").is_file(), evidence(out, "E00003")
+    manifest = apk_sidecar.metadata(row["id"], "manifest")
+    assert manifest["package"] == "org.anzu.test" and manifest["min_sdk"] == "26" and manifest["target_sdk"] == "35"
+    assert evidence(out, "E00003")["result"]["apktool"]["state"] == "ok"
+    assert evidence(out, "E00003")["result"]["jadx"]["state"] in {"ok", "failed"}  # no DEX in the fixture
