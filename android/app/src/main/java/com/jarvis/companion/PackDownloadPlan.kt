@@ -9,6 +9,11 @@ object PackDownloadPlan {
     /** Head-room kept free beyond the pack so Android and the app keep working. */
     const val STORAGE_MARGIN_BYTES = 256L * 1024 * 1024
 
+    /** Download attempts per tap; each retry resumes the .partial (2 s doubling to 30 s, jittered). */
+    const val DOWNLOAD_ATTEMPTS = 6
+    const val RETRY_BASE_DELAY_MS = 2_000L
+    const val RETRY_MAX_DELAY_MS = 30_000L
+
     /** Byte offset to resume from, or 0 to start fresh. */
     fun resumeFrom(partialLength: Long, expectedSize: Long): Long = when {
         partialLength <= 0L -> 0L

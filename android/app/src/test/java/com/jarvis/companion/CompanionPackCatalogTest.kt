@@ -32,5 +32,8 @@ class CompanionPackCatalogTest {
         assertEquals("1ec0b30c75b49223c82542caf2635a7af4edcda80d8c89759cc000d3871bf48e", big.sha256)
         assertEquals(2_707_514_688L, big.sizeBytes)
         assertTrue(big.minRamMb > small.minRamMb)
+        // Label must state the same free-RAM floor the guard enforces.
+        assertEquals(4608, big.minRamMb)
+        assertTrue(big.label.contains("4.5 GB free RAM"))
     }
 }

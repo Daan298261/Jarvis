@@ -17,15 +17,23 @@ object TransientRetry {
     const val MAX_DELAY_MS = 4_000L
 
     /** Full-jitter delay before retry [attempt] (1-based): uniform in [0, min(cap, base * 2^(attempt-1))]. */
-    fun delayMs(attempt: Int, random: Random = Random.Default): Long {
-        val ceiling = (BASE_DELAY_MS shl (attempt - 1).coerceIn(0, 10)).coerceAtMost(MAX_DELAY_MS)
+    fun delayMs(
+        attempt: Int,
+        random: Random = Random.Default,
+        baseDelayMs: Long = BASE_DELAY_MS,
+        maxDelayMs: Long = MAX_DELAY_MS,
+    ): Long {
+        val ceiling = (baseDelayMs shl (attempt - 1).coerceIn(0, 10)).coerceAtMost(maxDelayMs)
         return random.nextLong(ceiling + 1)
     }
 
     suspend fun <T> run(
         attempts: Int = DEFAULT_ATTEMPTS,
         random: Random = Random.Default,
+        baseDelayMs: Long = BASE_DELAY_MS,
+        maxDelayMs: Long = MAX_DELAY_MS,
         sleep: suspend (Long) -> Unit = { delay(it) },
+        onRetry: (attempt: Int, error: java.io.IOException) -> Unit = { _, _ -> },
         block: suspend () -> T,
     ): T {
         var last: java.io.IOException? = null
@@ -34,7 +42,10 @@ object TransientRetry {
                 return block()
             } catch (error: java.io.IOException) {
                 last = error
-                if (attempt < attempts) sleep(delayMs(attempt, random))
+                if (attempt < attempts) {
+                    onRetry(attempt, error)
+                    sleep(delayMs(attempt, random, baseDelayMs, maxDelayMs))
+                }
             }
         }
         throw last ?: java.io.IOException("No reachable ANZU endpoint")

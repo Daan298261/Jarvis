@@ -62,7 +62,7 @@ COMPANION_PACK_CATALOG: list[dict[str, Any]] = [
     },
     {
         "id": "qwen3.5-4b-abliterated-q4",
-        "label": "Qwen3.5 4B Abliterated — opt-in, 12 GB phones (Q4_K_M)",
+        "label": "Qwen3.5 4B Abliterated — opt-in, needs ~4.5 GB free RAM (8 GB+ phones) (Q4_K_M)",
         "filename": "Qwen3.5-4B-abliterated.Q4_K_M.gguf",
         "size_bytes": 2_707_514_688,
         "min_ram_mb": 4608,

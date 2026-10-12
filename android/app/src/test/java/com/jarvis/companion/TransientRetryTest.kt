@@ -61,4 +61,21 @@ class TransientRetryTest {
         }
         assertEquals(2, calls)
     }
+
+    @Test
+    fun downloadPolicyUsesLongerBackoffAndReportsRetries() = runBlocking {
+        val random = Random(3)
+        repeat(100) {
+            assertTrue(
+                TransientRetry.delayMs(5, random, PackDownloadPlan.RETRY_BASE_DELAY_MS, PackDownloadPlan.RETRY_MAX_DELAY_MS) in 0..PackDownloadPlan.RETRY_MAX_DELAY_MS,
+            )
+        }
+        val retried = mutableListOf<Int>()
+        var calls = 0
+        TransientRetry.run(attempts = PackDownloadPlan.DOWNLOAD_ATTEMPTS, sleep = {}, onRetry = { attempt, _ -> retried += attempt }) {
+            calls++
+            if (calls < 4) throw java.io.IOException("dropped")
+        }
+        assertEquals(listOf(1, 2, 3), retried)
+    }
 }

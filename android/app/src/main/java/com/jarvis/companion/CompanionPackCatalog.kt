@@ -56,7 +56,7 @@ object CompanionPackCatalog {
         ),
         CompanionPack(
             id = ABLITERATED_4B_ID,
-            label = "Qwen3.5 4B Abliterated — opt-in, 12 GB phones (Q4_K_M)",
+            label = "Qwen3.5 4B Abliterated — opt-in, needs ~4.5 GB free RAM (8 GB+ phones) (Q4_K_M)",
             filename = "Qwen3.5-4B-abliterated.Q4_K_M.gguf",
             sizeBytes = 2_707_514_688L,
             minRamMb = 4608,

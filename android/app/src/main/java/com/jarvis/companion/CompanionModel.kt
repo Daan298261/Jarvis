@@ -16,6 +16,7 @@ import android.content.ContentProviderOperation
 import android.content.Intent
 import android.provider.ContactsContract
 import android.util.Base64
+import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -87,6 +88,8 @@ private data class RefreshPayload(
     val coding: JSONObject,
     val voices: JSONObject,
 )
+
+private const val TAG = "CompanionModel"
 
 class CompanionModel(app: Application) : AndroidViewModel(app) {
     private val jarvisApp = app as JarvisApp
@@ -166,10 +169,15 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                             api.session()
                             refresh()
                             mutable.value = mutable.value.copy(pendingApproval = false, lanStatus = "idle", lanLabel = "")
+                        }.onFailure {
+                            // Still waiting for desktop approval (or desktop down): keep polling, but leave a trace.
+                            Log.w(TAG, "Pending-approval session check failed: ${it.message}")
                         }
                     } else {
                         runCatching { refresh() }.onSuccess { heartbeat.onSuccess() }.onFailure {
-                            if (heartbeat.onFailure()) {
+                            val offline = heartbeat.onFailure()
+                            Log.w(TAG, "Desktop poll failed (${heartbeat.consecutiveFailures} in a row, offline=$offline): ${it.message}")
+                            if (offline) {
                                 mutable.value = mutable.value.copy(
                                     connected = false,
                                     leaderReachable = false,
