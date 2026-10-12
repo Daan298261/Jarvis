@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
@@ -9,11 +10,13 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from ..config import load_settings
-from ..reverse_engineering import provision, store
+from ..reverse_engineering import apk_sidecar, provision, store
 from ..reverse_engineering.runtime import SERVICE
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/investigations", tags=["investigations"])
 _setup_task: asyncio.Task | None = None
+_apk_tasks: set[asyncio.Task] = set()
 
 
 class PrepareBody(BaseModel):
@@ -44,6 +47,19 @@ class IngestBody(BaseModel):
     background: bool = False
 
 
+class ApkPrepareBody(BaseModel):
+    source_type: Literal["file"] = "file"
+    target: str = Field(min_length=1, max_length=4096)
+    question: str = Field(default="Static APK analysis: manifest, permissions and exported components",
+                          min_length=1, max_length=10000)
+    task_id: str | None = None
+
+
+class ApkDecompileBody(BaseModel):
+    skip_jadx: bool = False
+    background: bool = False
+
+
 def public_row(row: dict) -> dict:
     return {k: v for k, v in row.items() if k not in {"manifest", "snapshot"}}
 
@@ -61,10 +77,14 @@ async def _setup(android: bool):
 
 
 @router.get("/readiness")
-async def readiness():
-    from ..reverse_engineering.android import readiness as android_readiness
-    return {"engine": await asyncio.to_thread(provision.readiness),
-            "android": android_readiness()}
+async def readiness(live: bool = False):
+    from ..reverse_engineering.android import readiness_dynamic, readiness_static
+    out = {"engine": await asyncio.to_thread(provision.readiness),
+           "android": readiness_dynamic(),
+           "apk_static": await asyncio.to_thread(readiness_static)}
+    if live:
+        out["apk_live"] = await asyncio.to_thread(apk_sidecar.readiness_live)
+    return out
 
 
 @router.post("/setup")
@@ -113,6 +133,71 @@ async def ingest(body: IngestBody):
         return public_row(row)
     except (ValueError, OSError, PermissionError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/apk/prepare")
+async def apk_prepare(body: ApkPrepareBody):
+    try:
+        row = await asyncio.to_thread(apk_sidecar.prepare_apk, body.target, body.question,
+                                      load_settings().allowed_directories, body.task_id)
+        return public_row(row)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+async def _apk_decompile_background(ident: str, skip_jadx: bool, claimed: dict):
+    try:
+        await SERVICE.run_apk(ident, "apk_decompile", {"skip_jadx": skip_jadx}, claimed)
+    except asyncio.CancelledError:
+        logger.info("APK decompile for investigation %s was cancelled", ident)
+        raise
+    except Exception:
+        # Status and last_error are on the row (decompile or release persisted them); keep the traceback here.
+        logger.exception("Background APK decompile failed for investigation %s", ident)
+    finally:
+        # Covers a task cancelled before run_apk started; a no-op once decompile owns or finished the claim.
+        await asyncio.to_thread(apk_sidecar.release, ident)
+
+
+@router.post("/{ident}/apk/decompile")
+async def apk_decompile(ident: str, body: ApkDecompileBody):
+    try:
+        row = await asyncio.to_thread(apk_sidecar.preflight, ident)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Unknown investigation") from exc
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if body.background:
+        try:
+            task = asyncio.create_task(_apk_decompile_background(ident, body.skip_jadx, row))
+        except BaseException:
+            await asyncio.to_thread(apk_sidecar.release, ident)
+            raise
+        _apk_tasks.add(task)
+        task.add_done_callback(_apk_tasks.discard)
+        return public_row(row)
+    try:
+        await SERVICE.run_apk(ident, "apk_decompile", {"skip_jadx": body.skip_jadx}, row)
+        return public_row(store.load(ident))
+    except (ValueError, OSError, RuntimeError) as exc:
+        # run_apk already released any claim decompile() never took over.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/{ident}/apk/summary")
+async def apk_summary(ident: str):
+    try:
+        return await asyncio.to_thread(apk_sidecar.summary, ident)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail="Unknown APK investigation") from exc
+
+
+@router.get("/{ident}/apk/{document}")
+async def apk_metadata(ident: str, document: Literal["manifest", "components"]):
+    try:
+        return await asyncio.to_thread(apk_sidecar.metadata, ident, document)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail="APK metadata has not been produced") from exc
 
 
 @router.get("/{ident}")

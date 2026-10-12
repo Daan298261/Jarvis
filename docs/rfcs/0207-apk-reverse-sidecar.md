@@ -9,8 +9,11 @@
 **Extends:** [RFC-0201](0201-reverse-engineer-anything.md) (ANZU Reverse Engineer Anything), [RFC-0200](0200-rea-mcp-local-investigation.md) (REA MCP local investigation).  
 **Related:** [RFC-0208](0208-ffs-dump-self-ingest.md) (FFS Dump Self-Ingest Phase 2), [RFC-0198](0198-blue-re-lta-protected-folder.md) (LTA extract dirs), [RFC-0197](0197-blue-red-purple-security-agents.md) (security agent policy).
 
-This PR is **specs-only**. No application code. Do not edit spec docs. Do not commit.
+## Implementation Slices
 
+**Slice 1 (implemented, `backend/app/reverse_engineering/apk_sidecar.py`):** `readiness_static()` (presence + pinned apktool SHA-256) and `readiness_live()` (tools executed, versions compared), with `android.readiness_static()` / `android.readiness_dynamic()` as the split; safe intake of standalone APK, XAPK/APKS and split-APK directories from an owner-named local path (zip-slip, symlink, 8 GiB and 50,000-file caps, per-part SHA-256 and size); apktool + jadx orchestration with `-Xmx4g -XX:+UseG1GC`, 300 s / 600 s timeouts and SIGTERM-then-SIGKILL; manifest, permission and component extraction (§5); evidence `apk_unpack`, `apk_manifest`, `apk_decompile` plus `custody.json`; REST routes `POST /apk/prepare`, `POST /{id}/apk/decompile`, `GET /{id}/apk/summary|manifest|components`; catalog operations `apk_decompile` and `apk_extract_manifest` (the legacy `android_decompile` is hidden and redirected for APK investigations); a host AXML decoder as the apktool manifest fallback; cancellation stops the running tool. Tests: synthetic ZIPs, a real aapt2-linked `tests/fixtures/apk/minimal_valid.apk`, and an opt-in real apktool/jadx run.
+
+**Later slices:** device (ADB) and FFS origins; native `.so` inventory (§6, `apk_inventory_native`); endpoints (§7) and crypto hints (§8) with evidence E00004-E00006; smali fallback; remaining fixtures.
 ---
 
 ## Problem
@@ -50,7 +53,7 @@ The APK Reverse-Engineering Sidecar operates as an execution-free static analysi
                                v Target APK / XAPK / Split Set
 +---------------------------------------------------------------------------------------------------+
 |                             APK Reverse-Engineering Sidecar Pipeline                              |
-|                              (backend/app/reverse_engineering/apk.py)                             |
+|                              (backend/app/reverse_engineering/apk_sidecar.py)                     |
 +---------------------------------------------------------------------------------------------------+
        |                                                                              |
        +-------------------------------+------------------------------+               |
@@ -615,7 +618,7 @@ Stored under `tests/fixtures/apk/`:
 
 | Area | Paths |
 | --- | --- |
-| **Backend Core** | `backend/app/reverse_engineering/apk.py` (new sidecar module), `backend/app/reverse_engineering/android.py` (readiness split), `backend/app/reverse_engineering/runtime.py` (tool catalog registration), `backend/app/reverse_engineering/engine-lock.json` (apktool pin) |
+| **Backend Core** | `backend/app/reverse_engineering/apk_sidecar.py` (new sidecar module), `backend/app/reverse_engineering/android.py` (readiness split), `backend/app/reverse_engineering/runtime.py` (tool catalog registration), `backend/app/reverse_engineering/engine-lock.json` (apktool pin) |
 | **Backend API** | `backend/app/api/investigations.py` (APK prepare/decompile/metadata endpoints) |
 | **Setup & Scripting** | `backend/app/reverse_engineering/setup-engine.sh` (apktool jar placement) |
 | **Tests & Fixtures** | `tests/test_rfc0207_apk_sidecar.py`, `tests/fixtures/apk/*` |

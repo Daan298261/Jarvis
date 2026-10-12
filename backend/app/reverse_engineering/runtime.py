@@ -228,9 +228,14 @@ class Investigations:
         tools = {k: v for k, v in actor.tools.items() if k in STATIC_OPERATIONS | RUNTIME_OPERATIONS}
         tools.update(BUILTIN_SCHEMAS)
         if row["kind"] == "mobile" and Path(row["target"]).suffix.lower() == ".apk":
-            tools["android_decompile"] = {"name": "android_decompile", "inputSchema": {"type": "object", "properties": {}}}
+            if not row.get("apk"):
+                # APK investigations decompile only through the RFC-0207 sidecar (apk_decompile).
+                tools["android_decompile"] = {"name": "android_decompile", "inputSchema": {"type": "object", "properties": {}}}
             from .android import capture_schema
             tools["android_capture"] = capture_schema()
+        if row.get("apk"):
+            from .apk_sidecar import CATALOG
+            tools.update(CATALOG)
         if operation:
             if operation not in tools:
                 raise ValueError("Operation is unavailable in the advertised session catalog")
@@ -275,7 +280,10 @@ class Investigations:
             if row["status"] in {"cancelled", "closed"}:
                 raise ValueError("Investigation is closed; prepare a new target")
             await asyncio.to_thread(store.validate_snapshot, row)
-            if operation not in STATIC_OPERATIONS | RUNTIME_OPERATIONS | {"android_decompile"} | BUILTIN_SCHEMAS.keys():
+            from .apk_sidecar import CATALOG as APK_CATALOG
+            if operation == "android_decompile" and row.get("apk"):
+                operation, arguments = "apk_decompile", {}
+            if operation not in STATIC_OPERATIONS | RUNTIME_OPERATIONS | {"android_decompile"} | BUILTIN_SCHEMAS.keys() | APK_CATALOG.keys():
                 raise PermissionError("Operation is not admitted")
             from ..policy.action_gate import gate_side_effect
             params = {"action": "call", "investigation_id": ident, "operation": operation, "arguments": arguments}
@@ -286,6 +294,12 @@ class Investigations:
             if operation in RUNTIME_OPERATIONS:
                 from ..policy.approval_grant import consume_grant
                 consume_grant(grant_id)
+            if operation in APK_CATALOG:
+                if not row.get("apk"):
+                    raise ValueError("Investigation was not prepared as an APK target")
+                from jsonschema import validate
+                validate(arguments, APK_CATALOG[operation]["inputSchema"])
+                return await self.run_apk(ident, operation, arguments)
             row["status"] = "analyzing"
             store.save(row)
             self.active[ident] = asyncio.current_task()
@@ -317,6 +331,30 @@ class Investigations:
                 store.save(row)
                 raise
             finally:
+                self.active.pop(ident, None)
+
+    async def run_apk(self, ident: str, operation: str, arguments: dict, claimed: dict | None = None) -> dict:
+        """Run an RFC-0207 sidecar operation as this investigation's active work, so close/cancel stops it."""
+        from . import apk_sidecar
+        if operation == "apk_decompile" and claimed is None:
+            claimed = await asyncio.to_thread(apk_sidecar.preflight, ident)
+        work = None
+        self.active[ident] = asyncio.current_task()
+        try:
+            work = asyncio.ensure_future(asyncio.to_thread(apk_sidecar.call, ident, operation, arguments, claimed))
+            return await asyncio.shield(work)
+        except asyncio.CancelledError:
+            await asyncio.to_thread(apk_sidecar.cancel, ident)
+            if work is not None:
+                await asyncio.wait([work], timeout=60)
+                if work.done() and not work.cancelled():
+                    work.exception()
+            raise
+        finally:
+            if claimed is not None:
+                # Frees a claim decompile() never took over; a no-op once decompile owns the row.
+                await asyncio.to_thread(apk_sidecar.release, ident)
+            if self.active.get(ident) is asyncio.current_task():
                 self.active.pop(ident, None)
 
     def record(self, row: dict, operation: str, arguments: dict, result: dict) -> dict:

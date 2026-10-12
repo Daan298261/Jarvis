@@ -144,13 +144,14 @@ def install() -> dict:
         _state(status="installing", stage="Installing OS prerequisites")
         wsl("bash", "-lc", "export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get install -y ca-certificates unzip xz-utils python3 gcc clang file", timeout=900)
         paths = {}
-        for key, filename in [("node", "node.tar.xz"), ("jdk", "jdk.tar.gz"), ("ghidra", "ghidra.zip"), ("jadx", "jadx.zip")]:
+        for key, filename in [("node", "node.tar.xz"), ("jdk", "jdk.tar.gz"), ("ghidra", "ghidra.zip"), ("jadx", "jadx.zip"),
+                              ("apktool", "apktool.jar")]:
             _state(status="installing", stage=f"Downloading verified {key} {specs[key]['version']}")
             paths[key] = linux_path(str(download(filename, specs[key])))
         script = Path(__file__).with_name("setup-engine.sh")
         _state(status="installing", stage="Installing pinned analysis tools")
         wsl("bash", linux_path(str(script)), paths["node"], paths["jdk"], paths["ghidra"], paths["jadx"],
-            linux_path(str(Path(__file__).with_name("rea-package-lock.json"))), timeout=900)
+            linux_path(str(Path(__file__).with_name("rea-package-lock.json"))), paths["apktool"], timeout=900)
         # npm lockfile records exact transitive artifacts; version/integrity checked separately.
         installed = json.loads(wsl("cat", "/opt/anzu/rea/node_modules/rea-agents/package.json"))
         if installed["version"] != specs["rea"]["version"]:
