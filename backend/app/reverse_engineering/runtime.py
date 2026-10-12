@@ -231,6 +231,9 @@ class Investigations:
             tools["android_decompile"] = {"name": "android_decompile", "inputSchema": {"type": "object", "properties": {}}}
             from .android import capture_schema
             tools["android_capture"] = capture_schema()
+        if row.get("apk"):
+            from .apk_sidecar import CATALOG
+            tools.update(CATALOG)
         if operation:
             if operation not in tools:
                 raise ValueError("Operation is unavailable in the advertised session catalog")
@@ -275,7 +278,8 @@ class Investigations:
             if row["status"] in {"cancelled", "closed"}:
                 raise ValueError("Investigation is closed; prepare a new target")
             await asyncio.to_thread(store.validate_snapshot, row)
-            if operation not in STATIC_OPERATIONS | RUNTIME_OPERATIONS | {"android_decompile"} | BUILTIN_SCHEMAS.keys():
+            from .apk_sidecar import CATALOG as APK_CATALOG
+            if operation not in STATIC_OPERATIONS | RUNTIME_OPERATIONS | {"android_decompile"} | BUILTIN_SCHEMAS.keys() | APK_CATALOG.keys():
                 raise PermissionError("Operation is not admitted")
             from ..policy.action_gate import gate_side_effect
             params = {"action": "call", "investigation_id": ident, "operation": operation, "arguments": arguments}
@@ -286,6 +290,13 @@ class Investigations:
             if operation in RUNTIME_OPERATIONS:
                 from ..policy.approval_grant import consume_grant
                 consume_grant(grant_id)
+            if operation in APK_CATALOG:
+                if not row.get("apk"):
+                    raise ValueError("Investigation was not prepared as an APK target")
+                from jsonschema import validate
+                from . import apk_sidecar
+                validate(arguments, APK_CATALOG[operation]["inputSchema"])
+                return await asyncio.to_thread(apk_sidecar.call, ident, operation, arguments)
             row["status"] = "analyzing"
             store.save(row)
             self.active[ident] = asyncio.current_task()

@@ -57,6 +57,17 @@ def readiness() -> dict:
         return {"status": "needs_repair", "error": str(exc)}
 
 
+def readiness_static() -> dict:
+    """RFC-0207 split: static APK tools (JDK, jadx, apktool) only, independent of the emulator."""
+    from .apk_sidecar import readiness_static as static
+    return static()
+
+
+def readiness_dynamic() -> dict:
+    """RFC-0207 split: emulator, adb and AVD readiness for android_capture."""
+    return readiness()
+
+
 def _state(**values):
     store.atomic_json(root() / "setup.json", values)
     return values

@@ -101,6 +101,31 @@ def _missing_static_components() -> list[str]:
     return missing
 
 
+def readiness_live() -> dict:
+    """Live check: run each pinned tool and compare the version it reports with engine-lock.json."""
+    static = readiness_static()
+    if static["status"] != "ready":
+        return static
+    versions = static["versions"]
+    probes = [("JDK", [JDK, "-version"], ".".join(versions["jdk"].split("+")[0].split(".")[:3])),
+              ("jadx", ["env", f"JAVA_HOME={JAVA_HOME}", f"PATH={JAVA_HOME}/bin:/usr/bin:/bin", JADX, "--version"], versions["jadx"]),
+              ("apktool", [JDK, "-jar", APKTOOL_JAR, "--version"], versions["apktool"])]
+    broken = []
+    for name, argv, expected in probes:
+        try:
+            result = _wsl(argv, 120)
+            text = (result.stdout + result.stderr).decode("utf-8", errors="replace")
+            ok = result.returncode == 0 and expected in text
+        except (OSError, subprocess.TimeoutExpired):
+            ok = False
+        if not ok:
+            broken.append(name)
+    if broken:
+        return {"status": "needs_repair", "stage": "Static APK toolchain does not run",
+                "error": f"Not runnable or wrong version: {', '.join(broken)}; run setup to repair", "versions": versions}
+    return {"status": "ready", "stage": "Static APK toolchain verified by execution", "versions": versions}
+
+
 def readiness_static() -> dict:
     """Static APK readiness only; emulator, AVD and adb state never affect it."""
     try:
@@ -563,6 +588,37 @@ def parse_manifest(path: Path, apktool_yml: Path | None = None) -> tuple[dict, d
                 "permissions": {"declared": declared, "requested": requested, "high_risk": high_risk},
                 "attack_surface": surface}
     return manifest, {"package": package, "components": items, "attack_surface": surface}
+
+
+# --- Agent tool catalog (runtime.py) ----------------------------------------------------
+
+CATALOG = {
+    "apk_decompile": {"name": "apk_decompile",
+                      "description": "Run apktool and jadx on the prepared APK and record manifest and decompile evidence.",
+                      "inputSchema": {"type": "object", "properties": {"skip_jadx": {"type": "boolean"}},
+                                      "additionalProperties": False}},
+    "apk_extract_manifest": {"name": "apk_extract_manifest",
+                             "description": "Return the parsed manifest, permissions and exported attack surface.",
+                             "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+}
+
+
+def call(ident: str, operation: str, arguments: dict) -> dict:
+    """Execute an admitted catalog operation; decompile writes its own evidence records."""
+    if operation == "apk_decompile":
+        before = len(store.load(ident)["evidence"])
+        row = decompile(ident, bool(arguments.get("skip_jadx", False)))
+        return {"status": "evidence", "investigation_status": row["status"],
+                "evidence": row["evidence"][before:], "unknowns": row.get("unknowns", [])}
+    if operation == "apk_extract_manifest":
+        row = store.load(ident)
+        eid = next((e["id"] for e in reversed(row["evidence"]) if e["operation"] == "apk_manifest"), None)
+        try:
+            manifest, components = metadata(ident, "manifest"), metadata(ident, "components")
+        except FileNotFoundError as exc:
+            raise ValueError("No decoded manifest yet; call apk_decompile first") from exc
+        return {"status": "evidence", "evidence_id": eid, "manifest": manifest, "components": components}
+    raise PermissionError("Operation is not admitted")
 
 
 # --- Read side used by the API ---------------------------------------------------------

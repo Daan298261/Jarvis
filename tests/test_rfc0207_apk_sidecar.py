@@ -415,3 +415,73 @@ def test_apk_api_endpoints(env):
     assert summary["decompiled"] is True and summary["parts"] == 2
     assert client.get("/api/investigations/0123456789abcdef0123456789abcdef/apk/summary").status_code == 404
     assert client.get("/api/investigations/readiness").json()["apk_static"]["status"] == "ready"
+
+
+FIXTURES = Path(__file__).parent / "fixtures" / "apk"
+
+
+def test_real_aapt2_built_apk_intake(env):
+    """minimal_valid.apk was linked by aapt2 35.0.0 from minimal_valid.AndroidManifest.xml (binary AXML + resources.arsc)."""
+    src, _ = env
+    real = FIXTURES / "minimal_valid.apk"
+    with zipfile.ZipFile(real) as z:
+        assert z.read("AndroidManifest.xml")[:4] == b"\x03\x00\x08\x00"  # binary AXML chunk header
+        assert "resources.arsc" in z.namelist()
+    copy = src / "minimal_valid.apk"
+    copy.write_bytes(real.read_bytes())
+    row = prepare(copy)
+    assert row["sha256"] == hashlib.sha256(real.read_bytes()).hexdigest()
+    assert row["apk"]["base"]["entries"] == len(zipfile.ZipFile(real).infolist())
+    assert evidence(row, "E00001")["result"]["format"] == "apk"
+
+
+def test_readiness_split_and_live_check(env, monkeypatch):
+    _, fake = env
+    from app.reverse_engineering import android
+    assert android.readiness_static()["status"] == "ready"
+    monkeypatch.setattr(android, "root", lambda: env[0])
+    assert android.readiness_dynamic()["status"] == "not_installed"  # emulator absent; static stays ready
+    real_call = fake.__call__
+
+    def versions(args, *a, **kw):
+        argv = args[6:] if args and args[0] == "wsl.exe" else []
+        if "-version" in argv:
+            return subprocess.CompletedProcess(args, 0, b"", b'openjdk version "21.0.12" 2026')
+        if "--version" in argv:
+            return subprocess.CompletedProcess(args, 0, (b"1.5.6" if apk_sidecar.JADX in argv else b"2.10.0"), b"")
+        return real_call(args, *a, **kw)
+    monkeypatch.setattr(subprocess, "run", versions)
+    assert apk_sidecar.readiness_live()["status"] == "ready"
+
+    def wrong(args, *a, **kw):
+        argv = args[6:] if args and args[0] == "wsl.exe" else []
+        if "--version" in argv and apk_sidecar.APKTOOL_JAR in argv:
+            return subprocess.CompletedProcess(args, 0, b"2.9.3", b"")
+        return versions(args, *a, **kw)
+    monkeypatch.setattr(subprocess, "run", wrong)
+    live = apk_sidecar.readiness_live()
+    assert live["status"] == "needs_repair" and "apktool" in live["error"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_catalog_exposes_and_runs_apk_operations(env, monkeypatch):
+    from types import SimpleNamespace
+    from app.reverse_engineering.runtime import Investigations
+    src, _ = env
+    row = prepare(make_xapk(src))
+    service = Investigations()
+
+    async def actor(ident):
+        return SimpleNamespace(tools={})
+    monkeypatch.setattr(service, "actor", actor)
+    monkeypatch.setattr("app.policy.action_gate.gate_side_effect",
+                        lambda *a, **k: SimpleNamespace(allowed=True, requires_approval=False, pending_approval_id=None, reason=""))
+    catalog = await service.catalog(row["id"], None)
+    names = {t["name"] for t in catalog["operations"]}
+    assert {"apk_decompile", "apk_extract_manifest"} <= names
+    with pytest.raises(ValueError, match="apk_decompile first"):
+        await service.call(row["id"], "apk_extract_manifest", {}, None)
+    out = await service.call(row["id"], "apk_decompile", {"skip_jadx": True}, None)
+    assert out["status"] == "evidence" and [e["operation"] for e in out["evidence"]] == ["apk_manifest", "apk_decompile"]
+    got = await service.call(row["id"], "apk_extract_manifest", {}, None)
+    assert got["evidence_id"] == "E00002" and got["manifest"]["package"] == "org.anzu.test"

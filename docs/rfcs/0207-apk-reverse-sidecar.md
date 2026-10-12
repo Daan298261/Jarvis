@@ -11,6 +11,12 @@
 
 This PR is **specs-only**. No application code. Do not edit spec docs. Do not commit.
 
+
+## Implementation Slices
+
+**Slice 1 (implemented, `backend/app/reverse_engineering/apk_sidecar.py`):** `readiness_static()` (presence + pinned apktool SHA-256) and `readiness_live()` (tools executed, versions compared), with `android.readiness_static()` / `android.readiness_dynamic()` as the split; safe intake of standalone APK, XAPK/APKS and split-APK directories from an owner-named local path (zip-slip, symlink, 8 GiB and 50,000-file caps, per-part SHA-256 and size); apktool + jadx orchestration with `-Xmx4g -XX:+UseG1GC`, 300 s / 600 s timeouts and SIGTERM-then-SIGKILL; manifest, permission and component extraction (§5); evidence `apk_unpack`, `apk_manifest`, `apk_decompile` plus `custody.json`; REST routes `POST /apk/prepare`, `POST /{id}/apk/decompile`, `GET /{id}/apk/summary|manifest|components`; catalog operations `apk_decompile` and `apk_extract_manifest`. Tests: synthetic ZIPs plus a real aapt2-linked `tests/fixtures/apk/minimal_valid.apk`.
+
+**Later slices:** device (ADB) and FFS origins; native `.so` inventory (§6, `apk_inventory_native`); endpoints (§7) and crypto hints (§8) with evidence E00004-E00006; smali / jadx AXML fallbacks; remaining fixtures.
 ---
 
 ## Problem

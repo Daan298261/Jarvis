@@ -75,11 +75,14 @@ async def _setup(android: bool):
 
 
 @router.get("/readiness")
-async def readiness():
-    from ..reverse_engineering.android import readiness as android_readiness
-    return {"engine": await asyncio.to_thread(provision.readiness),
-            "android": android_readiness(),
-            "apk_static": await asyncio.to_thread(apk_sidecar.readiness_static)}
+async def readiness(live: bool = False):
+    from ..reverse_engineering.android import readiness_dynamic, readiness_static
+    out = {"engine": await asyncio.to_thread(provision.readiness),
+           "android": readiness_dynamic(),
+           "apk_static": await asyncio.to_thread(readiness_static)}
+    if live:
+        out["apk_live"] = await asyncio.to_thread(apk_sidecar.readiness_live)
+    return out
 
 
 @router.post("/setup")
