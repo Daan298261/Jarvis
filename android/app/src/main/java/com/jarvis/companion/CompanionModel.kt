@@ -1300,6 +1300,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         }
         runCatching { connectivity.registerDefaultNetworkCallback(callback) }
             .onSuccess { networkCallback = callback }
+            .onFailure { Log.w(TAG, "Network watcher not registered; Wi-Fi changes will not trigger re-discovery", it) }
     }
 
     private fun onNetworkChange() {
@@ -1307,6 +1308,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         if (api.deviceId.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
             runCatching { api.recoverPairedLanFromBeacon() }
+                .onFailure { Log.w(TAG, "LAN re-discovery after network change failed: ${it.message}") }
             networkChanged.trySend(Unit)
         }
     }
@@ -1314,6 +1316,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         networkCallback?.let { callback ->
             runCatching { getApplication<Application>().getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(callback) }
+                .onFailure { Log.w(TAG, "Network watcher unregister failed", it) }
         }
         networkChanged.close()
         captureJob?.cancel(); listenJob?.cancel(); ttsQueueJob?.cancel(); ttsJob?.cancel()

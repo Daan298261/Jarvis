@@ -14,11 +14,15 @@ import java.io.File
  * Manual device/emulator sign-off for the offline pack (RFC-0204): loads a real GGUF
  * through the shipped llama.cpp JNI runtime and generates a short reply.
  *
- *   adb push Qwen3.5-2B-heretic-Q4_K_M.gguf /sdcard/Android/data/com.jarvis.companion/files/
+ *   adb push Qwen3.5-2B-heretic-Q4_K_M.gguf /data/local/tmp/
+ *   adb shell "run-as com.jarvis.companion sh -c 'mkdir -p files/model-packs && \
+ *     cp /data/local/tmp/Qwen3.5-2B-heretic-Q4_K_M.gguf files/model-packs/'"     # debug build
  *   adb shell am instrument -w -r -e class com.jarvis.companion.OnDeviceModelLoadTest \
+ *     -e modelPath /data/user/0/com.jarvis.companion/files/model-packs/Qwen3.5-2B-heretic-Q4_K_M.gguf \
  *     com.jarvis.companion.test/androidx.test.runner.AndroidJUnitRunner
  *
- * Optional: -e modelPath <absolute path>. Skips (assumption) when no model is present,
+ * Without -e modelPath it uses the app's own pack location (files/model-packs/<filename>),
+ * i.e. where an in-app download lands. Skips (assumption) when no model is present,
  * so CI without weights is unaffected. Reports load time and tok/s as instrumentation status.
  */
 @RunWith(AndroidJUnit4::class)
@@ -29,7 +33,7 @@ class OnDeviceModelLoadTest {
         val context = instrumentation.targetContext
         val pack = CompanionPackCatalog.builtIn.first { it.recommended }
         val path = InstrumentationRegistry.getArguments().getString("modelPath")
-            ?: File(context.getExternalFilesDir(null), pack.filename).absolutePath
+            ?: File(File(context.filesDir, "model-packs"), pack.filename).absolutePath
         assumeTrue("model not present at $path", File(path).isFile)
 
         val engine = LlamaCppInferenceEngine()
