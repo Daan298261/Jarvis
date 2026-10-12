@@ -11,6 +11,13 @@ import {
   type CompanionOnboardingSnapshot,
   type CompanionPairingCode,
 } from "../api"
+import {
+  describeManagerView,
+  fetchManagerStatus,
+  pairingRetryDelayMs,
+  requestManagerRestart,
+  type ManagerView,
+} from "../companionPairingRecovery"
 import { speakChatReply } from "../tts/chatTtsPlayer"
 import { useSpeakChatReplies } from "../tts/chatTtsSettings"
 
@@ -80,6 +87,9 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
   const [spokenOfferId, setSpokenOfferId] = useState<string | null>(null)
   const [speakChatReplies] = useSpeakChatReplies()
   const autoSpokenRef = useRef(false)
+  const [managerView, setManagerView] = useState<ManagerView | null>(null)
+  const [retryAttempt, setRetryAttempt] = useState(0)
+  const autoRegeneratedRef = useRef<string | null>(null)
 
   const refreshDevices = useCallback(() => {
     if (compact) return Promise.resolve()
@@ -88,13 +98,15 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
 
   const applyResult = useCallback((result: Awaited<ReturnType<typeof getActiveCompanionPairingCode>>) => {
     if (!result.available) {
-      if (result.reason === "not_found") {
+      if (result.reason === "not_found" || result.reason === "unreachable") {
         setState({ mode: "waiting_api" })
         return
       }
       setState({ mode: "error", message: result.message || "Could not load pairing code." })
       return
     }
+    setRetryAttempt(0)
+    setManagerView(null)
     const remaining = remainingSeconds(result.pairing)
     if (remaining <= 0) {
       setState({ mode: "expired", pairing: result.pairing })
@@ -113,8 +125,8 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
           result = await createCompanionPairingCode()
         }
         applyResult(result)
-        if (!result.available && result.reason === "not_found") {
-          setMsg("Pairing service is unavailable. Check that Jarvis is running and try again.")
+        if (!result.available && (result.reason === "not_found" || result.reason === "unreachable")) {
+          setMsg("Pairing service is unavailable. Retrying automatically.")
         }
       } finally {
         setBusy(false)
@@ -122,6 +134,39 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
     },
     [applyResult],
   )
+
+  // Backend down: ask the manager why, and keep retrying with backoff until a code loads.
+  useEffect(() => {
+    if (state.mode !== "waiting_api") return
+    let cancelled = false
+    fetchManagerStatus().then((view) => {
+      if (!cancelled) setManagerView(view)
+    })
+    const timer = window.setTimeout(() => {
+      setRetryAttempt((attempt) => attempt + 1)
+      ensureCode(true).catch(() => setState({ mode: "waiting_api" }))
+    }, pairingRetryDelayMs(retryAttempt))
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [state.mode, retryAttempt, ensureCode])
+
+  async function restartBackend() {
+    setBusy(true)
+    setMsg("Restarting ANZU backend…")
+    try {
+      const result = await requestManagerRestart()
+      setMsg(result.message)
+      setManagerView(await fetchManagerStatus())
+      if (result.ok) {
+        setRetryAttempt(0)
+        await ensureCode(true)
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
 
   useEffect(() => {
     ensureCode(true).catch(() => setState({ mode: "waiting_api" }))
@@ -192,6 +237,16 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
     return () => window.clearInterval(timer)
   }, [state.mode, readyExpiresAt])
 
+  // A code that expires while the panel is open is replaced once, automatically.
+  const expiredId = state.mode === "expired" ? String(state.pairing?.id ?? state.pairing?.expires_at ?? "") : null
+  useEffect(() => {
+    if (expiredId === null || busy || autoRegeneratedRef.current === expiredId) return
+    autoRegeneratedRef.current = expiredId
+    void regenerate()
+    // regenerate is a plain component function; expiredId gates one call per code.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expiredId, busy])
+
   async function regenerate() {
     setBusy(true)
     setMsg("")
@@ -203,9 +258,9 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
       applyResult(result)
       if (result.available) {
         setMsg("New pairing code generated. Previous unclaimed codes are invalidated.")
-      } else if (result.reason === "not_found") {
+      } else if (result.reason === "not_found" || result.reason === "unreachable") {
         setState({ mode: "waiting_api" })
-        setMsg("Pairing service is unavailable. Check that Jarvis is running and try again.")
+        setMsg("Pairing service is unavailable. Retrying automatically.")
       } else {
         setState({ mode: "error", message: result.message || "Could not regenerate code." })
       }
@@ -316,7 +371,9 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
       <div className="companion-pairing-meta">
         <span className="companion-pairing-ttl">{countdown}</span>
         {state.mode === "waiting_api" && (
-          <span className="companion-pairing-hint">Pairing service unavailable.</span>
+          <span className="companion-pairing-hint" role="status">
+            {describeManagerView(managerView)}
+          </span>
         )}
         {state.mode === "error" && <span className="companion-pairing-hint">{state.message}</span>}
       </div>
@@ -337,7 +394,12 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
         </button>
         {state.mode === "waiting_api" && (
           <button className="btn secondary" type="button" disabled={busy} onClick={() => void ensureCode(true)}>
-            Try create
+            Retry now
+          </button>
+        )}
+        {state.mode === "waiting_api" && managerView?.kind === "status" && managerView.status.core.state !== "ready" && (
+          <button className="btn secondary" type="button" disabled={busy} onClick={() => void restartBackend()}>
+            Restart ANZU backend
           </button>
         )}
       </div>

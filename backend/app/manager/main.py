@@ -5,11 +5,13 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Literal
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -17,6 +19,7 @@ from pydantic import BaseModel
 
 from ..config import repo_root
 from ..hardware import hardware_dict
+from .supervisor import LAUNCH_LOG_MAX_BYTES, LAUNCH_LOGS_KEPT, CoreSupervisor, rotate_file
 
 CORE_HEALTH_URL = "http://127.0.0.1:4780/api/health"
 STATIC_DIR = Path(__file__).with_name("static")
@@ -109,6 +112,7 @@ async def status_snapshot() -> dict:
     return {
         "manager": {"healthy": True, "bind": "127.0.0.1:4782"},
         "core": {"state": state, "healthy": healthy, "process_present": process_present},
+        "supervisor": SUPERVISOR.snapshot(),
         "hardware": hardware_dict(),
         "storage": {"disk": disk, "paths": storage},
         "agents": details,
@@ -130,7 +134,21 @@ def _launch(action: str) -> None:
         args = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(_root() / "installer" / "windows" / "force-stop-jarvis.ps1"), "-InstallRoot", str(root), "-PreserveManager"]
     else:
         raise RuntimeError("restart is sequenced by the control endpoint")
-    subprocess.Popen(args, cwd=root, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    # Launcher output goes to a size-rotated log so a failed start is never silent.
+    log_path = root / "logs" / "anzu-launch.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    rotate_file(log_path, LAUNCH_LOGS_KEPT, LAUNCH_LOG_MAX_BYTES)
+    with log_path.open("ab") as handle:
+        handle.write(f"\n=== {action} {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n".encode("utf-8"))
+        handle.flush()
+        subprocess.Popen(
+            args,
+            cwd=root,
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
 
 
 async def _wait_for(action: str) -> dict:
@@ -142,7 +160,34 @@ async def _wait_for(action: str) -> dict:
     return await status_snapshot()
 
 
+SUPERVISOR = CoreSupervisor(
+    root=lambda: _root(),
+    healthy=lambda: _core_healthy(),
+    process_present=lambda: _managed_process_running(),
+    launch=lambda action: _launch(action),
+)
+
 app = FastAPI(title="ANZU Manager", docs_url=None, redoc_url=None)
+
+# The portal (served by the core on :4780, or Vite in dev) asks the manager why
+# the core is down and offers a Restart button. Only loopback portal origins may
+# read or call it; the loopback_only middleware still rejects remote clients.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"^https?://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$",
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
+
+
+@app.on_event("startup")
+async def _start_supervisor() -> None:
+    SUPERVISOR.start()
+
+
+@app.on_event("shutdown")
+async def _stop_supervisor() -> None:
+    await SUPERVISOR.stop()
 
 
 @app.middleware("http")
@@ -162,6 +207,7 @@ async def manager_status():
 async def manager_control(action: Literal["start", "stop", "restart"], body: ControlRequest):
     if not body.confirm:
         raise HTTPException(status_code=400, detail="Explicit confirmation is required")
+    SUPERVISOR.set_desired(action != "stop")
     try:
         if action == "restart":
             _launch("stop")

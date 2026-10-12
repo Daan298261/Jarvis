@@ -4645,7 +4645,7 @@ export type CompanionStudioCapabilities = {
 
 export type CompanionPairingApiResult =
   | { available: true; pairing: CompanionPairingCode }
-  | { available: false; reason: "not_found" | "error"; message?: string }
+  | { available: false; reason: "not_found" | "error" | "unreachable"; message?: string }
 
 async function companionPairingRequest(
   path: string,
@@ -4680,7 +4680,8 @@ async function companionPairingRequest(
     }
     return { available: true, pairing }
   } catch (err) {
-    return { available: false, reason: "error", message: String(err) }
+    // fetch() only throws when the backend cannot be reached at all.
+    return { available: false, reason: "unreachable", message: String(err) }
   }
 }
 
