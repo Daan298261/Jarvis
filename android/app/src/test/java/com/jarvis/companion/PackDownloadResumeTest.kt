@@ -72,7 +72,7 @@ class PackDownloadResumeTest {
     @Test
     fun droppedDownloadRetriesAndResumesWithRange() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        ShadowStatFs.registerStats(context.filesDir.absolutePath + "/model-packs", 1_000_000, 1_000_000, 1_000_000)
+        ShadowStatFs.registerStats(java.io.File(context.filesDir, "model-packs"), 1_000_000, 1_000_000, 1_000_000)
         val sha = MessageDigest.getInstance("SHA-256").digest(payload).joinToString("") { "%02x".format(it) }
         val pack = JSONObject()
             .put("id", "resume-test")
