@@ -193,7 +193,7 @@ async def apk_summary(ident: str):
 
 
 @router.get("/{ident}/apk/{document}")
-async def apk_metadata(ident: str, document: Literal["manifest", "components"]):
+async def apk_metadata(ident: str, document: Literal["manifest", "components", "native"]):
     try:
         return await asyncio.to_thread(apk_sidecar.metadata, ident, document)
     except (ValueError, FileNotFoundError) as exc:

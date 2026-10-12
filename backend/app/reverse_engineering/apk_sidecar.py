@@ -1,10 +1,12 @@
-"""RFC-0207 RE Phase 1, slice 1: execution-free APK reverse-engineering sidecar.
+"""RFC-0207 RE Phase 1: execution-free APK reverse-engineering sidecar.
 
-Static toolchain readiness (JDK, jadx, apktool), safe intake of standalone APKs,
-XAPK/APKS containers and split-APK directories, apktool + jadx orchestration inside
-the ANZU-REA WSL distribution with heap caps and timeouts, and manifest, permission
-and component extraction. Every step is written to the RFC-0201 investigation store
-as citable evidence plus a chain-of-custody record. No target code is executed.
+Slice 1: static toolchain readiness (JDK, jadx, apktool), safe intake of standalone
+APKs, XAPK/APKS containers and split-APK directories, apktool + jadx orchestration
+inside the ANZU-REA WSL distribution with heap caps and timeouts, and manifest,
+permission and component extraction.
+Slice 2: native .so inventory (ABIs, ELF class/machine, JNI exports, packer/entropy).
+Every step is written to the RFC-0201 investigation store as citable evidence plus a
+chain-of-custody record. No target code is executed.
 """
 from __future__ import annotations
 
@@ -798,6 +800,371 @@ def parse_manifest(path: Path, apktool_yml: Path | None = None) -> tuple[dict, d
     return manifest, {"package": package, "components": items, "attack_surface": surface}
 
 
+# --- Native .so inventory (RFC-0207 §6) -------------------------------------------------
+
+PACKER_SO_NAMES = {
+    "libsecexe.so": "Bangcle",
+    "libsecmain.so": "Bangcle",
+    "libtxloader.so": "Tencent Legu",
+    "libshell.so": "Tencent Legu",
+    "libprotectClass.so": "Qihoo 360",
+    "libjiagu.so": "Qihoo 360",
+    "libDexHelper.so": "SecNeo",
+}
+ELF_MACHINES = {3: "x86", 40: "ARM", 62: "x86_64", 183: "AArch64"}
+_LIB_SO = re.compile(r"lib/([^/]+)/([^/]+\.so)$")
+_ENTROPY_BLOCK = 4096
+_ENTROPY_THRESHOLD = 7.2
+
+
+def _shannon_entropy(data: bytes) -> float:
+    import math
+    if not data:
+        return 0.0
+    counts = [0] * 256
+    for b in data:
+        counts[b] += 1
+    n = len(data)
+    return -sum((c / n) * math.log2(c / n) for c in counts if c)
+
+
+def _entropy_hints(data: bytes) -> dict:
+    high = 0
+    blocks = 0
+    max_e = 0.0
+    for i in range(0, len(data), _ENTROPY_BLOCK):
+        chunk = data[i:i + _ENTROPY_BLOCK]
+        if len(chunk) < _ENTROPY_BLOCK and blocks:
+            break
+        if not chunk:
+            continue
+        blocks += 1
+        e = _shannon_entropy(chunk)
+        if e > max_e:
+            max_e = e
+        if e > _ENTROPY_THRESHOLD:
+            high += 1
+    return {
+        "block_bytes": _ENTROPY_BLOCK,
+        "blocks": blocks,
+        "high_entropy_blocks": high,
+        "max_block_entropy": round(max_e, 3),
+        "high_entropy": high > 0,
+    }
+
+
+def _parse_elf(data: bytes) -> dict:
+    """Minimal ELF header + dynsym JNI scan for common Android little-endian 32/64 .so files."""
+    import struct
+    out: dict = {"parseable": False, "jni_exports": []}
+    if len(data) < 52 or data[:4] != b"\x7fELF":
+        out["note"] = "not ELF or truncated"
+        return out
+    ei_class, ei_data = data[4], data[5]
+    if ei_class not in (1, 2) or ei_data not in (1, 2):
+        out["note"] = "unsupported ELF class/endian"
+        return out
+    endian = "<" if ei_data == 1 else ">"
+    is64 = ei_class == 2
+    try:
+        if is64:
+            if len(data) < 64:
+                raise struct.error("short ehdr")
+            e_type, e_machine = struct.unpack_from(endian + "HH", data, 16)
+            e_shoff, = struct.unpack_from(endian + "Q", data, 40)
+            e_shentsize, e_shnum, e_shstrndx = struct.unpack_from(endian + "HHH", data, 58)
+        else:
+            e_type, e_machine = struct.unpack_from(endian + "HH", data, 16)
+            e_shoff, = struct.unpack_from(endian + "I", data, 32)
+            e_shentsize, e_shnum, e_shstrndx = struct.unpack_from(endian + "HHH", data, 46)
+    except struct.error:
+        out["note"] = "malformed ELF header"
+        return out
+    out.update({
+        "parseable": True,
+        "elf_class": 64 if is64 else 32,
+        "endian": "little" if ei_data == 1 else "big",
+        "machine": ELF_MACHINES.get(e_machine, f"unknown_{e_machine}"),
+        "machine_code": e_machine,
+        "etype": e_type,
+        "note": None,
+    })
+    if e_shoff == 0 or e_shnum == 0 or e_shentsize < (64 if is64 else 40):
+        out["note"] = "no section headers; JNI symbols not scanned"
+        return out
+    if e_shoff + e_shnum * e_shentsize > len(data):
+        out["note"] = "section table truncated; JNI symbols not scanned"
+        return out
+
+    def sh_at(i: int):
+        off = e_shoff + i * e_shentsize
+        if is64:
+            name, typ, _flags, _addr, offset, size, link, _info, _align, entsize = struct.unpack_from(
+                endian + "IIQQQQIIQQ", data, off)
+        else:
+            name, typ, _flags, _addr, offset, size, link, _info, _align, entsize = struct.unpack_from(
+                endian + "IIIIIIIIII", data, off)
+        return name, typ, offset, size, link, entsize
+
+    dynsym = None
+    for i in range(e_shnum):
+        _n, typ, offset, size, link, entsize = sh_at(i)
+        if typ == 11:  # SHT_DYNSYM
+            dynsym = (offset, size, link, entsize)
+            break
+    if dynsym is None:
+        out["note"] = "no .dynsym; JNI symbols not scanned"
+        return out
+    sym_off, sym_size, str_link, sym_entsize = dynsym
+    if sym_entsize <= 0 or str_link >= e_shnum:
+        out["note"] = "invalid dynsym linkage"
+        return out
+    _sn, _st, stroff, strsize, _sl, _se = sh_at(str_link)
+    if stroff + strsize > len(data) or sym_off + sym_size > len(data):
+        out["note"] = "dynsym/strtab truncated"
+        return out
+    strtab = data[stroff:stroff + strsize]
+    expected = 24 if is64 else 16
+    if sym_entsize < expected:
+        out["note"] = "unexpected dynsym entry size"
+        return out
+    jni = []
+    for i in range(sym_size // sym_entsize):
+        base = sym_off + i * sym_entsize
+        try:
+            st_name, = struct.unpack_from(endian + "I", data, base)
+        except struct.error:
+            break
+        if st_name >= len(strtab):
+            continue
+        end = strtab.find(b"\x00", st_name)
+        if end < 0:
+            continue
+        name = strtab[st_name:end].decode("utf-8", errors="replace")
+        if name.startswith("Java_") or name in {"JNI_OnLoad", "JNI_OnUnload"}:
+            jni.append(name)
+    out["jni_exports"] = sorted(set(jni))
+    return out
+
+
+def _lib_rel_from_parts(parts: tuple[str, ...]) -> str | None:
+    if "lib" not in parts:
+        return None
+    i = parts.index("lib")
+    rel = "/".join(parts[i:])
+    return rel if _LIB_SO.fullmatch(rel) else None
+
+
+def _collect_native_candidates(row: dict) -> list[tuple[str, str, Path | None, bytes | None]]:
+    """Return (relative_path, abi, disk_path|None, zip_bytes|None) for each unique lib/**/*.so."""
+    seen: set[str] = set()
+    found: list[tuple[str, str, Path | None, bytes | None]] = []
+    root = store.directory(row["id"]) / "apk"
+
+    def add(rel: str, disk: Path | None = None, blob: bytes | None = None) -> None:
+        rel = rel.replace("\\", "/")
+        m = _LIB_SO.fullmatch(rel)
+        if not m:
+            return
+        if rel in seen:
+            return
+        seen.add(rel)
+        found.append((rel, m.group(1), disk, blob))
+
+    for base in (root / "native", root / "apktool", root / "staged"):
+        if not base.is_dir():
+            continue
+        for so in base.rglob("*.so"):
+            if not so.is_file():
+                continue
+            try:
+                rel = _lib_rel_from_parts(so.relative_to(base).parts)
+            except ValueError:
+                rel = None
+            if rel is None:
+                rel = _lib_rel_from_parts(so.parts)
+            if rel:
+                add(rel, disk=so)
+
+    for part in row.get("apk", {}).get("parts", []):
+        recorded = [n.replace("\\", "/") for n in (part.get("native_libs") or [])]
+        path = Path(part["path"]) if part.get("path") else None
+        if path and path.is_file() and zipfile.is_zipfile(path):
+            with zipfile.ZipFile(path) as z:
+                names = {i.filename.replace("\\", "/") for i in z.infolist() if not i.is_dir()}
+                for name in sorted(names | set(recorded)):
+                    if not _LIB_SO.fullmatch(name):
+                        continue
+                    if name in seen:
+                        continue
+                    key = name if name in z.namelist() else next(
+                        (n for n in z.namelist() if n.replace("\\", "/") == name), None)
+                    if key is None:
+                        continue
+                    info = z.getinfo(key)
+                    if info.file_size > MAX_BYTES:
+                        continue
+                    add(name, blob=z.read(info))
+        elif path and path.is_dir():
+            for so in path.rglob("*.so"):
+                if not so.is_file():
+                    continue
+                rel = _lib_rel_from_parts(so.relative_to(path).parts)
+                if rel:
+                    add(rel, disk=so)
+        else:
+            for name in recorded:
+                add(name)
+    return found
+
+
+def _materialize_so(ident: str, rel: str, data: bytes) -> Path:
+    """Write lib bytes under apk/native/<rel> with zip-slip checks."""
+    dest_root = (store.directory(ident) / "apk" / "native").resolve()
+    dest_root.mkdir(parents=True, mode=0o700, exist_ok=True)
+    target = (dest_root / Path(*PurePosixPath(rel).parts)).resolve()
+    if not target.is_relative_to(dest_root):
+        raise ValueError(f"Unsafe native library path: {rel}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.exists():
+        target.write_bytes(data)
+    return target
+
+
+def _inspect_so(rel: str, abi: str, data: bytes, source: str) -> dict:
+    digest = hashlib.sha256(data).hexdigest()
+    elf = _parse_elf(data)
+    ent = _entropy_hints(data)
+    so_name = PurePosixPath(rel).name
+    packer = PACKER_SO_NAMES.get(so_name)
+    hints = []
+    if packer:
+        hints.append({
+            "kind": "packer_signature",
+            "packer": packer,
+            "detail": f"Native code is protected by {packer}; static symbols are obscured.",
+        })
+    if ent["high_entropy"]:
+        hints.append({
+            "kind": "high_entropy",
+            "detail": (
+                f"Shannon entropy > {_ENTROPY_THRESHOLD} on {ent['high_entropy_blocks']}/"
+                f"{ent['blocks']} {_ENTROPY_BLOCK}-byte blocks "
+                f"(max {ent['max_block_entropy']}); packing or encryption likely."
+            ),
+        })
+    elf_view = {
+        "parseable": elf.get("parseable", False),
+        "elf_class": elf.get("elf_class"),
+        "endian": elf.get("endian"),
+        "machine": elf.get("machine"),
+        "machine_code": elf.get("machine_code"),
+        "note": elf.get("note"),
+    }
+    return {
+        "path": rel,
+        "abi": abi,
+        "name": so_name,
+        "bytes": len(data),
+        "sha256": digest,
+        "source": source,
+        "elf": elf_view,
+        "jni_exports": list(elf.get("jni_exports") or []),
+        "entropy": ent,
+        "hints": hints,
+    }
+
+
+def apk_inventory_native(ident: str, abi: str | None = None) -> dict:
+    """Inventory native .so libraries across APK/split parts (RFC-0207 §6); writes apk_native_libs evidence."""
+    row = store.load(ident)
+    if not row.get("apk"):
+        raise ValueError("Investigation was not prepared as an APK target")
+    store.validate_snapshot(row)
+    candidates = _collect_native_candidates(row)
+    libraries = []
+    unknowns: list[str] = []
+    for rel, lib_abi, disk, blob in candidates:
+        if abi and lib_abi != abi:
+            continue
+        if disk is not None and disk.is_file():
+            data = disk.read_bytes()
+            source = "disk"
+        elif blob is not None:
+            data = blob
+            source = "apk_zip"
+            try:
+                _materialize_so(ident, rel, data)
+            except ValueError:
+                pass
+        else:
+            unknowns.append(f"Native library {rel} was listed but bytes were not available.")
+            continue
+        libraries.append(_inspect_so(rel, lib_abi, data, source))
+
+    libraries.sort(key=lambda item: (item["abi"], item["path"]))
+    abis = sorted({lib["abi"] for lib in libraries})
+    packers = sorted({
+        hint["packer"] for lib in libraries for hint in lib["hints"] if hint["kind"] == "packer_signature"
+    })
+    high_entropy = sum(1 for lib in libraries if lib["entropy"]["high_entropy"])
+    for packer in packers:
+        unknowns.append(f"Native code is protected by {packer}; static symbols are obscured.")
+    if high_entropy:
+        unknowns.append(
+            f"{high_entropy} native librar{'y' if high_entropy == 1 else 'ies'} show high entropy "
+            f"(>{_ENTROPY_THRESHOLD} on {_ENTROPY_BLOCK}-byte blocks); "
+            "static symbol extraction may be incomplete."
+        )
+
+    doc = {
+        "investigation_id": ident,
+        "filter_abi": abi,
+        "abis": abis,
+        "library_count": len(libraries),
+        "libraries": libraries,
+        "packers_detected": packers,
+        "high_entropy_count": high_entropy,
+        "unknowns": unknowns,
+        "limitations": [
+            "Static inspection only; no native code was executed.",
+            "JNI exports come from .dynsym when section headers are present.",
+            "Unparseable or truncated ELF files still appear with path, size and SHA-256.",
+        ],
+    }
+    meta = store.directory(ident) / "apk" / "metadata"
+    meta.mkdir(parents=True, mode=0o700, exist_ok=True)
+    store.atomic_json(meta / "native.json", doc)
+    eid = _record(row, "apk_native_libs", {"abi": abi}, {
+        "provider": "ANZU APK sidecar",
+        "abis": abis,
+        "library_count": len(libraries),
+        "libraries": [{
+            "path": lib["path"], "abi": lib["abi"], "bytes": lib["bytes"], "sha256": lib["sha256"],
+            "elf_class": lib["elf"].get("elf_class"), "machine": lib["elf"].get("machine"),
+            "jni_exports": lib["jni_exports"], "hints": lib["hints"],
+        } for lib in libraries],
+        "packers_detected": packers,
+        "high_entropy_count": high_entropy,
+        "unknowns": unknowns,
+        "metadata": "apk/metadata/native.json",
+        "limitations": doc["limitations"],
+    })
+    row["unknowns"] = list(dict.fromkeys([*row.get("unknowns", []), *unknowns]))
+    if row["status"] in {"prepared", "investigating", "partial"}:
+        row["status"] = "partial" if unknowns else "investigating"
+    noun = "library" if len(libraries) == 1 else "libraries"
+    detail = f"Inventoried {len(libraries)} native {noun}"
+    if abi:
+        detail += f" (abi={abi})"
+    detail += "."
+    _coc(row, "apk_native_inventoried", detail,
+         {"evidence": eid, "abis": abis, "library_count": len(libraries)})
+    _custody(row, native_inventoried_at=_now())
+    store.save(row)
+    return {**doc, "evidence_id": eid, "investigation_status": row["status"]}
+
+
 # --- Agent tool catalog (runtime.py) ----------------------------------------------------
 
 CATALOG = {
@@ -808,6 +1175,11 @@ CATALOG = {
     "apk_extract_manifest": {"name": "apk_extract_manifest",
                              "description": "Return the parsed manifest, permissions and exported attack surface.",
                              "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+    "apk_inventory_native": {"name": "apk_inventory_native",
+                             "description": "Inventory native .so libraries, ABIs, ELF headers, JNI exports and packer/entropy hints.",
+                             "inputSchema": {"type": "object",
+                                             "properties": {"abi": {"type": "string"}},
+                                             "additionalProperties": False}},
 }
 
 
@@ -826,13 +1198,20 @@ def call(ident: str, operation: str, arguments: dict, claimed: dict | None = Non
         except FileNotFoundError as exc:
             raise ValueError("No decoded manifest yet; call apk_decompile first") from exc
         return {"status": "evidence", "evidence_id": eid, "manifest": manifest, "components": components}
+    if operation == "apk_inventory_native":
+        abi = arguments.get("abi")
+        if abi is not None and not isinstance(abi, str):
+            raise ValueError("abi must be a string")
+        out = apk_inventory_native(ident, abi)
+        return {"status": "evidence", "evidence_id": out["evidence_id"],
+                "investigation_status": out["investigation_status"], "native": out}
     raise PermissionError("Operation is not admitted")
 
 
 # --- Read side used by the API ---------------------------------------------------------
 
 def metadata(ident: str, name: str) -> dict:
-    if name not in {"manifest", "components"}:
+    if name not in {"manifest", "components", "native"}:
         raise ValueError("Unknown APK metadata document")
     p = store.directory(ident) / "apk" / "metadata" / f"{name}.json"
     if not p.is_file():

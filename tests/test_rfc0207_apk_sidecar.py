@@ -688,3 +688,183 @@ def test_release_is_noop_while_decompile_owns_claim(env):
         apk_sidecar._OWNED.discard(row["id"])
     apk_sidecar.release(row["id"])
     assert store.load(row["id"])["status"] == "interrupted"
+
+# --- RFC-0207 slice 2: native .so inventory ----------------------------------------------
+
+def _elf64_le_with_jni(symbols, pad_high_entropy=False):
+    """Tiny little-endian ELF64 shared object with .dynsym/.dynstr carrying the given names."""
+    import struct
+    shoff = 64
+    shentsize = 64
+    shnum = 4
+    shstr = b"\x00.dynstr\x00.dynsym\x00.shstrtab\x00"
+    dynstr = b"\x00" + b"".join(s.encode("ascii") + b"\x00" for s in symbols)
+    syms = [struct.pack("<IBBHQQ", 0, 0, 0, 0, 0, 0)]
+    off = 1
+    for s in symbols:
+        syms.append(struct.pack("<IBBHQQ", off, 0x12, 0, 1, 0x1000, 0x10))
+        off += len(s) + 1
+    dynsym = b"".join(syms)
+    content_off = shoff + shnum * shentsize
+    dynstr_off = content_off
+    dynsym_off = dynstr_off + len(dynstr)
+    align = (8 - (dynsym_off % 8)) % 8
+    dynsym_off += align
+    shstr_off = dynsym_off + len(dynsym)
+
+    def shdr(name_off, typ, flags, addr, offset, size, link, info, align_v, entsize):
+        return struct.pack("<IIQQQQIIQQ", name_off, typ, flags, addr, offset, size, link, info, align_v, entsize)
+
+    sections = [
+        shdr(0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+        shdr(1, 3, 0, 0, dynstr_off, len(dynstr), 0, 0, 1, 0),
+        shdr(9, 11, 2, 0, dynsym_off, len(dynsym), 1, 1, 8, 24),
+        shdr(17, 3, 0, 0, shstr_off, len(shstr), 0, 0, 1, 0),
+    ]
+    ehdr = bytearray(64)
+    ehdr[0:4] = b"\x7fELF"
+    ehdr[4] = 2
+    ehdr[5] = 1
+    ehdr[6] = 1
+    struct.pack_into("<HHIQQQIHHHHHH", ehdr, 16, 3, 183, 1, 0, 0, shoff, 0, 64, 0, 0, shentsize, shnum, 3)
+    blob = bytearray(shstr_off + len(shstr))
+    blob[0:64] = ehdr
+    for i, sh in enumerate(sections):
+        blob[shoff + i * shentsize:shoff + (i + 1) * shentsize] = sh
+    blob[dynstr_off:dynstr_off + len(dynstr)] = dynstr
+    blob[dynsym_off:dynsym_off + len(dynsym)] = dynsym
+    blob[shstr_off:shstr_off + len(shstr)] = shstr
+    data = bytes(blob)
+    if pad_high_entropy:
+        import os
+        data = data + os.urandom(4096)
+    return data
+
+
+def test_native_inventory_across_splits(env):
+    src, _ = env
+    jni_elf = _elf64_le_with_jni(["Java_org_anzu_test_MainActivity_stringFromJNI", "JNI_OnLoad"])
+    plain = _elf64_le_with_jni(["not_jni_helper"])
+    with zipfile.ZipFile(src / "base.apk", "w") as z:
+        z.writestr("AndroidManifest.xml", b"\x03\x00\x08\x00binary-axml")
+        z.writestr("classes.dex", b"dex\n035\x00synthetic")
+        z.writestr("lib/arm64-v8a/libengine.so", jni_elf)
+        z.writestr("lib/armeabi-v7a/libengine.so", plain)
+    with zipfile.ZipFile(src / "config.arm64_v8a.apk", "w") as z:
+        z.writestr("AndroidManifest.xml", b"\x03\x00\x08\x00binary-axml")
+        z.writestr("lib/arm64-v8a/libsplit.so", plain)
+    out = src / "bundle.xapk"
+    with zipfile.ZipFile(out, "w") as z:
+        z.writestr("manifest.json", json.dumps({"package_name": "org.anzu.test", "split_apks": [
+            {"file": "base.apk", "id": "base"}, {"file": "config.arm64_v8a.apk", "id": "config.arm64_v8a"}]}))
+        z.write(src / "base.apk", "base.apk")
+        z.write(src / "config.arm64_v8a.apk", "config.arm64_v8a.apk")
+    row = prepare(out)
+    inv = apk_sidecar.apk_inventory_native(row["id"])
+    assert inv["library_count"] == 3
+    assert inv["abis"] == ["arm64-v8a", "armeabi-v7a"]
+    paths = {lib["path"] for lib in inv["libraries"]}
+    assert paths == {
+        "lib/arm64-v8a/libengine.so",
+        "lib/armeabi-v7a/libengine.so",
+        "lib/arm64-v8a/libsplit.so",
+    }
+    arm64_engine = next(lib for lib in inv["libraries"] if lib["path"] == "lib/arm64-v8a/libengine.so")
+    assert arm64_engine["elf"]["parseable"] is True
+    assert arm64_engine["elf"]["elf_class"] == 64
+    assert arm64_engine["elf"]["endian"] == "little"
+    assert arm64_engine["elf"]["machine"] == "AArch64"
+    assert "Java_org_anzu_test_MainActivity_stringFromJNI" in arm64_engine["jni_exports"]
+    assert "JNI_OnLoad" in arm64_engine["jni_exports"]
+    assert inv["evidence_id"].startswith("E")
+    meta = apk_sidecar.metadata(row["id"], "native")
+    assert meta["library_count"] == 3
+    e = evidence(store.load(row["id"]), inv["evidence_id"])
+    assert e["operation"] == "apk_native_libs" and e["success"] is True
+    assert e["result"]["library_count"] == 3
+    custody = json.loads((store.directory(row["id"]) / "custody.json").read_text(encoding="utf-8"))
+    assert custody.get("native_inventoried_at")
+    assert any(ev.get("event") == "apk_native_inventoried" for ev in custody["events"])
+    filtered = apk_sidecar.apk_inventory_native(row["id"], abi="armeabi-v7a")
+    assert filtered["library_count"] == 1 and filtered["libraries"][0]["abi"] == "armeabi-v7a"
+    client = TestClient(app)
+    res = client.get(f"/api/investigations/{row['id']}/apk/native")
+    assert res.status_code == 200 and res.json()["library_count"] >= 1
+
+
+def test_native_jni_symbol_extraction(env):
+    src, _ = env
+    elf = _elf64_le_with_jni([
+        "Java_org_anzu_test_Native_foo",
+        "JNI_OnLoad",
+        "JNI_OnUnload",
+        "ordinary_export",
+    ])
+    apk = src / "jni.apk"
+    with zipfile.ZipFile(apk, "w") as z:
+        z.writestr("AndroidManifest.xml", b"\x03\x00\x08\x00binary-axml")
+        z.writestr("classes.dex", b"dex\n035\x00synthetic")
+        z.writestr("lib/arm64-v8a/libjni.so", elf)
+    row = prepare(apk)
+    inv = apk_sidecar.apk_inventory_native(row["id"])
+    lib = inv["libraries"][0]
+    assert set(lib["jni_exports"]) == {
+        "Java_org_anzu_test_Native_foo",
+        "JNI_OnLoad",
+        "JNI_OnUnload",
+    }
+    assert "ordinary_export" not in lib["jni_exports"]
+
+
+def test_native_high_entropy_packer_hint(env):
+    src, _ = env
+    packed = _elf64_le_with_jni(["JNI_OnLoad"], pad_high_entropy=True)
+    apk = src / "packed.apk"
+    with zipfile.ZipFile(apk, "w") as z:
+        z.writestr("AndroidManifest.xml", b"\x03\x00\x08\x00binary-axml")
+        z.writestr("classes.dex", b"dex\n035\x00synthetic")
+        z.writestr("lib/arm64-v8a/libsecexe.so", packed)
+    row = prepare(apk)
+    inv = apk_sidecar.apk_inventory_native(row["id"])
+    lib = inv["libraries"][0]
+    assert lib["name"] == "libsecexe.so"
+    assert lib["entropy"]["high_entropy"] is True
+    kinds = {h["kind"] for h in lib["hints"]}
+    assert "packer_signature" in kinds and "high_entropy" in kinds
+    assert "Bangcle" in inv["packers_detected"]
+    assert any("Bangcle" in u for u in inv["unknowns"])
+    assert any("high entropy" in u for u in inv["unknowns"])
+    junk = src / "junk.apk"
+    with zipfile.ZipFile(junk, "w") as z:
+        z.writestr("AndroidManifest.xml", b"\x03\x00\x08\x00binary-axml")
+        z.writestr("lib/x86_64/libbroken.so", b"not-an-elf-at-all")
+    row2 = prepare(junk)
+    inv2 = apk_sidecar.apk_inventory_native(row2["id"])
+    broken = inv2["libraries"][0]
+    assert broken["elf"]["parseable"] is False
+    assert len(broken["sha256"]) == 64 and broken["bytes"] == len(b"not-an-elf-at-all")
+
+
+@pytest.mark.asyncio
+async def test_runtime_catalog_exposes_apk_inventory_native(env, monkeypatch):
+    from types import SimpleNamespace
+    from app.reverse_engineering.runtime import Investigations
+    src, _ = env
+    elf = _elf64_le_with_jni(["JNI_OnLoad"])
+    apk = src / "a.apk"
+    with zipfile.ZipFile(apk, "w") as z:
+        z.writestr("AndroidManifest.xml", b"\x03\x00\x08\x00binary-axml")
+        z.writestr("lib/arm64-v8a/libx.so", elf)
+    row = prepare(apk)
+    service = Investigations()
+
+    async def actor(ident):
+        return SimpleNamespace(tools={})
+    monkeypatch.setattr(service, "actor", actor)
+    monkeypatch.setattr("app.policy.action_gate.gate_side_effect",
+                        lambda *a, **k: SimpleNamespace(allowed=True, requires_approval=False, pending_approval_id=None, reason=""))
+    catalog = await service.catalog(row["id"], None)
+    names = {t["name"] for t in catalog["operations"]}
+    assert "apk_inventory_native" in names
+    out = await service.call(row["id"], "apk_inventory_native", {}, None)
+    assert out["status"] == "evidence" and out["native"]["library_count"] == 1

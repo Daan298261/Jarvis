@@ -13,7 +13,9 @@
 
 **Slice 1 (implemented, `backend/app/reverse_engineering/apk_sidecar.py`):** `readiness_static()` (presence + pinned apktool SHA-256) and `readiness_live()` (tools executed, versions compared), with `android.readiness_static()` / `android.readiness_dynamic()` as the split; safe intake of standalone APK, XAPK/APKS and split-APK directories from an owner-named local path (zip-slip, symlink, 8 GiB and 50,000-file caps, per-part SHA-256 and size); apktool + jadx orchestration with `-Xmx4g -XX:+UseG1GC`, 300 s / 600 s timeouts and SIGTERM-then-SIGKILL; manifest, permission and component extraction (§5); evidence `apk_unpack`, `apk_manifest`, `apk_decompile` plus `custody.json`; REST routes `POST /apk/prepare`, `POST /{id}/apk/decompile`, `GET /{id}/apk/summary|manifest|components`; catalog operations `apk_decompile` and `apk_extract_manifest` (the legacy `android_decompile` is hidden and redirected for APK investigations); a host AXML decoder as the apktool manifest fallback; cancellation stops the running tool. Tests: synthetic ZIPs, a real aapt2-linked `tests/fixtures/apk/minimal_valid.apk`, and an opt-in real apktool/jadx run.
 
-**Later slices:** device (ADB) and FFS origins; native `.so` inventory (§6, `apk_inventory_native`); endpoints (§7) and crypto hints (§8) with evidence E00004-E00006; smali fallback; remaining fixtures.
+**Slice 2 (implemented):** native `.so` inventory (§6) via `apk_inventory_native(ident, abi=None)` — walks APK/split `lib/**/*.so` (and recorded `native_libs`), records relative path / ABI / size / SHA-256, minimal in-process ELF class/machine/endian, JNI-looking dynsym exports (`Java_*`, `JNI_OnLoad`/`JNI_OnUnload`), Shannon entropy > 7.2 on 4 KiB blocks plus known packer `.so` name signatures; evidence `apk_native_libs` with custody; metadata `apk/metadata/native.json`; catalog op `apk_inventory_native`; REST `GET /{id}/apk/native`. Tests: synthetic ELF bytes for split inventory, JNI symbols, and high-entropy packer hints.
+
+**Later slices:** device (ADB) and FFS origins; endpoints (§7) and crypto hints (§8) with evidence E00005–E00006; smali fallback; remaining fixtures.
 ---
 
 ## Problem
