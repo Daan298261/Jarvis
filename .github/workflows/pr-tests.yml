@@ -92,6 +92,9 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Companion pairing recovery tests
+        run: npm run test:companion-pairing-recovery
+
   installer-compile:
     name: installer-compile
     runs-on: windows-latest

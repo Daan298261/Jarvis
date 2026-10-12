@@ -367,14 +367,60 @@ const MANAGER_BASE: &str = "http://127.0.0.1:4782";
 const MANAGER_CONTROL_TIMEOUT_SECS: u64 = 300;
 
 /// Tray start/stop/restart via ANZU Manager. Runs off the UI thread (restart can take
-/// a minute) and logs any failure instead of dropping it.
-fn manager_control(action: &str) {
+/// a minute). The GUI build has no console, so a failure goes to logs/desktop-tray.log
+/// and a tray notification instead of stderr.
+fn manager_control(app: &AppHandle, action: &str) {
     let action = action.to_string();
+    let app = app.clone();
     std::thread::spawn(move || {
         if let Err(err) = manager_control_at(&HTTP, MANAGER_BASE, &action) {
-            eprintln!("[anzu] manager {action} failed: {err}");
+            let line = tray_failure_line(&action, &err, std::time::SystemTime::now());
+            if let Err(io) = append_log_line(&logs_dir().join(TRAY_LOG_FILE), &line) {
+                eprintln!("{line} (log write failed: {io})");
+            }
+            use tauri_plugin_notification::NotificationExt;
+            let _ = app
+                .notification()
+                .builder()
+                .title(format!("ANZU {action} failed"))
+                .body(format!("{}\nDetails: logs\\{TRAY_LOG_FILE}", err.chars().take(180).collect::<String>()))
+                .show();
         }
     });
+}
+
+const TRAY_LOG_FILE: &str = "desktop-tray.log";
+
+fn append_log_line(path: &std::path::Path, line: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
+    writeln!(file, "{line}")
+}
+
+/// `2026-10-13T00:55:01Z manager restart failed: HTTP 403 ...` (UTC, no extra deps).
+fn tray_failure_line(action: &str, err: &str, at: std::time::SystemTime) -> String {
+    let secs = at.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64;
+    let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    // Howard Hinnant's civil_from_days.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + if month <= 2 { 1 } else { 0 };
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z manager {action} failed: {}",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60,
+        err.replace('\n', " ")
+    )
 }
 
 /// Fetches the per-session control token, then POSTs the confirmed action with it.
@@ -685,6 +731,7 @@ pub fn run() {
     hold_anzu_install_mutex();
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec![]),
@@ -731,20 +778,20 @@ pub fn run() {
                     "show" => show_main(app),
                     "hide" => hide_main(app),
                     "start_backend" => {
-                        if manager_mode() { manager_control("start"); return; }
+                        if manager_mode() { manager_control(app, "start"); return; }
                         if let Ok(mut g) = app.state::<AppState>().backend.lock() {
                             g.restart_count = 0;
                             ensure_backend(&mut g);
                         }
                     }
                     "stop_backend" => {
-                        if manager_mode() { manager_control("stop"); return; }
+                        if manager_mode() { manager_control(app, "stop"); return; }
                         if let Ok(mut g) = app.state::<AppState>().backend.lock() {
                             stop_owned_backend(&mut g);
                         }
                     }
                     "restart_backend" => {
-                        if manager_mode() { manager_control("restart"); return; }
+                        if manager_mode() { manager_control(app, "restart"); return; }
                         if let Ok(mut g) = app.state::<AppState>().backend.lock() {
                             stop_owned_backend(&mut g);
                             thread::sleep(Duration::from_millis(400));
@@ -871,7 +918,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod manager_control_tests {
-    use super::manager_control_at;
+    use super::{append_log_line, manager_control_at, tray_failure_line};
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpListener;
     use std::sync::{Arc, Mutex};
@@ -923,6 +970,23 @@ mod manager_control_tests {
         assert!(seen[0].starts_with("GET /api/manager/v1/session"));
         assert!(seen[1].starts_with("POST /api/manager/v1/control/restart"));
         assert!(seen[1].ends_with("token=tok-1"));
+    }
+
+    #[test]
+    fn failure_line_is_timestamped_and_single_line() {
+        let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_791_845_701); // 2026-10-12T22:55:01Z
+        let line = tray_failure_line("restart", "HTTP 403\nforbidden", at);
+        assert_eq!(line, "2026-10-12T22:55:01Z manager restart failed: HTTP 403 forbidden");
+    }
+
+    #[test]
+    fn failure_lines_append_to_log_file() {
+        let dir = std::env::temp_dir().join(format!("anzu-tray-log-{}", std::process::id()));
+        let path = dir.join("logs").join("desktop-tray.log");
+        append_log_line(&path, "one").unwrap();
+        append_log_line(&path, "two").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "one\ntwo\n");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
