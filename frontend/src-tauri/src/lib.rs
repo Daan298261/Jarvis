@@ -384,7 +384,8 @@ fn manager_control_at(client: &reqwest::blocking::Client, base: &str, action: &s
     if !session.status().is_success() {
         return Err(format!("session request: HTTP {}", session.status()));
     }
-    let session: serde_json::Value = session.json().map_err(|e| format!("session body: {e}"))?;
+    let raw = session.text().map_err(|e| format!("session body: {e}"))?;
+    let session: serde_json::Value = serde_json::from_str(&raw).map_err(|e| format!("session body: {e}"))?;
     let token = session["token"].as_str().ok_or("session body: missing token")?;
     let header = session["header"].as_str().unwrap_or("X-Anzu-Manager-Token");
     let response = client
