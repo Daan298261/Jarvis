@@ -1,6 +1,8 @@
 """Pairing-stability: AnzuManager watchdog, launch logs and degraded startup."""
 import asyncio
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from app import startup_health
@@ -284,3 +286,39 @@ def test_watchdog_is_opt_in_via_env(monkeypatch, tmp_path):
     on = sup.CoreSupervisor(root=lambda: tmp_path, healthy=_healthy, process_present=lambda: False, launch=lambda a: None)
     assert on.enabled is True
     assert main.SUPERVISOR.enabled is False  # test/import context never supervises
+
+
+class _FakeProc:
+    def __init__(self, waits, timeout_exc=False):
+        self.waits = waits
+        self.timeout_exc = timeout_exc
+
+    def wait(self, timeout=None):
+        self.waits.append(timeout)
+        if self.timeout_exc:
+            raise main.subprocess.TimeoutExpired("force-stop", timeout)
+        return 0
+
+
+def test_stop_launch_blocks_until_stop_script_exits(tmp_path, monkeypatch):
+    # A start fired while force-stop still runs gets killed as a "locker" (VRPC smoke, #593).
+    waits = []
+    monkeypatch.setattr(main, "_root", lambda: tmp_path)
+    monkeypatch.setattr(main.subprocess, "Popen", lambda *a, **k: _FakeProc(waits))
+    monkeypatch.setattr(main, "_script", lambda name: tmp_path / name)
+    main._launch("stop")
+    assert waits == [main.STOP_SCRIPT_TIMEOUT_SECONDS]
+    main._launch("start")
+    assert waits == [main.STOP_SCRIPT_TIMEOUT_SECONDS]  # start is fire-and-forget
+
+
+def test_stop_script_timeout_refuses_to_start(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "_root", lambda: tmp_path)
+    monkeypatch.setattr(main.subprocess, "Popen", lambda *a, **k: _FakeProc([], timeout_exc=True))
+    with pytest.raises(RuntimeError, match="start was not attempted"):
+        main._launch("stop")
+
+
+def test_start_health_wait_covers_a_real_cold_start():
+    # Smoke: force-stop ~52 s, cold start to healthy ~18-40 s; 10 s reported success too early.
+    assert main.START_HEALTH_WAIT_SECONDS >= 60
