@@ -33,6 +33,7 @@ JAVA_HOME = "/opt/anzu/jdk"
 JDK = "/opt/anzu/jdk/bin/java"
 JADX = "/opt/anzu/jadx/bin/jadx"
 APKTOOL_JAR = "/opt/anzu/apktool/apktool.jar"
+READELF = "/usr/bin/readelf"  # binutils, installed by provision.install()
 JVM_HEAP = ["-Xmx4g", "-XX:+UseG1GC"]
 APKTOOL_TIMEOUT = 300
 JADX_TIMEOUT = 600
@@ -99,7 +100,7 @@ def _linux_path(path: Path) -> str:
 
 def _missing_static_components() -> list[str]:
     missing = []
-    for name, path in [("JDK", JDK), ("jadx", JADX), ("apktool", APKTOOL_JAR)]:
+    for name, path in [("JDK", JDK), ("jadx", JADX), ("apktool", APKTOOL_JAR), ("readelf (binutils)", READELF)]:
         try:
             present = _wsl(["test", "-f", path], 30).returncode == 0
         except (OSError, subprocess.TimeoutExpired):
@@ -457,7 +458,8 @@ def _claim(ident: str, purpose: str) -> dict:
         row = store.load(ident)
         if not row.get("apk"):
             raise ValueError("Investigation was not prepared as an APK target")
-        if row["status"] in {"cancelled", "closed", "analyzing"} or ident in _CLAIMS:
+        # A reported investigation is final: further runs would rewrite the status of a published report.
+        if row["status"] in {"cancelled", "closed", "reported", "analyzing"} or ident in _CLAIMS:
             raise ValueError(f"Investigation is {row['status']}; cannot start {purpose}")
         store.validate_snapshot(row)
         row["status"] = "analyzing"
@@ -852,6 +854,19 @@ PACKER_SO_NAMES = {
     "libjiagu.so": "Qihoo 360",
     "libDexHelper.so": "SecNeo",
 }
+# DexGuard and DashO ship native components under product-named files (RFC-0207 §6.3), matched by
+# name stem since the exact file name varies by release, e.g. libdexguard.so or libdasho_rt.so.
+PACKER_SO_PATTERNS = [
+    (re.compile(r"lib(?:dexguard|dgrt)[\w.-]*\.so", re.I), "DexGuard"),
+    (re.compile(r"libdasho[\w.-]*\.so", re.I), "DashO"),
+]
+
+
+def _packer_for(name: str) -> str | None:
+    if name in PACKER_SO_NAMES:
+        return PACKER_SO_NAMES[name]
+    return next((label for pat, label in PACKER_SO_PATTERNS if pat.fullmatch(name)), None)
+
 ELF_MACHINES = {3: "x86", 40: "ARM", 62: "x86_64", 183: "AArch64"}
 _LIB_SO = re.compile(r"lib/([^/]+)/([^/]+\.so)")
 MAX_NATIVE_BYTES = 256 * 1024 * 1024
@@ -1051,7 +1066,7 @@ def _parse_elf(data: bytes) -> dict:
 
 def _readelf_fallback(ident: str, path: Path) -> dict:
     """Ask binutils readelf in ANZU-REA for what the in-process reader could not get."""
-    result = _wsl(["readelf", "-W", "--dynamic", "--dyn-syms", "--program-headers", _linux_path(path)], READELF_TIMEOUT)
+    result = _wsl([READELF, "-W", "--dynamic", "--dyn-syms", "--program-headers", _linux_path(path)], READELF_TIMEOUT)
     text = result.stdout.decode("utf-8", errors="replace")
     if result.returncode or not text.strip():
         raise RuntimeError((result.stderr.decode("utf-8", errors="replace") or "readelf failed")[-500:])
@@ -1150,7 +1165,7 @@ def _inspect_so(ident: str, cand: dict, data: bytes, digest: str, disk: Path, ca
     ent = _entropy_hints(data, elf["code_ranges"], cancel)
     name = PurePosixPath(cand["path"]).name
     hints = []
-    packer = PACKER_SO_NAMES.get(name)
+    packer = _packer_for(name)
     if packer:
         hints.append({"kind": "packer_signature", "packer": packer,
                       "detail": f"Native code is protected by {packer}; static symbols are obscured."})
@@ -1215,8 +1230,6 @@ def apk_inventory_native(ident: str, abi: str | None = None, claimed: dict | Non
                "libraries": libraries, "packers_detected": packers, "high_entropy_count": high,
                "unknowns": unknowns, "limitations": limitations}
         meta = store.directory(ident) / "apk" / "metadata"
-        meta.mkdir(parents=True, mode=0o700, exist_ok=True)
-        store.atomic_json(meta / "native.json", doc)
         with _CLAIM_LOCK:
             row = store.load(ident)  # reload: evidence ids and custody entries continue from the stored row
             if _CLAIMS.get(ident) != token:
@@ -1236,7 +1249,20 @@ def apk_inventory_native(ident: str, abi: str | None = None, claimed: dict | Non
                  f"Inventoried {len(libraries)} native librar{'y' if len(libraries) == 1 else 'ies'}"
                  + (f" (abi={abi})." if abi else "."), {"evidence": eid, "abis": abis, "library_count": len(libraries)})
             _custody(row, native_inventoried_at=_now())
-            store.save(row)
+            # native.json is written only once the claim is verified and the evidence recorded, and
+            # removed again if the row cannot be saved, so it never describes unrecorded results.
+            meta.mkdir(parents=True, mode=0o700, exist_ok=True)
+            native_json = meta / "native.json"
+            previous = native_json.read_bytes() if native_json.is_file() else None
+            store.atomic_json(native_json, doc)
+            try:
+                store.save(row)
+            except BaseException:
+                if previous is None:
+                    native_json.unlink(missing_ok=True)
+                else:
+                    native_json.write_bytes(previous)
+                raise
             _CLAIMS.pop(ident, None)
         return {**doc, "evidence_id": eid, "investigation_status": row["status"]}
     except DecompileCancelled as exc:

@@ -91,7 +91,7 @@ class FakeWSL:
     """Stands in for wsl.exe at subprocess.run; emulates wslpath, test, sha256sum, apktool and jadx."""
 
     def __init__(self):
-        self.present = {apk_sidecar.JDK, apk_sidecar.JADX, apk_sidecar.APKTOOL_JAR}
+        self.present = {apk_sidecar.JDK, apk_sidecar.JADX, apk_sidecar.APKTOOL_JAR, apk_sidecar.READELF}
         self.sha = APKTOOL_SHA
         self.calls: list[tuple[list[str], int]] = []
         self.jadx_mode = "ok"
@@ -118,7 +118,7 @@ class FakeWSL:
             return done(0 if argv[-1] in self.present else 1)
         if argv[0] == "sha256sum":
             return done(out=f"{self.sha}  {argv[-1]}\n".encode())
-        if argv[0] == "readelf":
+        if argv[0] == apk_sidecar.READELF:
             self.readelf_calls.append(argv)
             if self.readelf_text is None:
                 return done(127, err=b"readelf: command not found")
@@ -593,6 +593,7 @@ async def test_android_decompile_routes_to_sidecar_and_cancel_stops_it(env, monk
 REAL_JAVA = os.environ.get("ANZU_TEST_JAVA") or shutil.which("java")
 REAL_APKTOOL = os.environ.get("ANZU_TEST_APKTOOL_JAR")
 REAL_JADX = os.environ.get("ANZU_TEST_JADX")
+REAL_READELF = os.environ.get("ANZU_TEST_READELF") or shutil.which("readelf")
 
 
 @pytest.mark.skipif(not (REAL_JAVA and REAL_APKTOOL and REAL_JADX and Path(REAL_APKTOOL).is_file() and Path(REAL_JADX).is_file()),
@@ -604,7 +605,8 @@ def test_real_toolchain_decompiles_fixture(env, monkeypatch):
     copy.write_bytes((FIXTURES / "minimal_valid.apk").read_bytes())
     row = prepare(copy)
     real_run = REAL_RUN
-    mapping = {apk_sidecar.JDK: REAL_JAVA, apk_sidecar.APKTOOL_JAR: REAL_APKTOOL, apk_sidecar.JADX: REAL_JADX}
+    mapping = {apk_sidecar.JDK: REAL_JAVA, apk_sidecar.APKTOOL_JAR: REAL_APKTOOL, apk_sidecar.JADX: REAL_JADX,
+               apk_sidecar.READELF: REAL_READELF or REAL_JAVA}  # readelf is checked by readiness, not run here
 
     def host_wsl(argv, timeout):
         if argv[0] == "wslpath":
@@ -929,7 +931,7 @@ def test_readelf_fallback_fills_stripped_section_headers(env):
     fake.readelf_text = (FIXTURES / "libtestnative_arm64.readelf.txt").read_text(encoding="ascii")
     row = prepare(_apk_with_libs(src / "stripped.apk", {"lib/arm64-v8a/libtestnative.so": _strip_section_headers(NDK64)}))
     lib = apk_sidecar.apk_inventory_native(row["id"])["libraries"][0]
-    assert fake.readelf_calls and fake.readelf_calls[0][:5] == ["readelf", "-W", "--dynamic", "--dyn-syms", "--program-headers"]
+    assert fake.readelf_calls and fake.readelf_calls[0][:5] == [apk_sidecar.READELF, "-W", "--dynamic", "--dyn-syms", "--program-headers"]
     assert lib["readelf_fallback"] is True and lib["soname"] == "libtestnative.so"
     assert lib["needed"] == ["liblog.so", "libdl.so", "libc.so"]
     assert "Java_org_anzu_test_MainActivity_stringFromJNI" in lib["jni_exports"]
@@ -1084,3 +1086,98 @@ def test_cancel_logs_bad_pid_file_and_failed_kill(env, monkeypatch, caplog, tmp_
     with caplog.at_level("WARNING"):
         apk_sidecar.cancel(ident)
     assert "unreadable" in caplog.text and "not a PID" in caplog.text and "exited 1" in caplog.text
+
+
+# --- RFC-0207 slice 2 (second review): packers, reported rows, native.json ordering, readelf --
+
+def test_dexguard_and_dasho_native_packer_signatures(env):
+    assert apk_sidecar._packer_for("libdexguard.so") == "DexGuard"
+    assert apk_sidecar._packer_for("libDexGuard_rt.so") == "DexGuard"
+    assert apk_sidecar._packer_for("libdgrt.so") == "DexGuard"
+    assert apk_sidecar._packer_for("libdasho.so") == "DashO"
+    assert apk_sidecar._packer_for("libjiagu.so") == "Qihoo 360"
+    assert apk_sidecar._packer_for("libtestnative.so") is None
+    src, _ = env
+    row = prepare(_apk_with_libs(src / "dg.apk", {"lib/arm64-v8a/libdexguard.so": NDK64,
+                                                   "lib/arm64-v8a/libdasho_rt.so": NDK64}))
+    inv = apk_sidecar.apk_inventory_native(row["id"])
+    assert inv["packers_detected"] == ["DashO", "DexGuard"]
+    assert "Native code is protected by DexGuard; static symbols are obscured." in inv["unknowns"]
+
+
+def test_reported_investigation_is_never_reopened(env):
+    src, _ = env
+    row = prepare(_apk_with_libs(src / "r.apk", {"lib/arm64-v8a/libtestnative.so": NDK64}))
+    stored = store.load(row["id"])
+    stored["status"] = "reported"
+    store.save(stored)
+    with pytest.raises(ValueError, match="reported; cannot start native inventory"):
+        apk_sidecar.apk_inventory_native(row["id"])
+    with pytest.raises(ValueError, match="reported; cannot start decompilation"):
+        apk_sidecar.preflight(row["id"])
+    after = store.load(row["id"])
+    assert after["status"] == "reported" and len(after["evidence"]) == 1 and row["id"] not in apk_sidecar._CLAIMS
+
+
+def test_native_json_only_written_after_evidence_is_recorded(env, monkeypatch):
+    src, _ = env
+    row = prepare(_apk_with_libs(src / "n.apk", {"lib/arm64-v8a/libtestnative.so": NDK64}))
+    native_json = store.directory(row["id"]) / "apk" / "metadata" / "native.json"
+    # Claim lost before recording: nothing is written.
+    claim = apk_sidecar._claim(row["id"], "native inventory")
+    apk_sidecar._CLAIMS[row["id"]] = "stale"
+    with pytest.raises(RuntimeError, match="claim was lost"):
+        apk_sidecar.apk_inventory_native(row["id"], claimed=claim)
+    assert not native_json.exists()
+    apk_sidecar._CLAIMS.pop(row["id"], None)
+    apk_sidecar._CANCEL.pop(row["id"], None)
+    stored = store.load(row["id"])
+    stored["status"] = "investigating"
+    store.save(stored)
+    # Save fails after the evidence was recorded: native.json is removed again.
+    real_save = store.save
+
+    def failing_save(r):
+        if any(c.get("event") == "apk_native_inventoried" for c in r.get("chain_of_custody", [])):
+            assert native_json.is_file()
+            raise OSError("disk full")
+        return real_save(r)
+    monkeypatch.setattr(store, "save", failing_save)
+    with pytest.raises(OSError, match="disk full"):
+        apk_sidecar.apk_inventory_native(row["id"])
+    assert not native_json.exists() and store.load(row["id"])["status"] == "interrupted"
+    monkeypatch.setattr(store, "save", real_save)
+    stored = store.load(row["id"])
+    stored["status"] = "investigating"
+    store.save(stored)
+    inv = apk_sidecar.apk_inventory_native(row["id"])
+    assert json.loads(native_json.read_text(encoding="utf-8"))["library_count"] == inv["library_count"] == 1
+
+
+def test_readiness_requires_readelf(env):
+    _, fake = env
+    fake.present.discard(apk_sidecar.READELF)
+    out = apk_sidecar.readiness_static()
+    assert out["status"] == "needs_repair" and out["error"] == "Missing: readelf (binutils); run setup to install"
+
+
+def test_provision_installs_binutils():
+    from app.reverse_engineering import provision
+    src = Path(provision.__file__).read_text(encoding="utf-8")
+    assert "binutils" in src and "test -x /usr/bin/readelf" in src
+
+
+@pytest.mark.skipif(not (REAL_READELF and Path(REAL_READELF).is_file()),
+                    reason="readelf not available; set ANZU_TEST_READELF or put binutils readelf on PATH")
+def test_real_readelf_fallback_on_ndk_fixture(monkeypatch):
+    def host_wsl(argv, timeout):
+        if argv[0] == "wslpath":
+            return subprocess.CompletedProcess(argv, 0, (argv[-1] + "\n").encode(), b"")
+        assert argv[0] == apk_sidecar.READELF
+        return REAL_RUN([REAL_READELF, *argv[1:]], capture_output=True, timeout=timeout)
+    monkeypatch.setattr(apk_sidecar, "_wsl", host_wsl)
+    out = apk_sidecar._readelf_fallback("0" * 32, FIXTURES / "libtestnative_arm64.so")
+    assert out["soname"] == "libtestnative.so"
+    assert out["needed"] == ["liblog.so", "libdl.so", "libc.so"]
+    assert set(out["jni_exports"]) == {"JNI_OnLoad", "Java_org_anzu_test_MainActivity_stringFromJNI"}
+    assert out["relro"] == "full" and out["stack_canary"] is True and out["executable_stack"] is False
