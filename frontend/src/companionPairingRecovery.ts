@@ -22,6 +22,7 @@ export type ManagerSupervisor = {
   enabled: boolean
   desired_running: boolean
   restarting: boolean
+  control_in_flight?: string | null
   restart_attempts: number
   next_restart_in_seconds: number
   last_exit: { reason?: string; at?: number; error_tail?: string[]; crash_log?: string | null; launch_error?: string } | null
@@ -43,10 +44,13 @@ export function describeManagerView(view: ManagerView | null): string {
     return "ANZU backend is not answering and ANZU Manager is not running. Start ANZU from the Start menu or tray."
   }
   const { core, supervisor } = view.status
-  if (core.state === "ready") return "ANZU backend is back. Loading pairing code…"
+  if (core.state === "ready" && core.healthy) return "ANZU backend is back. Loading pairing code…"
   const reason = supervisor?.last_exit?.reason
   if (supervisor?.restarting) return "ANZU Manager is restarting the backend…"
-  if (core.state === "starting") return "ANZU backend is starting…"
+  if (supervisor?.control_in_flight) return `ANZU ${supervisor.control_in_flight} in progress…`
+  if (core.state === "starting") {
+    return reason ? `ANZU backend is running but not healthy (${reason}).` : "ANZU backend is starting or not healthy yet…"
+  }
   if (supervisor?.enabled && supervisor.desired_running) {
     const wait = supervisor.next_restart_in_seconds
     const when = wait > 0 ? `Automatic restart in ${wait}s.` : "Automatic restart is pending."
@@ -67,9 +71,12 @@ export async function fetchManagerStatus(fetchImpl: typeof fetch = fetch): Promi
 
 export async function requestManagerRestart(fetchImpl: typeof fetch = fetch): Promise<{ ok: boolean; message: string }> {
   try {
+    const session = await fetchImpl(`${MANAGER_ORIGIN}/api/manager/v1/session`, { cache: "no-store" })
+    if (!session.ok) return { ok: false, message: `ANZU Manager refused a control session (HTTP ${session.status}).` }
+    const { token, header } = (await session.json()) as { token: string; header: string }
     const response = await fetchImpl(`${MANAGER_ORIGIN}/api/manager/v1/control/restart`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", [header]: token },
       body: JSON.stringify({ confirm: true }),
     })
     const data = (await response.json().catch(() => ({}))) as { ok?: boolean; detail?: string }

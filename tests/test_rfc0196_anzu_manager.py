@@ -16,7 +16,9 @@ def test_manager_status_is_local_aggregate(monkeypatch, tmp_path):
 
 
 def test_manager_control_requires_confirmation():
-    response = TestClient(main.app).post("/api/manager/v1/control/start", json={})
+    client = TestClient(main.app)
+    session = client.get("/api/manager/v1/session").json()
+    response = client.post("/api/manager/v1/control/start", json={}, headers={session["header"]: session["token"]})
     assert response.status_code == 400
 
 
@@ -24,7 +26,7 @@ def test_manager_control_runs_only_confirmed_action(monkeypatch):
     calls = []
     monkeypatch.setattr(main, "_launch", calls.append)
     monkeypatch.setattr(main, "_wait_for", lambda action: _async({"core": {"healthy": True, "state": "ready"}}))
-    response = TestClient(main.app).post("/api/manager/v1/control/start", json={"confirm": True})
+    response = _client_post("/api/manager/v1/control/start")
     assert response.status_code == 200
     assert response.json()["ok"] is True
     assert calls == ["start"]
@@ -34,10 +36,16 @@ def test_manager_restart_stops_before_start(monkeypatch):
     calls = []
     monkeypatch.setattr(main, "_launch", calls.append)
     monkeypatch.setattr(main, "_wait_for", lambda action: _async({"core": {"healthy": action != "stop", "state": "stopped" if action == "stop" else "ready"}}))
-    response = TestClient(main.app).post("/api/manager/v1/control/restart", json={"confirm": True})
+    response = _client_post("/api/manager/v1/control/restart")
     assert response.status_code == 200
     assert calls == ["stop", "start"]
 
 
 async def _async(value):
     return value
+
+
+def _client_post(path):
+    client = TestClient(main.app)
+    session = client.get("/api/manager/v1/session").json()
+    return client.post(path, json={"confirm": True}, headers={session["header"]: session["token"]})

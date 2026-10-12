@@ -9,6 +9,7 @@ so the manager and the portal can explain what happened.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -22,6 +23,9 @@ log = logging.getLogger(__name__)
 
 TICK_SECONDS = 10.0
 STARTUP_GRACE_SECONDS = 90.0
+# After any launch (watchdog or owner control) the new core gets this long to come
+# up before the watchdog may act again, so it never launches a second core.
+LAUNCH_PENDING_GRACE_SECONDS = 120.0
 BACKOFF_BASE_SECONDS = 15.0
 BACKOFF_CAP_SECONDS = 600.0
 STABLE_RESET_SECONDS = 300.0
@@ -83,7 +87,7 @@ def preserve_crash_log(logs_dir: Path, now: float) -> str | None:
         try:
             stale.unlink()
         except OSError:
-            pass
+            log.warning("Could not delete old crash log %s", stale, exc_info=True)
     return target.name
 
 
@@ -95,6 +99,8 @@ class SupervisorState:
     unhealthy_since: float | None = None
     healthy_since: float | None = None
     restarting: bool = False
+    control_in_flight: str | None = None
+    launch_pending_until: float = 0.0
     last_exit: dict | None = None
     last_restart_at: float | None = None
     history: list[dict] = field(default_factory=list)
@@ -158,6 +164,20 @@ class CoreSupervisor:
         self.state.unhealthy_since = None
         self._save()
 
+    @contextlib.asynccontextmanager
+    async def control_action(self, action: str):
+        """Owner start/stop/restart in progress: the watchdog stands down until it ends."""
+        self.state.control_in_flight = action
+        try:
+            yield
+        finally:
+            self.state.control_in_flight = None
+            if action != "stop":
+                self.note_launch()
+
+    def note_launch(self) -> None:
+        self.state.launch_pending_until = self._clock() + LAUNCH_PENDING_GRACE_SECONDS
+
     def snapshot(self) -> dict:
         s = self.state
         now = self._clock()
@@ -165,6 +185,8 @@ class CoreSupervisor:
             "enabled": self.enabled,
             "desired_running": s.desired_running,
             "restarting": s.restarting,
+            "control_in_flight": s.control_in_flight,
+            "launch_pending_seconds": max(0, round(s.launch_pending_until - now)),
             "restart_attempts": s.restart_attempts,
             "next_restart_in_seconds": max(0, round(s.next_restart_at - now)) if s.next_restart_at > now else 0,
             "unhealthy_for_seconds": round(now - s.unhealthy_since) if s.unhealthy_since else 0,
@@ -176,8 +198,14 @@ class CoreSupervisor:
         """One supervision step. Returns what happened (for tests and logs)."""
         if not self.enabled or not self.state.desired_running or self.state.restarting:
             return "idle"
+        if self.state.control_in_flight:
+            return "control_in_flight"
         now = self._clock()
-        if await self._healthy():
+        healthy = await self._healthy()
+        if self.state.control_in_flight:  # owner action started while we were probing
+            return "control_in_flight"
+        if healthy:
+            self.state.launch_pending_until = 0.0
             s = self.state
             s.unhealthy_since = None
             if s.healthy_since is None:
@@ -187,6 +215,8 @@ class CoreSupervisor:
                 s.next_restart_at = 0.0
             return "healthy"
         self.state.healthy_since = None
+        if now < self.state.launch_pending_until:
+            return "launch_pending"
         present = self._process_present()
         if self.state.unhealthy_since is None:
             self.state.unhealthy_since = now
@@ -225,6 +255,7 @@ class CoreSupervisor:
             if hung:
                 await asyncio.to_thread(self._launch, "stop")
             await asyncio.to_thread(self._launch, "start")
+            self.note_launch()
         except Exception as exc:  # launcher missing etc. — keep backing off, never crash the manager
             s.last_exit = {**(s.last_exit or {}), "launch_error": str(exc)}
             self._save()

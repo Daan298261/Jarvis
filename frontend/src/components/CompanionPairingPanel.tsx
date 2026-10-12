@@ -98,7 +98,7 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
 
   const applyResult = useCallback((result: Awaited<ReturnType<typeof getActiveCompanionPairingCode>>) => {
     if (!result.available) {
-      if (result.reason === "not_found" || result.reason === "unreachable") {
+      if (result.reason === "not_found" || result.reason === "unreachable" || result.reason === "unhealthy") {
         setState({ mode: "waiting_api" })
         return
       }
@@ -125,7 +125,7 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
           result = await createCompanionPairingCode()
         }
         applyResult(result)
-        if (!result.available && (result.reason === "not_found" || result.reason === "unreachable")) {
+        if (!result.available && (result.reason === "not_found" || result.reason === "unreachable" || result.reason === "unhealthy")) {
           setMsg("Pairing service is unavailable. Retrying automatically.")
         }
       } finally {
@@ -258,7 +258,7 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
       applyResult(result)
       if (result.available) {
         setMsg("New pairing code generated. Previous unclaimed codes are invalidated.")
-      } else if (result.reason === "not_found" || result.reason === "unreachable") {
+      } else if (result.reason === "not_found" || result.reason === "unreachable" || result.reason === "unhealthy") {
         setState({ mode: "waiting_api" })
         setMsg("Pairing service is unavailable. Retrying automatically.")
       } else {
@@ -397,7 +397,7 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
             Retry now
           </button>
         )}
-        {state.mode === "waiting_api" && managerView?.kind === "status" && managerView.status.core.state !== "ready" && (
+        {state.mode === "waiting_api" && managerView?.kind === "status" && !(managerView.status.core.state === "ready" && managerView.status.core.healthy) && (
           <button className="btn secondary" type="button" disabled={busy} onClick={() => void restartBackend()}>
             Restart ANZU backend
           </button>

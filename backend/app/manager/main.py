@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -10,7 +11,7 @@ from pathlib import Path
 from typing import Literal
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
@@ -167,6 +168,12 @@ SUPERVISOR = CoreSupervisor(
     launch=lambda action: _launch(action),
 )
 
+# Per-manager-session token for control actions. Clients on this computer get it
+# from /session (CORS limits browser readers to loopback portal origins); a page
+# that cannot read it cannot start, stop or restart ANZU.
+SESSION_TOKEN = secrets.token_urlsafe(32)
+TOKEN_HEADER = "X-Anzu-Manager-Token"
+
 app = FastAPI(title="ANZU Manager", docs_url=None, redoc_url=None)
 
 # The portal (served by the core on :4780, or Vite in dev) asks the manager why
@@ -176,7 +183,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"^https?://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$",
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", TOKEN_HEADER],
 )
 
 
@@ -203,23 +210,37 @@ async def manager_status():
     return await status_snapshot()
 
 
+@app.get("/api/manager/v1/session")
+async def manager_session():
+    return {"token": SESSION_TOKEN, "header": TOKEN_HEADER}
+
+
 @app.post("/api/manager/v1/control/{action}")
-async def manager_control(action: Literal["start", "stop", "restart"], body: ControlRequest):
+async def manager_control(
+    action: Literal["start", "stop", "restart"],
+    body: ControlRequest,
+    token: str | None = Header(default=None, alias=TOKEN_HEADER),
+):
+    if not token or not secrets.compare_digest(token, SESSION_TOKEN):
+        raise HTTPException(status_code=403, detail="Manager session token required")
     if not body.confirm:
         raise HTTPException(status_code=400, detail="Explicit confirmation is required")
+    if SUPERVISOR.state.control_in_flight:
+        raise HTTPException(status_code=409, detail=f"ANZU {SUPERVISOR.state.control_in_flight} is already in progress")
     SUPERVISOR.set_desired(action != "stop")
-    try:
-        if action == "restart":
-            _launch("stop")
-            stopped = await _wait_for("stop")
-            if stopped["core"]["state"] != "stopped":
-                raise HTTPException(status_code=409, detail="ANZU did not stop; restart was not attempted")
-            _launch("start")
-        else:
-            _launch(action)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    snapshot = await _wait_for(action)
+    async with SUPERVISOR.control_action(action):
+        try:
+            if action == "restart":
+                _launch("stop")
+                stopped = await _wait_for("stop")
+                if stopped["core"]["state"] != "stopped":
+                    raise HTTPException(status_code=409, detail="ANZU did not stop; restart was not attempted")
+                _launch("start")
+            else:
+                _launch(action)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        snapshot = await _wait_for(action)
     ok = snapshot["core"]["healthy"] if action != "stop" else snapshot["core"]["state"] == "stopped"
     return {"action": action, "ok": ok, "status": snapshot}
 

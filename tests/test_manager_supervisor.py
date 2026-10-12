@@ -53,10 +53,10 @@ def test_dead_backend_is_restarted_with_reason_and_error_tail(tmp_path):
     assert "exited" in exit_info["reason"]
     assert exit_info["error_tail"][-1] == "RuntimeError: db locked"
     assert (logs / exit_info["crash_log"]).read_text(encoding="utf-8").startswith("Traceback")
-    # within backoff no second restart
+    # the relaunched core gets its launch grace: no double launch
     clock.now += 5
-    assert run(s.tick()) == "backoff"
-    clock.now += sup.backoff_seconds(1)
+    assert run(s.tick()) == "launch_pending"
+    clock.now += sup.LAUNCH_PENDING_GRACE_SECONDS
     assert run(s.tick()) == "restarted"
     assert calls == ["start", "start"]
     assert s.snapshot()["restart_attempts"] == 2
@@ -141,10 +141,11 @@ def test_status_reports_supervisor_and_control_sets_desired(monkeypatch, tmp_pat
     monkeypatch.setattr(main, "_launch", lambda action: None)
     monkeypatch.setattr(main, "_wait_for", lambda action: _async({"core": {"healthy": False, "state": "stopped"}}))
     client = TestClient(main.app)
-    client.post("/api/manager/v1/control/stop", json={"confirm": True})
+    headers = _token_headers(client)
+    client.post("/api/manager/v1/control/stop", json={"confirm": True}, headers=headers)
     body = client.get("/api/manager/v1/status").json()
     assert body["supervisor"]["desired_running"] is False
-    client.post("/api/manager/v1/control/start", json={"confirm": True})
+    client.post("/api/manager/v1/control/start", json={"confirm": True}, headers=headers)
     assert client.get("/api/manager/v1/status").json()["supervisor"]["desired_running"] is True
 
 
@@ -176,13 +177,92 @@ def test_startup_step_failure_degrades_instead_of_crashing():
     startup_health.reset()
 
 
+def test_critical_step_failure_makes_health_not_ready():
+    import app.main as core_main
+
+    startup_health.reset()
+
+    async def broken_db():
+        raise RuntimeError("database is locked")
+
+    run(startup_health.run_step("database", broken_db, critical=True))
+    body = run(core_main.health())
+    assert body["ok"] is False
+    assert body["startup"]["ready"] is False
+    assert body["startup"]["failed_steps"][0] == {**body["startup"]["failed_steps"][0], "step": "database", "critical": True}
+    startup_health.reset()
+    assert run(core_main.health())["ok"] is True
+
+
+def test_watchdog_treats_not_ready_core_as_unhealthy(monkeypatch):
+    class Resp:
+        is_success = True
+
+        def json(self):
+            return {"ok": False, "startup": {"ready": False}}
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, url):
+            return Resp()
+
+    monkeypatch.setattr(main.httpx, "AsyncClient", Client)
+    assert run(main._core_healthy()) is False
+
+
+def test_watchdog_stands_down_during_owner_control(tmp_path):
+    clock = Clock()
+    s, calls = _make(tmp_path, [False], [False], clock)
+
+    async def scenario():
+        async with s.control_action("restart"):
+            assert await s.tick() == "control_in_flight"
+        # the owner's start gets the launch grace before the watchdog may act
+        assert await s.tick() == "launch_pending"
+
+    run(scenario())
+    assert calls == []
+    clock.now += sup.LAUNCH_PENDING_GRACE_SECONDS + 1
+    assert run(s.tick()) == "restarted"
+
+
+def test_control_requires_session_token_and_rejects_concurrent_action(monkeypatch):
+    monkeypatch.setattr(main, "_launch", lambda action: None)
+    monkeypatch.setattr(main, "_wait_for", lambda action: _async({"core": {"healthy": True, "state": "ready"}}))
+    client = TestClient(main.app)
+    assert client.post("/api/manager/v1/control/restart", json={"confirm": True}).status_code == 403
+    bad = {"X-Anzu-Manager-Token": "nope"}
+    assert client.post("/api/manager/v1/control/restart", json={"confirm": True}, headers=bad).status_code == 403
+    headers = _token_headers(client)
+    main.SUPERVISOR.state.control_in_flight = "stop"
+    try:
+        assert client.post("/api/manager/v1/control/start", json={"confirm": True}, headers=headers).status_code == 409
+    finally:
+        main.SUPERVISOR.state.control_in_flight = None
+    assert client.post("/api/manager/v1/control/start", json={"confirm": True}, headers=headers).status_code == 200
+
+
+def _token_headers(client):
+    session = client.get("/api/manager/v1/session").json()
+    return {session["header"]: session["token"]}
+
+
 def test_health_endpoint_exposes_startup_report():
     import app.main as core_main
 
     startup_health.reset()
     run(startup_health.run_step("hardware_snapshot", lambda: (_ for _ in ()).throw(OSError("disk full"))))
     body = run(core_main.health())
-    assert body["ok"] is True
+    assert body["ok"] is True  # non-critical failure: degraded but still ready
+    assert body["startup"]["ready"] is True
     assert body["startup"]["degraded"] is True
     assert body["startup"]["failed_steps"][0]["step"] == "hardware_snapshot"
     startup_health.reset()

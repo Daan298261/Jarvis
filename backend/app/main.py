@@ -195,7 +195,7 @@ async def auth_middleware(request: Request, call_next):
 async def startup() -> None:
     app.state.startup_id = str(uuid.uuid4())
     startup_health.reset()
-    await startup_health.run_step("database", init_db)
+    await startup_health.run_step("database", init_db, critical=True)
     try:
         from .recovery.hooks import startup_recovery
 
@@ -510,7 +510,7 @@ async def health():
     from .runtime.elevation import is_elevated
 
     return {
-        "ok": True,
+        "ok": startup_health.ready(),
         "elevated": is_elevated(),
         "pid": os.getpid(),
         "executable": sys.executable,
