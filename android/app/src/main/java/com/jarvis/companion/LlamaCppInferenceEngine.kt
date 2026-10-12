@@ -5,6 +5,7 @@ package com.jarvis.companion
  */
 class LlamaCppInferenceEngine : LocalInferenceEngine {
     override val runtimeName: String = "llama.cpp"
+    @Volatile private var promptStyle = ChatPromptFormat.Style.RAW
 
     override fun isRuntimeAvailable(): Boolean = CompanionNativeBridge.isLoaded()
 
@@ -12,12 +13,13 @@ class LlamaCppInferenceEngine : LocalInferenceEngine {
         if (!isRuntimeAvailable()) {
             return "On-device inference runtime is missing from this build"
         }
+        promptStyle = ChatPromptFormat.styleFor(modelPath)
         return CompanionNativeBridge.nativeLoad(modelPath, contextTokens).ifBlank { null }
     }
 
     override fun tokenize(text: String): Int {
         if (!isRuntimeAvailable()) return (text.length + 3) / 4
-        val n = CompanionNativeBridge.nativeTokenize(text)
+        val n = CompanionNativeBridge.nativeTokenize(ChatPromptFormat.wrap(text, promptStyle))
         return if (n > 0) n else (text.length + 3) / 4
     }
 
@@ -25,7 +27,8 @@ class LlamaCppInferenceEngine : LocalInferenceEngine {
         if (!isRuntimeAvailable()) {
             return GenerateOutcome(error = "On-device inference runtime is missing from this build")
         }
-        val output = CompanionNativeBridge.nativeGenerate(prompt, maxTokens, OfflinePromptPlanner.N_BATCH)
+        val style = promptStyle
+        val output = CompanionNativeBridge.nativeGenerate(ChatPromptFormat.wrap(prompt, style), maxTokens, OfflinePromptPlanner.N_BATCH)
         if (output.startsWith("error:cancelled") || output == "cancelled") {
             return GenerateOutcome(cancelled = true)
         }
@@ -33,7 +36,7 @@ class LlamaCppInferenceEngine : LocalInferenceEngine {
             return GenerateOutcome(error = output.removePrefix("error:"))
         }
         val truncated = output.startsWith("truncated:")
-        val text = if (truncated) output.removePrefix("truncated:") else output
+        val text = ChatPromptFormat.clean(if (truncated) output.removePrefix("truncated:") else output, style)
         if (text.isNotEmpty()) onToken(text)
         return GenerateOutcome(truncated = truncated)
     }

@@ -2,6 +2,8 @@ package com.jarvis.companion
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.StatFs
+import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -18,6 +20,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.coroutineContext
+
+private const val TAG = "CompanionPackManager"
 
 fun interface FileHasher {
     fun hash(file: File): String
@@ -214,28 +218,33 @@ class CompanionPackManager(
         errorRef.set("")
         val target = packFile(pack)
         val partial = File(target.parent, "${target.name}.partial")
-        partial.delete()
-        val request = Request.Builder().url(pack.url).get().build()
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) error("Download failed (${response.code})")
-            val body = response.body ?: error("Empty download body")
-            val total = body.contentLength().coerceAtLeast(pack.sizeBytes)
-            body.byteStream().use { input ->
-                partial.outputStream().use { output ->
-                    val buffer = ByteArray(65536)
-                    var readTotal = 0L
-                    while (true) {
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        output.write(buffer, 0, count)
-                        readTotal += count
-                        val pct = ((readTotal * 100) / total).toInt().coerceIn(0, 100)
-                        progressRef.set(pct)
-                        onProgress(pct)
-                    }
-                }
-            }
+        val offset = PackDownloadPlan.resumeFrom(partial.length(), pack.sizeBytes)
+        if (offset == 0L && !PackDownloadPlan.partialIsComplete(partial.length(), pack.sizeBytes)) partial.delete()
+        PackDownloadPlan.storageBlockReason(StatFs(packDir.absolutePath).availableBytes, pack.sizeBytes, offset)?.let { reason ->
+            statusRef.set(CompanionPackStatus.ERROR)
+            errorRef.set(reason)
+            error(reason)
         }
+        try {
+            // Mobile networks drop multi-GB downloads: retry transport errors with backoff,
+            // each attempt resuming the .partial from where the last one stopped.
+            TransientRetry.run(
+                attempts = PackDownloadPlan.DOWNLOAD_ATTEMPTS,
+                baseDelayMs = PackDownloadPlan.RETRY_BASE_DELAY_MS,
+                maxDelayMs = PackDownloadPlan.RETRY_MAX_DELAY_MS,
+                onRetry = { attempt, error ->
+                    Log.w(TAG, "Pack download attempt $attempt failed, resuming: ${error.message}")
+                    errorRef.set("Connection dropped — resuming download (attempt ${attempt + 1} of ${PackDownloadPlan.DOWNLOAD_ATTEMPTS})")
+                },
+            ) {
+                downloadOnce(pack, partial, onProgress)
+            }
+        } catch (error: java.io.IOException) {
+            statusRef.set(CompanionPackStatus.ERROR)
+            errorRef.set("Download interrupted after ${PackDownloadPlan.DOWNLOAD_ATTEMPTS} attempts (${error.message}). Tap Download to resume.")
+            throw error
+        }
+        errorRef.set("")
         if (pack.sha256.isNotBlank()) {
             val digest = digestCache.digestOf(partial)
             if (!digest.equals(pack.sha256, ignoreCase = true)) {
@@ -251,6 +260,42 @@ class CompanionPackManager(
         if (pack.sha256.isNotBlank()) digestCache.remember(target, pack.sha256)
         statusRef.set(CompanionPackStatus.READY)
         progressRef.set(100)
+    }
+
+    /** One HTTP attempt; resumes [partial] with a Range request when bytes are already on disk. */
+    private suspend fun downloadOnce(pack: CompanionPack, partial: File, onProgress: (Int) -> Unit) {
+        if (PackDownloadPlan.partialIsComplete(partial.length(), pack.sizeBytes)) return
+        var offset = PackDownloadPlan.resumeFrom(partial.length(), pack.sizeBytes)
+        val builder = Request.Builder().url(pack.url).get()
+        if (offset > 0L) builder.header("Range", "bytes=$offset-")
+        client.newCall(builder.build()).execute().use { response ->
+            // 5xx/429 are transient on the CDN: surface them as IOException so they retry.
+            if (response.code >= 500 || response.code == 429) throw java.io.IOException("Download server returned ${response.code}")
+            if (!response.isSuccessful) error("Download failed (${response.code})")
+            val append = PackDownloadPlan.appendToPartial(offset, response.code)
+            if (!append) offset = 0L
+            val body = response.body ?: throw java.io.IOException("Empty download body")
+            val total = (offset + body.contentLength()).coerceAtLeast(pack.sizeBytes).coerceAtLeast(1L)
+            body.byteStream().use { input ->
+                java.io.FileOutputStream(partial, append).use { output ->
+                    val buffer = ByteArray(65536)
+                    var readTotal = offset
+                    while (true) {
+                        if (!coroutineContext.isActive) throw CancellationException("download cancelled; partial kept for resume")
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                        readTotal += count
+                        val pct = ((readTotal * 100) / total).toInt().coerceIn(0, 100)
+                        progressRef.set(pct)
+                        onProgress(pct)
+                    }
+                }
+            }
+        }
+        if (pack.sizeBytes > 0L && partial.length() < pack.sizeBytes) {
+            throw java.io.IOException("Download ended early at ${partial.length()} of ${pack.sizeBytes} bytes")
+        }
     }
 
     fun deleteSelected() {
