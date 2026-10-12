@@ -5,6 +5,8 @@ APKs, XAPK/APKS containers and split-APK directories, apktool + jadx orchestrati
 inside the ANZU-REA WSL distribution with heap caps and timeouts, and manifest,
 permission and component extraction.
 Slice 2: native .so inventory (ABIs, ELF class/machine, JNI exports, packer/entropy).
+Slice 3: string and network endpoint extraction and cryptographic key-material hints
+(``apk_strings``), including network security config evaluation.
 Every step is written to the RFC-0201 investigation store as citable evidence plus a
 chain-of-custody record. No target code is executed.
 """
@@ -19,6 +21,7 @@ import subprocess
 import threading
 import zipfile
 import xml.etree.ElementTree as ET
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
@@ -45,6 +48,7 @@ _CLAIM_LOCK = threading.Lock()
 _CANCEL: dict[str, threading.Event] = {}
 _RUNNING: dict[str, list[Path]] = {}
 _OWNED: set[str] = set()
+_BUSY: set[str] = set()
 
 
 class DecompileCancelled(Exception):
@@ -446,6 +450,8 @@ def preflight(ident: str) -> dict:
             raise ValueError("Investigation was not prepared as an APK target")
         if row["status"] in {"cancelled", "closed", "analyzing"}:
             raise ValueError(f"Investigation is {row['status']}; cannot start decompilation")
+        if ident in _BUSY:
+            raise ValueError("A static analysis step is running for this investigation; retry when it finishes")
         store.validate_snapshot(row)
         row["status"] = "analyzing"
         _CANCEL[ident] = threading.Event()
@@ -677,6 +683,8 @@ def decode_axml(buf: bytes) -> str:
                 out.append(f"<{tag}{' ' if attrs else ''}{' '.join(attrs)}>")
             elif ctype == 0x0103:
                 out.append(f"</{sref(struct.unpack_from('<ii', buf, off + 16)[1])}>")
+            elif ctype == 0x0104:
+                out.append(escape(sref(struct.unpack_from("<i", buf, off + 16)[0])))
             off += size
     except (struct.error, IndexError) as exc:
         raise ValueError("malformed binary XML") from exc
@@ -798,6 +806,46 @@ def parse_manifest(path: Path, apktool_yml: Path | None = None) -> tuple[dict, d
                 "permissions": {"declared": declared, "requested": requested, "high_risk": high_risk},
                 "attack_surface": surface}
     return manifest, {"package": package, "components": items, "attack_surface": surface}
+
+
+# --- Static analysis steps (shared guard) --------------------------------------------------
+
+@contextmanager
+def _static_op(ident: str):
+    """Claim one in-process static step; never overlaps a decompile or another step on the row.
+
+    Evidence IDs are allocated from the row, so two writers on one investigation would clobber
+    each other's records; preflight() refuses to claim while a step is in flight and vice versa.
+    """
+    with _CLAIM_LOCK:
+        row = store.load(ident)
+        if not row.get("apk"):
+            raise ValueError("Investigation was not prepared as an APK target")
+        if row["status"] in {"analyzing", "cancelled", "closed"}:
+            raise ValueError(f"Investigation is {row['status']}; cannot run a static analysis step")
+        if ident in _BUSY:
+            raise ValueError("A static analysis step is already running for this investigation")
+        _BUSY.add(ident)
+    try:
+        store.validate_snapshot(row)
+        yield row
+    finally:
+        with _CLAIM_LOCK:
+            _BUSY.discard(ident)
+
+
+def _settle(row: dict, unknowns: list[str]) -> None:
+    """Merge step unknowns into the row; the row stays partial while any unknown is declared."""
+    row["unknowns"] = list(dict.fromkeys([*row.get("unknowns", []), *unknowns]))
+    if row["status"] in {"prepared", "investigating", "partial"}:
+        row["status"] = "partial" if row["unknowns"] else "investigating"
+
+
+def _optional_metadata(ident: str, name: str) -> dict | None:
+    try:
+        return metadata(ident, name)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
 
 
 # --- Native .so inventory (RFC-0207 §6) -------------------------------------------------
@@ -1077,10 +1125,11 @@ def _inspect_so(rel: str, abi: str, data: bytes, source: str) -> dict:
 
 def apk_inventory_native(ident: str, abi: str | None = None) -> dict:
     """Inventory native .so libraries across APK/split parts (RFC-0207 §6); writes apk_native_libs evidence."""
-    row = store.load(ident)
-    if not row.get("apk"):
-        raise ValueError("Investigation was not prepared as an APK target")
-    store.validate_snapshot(row)
+    with _static_op(ident) as row:
+        return _inventory_native(ident, row, abi)
+
+
+def _inventory_native(ident: str, row: dict, abi: str | None) -> dict:
     candidates = _collect_native_candidates(row)
     libraries = []
     unknowns: list[str] = []
@@ -1150,9 +1199,7 @@ def apk_inventory_native(ident: str, abi: str | None = None) -> dict:
         "metadata": "apk/metadata/native.json",
         "limitations": doc["limitations"],
     })
-    row["unknowns"] = list(dict.fromkeys([*row.get("unknowns", []), *unknowns]))
-    if row["status"] in {"prepared", "investigating", "partial"}:
-        row["status"] = "partial" if unknowns else "investigating"
+    _settle(row, unknowns)
     noun = "library" if len(libraries) == 1 else "libraries"
     detail = f"Inventoried {len(libraries)} native {noun}"
     if abi:
@@ -1162,6 +1209,81 @@ def apk_inventory_native(ident: str, abi: str | None = None) -> dict:
          {"evidence": eid, "abis": abis, "library_count": len(libraries)})
     _custody(row, native_inventoried_at=_now())
     store.save(row)
+    return {**doc, "evidence_id": eid, "investigation_status": row["status"]}
+
+
+# --- Strings, endpoints and crypto hints (RFC-0207 §7-§8) --------------------------------
+
+EVIDENCE_RECORD_CAP = 2000
+ENDPOINT_LIMIT_MAX = 10000
+
+
+def apk_extract_endpoints(ident: str, category: str | None = None, limit: int | None = None) -> dict:
+    """Extract URLs, IPs, WebSockets, custom schemes and cloud backends (RFC-0207 §7).
+
+    Always scans and stores the full result (apk/metadata/endpoints.json and strings.json) and
+    records apk_endpoints evidence; ``category`` and ``limit`` only narrow the returned view.
+    """
+    from . import apk_strings
+    if category is not None and category not in apk_strings.ENDPOINT_CATEGORIES:
+        raise ValueError(f"category must be one of {', '.join(apk_strings.ENDPOINT_CATEGORIES)}")
+    if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int)
+                              or not 1 <= limit <= ENDPOINT_LIMIT_MAX):
+        raise ValueError(f"limit must be an integer between 1 and {ENDPOINT_LIMIT_MAX}")
+    with _static_op(ident) as row:
+        result = apk_strings.extract_endpoints(store.directory(ident) / "apk", row["apk"]["parts"],
+                                               _optional_metadata(ident, "components"))
+        strings = result.pop("strings")
+        records = result["endpoints"]
+        doc = {"investigation_id": ident, **result}
+        meta = store.directory(ident) / "apk" / "metadata"
+        meta.mkdir(parents=True, mode=0o700, exist_ok=True)
+        store.atomic_json(meta / "endpoints.json", doc)
+        store.atomic_json(meta / "strings.json", {"investigation_id": ident, "coverage": result["coverage"], **strings})
+        eid = _record(row, "apk_endpoints", {"category": category, "limit": limit}, {
+            "provider": "ANZU APK sidecar", "counts": result["counts"], "endpoint_count": len(records),
+            "cloud_services": result["cloud_services"], "endpoints": records[:EVIDENCE_RECORD_CAP],
+            "evidence_truncated": len(records) > EVIDENCE_RECORD_CAP, "filtered": result["filtered"],
+            "coverage": result["coverage"], "unique_strings": strings["unique_strings_stored"],
+            "unknowns": result["unknowns"], "metadata": "apk/metadata/endpoints.json",
+            "strings_metadata": "apk/metadata/strings.json", "limitations": result["limitations"]})
+        _settle(row, result["unknowns"])
+        _coc(row, "apk_endpoints_extracted", f"Extracted {len(records)} endpoint(s) from static strings.",
+             {"evidence": eid, "counts": result["counts"]})
+        _custody(row, endpoints_extracted_at=_now())
+        store.save(row)
+    view = [r for r in records if category is None or r["category"] == category]
+    if limit is not None:
+        view = view[:limit]
+    return {**doc, "filter_category": category, "limit": limit, "endpoints": view, "returned": len(view),
+            "evidence_id": eid, "investigation_status": row["status"]}
+
+
+def apk_crypto_hints(ident: str) -> dict:
+    """Flag hardcoded secrets, weak crypto, NSC trust policy and key-storage posture (RFC-0207 §8)."""
+    from . import apk_strings
+    with _static_op(ident) as row:
+        result = apk_strings.crypto_hints(store.directory(ident) / "apk", row["apk"]["parts"],
+                                          _optional_metadata(ident, "manifest"))
+        doc = {"investigation_id": ident, **result}
+        meta = store.directory(ident) / "apk" / "metadata"
+        meta.mkdir(parents=True, mode=0o700, exist_ok=True)
+        store.atomic_json(meta / "crypto_hints.json", doc)
+        findings = result["findings"]
+        eid = _record(row, "apk_crypto_hints", {}, {
+            "provider": "ANZU APK sidecar", "finding_count": len(findings), "alert_count": result["alert_count"],
+            "by_severity": result["by_severity"], "by_category": result["by_category"],
+            "findings": findings[:EVIDENCE_RECORD_CAP], "evidence_truncated": len(findings) > EVIDENCE_RECORD_CAP,
+            "network_security_config": result["network_security_config"],
+            "key_storage": {"posture": result["key_storage"]["posture"], "detail": result["key_storage"]["detail"]},
+            "coverage": result["coverage"], "unknowns": result["unknowns"],
+            "metadata": "apk/metadata/crypto_hints.json", "limitations": result["limitations"]})
+        _settle(row, result["unknowns"])
+        _coc(row, "apk_crypto_hints_extracted",
+             f"Recorded {len(findings)} cryptographic hint(s), {result['alert_count']} alert(s).",
+             {"evidence": eid, "by_severity": result["by_severity"]})
+        _custody(row, crypto_hints_extracted_at=_now())
+        store.save(row)
     return {**doc, "evidence_id": eid, "investigation_status": row["status"]}
 
 
@@ -1180,6 +1302,19 @@ CATALOG = {
                              "inputSchema": {"type": "object",
                                              "properties": {"abi": {"type": "string"}},
                                              "additionalProperties": False}},
+    "apk_extract_endpoints": {"name": "apk_extract_endpoints",
+                              "description": "Extract URLs, IPs, WebSockets, custom URI schemes and cloud backends "
+                                             "from DEX strings, resources and recovered Java; records endpoint evidence.",
+                              "inputSchema": {"type": "object",
+                                              "properties": {"category": {"type": "string", "enum": [
+                                                  "url", "websocket", "custom_scheme", "cloud_service", "ipv4", "ipv6"]},
+                                                  "limit": {"type": "integer", "minimum": 1,
+                                                            "maximum": ENDPOINT_LIMIT_MAX}},
+                                              "additionalProperties": False}},
+    "apk_crypto_hints": {"name": "apk_crypto_hints",
+                         "description": "Flag hardcoded secrets, weak ciphers, static keys/IVs, network security "
+                                        "config trust policy and AndroidKeyStore usage; records crypto evidence.",
+                         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
 }
 
 
@@ -1205,15 +1340,27 @@ def call(ident: str, operation: str, arguments: dict, claimed: dict | None = Non
         out = apk_inventory_native(ident, abi)
         return {"status": "evidence", "evidence_id": out["evidence_id"],
                 "investigation_status": out["investigation_status"], "native": out}
+    if operation == "apk_extract_endpoints":
+        out = apk_extract_endpoints(ident, arguments.get("category"), arguments.get("limit"))
+        return {"status": "evidence", "evidence_id": out["evidence_id"],
+                "investigation_status": out["investigation_status"], "endpoints": out}
+    if operation == "apk_crypto_hints":
+        out = apk_crypto_hints(ident)
+        return {"status": "evidence", "evidence_id": out["evidence_id"],
+                "investigation_status": out["investigation_status"], "crypto": out}
     raise PermissionError("Operation is not admitted")
 
 
 # --- Read side used by the API ---------------------------------------------------------
 
+METADATA_DOCUMENTS = {"manifest": "manifest", "components": "components", "native": "native",
+                      "endpoints": "endpoints", "crypto": "crypto_hints", "strings": "strings"}
+
+
 def metadata(ident: str, name: str) -> dict:
-    if name not in {"manifest", "components", "native"}:
+    if name not in METADATA_DOCUMENTS:
         raise ValueError("Unknown APK metadata document")
-    p = store.directory(ident) / "apk" / "metadata" / f"{name}.json"
+    p = store.directory(ident) / "apk" / "metadata" / f"{METADATA_DOCUMENTS[name]}.json"
     if not p.is_file():
         raise FileNotFoundError(name)
     return json.loads(p.read_text(encoding="utf-8"))
@@ -1229,6 +1376,8 @@ def summary(ident: str) -> dict:
     except FileNotFoundError:
         manifest = None
     abis = sorted({abi for p in apk["parts"] for abi in p["abis"]})
+    endpoints = _optional_metadata(ident, "endpoints")
+    crypto = _optional_metadata(ident, "crypto")
     return {"id": ident, "status": row["status"], "format": apk["format"], "sha256": row.get("sha256"),
             "parts": len(apk["parts"]), "obb": len(apk["obb"]), "native_abis": abis,
             "native_libs": sum(len(p["native_libs"]) for p in apk["parts"]),
@@ -1240,4 +1389,7 @@ def summary(ident: str) -> dict:
             "exported": manifest["attack_surface"]["exported"] if manifest else None,
             "exported_unprotected": manifest["attack_surface"]["exported_unprotected_count"] if manifest else None,
             "high_risk_permissions": len(manifest["permissions"]["high_risk"]) if manifest else None,
+            "endpoints": endpoints["endpoint_count"] if endpoints else None,
+            "urls": endpoints["counts"]["url"] if endpoints else None,
+            "crypto_alerts": crypto["alert_count"] if crypto else None,
             "decompiled": manifest is not None, "unknowns": row.get("unknowns", [])}
