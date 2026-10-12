@@ -50,7 +50,7 @@ The APK Reverse-Engineering Sidecar operates as an execution-free static analysi
                                v Target APK / XAPK / Split Set
 +---------------------------------------------------------------------------------------------------+
 |                             APK Reverse-Engineering Sidecar Pipeline                              |
-|                              (backend/app/reverse_engineering/apk.py)                             |
+|                              (backend/app/reverse_engineering/apk_sidecar.py)                     |
 +---------------------------------------------------------------------------------------------------+
        |                                                                              |
        +-------------------------------+------------------------------+               |
@@ -615,7 +615,7 @@ Stored under `tests/fixtures/apk/`:
 
 | Area | Paths |
 | --- | --- |
-| **Backend Core** | `backend/app/reverse_engineering/apk.py` (new sidecar module), `backend/app/reverse_engineering/android.py` (readiness split), `backend/app/reverse_engineering/runtime.py` (tool catalog registration), `backend/app/reverse_engineering/engine-lock.json` (apktool pin) |
+| **Backend Core** | `backend/app/reverse_engineering/apk_sidecar.py` (new sidecar module), `backend/app/reverse_engineering/android.py` (readiness split), `backend/app/reverse_engineering/runtime.py` (tool catalog registration), `backend/app/reverse_engineering/engine-lock.json` (apktool pin) |
 | **Backend API** | `backend/app/api/investigations.py` (APK prepare/decompile/metadata endpoints) |
 | **Setup & Scripting** | `backend/app/reverse_engineering/setup-engine.sh` (apktool jar placement) |
 | **Tests & Fixtures** | `tests/test_rfc0207_apk_sidecar.py`, `tests/fixtures/apk/*` |

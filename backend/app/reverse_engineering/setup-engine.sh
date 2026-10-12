@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
-mkdir -p /opt/anzu/{node,jdk,ghidra,jadx,rea,bin}
+mkdir -p /opt/anzu/{node,jdk,ghidra,jadx,apktool,rea,bin}
 tar -xJf "$1" -C /opt/anzu/node --strip-components=1
 tar -xzf "$2" -C /opt/anzu/jdk --strip-components=1
 unzip -oq "$3" -d /opt/anzu/ghidra
 unzip -oq "$4" -d /opt/anzu/jadx
+install -m 0600 "$6" /opt/anzu/apktool/apktool.jar
 export PATH=/opt/anzu/node/bin:/opt/anzu/jdk/bin:$PATH
 export JAVA_HOME=/opt/anzu/jdk
 cd /opt/anzu/rea

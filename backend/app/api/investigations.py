@@ -9,11 +9,12 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from ..config import load_settings
-from ..reverse_engineering import provision, store
+from ..reverse_engineering import apk_sidecar, provision, store
 from ..reverse_engineering.runtime import SERVICE
 
 router = APIRouter(prefix="/api/investigations", tags=["investigations"])
 _setup_task: asyncio.Task | None = None
+_apk_tasks: set[asyncio.Task] = set()
 
 
 class PrepareBody(BaseModel):
@@ -44,6 +45,19 @@ class IngestBody(BaseModel):
     background: bool = False
 
 
+class ApkPrepareBody(BaseModel):
+    source_type: Literal["file"] = "file"
+    target: str = Field(min_length=1, max_length=4096)
+    question: str = Field(default="Static APK analysis: manifest, permissions and exported components",
+                          min_length=1, max_length=10000)
+    task_id: str | None = None
+
+
+class ApkDecompileBody(BaseModel):
+    skip_jadx: bool = False
+    background: bool = False
+
+
 def public_row(row: dict) -> dict:
     return {k: v for k, v in row.items() if k not in {"manifest", "snapshot"}}
 
@@ -64,7 +78,8 @@ async def _setup(android: bool):
 async def readiness():
     from ..reverse_engineering.android import readiness as android_readiness
     return {"engine": await asyncio.to_thread(provision.readiness),
-            "android": android_readiness()}
+            "android": android_readiness(),
+            "apk_static": await asyncio.to_thread(apk_sidecar.readiness_static)}
 
 
 @router.post("/setup")
@@ -113,6 +128,59 @@ async def ingest(body: IngestBody):
         return public_row(row)
     except (ValueError, OSError, PermissionError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/apk/prepare")
+async def apk_prepare(body: ApkPrepareBody):
+    try:
+        row = await asyncio.to_thread(apk_sidecar.prepare_apk, body.target, body.question,
+                                      load_settings().allowed_directories, body.task_id)
+        return public_row(row)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+async def _apk_decompile_background(ident: str, skip_jadx: bool):
+    try:
+        await asyncio.to_thread(apk_sidecar.decompile, ident, skip_jadx)
+    except Exception:
+        # decompile() persists status "interrupted" and last_error on the investigation row.
+        return
+
+
+@router.post("/{ident}/apk/decompile")
+async def apk_decompile(ident: str, body: ApkDecompileBody):
+    try:
+        row = await asyncio.to_thread(apk_sidecar.preflight, ident)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Unknown investigation") from exc
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if body.background:
+        task = asyncio.create_task(_apk_decompile_background(ident, body.skip_jadx))
+        _apk_tasks.add(task)
+        task.add_done_callback(_apk_tasks.discard)
+        return {**public_row(row), "status": "analyzing"}
+    try:
+        return public_row(await asyncio.to_thread(apk_sidecar.decompile, ident, body.skip_jadx))
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/{ident}/apk/summary")
+async def apk_summary(ident: str):
+    try:
+        return await asyncio.to_thread(apk_sidecar.summary, ident)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail="Unknown APK investigation") from exc
+
+
+@router.get("/{ident}/apk/{document}")
+async def apk_metadata(ident: str, document: Literal["manifest", "components"]):
+    try:
+        return await asyncio.to_thread(apk_sidecar.metadata, ident, document)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail="APK metadata has not been produced") from exc
 
 
 @router.get("/{ident}")
