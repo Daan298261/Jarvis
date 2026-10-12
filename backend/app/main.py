@@ -20,6 +20,7 @@ from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
 from .api import advisor, agent_policy, agent_portability, agent_rooms, amazon_ads, approvals, auth, automation_breaker, autonomy, capability_lab, coding, companion, computer_use, context_repo, custom_presence, cyber_ato, decision, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, installer, integrations, license, lmstudio, lta, mcp, media, memory, mobile, model, modules, named_personas, owner_chat, packs, perception, perception_commentary, perception_identity, permissions, projects, queue, recovery, reversibility, runtime_profiles, security_agents, self_dev, session_personality, settings, setup, skill_forge, supermemory, swarm, system, tasks, tools, trajectories, vault, voice, voice_profiles, worker_environments, workflows, rea
 from .auth import authenticate_request, authenticate_websocket
 from .guests.service import authenticate_guest_request, extract_guest_token_from_request
+from . import startup_health
 from .config import default_allowed_directories, load_settings, logs_dir, repo_root, save_settings
 from .db import init_db
 from .events import BUS
@@ -193,7 +194,8 @@ async def auth_middleware(request: Request, call_next):
 @app.on_event("startup")
 async def startup() -> None:
     app.state.startup_id = str(uuid.uuid4())
-    await init_db()
+    startup_health.reset()
+    await startup_health.run_step("database", init_db, critical=True)
     try:
         from .recovery.hooks import startup_recovery
 
@@ -206,9 +208,12 @@ async def startup() -> None:
         await reconcile_execution_on_startup()
     except Exception:
         logging.debug("Execution lease reconcile skipped", exc_info=True)
-    node = await register_localhost_node()
-    await bind_workers_to_node(node.id)
-    await register_localhost_capabilities(node.id)
+    async def _register_node() -> None:
+        node = await register_localhost_node()
+        await bind_workers_to_node(node.id)
+        await register_localhost_capabilities(node.id)
+
+    await startup_health.run_step("localhost_node", _register_node)
     try:
         from .decision.laya import runtime as laya_runtime
 
@@ -232,7 +237,7 @@ async def startup() -> None:
         persist_dirs = True
     if persist_dirs:
         save_settings(current)
-    REGISTRY.apply_settings(current)
+    await startup_health.run_step("tool_registry", lambda: REGISTRY.apply_settings(current))
     try:
         from .auth import ensure_owner_private_key
 
@@ -268,7 +273,10 @@ async def startup() -> None:
         apply_playwright_browsers_path()
     except Exception:
         logging.debug("Extra-drive cache dest apply on startup skipped", exc_info=True)
-    Path(repo_root() / "data" / "hardware.json").write_text(json.dumps(hardware_dict(), indent=2), encoding="utf-8")
+    await startup_health.run_step(
+        "hardware_snapshot",
+        lambda: Path(repo_root() / "data" / "hardware.json").write_text(json.dumps(hardware_dict(), indent=2), encoding="utf-8"),
+    )
     try:
         from .licensing.clock_log import record_clock_sample
 
@@ -502,11 +510,12 @@ async def health():
     from .runtime.elevation import is_elevated
 
     return {
-        "ok": True,
+        "ok": startup_health.ready(),
         "elevated": is_elevated(),
         "pid": os.getpid(),
         "executable": sys.executable,
         "platform": os.name,
+        "startup": startup_health.report(),
     }
 
 
