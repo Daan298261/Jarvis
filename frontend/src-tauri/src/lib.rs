@@ -362,11 +362,45 @@ fn hide_main(app: &AppHandle) {
     }
 }
 
+const MANAGER_BASE: &str = "http://127.0.0.1:4782";
+
+/// Tray start/stop/restart via ANZU Manager. Runs off the UI thread (restart can take
+/// a minute) and logs any failure instead of dropping it.
 fn manager_control(action: &str) {
-    let _ = HTTP.post(format!("http://127.0.0.1:4782/api/manager/v1/control/{action}"))
+    let action = action.to_string();
+    std::thread::spawn(move || {
+        if let Err(err) = manager_control_at(&HTTP, MANAGER_BASE, &action) {
+            eprintln!("[anzu] manager {action} failed: {err}");
+        }
+    });
+}
+
+/// Fetches the per-session control token, then POSTs the confirmed action with it.
+fn manager_control_at(client: &reqwest::blocking::Client, base: &str, action: &str) -> Result<(), String> {
+    let session = client
+        .get(format!("{base}/api/manager/v1/session"))
+        .send()
+        .map_err(|e| format!("session request: {e}"))?;
+    if !session.status().is_success() {
+        return Err(format!("session request: HTTP {}", session.status()));
+    }
+    let session: serde_json::Value = session.json().map_err(|e| format!("session body: {e}"))?;
+    let token = session["token"].as_str().ok_or("session body: missing token")?;
+    let header = session["header"].as_str().unwrap_or("X-Anzu-Manager-Token");
+    let response = client
+        .post(format!("{base}/api/manager/v1/control/{action}"))
+        .timeout(Duration::from_secs(150))
         .header("content-type", "application/json")
+        .header(header, token)
         .body("{\"confirm\":true}")
-        .send();
+        .send()
+        .map_err(|e| format!("control request: {e}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        let detail = response.text().unwrap_or_default();
+        return Err(format!("HTTP {status}: {}", detail.chars().take(300).collect::<String>()));
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -829,4 +863,75 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Jarvis desktop shell");
+}
+
+#[cfg(test)]
+mod manager_control_tests {
+    use super::manager_control_at;
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{Arc, Mutex};
+
+    /// Minimal manager stub: /session hands out "tok-1"; control accepts only that token.
+    fn serve(requests: usize) -> (String, Arc<Mutex<Vec<String>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().take(requests) {
+                let mut stream = stream.unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let (mut token, mut length) = (String::new(), 0usize);
+                loop {
+                    let mut h = String::new();
+                    reader.read_line(&mut h).unwrap();
+                    let h = h.trim_end().to_string();
+                    if h.is_empty() { break; }
+                    let lower = h.to_ascii_lowercase();
+                    if let Some(v) = lower.strip_prefix("x-anzu-manager-token:") { token = v.trim().to_string(); }
+                    if let Some(v) = lower.strip_prefix("content-length:") { length = v.trim().parse().unwrap(); }
+                }
+                let mut body = vec![0u8; length];
+                reader.read_exact(&mut body).unwrap();
+                log.lock().unwrap().push(format!("{} token={token}", line.trim_end()));
+                let (code, out) = if line.starts_with("GET /api/manager/v1/session") {
+                    ("200 OK", r#"{"token":"tok-1","header":"X-Anzu-Manager-Token"}"#.to_string())
+                } else if token == "tok-1" {
+                    ("200 OK", r#"{"ok":true}"#.to_string())
+                } else {
+                    ("403 Forbidden", r#"{"detail":"Manager session token required"}"#.to_string())
+                };
+                write!(stream, "HTTP/1.1 {code}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{out}", out.len()).unwrap();
+            }
+        });
+        (base, seen)
+    }
+
+    #[test]
+    fn sends_session_token_with_control_action() {
+        let (base, seen) = serve(2);
+        let client = reqwest::blocking::Client::new();
+        manager_control_at(&client, &base, "restart").unwrap();
+        let seen = seen.lock().unwrap();
+        assert!(seen[0].starts_with("GET /api/manager/v1/session"));
+        assert!(seen[1].starts_with("POST /api/manager/v1/control/restart"));
+        assert!(seen[1].ends_with("token=tok-1"));
+    }
+
+    #[test]
+    fn reports_rejected_control_instead_of_swallowing_it() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf);
+            let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        });
+        let err = manager_control_at(&reqwest::blocking::Client::new(), &base, "stop").unwrap_err();
+        assert!(err.contains("403"), "{err}");
+    }
 }
