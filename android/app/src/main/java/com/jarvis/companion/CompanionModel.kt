@@ -8,6 +8,9 @@ import android.media.AudioRecord
 import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.media.MediaRecorder.AudioSource
+import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
 import android.net.Uri
 import android.content.ContentProviderOperation
 import android.content.Intent
@@ -21,6 +24,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
@@ -116,6 +121,9 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private var onDevicePcm: java.io.ByteArrayOutputStream? = null
     private var onDeviceListening = false
     private var pickedTextForPrompt: String? = null
+    private val heartbeat = LeaderHeartbeat()
+    private val networkChanged = Channel<Unit>(Channel.CONFLATED)
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
     init {
         deviceModelChrome.actions = object : DevicePackChromeActions {
             override fun downloadSelectedPack() {
@@ -160,19 +168,23 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                             mutable.value = mutable.value.copy(pendingApproval = false, lanStatus = "idle", lanLabel = "")
                         }
                     } else {
-                        runCatching { refresh() }.onFailure {
-                            mutable.value = mutable.value.copy(
-                                connected = false,
-                                leaderReachable = false,
-                                activity = "Offline",
-                                error = it.message,
-                            )
+                        runCatching { refresh() }.onSuccess { heartbeat.onSuccess() }.onFailure {
+                            if (heartbeat.onFailure()) {
+                                mutable.value = mutable.value.copy(
+                                    connected = false,
+                                    leaderReachable = false,
+                                    activity = "Offline",
+                                    error = it.message,
+                                )
+                            }
                         }
                     }
                 }
-                delay(4000)
+                // Sleep until the next heartbeat, or wake early when the phone changes network.
+                withTimeoutOrNull(heartbeat.nextDelayMs()) { networkChanged.receive() }
             }
         }
+        registerNetworkWatcher()
         if (api.deviceId.isEmpty()) startLanScan()
         StandaloneActions.deliverDueReminders(app)
     }
@@ -1267,7 +1279,35 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private fun stopSpeaking() {
         cancelOnDeviceSpeak()
     }
+    /**
+     * Wi-Fi/cellular hand-off or a new DHCP lease changes the desktop's reachable address.
+     * Re-discover the paired desktop on the LAN (pin-matched, pairing kept) and poll now.
+     */
+    private fun registerNetworkWatcher() {
+        val connectivity = getApplication<Application>().getSystemService(ConnectivityManager::class.java) ?: return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) = onNetworkChange()
+            override fun onLost(network: Network) = onNetworkChange()
+            override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) = onNetworkChange()
+        }
+        runCatching { connectivity.registerDefaultNetworkCallback(callback) }
+            .onSuccess { networkCallback = callback }
+    }
+
+    private fun onNetworkChange() {
+        heartbeat.onNetworkChanged()
+        if (api.deviceId.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { api.recoverPairedLanFromBeacon() }
+            networkChanged.trySend(Unit)
+        }
+    }
+
     override fun onCleared() {
+        networkCallback?.let { callback ->
+            runCatching { getApplication<Application>().getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(callback) }
+        }
+        networkChanged.close()
         captureJob?.cancel(); listenJob?.cancel(); ttsQueueJob?.cancel(); ttsJob?.cancel()
         onDeviceSpeak?.stop()
         onDeviceListening = false

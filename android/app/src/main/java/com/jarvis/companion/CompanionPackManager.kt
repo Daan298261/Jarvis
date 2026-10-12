@@ -2,6 +2,7 @@ package com.jarvis.companion
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.StatFs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -214,24 +215,36 @@ class CompanionPackManager(
         errorRef.set("")
         val target = packFile(pack)
         val partial = File(target.parent, "${target.name}.partial")
-        partial.delete()
-        val request = Request.Builder().url(pack.url).get().build()
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) error("Download failed (${response.code})")
-            val body = response.body ?: error("Empty download body")
-            val total = body.contentLength().coerceAtLeast(pack.sizeBytes)
-            body.byteStream().use { input ->
-                partial.outputStream().use { output ->
-                    val buffer = ByteArray(65536)
-                    var readTotal = 0L
-                    while (true) {
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        output.write(buffer, 0, count)
-                        readTotal += count
-                        val pct = ((readTotal * 100) / total).toInt().coerceIn(0, 100)
-                        progressRef.set(pct)
-                        onProgress(pct)
+        var offset = PackDownloadPlan.resumeFrom(partial.length(), pack.sizeBytes)
+        if (offset == 0L && !PackDownloadPlan.partialIsComplete(partial.length(), pack.sizeBytes)) partial.delete()
+        PackDownloadPlan.storageBlockReason(StatFs(packDir.absolutePath).availableBytes, pack.sizeBytes, offset)?.let { reason ->
+            statusRef.set(CompanionPackStatus.ERROR)
+            errorRef.set(reason)
+            error(reason)
+        }
+        if (!PackDownloadPlan.partialIsComplete(partial.length(), pack.sizeBytes)) {
+            val builder = Request.Builder().url(pack.url).get()
+            if (offset > 0L) builder.header("Range", "bytes=$offset-")
+            client.newCall(builder.build()).execute().use { response ->
+                if (!response.isSuccessful) error("Download failed (${response.code})")
+                val append = PackDownloadPlan.appendToPartial(offset, response.code)
+                if (!append) offset = 0L
+                val body = response.body ?: error("Empty download body")
+                val total = (offset + body.contentLength()).coerceAtLeast(pack.sizeBytes).coerceAtLeast(1L)
+                body.byteStream().use { input ->
+                    java.io.FileOutputStream(partial, append).use { output ->
+                        val buffer = ByteArray(65536)
+                        var readTotal = offset
+                        while (true) {
+                            if (!isActive) throw CancellationException("download cancelled; partial kept for resume")
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            output.write(buffer, 0, count)
+                            readTotal += count
+                            val pct = ((readTotal * 100) / total).toInt().coerceIn(0, 100)
+                            progressRef.set(pct)
+                            onProgress(pct)
+                        }
                     }
                 }
             }
