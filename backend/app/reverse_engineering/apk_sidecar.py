@@ -4,7 +4,8 @@ Slice 1: static toolchain readiness (JDK, jadx, apktool), safe intake of standal
 APKs, XAPK/APKS containers and split-APK directories, apktool + jadx orchestration
 inside the ANZU-REA WSL distribution with heap caps and timeouts, and manifest,
 permission and component extraction.
-Slice 2: native .so inventory (ABIs, ELF class/machine, JNI exports, packer/entropy).
+Slice 2: native .so inventory (ABIs, ELF header, SONAME/NEEDED, RELRO, stack canary,
+GNU_STACK, JNI exports, readelf fallback, packer and code-segment entropy hints).
 Every step is written to the RFC-0201 investigation store as citable evidence plus a
 chain-of-custody record. No target code is executed.
 """
@@ -12,11 +13,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import os
 import re
 import shutil
 import stat
 import subprocess
 import threading
+import uuid
 import zipfile
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -45,6 +49,8 @@ _CLAIM_LOCK = threading.Lock()
 _CANCEL: dict[str, threading.Event] = {}
 _RUNNING: dict[str, list[Path]] = {}
 _OWNED: set[str] = set()
+_CLAIMS: dict[str, str] = {}
+log = logging.getLogger(__name__)
 
 
 class DecompileCancelled(Exception):
@@ -377,15 +383,21 @@ def cancel(ident: str) -> None:
         for pidfile in list(_RUNNING.get(ident, [])):
             try:
                 pid = pidfile.read_text(encoding="ascii").strip()
-            except OSError:
+            except OSError as exc:
+                log.warning("Cancel %s: pid file %s unreadable (%s); that tool may keep running", ident, pidfile, exc)
                 continue
             if not pid.isdigit() or int(pid) < 2:
+                log.warning("Cancel %s: pid file %s holds %r, not a PID; not signalling", ident, pidfile, pid)
                 continue
             try:
                 # coreutils timeout leads its own process group; signal the whole group by PID.
-                _wsl(["kill", signal, "--", f"-{pid}"], 30)
-            except (OSError, subprocess.TimeoutExpired):
+                result = _wsl(["kill", signal, "--", f"-{pid}"], 30)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                log.warning("Cancel %s: kill %s -%s failed: %s", ident, signal, pid, exc)
                 continue
+            if result.returncode:
+                log.warning("Cancel %s: kill %s -%s exited %s: %s", ident, signal, pid, result.returncode,
+                            result.stderr.decode("utf-8", errors="replace")[-300:])
         deadline = time.monotonic() + KILL_GRACE
         while _RUNNING.get(ident) and time.monotonic() < deadline:
             time.sleep(0.2)
@@ -435,34 +447,60 @@ def _run_tool(ident: str, name: str, argv: list[str], seconds: int, out: Path) -
             "diagnostics": text[-4000:]}
 
 
-def preflight(ident: str) -> dict:
-    """Validate and atomically claim the investigation (status -> analyzing) for one decompile."""
-    ready = readiness_static()
-    if ready["status"] != "ready":
-        raise RuntimeError(ready.get("error") or "Static APK toolchain is not ready")
+def _claim(ident: str, purpose: str) -> dict:
+    """Atomically claim the investigation (status -> analyzing) under a fresh per-claim token.
+
+    The returned row carries ``_claim_token`` (never persisted). Only that token can release
+    or finish the claim, so a late release from an earlier claim cannot interrupt a newer one.
+    """
     with _CLAIM_LOCK:
         row = store.load(ident)
         if not row.get("apk"):
             raise ValueError("Investigation was not prepared as an APK target")
-        if row["status"] in {"cancelled", "closed", "analyzing"}:
-            raise ValueError(f"Investigation is {row['status']}; cannot start decompilation")
+        if row["status"] in {"cancelled", "closed", "analyzing"} or ident in _CLAIMS:
+            raise ValueError(f"Investigation is {row['status']}; cannot start {purpose}")
         store.validate_snapshot(row)
         row["status"] = "analyzing"
+        token = uuid.uuid4().hex
+        saved = store.save(row)
+        _CLAIMS[ident] = token
         _CANCEL[ident] = threading.Event()
-        return store.save(row)
+    return {**saved, "_claim_token": token}
 
 
-def release(ident: str) -> None:
-    """Undo a preflight claim that decompile() never took over; a no-op while decompile owns it."""
+def preflight(ident: str) -> dict:
+    """Check the static toolchain, then claim the investigation for one decompile."""
+    ready = readiness_static()
+    if ready["status"] != "ready":
+        raise RuntimeError(ready.get("error") or "Static APK toolchain is not ready")
+    return _claim(ident, "decompilation")
+
+
+def release(ident: str, token: str | None = None) -> None:
+    """Undo a claim no operation took over. No-op while an operation owns it, when the claim is
+    already finished, or when ``token`` belongs to an earlier claim."""
     with _CLAIM_LOCK:
-        if ident in _OWNED:
+        current = _CLAIMS.get(ident)
+        if ident in _OWNED or current is None or (token is not None and token != current):
             return
         row = store.load(ident)
         if row["status"] == "analyzing":
             row["status"] = "interrupted"
-            row["last_error"] = "Decompile was claimed but never started"
+            row["last_error"] = "Operation was claimed but never started"
             store.save(row)
+        _CLAIMS.pop(ident, None)
         _CANCEL.pop(ident, None)
+
+
+def _finish_failed(ident: str, token: str, status: str, error: str) -> None:
+    with _CLAIM_LOCK:
+        if _CLAIMS.get(ident) != token:
+            return
+        row = store.load(ident)
+        row.update(status=status, last_error=error)
+        _coc(row, f"native_inventory_{status}", error[:500])
+        store.save(row)
+        _CLAIMS.pop(ident, None)
 
 
 def decompile(ident: str, skip_jadx: bool = False, claimed: dict | None = None) -> dict:
@@ -470,7 +508,8 @@ def decompile(ident: str, skip_jadx: bool = False, claimed: dict | None = None) 
 
     ``claimed`` is the row returned by preflight(); without it the claim is taken here.
     """
-    row = claimed if claimed is not None else preflight(ident)
+    row = dict(claimed) if claimed is not None else preflight(ident)
+    token = row.pop("_claim_token", None)
     with _CLAIM_LOCK:
         _OWNED.add(ident)
     try:
@@ -478,6 +517,8 @@ def decompile(ident: str, skip_jadx: bool = False, claimed: dict | None = None) 
     finally:
         with _CLAIM_LOCK:
             _OWNED.discard(ident)
+            if token is not None and _CLAIMS.get(ident) == token:
+                _CLAIMS.pop(ident, None)
 
 
 def _decompile_owned(ident: str, skip_jadx: bool, row: dict) -> dict:
@@ -812,51 +853,80 @@ PACKER_SO_NAMES = {
     "libDexHelper.so": "SecNeo",
 }
 ELF_MACHINES = {3: "x86", 40: "ARM", 62: "x86_64", 183: "AArch64"}
-_LIB_SO = re.compile(r"lib/([^/]+)/([^/]+\.so)$")
+_LIB_SO = re.compile(r"lib/([^/]+)/([^/]+\.so)")
+MAX_NATIVE_BYTES = 256 * 1024 * 1024
+MAX_NATIVE_LIBS = 4096
+MAX_ENTROPY_BYTES = 64 * 1024 * 1024
+MAX_ELF_TABLE_ENTRIES = 65536
+READELF_TIMEOUT = 60
 _ENTROPY_BLOCK = 4096
 _ENTROPY_THRESHOLD = 7.2
+_READ_CHUNK = 1024 * 1024
+_PT_LOAD, _PT_GNU_STACK, _PT_GNU_RELRO, _PF_X = 1, 0x6474E551, 0x6474E552, 0x1
+_SHT_DYNSYM, _SHT_DYNAMIC = 11, 6
+_DT_NEEDED, _DT_SONAME, _DT_BIND_NOW, _DT_FLAGS, _DT_FLAGS_1 = 1, 14, 24, 30, 0x6FFFFFFB
+_DF_BIND_NOW, _DF_1_NOW = 0x8, 0x1
 
 
 def _shannon_entropy(data: bytes) -> float:
     import math
+    from collections import Counter
     if not data:
         return 0.0
-    counts = [0] * 256
-    for b in data:
-        counts[b] += 1
     n = len(data)
-    return -sum((c / n) * math.log2(c / n) for c in counts if c)
+    return -sum((c / n) * math.log2(c / n) for c in Counter(data).values())
 
 
-def _entropy_hints(data: bytes) -> dict:
-    high = 0
-    blocks = 0
+def _entropy_hints(data: bytes, ranges: list[tuple[int, int]] | None = None,
+                   cancel: threading.Event | None = None) -> dict:
+    """Shannon entropy over 4 KiB blocks of the code ranges (whole file when none).
+
+    The final short block of every range is scored too, so a packed tail is never skipped.
+    At most MAX_ENTROPY_BYTES are scored per library; the result says when it stopped early.
+    """
+    scope = "executable segments" if ranges else "whole file"
+    spans = ranges or [(0, len(data))]
+    blocks = high = scanned = 0
     max_e = 0.0
-    for i in range(0, len(data), _ENTROPY_BLOCK):
-        chunk = data[i:i + _ENTROPY_BLOCK]
-        if len(chunk) < _ENTROPY_BLOCK and blocks:
+    tail_bytes = 0
+    truncated = False
+    for start, size in spans:
+        start, end = max(0, start), min(len(data), start + max(0, size))
+        pos = start
+        while pos < end:
+            if scanned >= MAX_ENTROPY_BYTES:
+                truncated = True
+                break
+            if cancel is not None and cancel.is_set():
+                raise DecompileCancelled("native entropy scan")
+            chunk = data[pos:min(pos + _ENTROPY_BLOCK, end)]
+            pos += len(chunk)
+            scanned += len(chunk)
+            if len(chunk) < _ENTROPY_BLOCK:
+                tail_bytes += len(chunk)
+            blocks += 1
+            e = _shannon_entropy(chunk)
+            max_e = max(max_e, e)
+            if e > _ENTROPY_THRESHOLD:
+                high += 1
+        if truncated:
             break
-        if not chunk:
-            continue
-        blocks += 1
-        e = _shannon_entropy(chunk)
-        if e > max_e:
-            max_e = e
-        if e > _ENTROPY_THRESHOLD:
-            high += 1
-    return {
-        "block_bytes": _ENTROPY_BLOCK,
-        "blocks": blocks,
-        "high_entropy_blocks": high,
-        "max_block_entropy": round(max_e, 3),
-        "high_entropy": high > 0,
-    }
+    return {"block_bytes": _ENTROPY_BLOCK, "scope": scope, "blocks": blocks, "tail_bytes": tail_bytes,
+            "scanned_bytes": scanned, "truncated": truncated, "high_entropy_blocks": high,
+            "max_block_entropy": round(max_e, 3), "high_entropy": high > 0}
+
+
+def _cstr(buf: bytes, off: int) -> str:
+    end = buf.find(b"\x00", off)
+    return buf[off:end if end >= 0 else len(buf)].decode("utf-8", errors="replace")
 
 
 def _parse_elf(data: bytes) -> dict:
-    """Minimal ELF header + dynsym JNI scan for common Android little-endian 32/64 .so files."""
+    """In-process ELF reader: header, program headers, .dynsym and .dynamic (32/64-bit, either endian)."""
     import struct
-    out: dict = {"parseable": False, "jni_exports": []}
+    out: dict = {"parseable": False, "jni_exports": [], "needed": [], "soname": None, "relro": None,
+                 "stack_canary": None, "executable_stack": None, "code_ranges": [], "symbols_read": False,
+                 "dynamic_read": False, "note": None}
     if len(data) < 52 or data[:4] != b"\x7fELF":
         out["note"] = "not ELF or truncated"
         return out
@@ -864,305 +934,322 @@ def _parse_elf(data: bytes) -> dict:
     if ei_class not in (1, 2) or ei_data not in (1, 2):
         out["note"] = "unsupported ELF class/endian"
         return out
-    endian = "<" if ei_data == 1 else ">"
-    is64 = ei_class == 2
-    try:
-        if is64:
-            if len(data) < 64:
-                raise struct.error("short ehdr")
-            e_type, e_machine = struct.unpack_from(endian + "HH", data, 16)
-            e_shoff, = struct.unpack_from(endian + "Q", data, 40)
-            e_shentsize, e_shnum, e_shstrndx = struct.unpack_from(endian + "HHH", data, 58)
-        else:
-            e_type, e_machine = struct.unpack_from(endian + "HH", data, 16)
-            e_shoff, = struct.unpack_from(endian + "I", data, 32)
-            e_shentsize, e_shnum, e_shstrndx = struct.unpack_from(endian + "HHH", data, 46)
-    except struct.error:
+    en, is64 = ("<" if ei_data == 1 else ">"), ei_class == 2
+    if is64 and len(data) < 64:
         out["note"] = "malformed ELF header"
         return out
-    out.update({
-        "parseable": True,
-        "elf_class": 64 if is64 else 32,
-        "endian": "little" if ei_data == 1 else "big",
-        "machine": ELF_MACHINES.get(e_machine, f"unknown_{e_machine}"),
-        "machine_code": e_machine,
-        "etype": e_type,
-        "note": None,
-    })
-    if e_shoff == 0 or e_shnum == 0 or e_shentsize < (64 if is64 else 40):
-        out["note"] = "no section headers; JNI symbols not scanned"
-        return out
-    if e_shoff + e_shnum * e_shentsize > len(data):
-        out["note"] = "section table truncated; JNI symbols not scanned"
-        return out
+    e_type, e_machine = struct.unpack_from(en + "HH", data, 16)
+    if is64:
+        e_phoff, e_shoff = struct.unpack_from(en + "QQ", data, 32)
+        e_phentsize, e_phnum, e_shentsize, e_shnum = struct.unpack_from(en + "HHHH", data, 54)
+    else:
+        e_phoff, e_shoff = struct.unpack_from(en + "II", data, 28)
+        e_phentsize, e_phnum, e_shentsize, e_shnum = struct.unpack_from(en + "HHHH", data, 42)
+    out.update(parseable=True, elf_class=64 if is64 else 32, endian="little" if ei_data == 1 else "big",
+               machine=ELF_MACHINES.get(e_machine, f"unknown_{e_machine}"), machine_code=e_machine, etype=e_type)
+    notes: list[str] = []
 
-    def sh_at(i: int):
-        off = e_shoff + i * e_shentsize
+    relro_segment = False
+    ph_min = 56 if is64 else 32
+    if e_phnum and (e_phentsize < ph_min or e_phoff + e_phnum * e_phentsize > len(data)):
+        notes.append("program header table truncated")
+    else:
+        for i in range(e_phnum):
+            o = e_phoff + i * e_phentsize
+            if is64:
+                p_type, p_flags, p_offset = struct.unpack_from(en + "IIQ", data, o)
+                p_filesz = struct.unpack_from(en + "Q", data, o + 32)[0]
+            else:
+                p_type, p_offset = struct.unpack_from(en + "II", data, o)
+                p_filesz, _memsz, p_flags = struct.unpack_from(en + "III", data, o + 16)
+            if p_type == _PT_GNU_RELRO:
+                relro_segment = True
+            elif p_type == _PT_GNU_STACK:
+                out["executable_stack"] = bool(p_flags & _PF_X)
+            elif p_type == _PT_LOAD and p_flags & _PF_X and p_filesz:
+                out["code_ranges"].append((p_offset, p_filesz))
+        if out["executable_stack"] is None:
+            notes.append("no PT_GNU_STACK; the loader may map an executable stack")
+
+    def section(i: int) -> tuple[int, int, int, int, int]:
+        o = e_shoff + i * e_shentsize
         if is64:
-            name, typ, _flags, _addr, offset, size, link, _info, _align, entsize = struct.unpack_from(
-                endian + "IIQQQQIIQQ", data, off)
+            _nm, typ, _fl, _ad, offset, size, link, _inf, _al, ent = struct.unpack_from(en + "IIQQQQIIQQ", data, o)
         else:
-            name, typ, _flags, _addr, offset, size, link, _info, _align, entsize = struct.unpack_from(
-                endian + "IIIIIIIIII", data, off)
-        return name, typ, offset, size, link, entsize
+            _nm, typ, _fl, _ad, offset, size, link, _inf, _al, ent = struct.unpack_from(en + "IIIIIIIIII", data, o)
+        return typ, offset, size, link, ent
 
-    dynsym = None
-    for i in range(e_shnum):
-        _n, typ, offset, size, link, entsize = sh_at(i)
-        if typ == 11:  # SHT_DYNSYM
-            dynsym = (offset, size, link, entsize)
-            break
-    if dynsym is None:
-        out["note"] = "no .dynsym; JNI symbols not scanned"
-        return out
-    sym_off, sym_size, str_link, sym_entsize = dynsym
-    if sym_entsize <= 0 or str_link >= e_shnum:
-        out["note"] = "invalid dynsym linkage"
-        return out
-    _sn, _st, stroff, strsize, _sl, _se = sh_at(str_link)
-    if stroff + strsize > len(data) or sym_off + sym_size > len(data):
-        out["note"] = "dynsym/strtab truncated"
-        return out
-    strtab = data[stroff:stroff + strsize]
-    expected = 24 if is64 else 16
-    if sym_entsize < expected:
-        out["note"] = "unexpected dynsym entry size"
-        return out
-    jni = []
-    for i in range(sym_size // sym_entsize):
-        base = sym_off + i * sym_entsize
-        try:
-            st_name, = struct.unpack_from(endian + "I", data, base)
-        except struct.error:
-            break
-        if st_name >= len(strtab):
-            continue
-        end = strtab.find(b"\x00", st_name)
-        if end < 0:
-            continue
-        name = strtab[st_name:end].decode("utf-8", errors="replace")
-        if name.startswith("Java_") or name in {"JNI_OnLoad", "JNI_OnUnload"}:
-            jni.append(name)
-    out["jni_exports"] = sorted(set(jni))
+    full_now = False
+    if e_shoff == 0 or e_shnum == 0:
+        notes.append("no section headers; JNI symbols and dynamic tags need the readelf fallback")
+    elif e_shentsize < (64 if is64 else 40) or e_shnum > MAX_ELF_TABLE_ENTRIES or e_shoff + e_shnum * e_shentsize > len(data):
+        notes.append("section table truncated; JNI symbols and dynamic tags need the readelf fallback")
+    else:
+        dynsym = dynamic = None
+        for i in range(e_shnum):
+            typ, offset, size, link, ent = section(i)
+            if typ == _SHT_DYNSYM and dynsym is None:
+                dynsym = (offset, size, link, ent)
+            elif typ == _SHT_DYNAMIC and dynamic is None:
+                dynamic = (offset, size, ent)
+        dynstr = None
+        if dynsym is None:
+            notes.append("no .dynsym")
+        else:
+            sym_off, sym_size, str_link, sym_ent = dynsym
+            if sym_ent < (24 if is64 else 16) or str_link >= e_shnum:
+                notes.append("invalid dynsym linkage")
+            else:
+                _t, stroff, strsize, _l, _e = section(str_link)
+                if stroff + strsize > len(data) or sym_off + sym_size > len(data) or sym_size // sym_ent > MAX_ELF_TABLE_ENTRIES:
+                    notes.append("dynsym/strtab truncated")
+                else:
+                    dynstr = data[stroff:stroff + strsize]
+                    jni, canary = set(), False
+                    for k in range(sym_size // sym_ent):
+                        st_name = struct.unpack_from(en + "I", data, sym_off + k * sym_ent)[0]
+                        if st_name >= len(dynstr):
+                            continue
+                        name = _cstr(dynstr, st_name)
+                        canary = canary or name == "__stack_chk_fail"
+                        if name.startswith("Java_") or name in {"JNI_OnLoad", "JNI_OnUnload"}:
+                            jni.add(name)
+                    out.update(jni_exports=sorted(jni), stack_canary=canary, symbols_read=True)
+        if dynamic is None:
+            notes.append("no .dynamic")
+        else:
+            dyn_off, dyn_size, dyn_ent = dynamic
+            dyn_ent = dyn_ent or (16 if is64 else 8)
+            if dyn_ent < (16 if is64 else 8) or dyn_off + dyn_size > len(data) or dyn_size // dyn_ent > MAX_ELF_TABLE_ENTRIES:
+                notes.append("dynamic section truncated")
+            else:
+                needed, soname = [], None
+                for k in range(dyn_size // dyn_ent):
+                    tag, val = struct.unpack_from(en + ("QQ" if is64 else "II"), data, dyn_off + k * dyn_ent)
+                    if tag == 0:
+                        break
+                    if tag == _DT_NEEDED:
+                        needed.append(val)
+                    elif tag == _DT_SONAME:
+                        soname = val
+                    elif tag == _DT_BIND_NOW:
+                        full_now = True
+                    elif tag == _DT_FLAGS and val & _DF_BIND_NOW:
+                        full_now = True
+                    elif tag == _DT_FLAGS_1 and val & _DF_1_NOW:
+                        full_now = True
+                if dynstr is None:
+                    notes.append("dynamic tags present but .dynstr unavailable")
+                else:
+                    out["needed"] = [_cstr(dynstr, v) for v in needed if v < len(dynstr)]
+                    out["soname"] = _cstr(dynstr, soname) if soname is not None and soname < len(dynstr) else None
+                out["dynamic_read"] = True
+    out["relro"] = ("full" if full_now else "partial") if relro_segment else "none"
+    out["note"] = "; ".join(notes) or None
     return out
 
 
-def _lib_rel_from_parts(parts: tuple[str, ...]) -> str | None:
-    if "lib" not in parts:
-        return None
-    i = parts.index("lib")
-    rel = "/".join(parts[i:])
-    return rel if _LIB_SO.fullmatch(rel) else None
+def _readelf_fallback(ident: str, path: Path) -> dict:
+    """Ask binutils readelf in ANZU-REA for what the in-process reader could not get."""
+    result = _wsl(["readelf", "-W", "--dynamic", "--dyn-syms", "--program-headers", _linux_path(path)], READELF_TIMEOUT)
+    text = result.stdout.decode("utf-8", errors="replace")
+    if result.returncode or not text.strip():
+        raise RuntimeError((result.stderr.decode("utf-8", errors="replace") or "readelf failed")[-500:])
+    needed = re.findall(r"\(NEEDED\)\s+Shared library: \[([^\]]+)\]", text)
+    soname = re.search(r"\(SONAME\)\s+Library soname: \[([^\]]+)\]", text)
+    symbols = set(re.findall(r"\s(\S+?)(?:@\S+)?$", text, re.M))
+    jni = sorted(s for s in symbols if s.startswith("Java_") or s in {"JNI_OnLoad", "JNI_OnUnload"})
+    full = bool(re.search(r"\((?:FLAGS|FLAGS_1)\)\s+.*\b(?:BIND_NOW|NOW)\b", text) or "(BIND_NOW)" in text)
+    relro = "GNU_RELRO" in text
+    stack = re.search(r"GNU_STACK(?:\s+\S+){5}\s+([RWE ]+?)\s+0x", text)
+    return {"needed": needed, "soname": soname.group(1) if soname else None, "jni_exports": jni,
+            "stack_canary": any(s == "__stack_chk_fail" for s in symbols),
+            "relro": ("full" if full else "partial") if relro else "none",
+            "executable_stack": ("E" in stack.group(1)) if stack else None}
 
 
-def _collect_native_candidates(row: dict) -> list[tuple[str, str, Path | None, bytes | None]]:
-    """Return (relative_path, abi, disk_path|None, zip_bytes|None) for each unique lib/**/*.so."""
-    seen: set[str] = set()
-    found: list[tuple[str, str, Path | None, bytes | None]] = []
-    root = store.directory(row["id"]) / "apk"
-
-    def add(rel: str, disk: Path | None = None, blob: bytes | None = None) -> None:
-        rel = rel.replace("\\", "/")
-        m = _LIB_SO.fullmatch(rel)
-        if not m:
-            return
-        if rel in seen:
-            return
-        seen.add(rel)
-        found.append((rel, m.group(1), disk, blob))
-
-    for base in (root / "native", root / "apktool", root / "staged"):
-        if not base.is_dir():
-            continue
-        for so in base.rglob("*.so"):
-            if not so.is_file():
-                continue
-            try:
-                rel = _lib_rel_from_parts(so.relative_to(base).parts)
-            except ValueError:
-                rel = None
-            if rel is None:
-                rel = _lib_rel_from_parts(so.parts)
-            if rel:
-                add(rel, disk=so)
-
-    for part in row.get("apk", {}).get("parts", []):
-        recorded = [n.replace("\\", "/") for n in (part.get("native_libs") or [])]
-        path = Path(part["path"]) if part.get("path") else None
-        if path and path.is_file() and zipfile.is_zipfile(path):
-            with zipfile.ZipFile(path) as z:
-                names = {i.filename.replace("\\", "/") for i in z.infolist() if not i.is_dir()}
-                for name in sorted(names | set(recorded)):
-                    if not _LIB_SO.fullmatch(name):
-                        continue
-                    if name in seen:
-                        continue
-                    key = name if name in z.namelist() else next(
-                        (n for n in z.namelist() if n.replace("\\", "/") == name), None)
-                    if key is None:
-                        continue
-                    info = z.getinfo(key)
-                    if info.file_size > MAX_BYTES:
-                        continue
-                    add(name, blob=z.read(info))
-        elif path and path.is_dir():
-            for so in path.rglob("*.so"):
-                if not so.is_file():
-                    continue
-                rel = _lib_rel_from_parts(so.relative_to(path).parts)
-                if rel:
-                    add(rel, disk=so)
-        else:
-            for name in recorded:
-                add(name)
-    return found
-
-
-def _materialize_so(ident: str, rel: str, data: bytes) -> Path:
-    """Write lib bytes under apk/native/<rel> with zip-slip checks."""
-    dest_root = (store.directory(ident) / "apk" / "native").resolve()
-    dest_root.mkdir(parents=True, mode=0o700, exist_ok=True)
-    target = (dest_root / Path(*PurePosixPath(rel).parts)).resolve()
-    if not target.is_relative_to(dest_root):
-        raise ValueError(f"Unsafe native library path: {rel}")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if not target.exists():
-        target.write_bytes(data)
-    return target
-
-
-def _inspect_so(rel: str, abi: str, data: bytes, source: str) -> dict:
-    digest = hashlib.sha256(data).hexdigest()
-    elf = _parse_elf(data)
-    ent = _entropy_hints(data)
-    so_name = PurePosixPath(rel).name
-    packer = PACKER_SO_NAMES.get(so_name)
-    hints = []
-    if packer:
-        hints.append({
-            "kind": "packer_signature",
-            "packer": packer,
-            "detail": f"Native code is protected by {packer}; static symbols are obscured.",
-        })
-    if ent["high_entropy"]:
-        hints.append({
-            "kind": "high_entropy",
-            "detail": (
-                f"Shannon entropy > {_ENTROPY_THRESHOLD} on {ent['high_entropy_blocks']}/"
-                f"{ent['blocks']} {_ENTROPY_BLOCK}-byte blocks "
-                f"(max {ent['max_block_entropy']}); packing or encryption likely."
-            ),
-        })
-    elf_view = {
-        "parseable": elf.get("parseable", False),
-        "elf_class": elf.get("elf_class"),
-        "endian": elf.get("endian"),
-        "machine": elf.get("machine"),
-        "machine_code": elf.get("machine_code"),
-        "note": elf.get("note"),
-    }
-    return {
-        "path": rel,
-        "abi": abi,
-        "name": so_name,
-        "bytes": len(data),
-        "sha256": digest,
-        "source": source,
-        "elf": elf_view,
-        "jni_exports": list(elf.get("jni_exports") or []),
-        "entropy": ent,
-        "hints": hints,
-    }
-
-
-def apk_inventory_native(ident: str, abi: str | None = None) -> dict:
-    """Inventory native .so libraries across APK/split parts (RFC-0207 §6); writes apk_native_libs evidence."""
-    row = store.load(ident)
-    if not row.get("apk"):
-        raise ValueError("Investigation was not prepared as an APK target")
-    store.validate_snapshot(row)
-    candidates = _collect_native_candidates(row)
-    libraries = []
+def _native_candidates(row: dict, abi: str | None) -> tuple[list[dict], list[str]]:
+    """List lib/<abi>/*.so entries from ZIP metadata only; nothing is read or extracted here."""
+    found: dict[str, dict] = {}
     unknowns: list[str] = []
-    for rel, lib_abi, disk, blob in candidates:
-        if abi and lib_abi != abi:
+    for part in row["apk"]["parts"]:
+        try:
+            with zipfile.ZipFile(part["path"]) as z:
+                infos = [i for i in z.infolist() if not i.is_dir() and _LIB_SO.fullmatch(i.filename)]
+        except (OSError, zipfile.BadZipFile) as exc:
+            unknowns.append(f"APK part {part['name']} could not be opened for native inventory: {exc}")
             continue
-        if disk is not None and disk.is_file():
-            data = disk.read_bytes()
-            source = "disk"
-        elif blob is not None:
-            data = blob
-            source = "apk_zip"
-            try:
-                _materialize_so(ident, rel, data)
-            except ValueError:
-                pass
+        listed = set(part.get("native_libs") or [])
+        present = {i.filename for i in infos}
+        for missing in sorted(listed - present):
+            unknowns.append(f"Native library {missing} was recorded at intake but is missing from {part['name']}.")
+        for info in infos:
+            lib_abi = _LIB_SO.fullmatch(info.filename).group(1)
+            if abi and lib_abi != abi:
+                continue
+            if info.filename in found:
+                if found[info.filename]["crc"] != info.CRC:
+                    unknowns.append(f"{info.filename} differs between {found[info.filename]['part']} and "
+                                    f"{part['name']}; only the first copy was inventoried.")
+                continue
+            if info.file_size > MAX_NATIVE_BYTES:
+                unknowns.append(f"Native library {info.filename} in {part['name']} is {info.file_size} bytes, over the "
+                                f"{MAX_NATIVE_BYTES}-byte cap; it was not read.")
+                continue
+            if len(found) >= MAX_NATIVE_LIBS:
+                unknowns.append(f"More than {MAX_NATIVE_LIBS} native libraries; the rest were not inventoried.")
+                break
+            found[info.filename] = {"path": info.filename, "abi": lib_abi, "part": part["name"],
+                                    "apk": Path(part["path"]), "size": info.file_size, "crc": info.CRC}
+    return sorted(found.values(), key=lambda c: (c["abi"], c["path"])), unknowns
+
+
+def _read_native(ident: str, cand: dict, cancel: threading.Event) -> tuple[bytes, str, Path]:
+    """Stream one library out of its APK: hash, size cap and cancel checks per chunk; copy kept under apk/native/."""
+    dest_root = (store.directory(ident) / "apk" / "native").resolve()
+    target = (dest_root / cand["part"].replace("/", "_") / Path(*PurePosixPath(cand["path"]).parts)).resolve()
+    if not target.is_relative_to(dest_root):
+        raise ValueError(f"Unsafe native library path: {cand['path']}")
+    target.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    h = hashlib.sha256()
+    buf = bytearray()
+    tmp = target.with_name(target.name + ".partial")
+    with zipfile.ZipFile(cand["apk"]) as z, z.open(cand["path"]) as src, tmp.open("wb") as dst:
+        for chunk in iter(lambda: src.read(_READ_CHUNK), b""):
+            if cancel.is_set():
+                raise DecompileCancelled("native inventory")
+            buf += chunk
+            if len(buf) > MAX_NATIVE_BYTES:
+                raise ValueError(f"{cand['path']} expanded past the {MAX_NATIVE_BYTES}-byte cap")
+            h.update(chunk)
+            dst.write(chunk)
+    os.replace(tmp, target)
+    return bytes(buf), h.hexdigest(), target
+
+
+def _inspect_so(ident: str, cand: dict, data: bytes, digest: str, disk: Path, cancel: threading.Event,
+                unknowns: list[str]) -> dict:
+    elf = _parse_elf(data)
+    fallback = None
+    if elf["parseable"] and not (elf["symbols_read"] and elf["dynamic_read"]):
+        try:
+            fallback = _readelf_fallback(ident, disk)
+        except (RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
+            log.warning("readelf fallback failed for %s: %s", cand["path"], exc)
+            unknowns.append(f"{cand['path']}: {elf['note']}; readelf fallback failed ({str(exc)[:200]}).")
         else:
-            unknowns.append(f"Native library {rel} was listed but bytes were not available.")
-            continue
-        libraries.append(_inspect_so(rel, lib_abi, data, source))
+            for key in ("needed", "soname", "jni_exports", "stack_canary", "executable_stack"):
+                if not elf.get(key) and fallback.get(key) not in (None, []):
+                    elf[key] = fallback[key]
+            rank = {"none": 0, "partial": 1, "full": 2}
+            if not elf["dynamic_read"] or rank.get(fallback["relro"], 0) > rank.get(elf["relro"], 0):
+                # Without the dynamic table our own parse cannot see BIND_NOW, so readelf's view wins.
+                elf["relro"] = fallback["relro"]
+    elif not elf["parseable"]:
+        unknowns.append(f"{cand['path']} is not a parseable ELF ({elf['note']}); only size and SHA-256 were recorded.")
+    ent = _entropy_hints(data, elf["code_ranges"], cancel)
+    name = PurePosixPath(cand["path"]).name
+    hints = []
+    packer = PACKER_SO_NAMES.get(name)
+    if packer:
+        hints.append({"kind": "packer_signature", "packer": packer,
+                      "detail": f"Native code is protected by {packer}; static symbols are obscured."})
+    if ent["high_entropy"]:
+        hints.append({"kind": "high_entropy", "detail": (
+            f"Shannon entropy > {_ENTROPY_THRESHOLD} on {ent['high_entropy_blocks']}/{ent['blocks']} "
+            f"{_ENTROPY_BLOCK}-byte blocks of the {ent['scope']} (max {ent['max_block_entropy']}); packing or encryption likely.")})
+    if ent["truncated"]:
+        unknowns.append(f"{cand['path']}: entropy scored on the first {MAX_ENTROPY_BYTES} bytes only.")
+    if elf.get("executable_stack"):
+        hints.append({"kind": "executable_stack", "detail": "PT_GNU_STACK is RWE; the stack is executable."})
+    if elf["parseable"] and elf["relro"] != "full":
+        hints.append({"kind": "relro", "detail": f"{elf['relro'].capitalize()} RELRO; the GOT stays writable."})
+    if elf["parseable"] and elf.get("stack_canary") is False:
+        hints.append({"kind": "no_stack_canary", "detail": "__stack_chk_fail is not imported; no stack canaries."})
+    return {"path": cand["path"], "abi": cand["abi"], "part": cand["part"], "name": name, "bytes": len(data),
+            "sha256": digest, "copy": str(disk),
+            "elf": {k: elf.get(k) for k in ("parseable", "elf_class", "endian", "machine", "machine_code", "note")},
+            "soname": elf.get("soname"), "needed": elf.get("needed") or [],
+            "hardening": {"relro": elf.get("relro"), "stack_canary": elf.get("stack_canary"),
+                          "executable_stack": elf.get("executable_stack")},
+            "jni_exports": list(elf.get("jni_exports") or []), "readelf_fallback": fallback is not None,
+            "entropy": ent, "hints": hints}
 
-    libraries.sort(key=lambda item: (item["abi"], item["path"]))
-    abis = sorted({lib["abi"] for lib in libraries})
-    packers = sorted({
-        hint["packer"] for lib in libraries for hint in lib["hints"] if hint["kind"] == "packer_signature"
-    })
-    high_entropy = sum(1 for lib in libraries if lib["entropy"]["high_entropy"])
-    for packer in packers:
-        unknowns.append(f"Native code is protected by {packer}; static symbols are obscured.")
-    if high_entropy:
-        unknowns.append(
-            f"{high_entropy} native librar{'y' if high_entropy == 1 else 'ies'} show high entropy "
-            f"(>{_ENTROPY_THRESHOLD} on {_ENTROPY_BLOCK}-byte blocks); "
-            "static symbol extraction may be incomplete."
-        )
 
-    doc = {
-        "investigation_id": ident,
-        "filter_abi": abi,
-        "abis": abis,
-        "library_count": len(libraries),
-        "libraries": libraries,
-        "packers_detected": packers,
-        "high_entropy_count": high_entropy,
-        "unknowns": unknowns,
-        "limitations": [
-            "Static inspection only; no native code was executed.",
-            "JNI exports come from .dynsym when section headers are present.",
-            "Unparseable or truncated ELF files still appear with path, size and SHA-256.",
-        ],
-    }
-    meta = store.directory(ident) / "apk" / "metadata"
-    meta.mkdir(parents=True, mode=0o700, exist_ok=True)
-    store.atomic_json(meta / "native.json", doc)
-    eid = _record(row, "apk_native_libs", {"abi": abi}, {
-        "provider": "ANZU APK sidecar",
-        "abis": abis,
-        "library_count": len(libraries),
-        "libraries": [{
-            "path": lib["path"], "abi": lib["abi"], "bytes": lib["bytes"], "sha256": lib["sha256"],
-            "elf_class": lib["elf"].get("elf_class"), "machine": lib["elf"].get("machine"),
-            "jni_exports": lib["jni_exports"], "hints": lib["hints"],
-        } for lib in libraries],
-        "packers_detected": packers,
-        "high_entropy_count": high_entropy,
-        "unknowns": unknowns,
-        "metadata": "apk/metadata/native.json",
-        "limitations": doc["limitations"],
-    })
-    row["unknowns"] = list(dict.fromkeys([*row.get("unknowns", []), *unknowns]))
-    if row["status"] in {"prepared", "investigating", "partial"}:
-        row["status"] = "partial" if unknowns else "investigating"
-    noun = "library" if len(libraries) == 1 else "libraries"
-    detail = f"Inventoried {len(libraries)} native {noun}"
-    if abi:
-        detail += f" (abi={abi})"
-    detail += "."
-    _coc(row, "apk_native_inventoried", detail,
-         {"evidence": eid, "abis": abis, "library_count": len(libraries)})
-    _custody(row, native_inventoried_at=_now())
-    store.save(row)
-    return {**doc, "evidence_id": eid, "investigation_status": row["status"]}
+def apk_inventory_native(ident: str, abi: str | None = None, claimed: dict | None = None) -> dict:
+    """Inventory native .so libraries across APK parts (RFC-0207 §6); writes apk_native_libs evidence.
+
+    Holds the investigation claim for the whole run, so it never interleaves evidence or custody
+    entries with a decompile; it is refused while another operation is analyzing.
+    """
+    claim = claimed if claimed is not None else _claim(ident, "native inventory")
+    token = claim["_claim_token"]
+    with _CLAIM_LOCK:
+        _OWNED.add(ident)
+    try:
+        cancel = _CANCEL[ident]
+        candidates, unknowns = _native_candidates(claim, abi)
+        libraries = []
+        for cand in candidates:
+            if cancel.is_set():
+                raise DecompileCancelled("native inventory")
+            try:
+                data, digest, disk = _read_native(ident, cand, cancel)
+            except (ValueError, OSError, zipfile.BadZipFile) as exc:
+                log.warning("Native library %s could not be read: %s", cand["path"], exc)
+                unknowns.append(f"Native library {cand['path']} could not be read: {exc}")
+                continue
+            libraries.append(_inspect_so(ident, cand, data, digest, disk, cancel, unknowns))
+        abis = sorted({lib["abi"] for lib in libraries})
+        packers = sorted({h["packer"] for lib in libraries for h in lib["hints"] if h["kind"] == "packer_signature"})
+        high = sum(1 for lib in libraries if lib["entropy"]["high_entropy"])
+        unknowns += [f"Native code is protected by {p}; static symbols are obscured." for p in packers]
+        if high:
+            unknowns.append(f"{high} native librar{'y' if high == 1 else 'ies'} show high entropy "
+                            f"(>{_ENTROPY_THRESHOLD}); packed or encrypted, static symbol extraction incomplete.")
+        unknowns = list(dict.fromkeys(unknowns))
+        limitations = ["Static inspection only; no native code was executed.",
+                       "ELF data comes from program headers, .dynsym and .dynamic; readelf in ANZU-REA fills gaps.",
+                       f"Libraries over {MAX_NATIVE_BYTES} bytes are listed as unknowns, not read."]
+        doc = {"investigation_id": ident, "filter_abi": abi, "abis": abis, "library_count": len(libraries),
+               "libraries": libraries, "packers_detected": packers, "high_entropy_count": high,
+               "unknowns": unknowns, "limitations": limitations}
+        meta = store.directory(ident) / "apk" / "metadata"
+        meta.mkdir(parents=True, mode=0o700, exist_ok=True)
+        store.atomic_json(meta / "native.json", doc)
+        with _CLAIM_LOCK:
+            row = store.load(ident)  # reload: evidence ids and custody entries continue from the stored row
+            if _CLAIMS.get(ident) != token:
+                raise RuntimeError("Investigation claim was lost; native inventory results were not recorded")
+            eid = _record(row, "apk_native_libs", {"abi": abi}, {
+                "provider": "ANZU APK sidecar", "abis": abis, "library_count": len(libraries),
+                "libraries": [{k: lib[k] for k in ("path", "abi", "part", "bytes", "sha256", "soname", "needed",
+                                                   "hardening", "jni_exports", "hints")} | {
+                                   "elf_class": lib["elf"]["elf_class"], "machine": lib["elf"]["machine"]}
+                              for lib in libraries],
+                "packers_detected": packers, "high_entropy_count": high, "unknowns": unknowns,
+                "metadata": "apk/metadata/native.json", "limitations": limitations})
+            row["unknowns"] = list(dict.fromkeys([*row.get("unknowns", []), *unknowns]))
+            row["status"] = "partial" if row["unknowns"] else "investigating"
+            row.pop("last_error", None)
+            _coc(row, "apk_native_inventoried",
+                 f"Inventoried {len(libraries)} native librar{'y' if len(libraries) == 1 else 'ies'}"
+                 + (f" (abi={abi})." if abi else "."), {"evidence": eid, "abis": abis, "library_count": len(libraries)})
+            _custody(row, native_inventoried_at=_now())
+            store.save(row)
+            _CLAIMS.pop(ident, None)
+        return {**doc, "evidence_id": eid, "investigation_status": row["status"]}
+    except DecompileCancelled as exc:
+        _finish_failed(ident, token, "cancelled", f"Cancelled during {exc}")
+        raise
+    except BaseException as exc:
+        _finish_failed(ident, token, "interrupted", str(exc)[:2000])
+        raise
+    finally:
+        with _CLAIM_LOCK:
+            _OWNED.discard(ident)
+            if _CLAIMS.get(ident) is None or _CLAIMS.get(ident) == token:
+                _CANCEL.pop(ident, None)
 
 
 # --- Agent tool catalog (runtime.py) ----------------------------------------------------
@@ -1178,7 +1265,7 @@ CATALOG = {
     "apk_inventory_native": {"name": "apk_inventory_native",
                              "description": "Inventory native .so libraries, ABIs, ELF headers, JNI exports and packer/entropy hints.",
                              "inputSchema": {"type": "object",
-                                             "properties": {"abi": {"type": "string"}},
+                                             "properties": {"abi": {"type": "string", "pattern": r"^[A-Za-z0-9_-]{1,32}$"}},
                                              "additionalProperties": False}},
 }
 
@@ -1200,9 +1287,9 @@ def call(ident: str, operation: str, arguments: dict, claimed: dict | None = Non
         return {"status": "evidence", "evidence_id": eid, "manifest": manifest, "components": components}
     if operation == "apk_inventory_native":
         abi = arguments.get("abi")
-        if abi is not None and not isinstance(abi, str):
-            raise ValueError("abi must be a string")
-        out = apk_inventory_native(ident, abi)
+        if abi is not None and not (isinstance(abi, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,32}", abi)):
+            raise ValueError("abi must be an ABI name such as arm64-v8a")
+        out = apk_inventory_native(ident, abi, claimed)
         return {"status": "evidence", "evidence_id": out["evidence_id"],
                 "investigation_status": out["investigation_status"], "native": out}
     raise PermissionError("Operation is not admitted")

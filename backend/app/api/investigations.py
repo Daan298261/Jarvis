@@ -61,7 +61,7 @@ class ApkDecompileBody(BaseModel):
 
 
 def public_row(row: dict) -> dict:
-    return {k: v for k, v in row.items() if k not in {"manifest", "snapshot"}}
+    return {k: v for k, v in row.items() if k not in {"manifest", "snapshot", "_claim_token"}}
 
 
 async def _setup(android: bool):
@@ -156,7 +156,7 @@ async def _apk_decompile_background(ident: str, skip_jadx: bool, claimed: dict):
         logger.exception("Background APK decompile failed for investigation %s", ident)
     finally:
         # Covers a task cancelled before run_apk started; a no-op once decompile owns or finished the claim.
-        await asyncio.to_thread(apk_sidecar.release, ident)
+        await asyncio.to_thread(apk_sidecar.release, ident, claimed.get("_claim_token"))
 
 
 @router.post("/{ident}/apk/decompile")
@@ -171,7 +171,7 @@ async def apk_decompile(ident: str, body: ApkDecompileBody):
         try:
             task = asyncio.create_task(_apk_decompile_background(ident, body.skip_jadx, row))
         except BaseException:
-            await asyncio.to_thread(apk_sidecar.release, ident)
+            await asyncio.to_thread(apk_sidecar.release, ident, row.get("_claim_token"))
             raise
         _apk_tasks.add(task)
         task.add_done_callback(_apk_tasks.discard)

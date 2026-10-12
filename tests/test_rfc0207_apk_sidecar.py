@@ -10,6 +10,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import zipfile
 from pathlib import Path
 
@@ -96,6 +97,8 @@ class FakeWSL:
         self.jadx_mode = "ok"
         self.apktool_mode = "ok"
         self.manifest = MANIFEST
+        self.readelf_text: str | None = None
+        self.readelf_calls: list[list[str]] = []
 
     def __call__(self, args, *a, **kw):
         if not args or args[0] != "wsl.exe":
@@ -115,6 +118,11 @@ class FakeWSL:
             return done(0 if argv[-1] in self.present else 1)
         if argv[0] == "sha256sum":
             return done(out=f"{self.sha}  {argv[-1]}\n".encode())
+        if argv[0] == "readelf":
+            self.readelf_calls.append(argv)
+            if self.readelf_text is None:
+                return done(127, err=b"readelf: command not found")
+            return done(out=self.readelf_text.encode())
         if argv[0] == "/opt/anzu/bin/rea":
             return done(out=b"{}")
         assert argv[0] == "timeout" and argv[1] == "--kill-after=10s"
@@ -868,3 +876,211 @@ async def test_runtime_catalog_exposes_apk_inventory_native(env, monkeypatch):
     assert "apk_inventory_native" in names
     out = await service.call(row["id"], "apk_inventory_native", {}, None)
     assert out["status"] == "evidence" and out["native"]["library_count"] == 1
+
+
+# --- RFC-0207 slice 2 (review fixes): real NDK fixtures, hardening, fallback, caps, claims --
+
+NDK64 = (FIXTURES / "libtestnative_arm64.so").read_bytes()
+NDK32 = (FIXTURES / "libtestnative_armv7.so").read_bytes()
+
+
+def _apk_with_libs(path: Path, libs: dict[str, bytes]) -> Path:
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("AndroidManifest.xml", b"\x03\x00\x08\x00binary-axml")
+        for name, data in libs.items():
+            z.writestr(name, data)
+    return path
+
+
+def _strip_section_headers(data: bytes) -> bytes:
+    import struct
+    buf = bytearray(data)
+    struct.pack_into("<Q", buf, 40, 0)        # e_shoff
+    struct.pack_into("<HHH", buf, 58, 0, 0, 0)  # e_shentsize, e_shnum, e_shstrndx
+    return bytes(buf)
+
+
+def test_real_ndk_libraries_full_elf_inventory(env):
+    src, fake = env
+    row = prepare(_apk_with_libs(src / "ndk.apk", {"lib/arm64-v8a/libtestnative.so": NDK64,
+                                                    "lib/armeabi-v7a/libtestnative.so": NDK32}))
+    inv = apk_sidecar.apk_inventory_native(row["id"])
+    libs = {lib["abi"]: lib for lib in inv["libraries"]}
+    a64, a32 = libs["arm64-v8a"], libs["armeabi-v7a"]
+    assert a64["elf"]["elf_class"] == 64 and a64["elf"]["machine"] == "AArch64" and a64["elf"]["note"] is None
+    assert a32["elf"]["elf_class"] == 32 and a32["elf"]["machine"] == "ARM"
+    for lib in (a64, a32):
+        assert lib["soname"] == "libtestnative.so"
+        assert lib["needed"] == ["liblog.so", "libdl.so", "libc.so"]
+        assert set(lib["jni_exports"]) == {"JNI_OnLoad", "Java_org_anzu_test_MainActivity_stringFromJNI"}
+        assert lib["hardening"]["executable_stack"] is False
+        assert lib["entropy"]["scope"] == "executable segments" and lib["entropy"]["blocks"] >= 1
+        assert lib["sha256"] == hashlib.sha256(NDK64 if lib is a64 else NDK32).hexdigest()
+        assert Path(lib["copy"]).read_bytes() == (NDK64 if lib is a64 else NDK32)
+    assert a64["hardening"] == {"relro": "full", "stack_canary": True, "executable_stack": False}
+    assert a32["hardening"] == {"relro": "partial", "stack_canary": False, "executable_stack": False}
+    assert {h["kind"] for h in a32["hints"]} == {"relro", "no_stack_canary"}
+    assert a64["hints"] == [] and fake.readelf_calls == []
+    assert inv["unknowns"] == [] and inv["investigation_status"] == "investigating"
+
+
+def test_readelf_fallback_fills_stripped_section_headers(env):
+    src, fake = env
+    fake.readelf_text = (FIXTURES / "libtestnative_arm64.readelf.txt").read_text(encoding="ascii")
+    row = prepare(_apk_with_libs(src / "stripped.apk", {"lib/arm64-v8a/libtestnative.so": _strip_section_headers(NDK64)}))
+    lib = apk_sidecar.apk_inventory_native(row["id"])["libraries"][0]
+    assert fake.readelf_calls and fake.readelf_calls[0][:5] == ["readelf", "-W", "--dynamic", "--dyn-syms", "--program-headers"]
+    assert lib["readelf_fallback"] is True and lib["soname"] == "libtestnative.so"
+    assert lib["needed"] == ["liblog.so", "libdl.so", "libc.so"]
+    assert "Java_org_anzu_test_MainActivity_stringFromJNI" in lib["jni_exports"]
+    assert lib["hardening"] == {"relro": "full", "stack_canary": True, "executable_stack": False}
+
+
+def test_readelf_fallback_failure_is_recorded(env, caplog):
+    src, fake = env
+    row = prepare(_apk_with_libs(src / "stripped.apk", {"lib/arm64-v8a/libtestnative.so": _strip_section_headers(NDK64)}))
+    with caplog.at_level("WARNING"):
+        inv = apk_sidecar.apk_inventory_native(row["id"])
+    assert any("readelf fallback failed" in u for u in inv["unknowns"])
+    assert inv["investigation_status"] == "partial" and "readelf fallback failed" in caplog.text
+
+
+def test_malformed_elf_variants():
+    import struct
+    be32 = bytearray(64)
+    be32[:6] = b"\x7fELF\x01\x02"
+    struct.pack_into(">HH", be32, 16, 3, 40)
+    out = apk_sidecar._parse_elf(bytes(be32))
+    assert out["parseable"] and out["elf_class"] == 32 and out["endian"] == "big" and out["machine"] == "ARM"
+    assert "no section headers" in out["note"]
+
+    bad_sh = bytearray(NDK64)
+    struct.pack_into("<H", bad_sh, 60, 4000)  # e_shnum far past the file
+    assert "section table truncated" in apk_sidecar._parse_elf(bytes(bad_sh))["note"]
+
+    import zipfile as _z  # locate .dynsym in the real fixture and point it past EOF
+    data = bytearray(NDK64)
+    shoff = struct.unpack_from("<Q", data, 40)[0]
+    shnum = struct.unpack_from("<H", data, 60)[0]
+    for i in range(shnum):
+        o = shoff + i * 64
+        if struct.unpack_from("<I", data, o + 4)[0] == 11:
+            struct.pack_into("<Q", data, o + 32, 10 ** 9)  # sh_size
+    out = apk_sidecar._parse_elf(bytes(data))
+    assert "dynsym/strtab truncated" in out["note"] and out["jni_exports"] == []
+
+    bad_ph = bytearray(NDK32)
+    struct.pack_into("<H", bad_ph, 44, 5000)  # e_phnum
+    assert "program header table truncated" in apk_sidecar._parse_elf(bytes(bad_ph))["note"]
+    assert apk_sidecar._parse_elf(b"\x7fELF\x03\x01" + b"\0" * 60)["note"] == "unsupported ELF class/endian"
+    assert apk_sidecar._parse_elf(NDK64[:40])["parseable"] is False
+
+
+def test_entropy_scores_short_tail_and_is_bounded(monkeypatch):
+    import os as _os
+    data = b"\0" * 4096 + _os.urandom(1000)
+    ent = apk_sidecar._entropy_hints(data)
+    assert ent["blocks"] == 2 and ent["tail_bytes"] == 1000 and ent["high_entropy"] is True
+    monkeypatch.setattr(apk_sidecar, "MAX_ENTROPY_BYTES", 4096)
+    ent = apk_sidecar._entropy_hints(data)
+    assert ent["truncated"] is True and ent["scanned_bytes"] == 4096 and ent["high_entropy"] is False
+    cancel = threading.Event()
+    cancel.set()
+    with pytest.raises(apk_sidecar.DecompileCancelled):
+        apk_sidecar._entropy_hints(data, None, cancel)
+
+
+def test_native_caps_abi_filter_and_missing_libs_are_recorded(env, monkeypatch, caplog):
+    src, _ = env
+    row = prepare(_apk_with_libs(src / "caps.apk", {"lib/arm64-v8a/libbig.so": NDK64,
+                                                     "lib/armeabi-v7a/libtestnative.so": NDK32}))
+    reads = []
+    real_read = apk_sidecar._read_native
+
+    def spy(ident, cand, cancel):
+        reads.append(cand["path"])
+        return real_read(ident, cand, cancel)
+    monkeypatch.setattr(apk_sidecar, "_read_native", spy)
+    inv = apk_sidecar.apk_inventory_native(row["id"], abi="armeabi-v7a")
+    assert reads == ["lib/armeabi-v7a/libtestnative.so"]  # filter applied before any bytes are read
+    monkeypatch.setattr(apk_sidecar, "MAX_NATIVE_BYTES", len(NDK64) - 1)
+    reads.clear()
+    inv = apk_sidecar.apk_inventory_native(row["id"])
+    assert "lib/arm64-v8a/libbig.so" not in reads
+    assert any("libbig.so" in u and "over the" in u for u in inv["unknowns"]) and inv["investigation_status"] == "partial"
+    # A library recorded at intake but gone from the part is an explicit unknown.
+    stored = store.load(row["id"])
+    stored["apk"]["parts"][0]["native_libs"].append("lib/x86/libgone.so")
+    store.save(stored)
+    monkeypatch.setattr(apk_sidecar, "MAX_NATIVE_BYTES", 10 ** 9)
+
+    def broken(ident, cand, cancel):
+        raise ValueError("Unsafe native library path")
+    monkeypatch.setattr(apk_sidecar, "_read_native", broken)
+    with caplog.at_level("WARNING"):
+        inv = apk_sidecar.apk_inventory_native(row["id"])
+    assert any("libgone.so" in u and "missing" in u for u in inv["unknowns"])
+    assert any("could not be read: Unsafe native library path" in u for u in inv["unknowns"])
+    assert "could not be read" in caplog.text and inv["library_count"] == 0
+
+
+def test_native_inventory_takes_claim_and_reloads_row(env):
+    src, _ = env
+    row = prepare(_apk_with_libs(src / "a.apk", {"lib/arm64-v8a/libtestnative.so": NDK64}))
+    claim = apk_sidecar.preflight(row["id"])
+    with pytest.raises(ValueError, match="analyzing; cannot start native inventory"):
+        apk_sidecar.apk_inventory_native(row["id"])
+    apk_sidecar.release(row["id"], claim["_claim_token"])
+    # Evidence written by someone else between claim and save is preserved, ids continue after it.
+    stored = store.load(row["id"])
+    stored["unknowns"] = ["Earlier decompile left a question open."]
+    stored["status"] = "investigating"
+    store.save(stored)
+    inv = apk_sidecar.apk_inventory_native(row["id"])
+    after = store.load(row["id"])
+    assert inv["evidence_id"] == "E00002" and [e["id"] for e in after["evidence"]] == ["E00001", "E00002"]
+    assert after["status"] == "partial"  # merged unknowns, not just this call's
+    assert after["chain_of_custody"][-1]["event"] == "apk_native_inventoried"
+    assert row["id"] not in apk_sidecar._CLAIMS and row["id"] not in apk_sidecar._CANCEL
+    assert "_claim_token" not in json.dumps(after)
+
+
+def test_native_inventory_cancel_marks_cancelled(env, monkeypatch):
+    src, _ = env
+    row = prepare(_apk_with_libs(src / "a.apk", {"lib/arm64-v8a/libtestnative.so": NDK64}))
+    real = apk_sidecar._entropy_hints
+
+    def cancel_then_score(data, ranges=None, cancel=None):
+        apk_sidecar.cancel(row["id"])
+        return real(data, ranges, cancel)
+    monkeypatch.setattr(apk_sidecar, "_entropy_hints", cancel_then_score)
+    with pytest.raises(apk_sidecar.DecompileCancelled):
+        apk_sidecar.apk_inventory_native(row["id"])
+    after = store.load(row["id"])
+    assert after["status"] == "cancelled" and row["id"] not in apk_sidecar._CLAIMS
+
+
+def test_late_release_cannot_interrupt_newer_claim(env):
+    src, _ = env
+    row = prepare(make_apk(src / "a.apk"))
+    first = apk_sidecar.preflight(row["id"])
+    apk_sidecar.release(row["id"], first["_claim_token"])
+    second = apk_sidecar.preflight(row["id"])
+    apk_sidecar.release(row["id"], first["_claim_token"])  # late, stale token
+    assert store.load(row["id"])["status"] == "analyzing"
+    apk_sidecar.release(row["id"], second["_claim_token"])
+    assert store.load(row["id"])["status"] == "interrupted"
+
+
+def test_cancel_logs_bad_pid_file_and_failed_kill(env, monkeypatch, caplog, tmp_path):
+    ident = "f" * 32
+    good, bad, gone = tmp_path / "good.pid", tmp_path / "bad.pid", tmp_path / "gone.pid"
+    good.write_text("4242", encoding="ascii")
+    bad.write_text("not-a-pid", encoding="ascii")
+    monkeypatch.setitem(apk_sidecar._CANCEL, ident, threading.Event())
+    monkeypatch.setitem(apk_sidecar._RUNNING, ident, [good, bad, gone])
+    monkeypatch.setattr(apk_sidecar, "KILL_GRACE", 0)
+    monkeypatch.setattr(apk_sidecar, "_wsl", lambda argv, timeout: subprocess.CompletedProcess(argv, 1, b"", b"No such process"))
+    with caplog.at_level("WARNING"):
+        apk_sidecar.cancel(ident)
+    assert "unreadable" in caplog.text and "not a PID" in caplog.text and "exited 1" in caplog.text
