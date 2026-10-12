@@ -1,7 +1,9 @@
-"""RFC-0207 slice 1: APK sidecar readiness, intake, decompile orchestration, manifest and API.
+"""RFC-0207 APK sidecar: readiness, intake (file/device/FFS), decompile, manifest, native, endpoints, crypto, API.
 
 Fixtures are synthetic ZIPs built in tmp_path; WSL, apktool and jadx are mocked at the
-subprocess.run boundary so no real toolchain or device is needed.
+subprocess.run boundary so no real toolchain or device is needed. ADB is mocked at the
+apk_sidecar._ADB_RUN / _adb_bin boundary; FFS origins use a synthetic kind=ffs investigation
+with index/files.ndjson.
 """
 from __future__ import annotations
 
@@ -158,6 +160,7 @@ def env(tmp_path, monkeypatch):
     data.mkdir()
     monkeypatch.setattr(store, "data_dir", lambda: data)
     monkeypatch.setattr(store, "resolve_allowed_path", lambda path, allowed: Path(path).resolve())
+    monkeypatch.setattr(apk_sidecar, "resolve_allowed_path", lambda path, allowed: Path(path).resolve())
     fake = FakeWSL()
     monkeypatch.setattr(subprocess, "run", fake)
     from app.config import load_settings
@@ -1685,3 +1688,265 @@ def test_real_aapt2_apk_string_scan(env):
     crypto = apk_sidecar.apk_crypto_hints(row["id"])
     assert crypto["unknowns"] == [] and crypto["network_security_config"]["present"] is False
     assert crypto["key_storage"]["posture"] == "no_crypto_api_observed"
+
+
+# --- Slice 4: device (ADB) + FFS origins -------------------------------------------------
+
+class FakeADB:
+    """Deterministic adb stand-in: pm path lists remotes; pull copies fixture bytes to dest."""
+
+    def __init__(self, mapping: dict[str, bytes]):
+        # remote device path -> APK bytes
+        self.mapping = dict(mapping)
+        self.calls: list[list[str]] = []
+        self.pm_path_rc = 0
+        self.pm_path_stdout = ""
+        self.pull_rc = 0
+        self.missing = False
+
+    def __call__(self, argv: list[str], timeout: int = 120):
+        self.calls.append(list(argv))
+        # argv: [adb, (-s serial)?, ...]
+        args = list(argv)
+        assert args and (args[0].endswith("adb") or args[0].endswith("adb.exe"))
+        args = args[1:]
+        serial = None
+        if args[:1] == ["-s"]:
+            serial = args[1]
+            args = args[2:]
+            assert serial
+        if self.missing:
+            raise FileNotFoundError("ADB is unavailable")
+        if args[:2] == ["shell", "pm"] and args[2:3] == ["path"]:
+            out = self.pm_path_stdout
+            if not out:
+                pkg = args[3]
+                # default: emit package: lines for every mapped remote whose key contains pkg hint
+                lines = [f"package:{remote}" for remote in self.mapping]
+                out = "\n".join(lines) + ("\n" if lines else "")
+            return subprocess.CompletedProcess(argv, self.pm_path_rc, out, "")
+        if args[:1] == ["pull"]:
+            remote, dest = args[1], Path(args[2])
+            if self.pull_rc != 0:
+                return subprocess.CompletedProcess(argv, self.pull_rc, "", "pull failed")
+            if remote not in self.mapping:
+                return subprocess.CompletedProcess(argv, 1, "", f"remote not found: {remote}")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(self.mapping[remote])
+            return subprocess.CompletedProcess(argv, 0, f"{remote}: 1 file pulled\n", "")
+        raise AssertionError(f"unexpected adb argv {argv}")
+
+
+def _install_fake_adb(monkeypatch, fake: FakeADB, tmp_path: Path):
+    adb_bin = tmp_path / "fake-adb" / "adb.exe"
+    adb_bin.parent.mkdir(parents=True, exist_ok=True)
+    adb_bin.write_bytes(b"fake")
+    monkeypatch.setattr(apk_sidecar, "_adb_bin", lambda: adb_bin)
+    monkeypatch.setattr(apk_sidecar, "_ADB_RUN", fake)
+
+
+def test_prepare_from_device_pulls_base_and_split(env, monkeypatch):
+    src, _ = env
+    base = make_apk(src / "base.apk", libs=())
+    split = make_apk(src / "split.apk", dex=False, libs=("arm64-v8a/libsplit.so",))
+    remotes = {
+        "/data/app/~~x/base.apk": base.read_bytes(),
+        "/data/app/~~x/split_config.arm64_v8a.apk": split.read_bytes(),
+    }
+    fake = FakeADB(remotes)
+    fake.pm_path_stdout = "\n".join(f"package:{r}" for r in remotes) + "\n"
+    _install_fake_adb(monkeypatch, fake, src)
+    row = apk_sidecar.prepare_apk(
+        None, "Device pull analysis", [], "task-dev",
+        source_type="device", device_serial="emulator-5584", package_name="org.anzu.test",
+    )
+    assert row["source_kind"] == "device_pull"
+    assert row["source_uri"] == "device://emulator-5584/org.anzu.test"
+    assert row["package_name"] == "org.anzu.test"
+    assert row["device_serial"] == "emulator-5584"
+    assert row["apk"]["format"] == "split_set"
+    assert len(row["apk"]["parts"]) == 2
+    assert {p["role"] for p in row["apk"]["parts"]} == {"base", "split"}
+    staged = Path(row["apk"]["staged"])
+    assert (staged / "base.apk").is_file() and (staged / "split_config.arm64_v8a.apk").is_file()
+    custody = json.loads((store.directory(row["id"]) / "custody.json").read_text(encoding="utf-8"))
+    assert custody["source_kind"] == "device_pull"
+    assert custody["package_name"] == "org.anzu.test"
+    assert evidence(row, "E00001")["result"]["source_kind"] == "device_pull"
+    # adb was invoked with -s serial for pm path and both pulls
+    assert any(c[1:3] == ["-s", "emulator-5584"] and "pm" in c for c in fake.calls)
+
+
+def test_prepare_from_device_fails_closed_when_adb_missing(env, monkeypatch):
+    src, _ = env
+    fake = FakeADB({})
+    fake.missing = True
+    _install_fake_adb(monkeypatch, fake, src)
+    with pytest.raises(ValueError, match="ADB is unavailable"):
+        apk_sidecar.prepare_apk(
+            None, "q", [], None, source_type="device", package_name="org.anzu.test",
+        )
+    assert list(store.root().iterdir()) == [] or all(
+        not (p / "investigation.json").exists() for p in store.root().iterdir()
+    )
+
+
+def test_prepare_from_device_no_invented_paths_when_package_missing(env, monkeypatch):
+    src, _ = env
+    fake = FakeADB({})
+    fake.pm_path_stdout = "\n"
+    _install_fake_adb(monkeypatch, fake, src)
+    with pytest.raises(ValueError, match="not installed|no package"):
+        apk_sidecar.prepare_apk(
+            None, "q", [], None, source_type="device", package_name="org.missing.app",
+        )
+
+
+def test_prepare_from_device_rejects_bad_package_name(env, monkeypatch):
+    src, _ = env
+    _install_fake_adb(monkeypatch, FakeADB({}), src)
+    with pytest.raises(ValueError, match="Invalid Android package name"):
+        apk_sidecar.prepare_apk(
+            None, "q", [], None, source_type="device", package_name="../evil",
+        )
+
+
+def _make_ffs_investigation(dump: Path, apk_rel: str, apk_bytes: bytes, *, bad_hash: str | None = None) -> str:
+    dump.mkdir(parents=True, exist_ok=True)
+    apk_path = dump.joinpath(*apk_rel.replace('\\', '/').split('/'))
+    apk_path.parent.mkdir(parents=True, exist_ok=True)
+    apk_path.write_bytes(apk_bytes)
+    digest = hashlib.sha256(apk_bytes).hexdigest()
+    ident = "a" * 32
+    # Use a real blank row id from store
+    from app.reverse_engineering.privacy import private_directory
+    import uuid
+    ident = uuid.uuid4().hex
+    workspace = store.directory(ident)
+    workspace.mkdir(mode=0o700, exist_ok=True)
+    private_directory(workspace)
+    index_dir = workspace / "index"
+    index_dir.mkdir(mode=0o700)
+    entry = {
+        "path": apk_rel.replace("\\", "/"),
+        "bytes": len(apk_bytes),
+        "sha256": bad_hash or digest,
+        "mtime": 0,
+        "magic_hex": apk_bytes[:16].hex(),
+        "type": "apk",
+    }
+    (index_dir / "files.ndjson").write_text(json.dumps(entry) + "\n", encoding="utf-8")
+    row = {
+        "id": ident, "task_id": "ffs-1", "target": str(dump.resolve()),
+        "question": "FFS dump", "kind": "ffs", "status": "completed",
+        "evidence": [], "findings": [], "unknowns": [], "chain_of_custody": [],
+        "created_at": "2026-10-13T00:00:00+00:00",
+    }
+    store.save(row)
+    return ident
+
+
+def test_prepare_from_ffs_copies_and_verifies_sha256(env):
+    src, _ = env
+    dump = src / "ffs_dump"
+    apk_rel = "apps/org.anzu.test/base.apk"
+    apk_bytes = make_apk(src / "seed.apk").read_bytes()
+    ffs_id = _make_ffs_investigation(dump, apk_rel, apk_bytes)
+    row = apk_sidecar.prepare_apk(
+        apk_rel, "FFS APK analysis", [], "task-ffs",
+        source_type="ffs", ffs_investigation_id=ffs_id,
+    )
+    assert row["source_kind"] == "ffs_reference"
+    assert row["ffs_investigation_id"] == ffs_id
+    assert row["apk"]["format"] == "apk"
+    assert row["apk"]["association"] == "ffs index/files.ndjson"
+    assert row["sha256"] == hashlib.sha256(apk_bytes).hexdigest()
+    assert Path(row["snapshot"]).is_file()
+    custody = json.loads((store.directory(row["id"]) / "custody.json").read_text(encoding="utf-8"))
+    assert custody["source_kind"] == "ffs_reference"
+    assert custody["ffs_investigation_id"] == ffs_id
+    assert evidence(row, "E00001")["result"]["ffs_investigation_id"] == ffs_id
+    # Source dump bytes untouched
+    assert (dump / "apps" / "org.anzu.test" / "base.apk").read_bytes() == apk_bytes
+
+
+def test_prepare_from_ffs_rejects_hash_mismatch(env):
+    src, _ = env
+    dump = src / "ffs_dump2"
+    apk_bytes = make_apk(src / "seed2.apk").read_bytes()
+    ffs_id = _make_ffs_investigation(dump, "payload.apk", apk_bytes, bad_hash="0" * 64)
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+        apk_sidecar.prepare_apk(
+            "payload.apk", "q", [], None, source_type="ffs", ffs_investigation_id=ffs_id,
+        )
+
+
+def test_prepare_from_ffs_requires_kind_ffs(env):
+    src, _ = env
+    dump = src / "ffs_dump3"
+    apk_bytes = make_apk(src / "seed3.apk").read_bytes()
+    ffs_id = _make_ffs_investigation(dump, "payload.apk", apk_bytes)
+    row = store.load(ffs_id)
+    row["kind"] = "forensic"
+    store.save(row)
+    with pytest.raises(ValueError, match="kind == 'ffs'"):
+        apk_sidecar.prepare_apk(
+            "payload.apk", "q", [], None, source_type="ffs", ffs_investigation_id=ffs_id,
+        )
+
+
+def test_prepare_from_ffs_rejects_path_escape(env):
+    src, _ = env
+    dump = src / "ffs_dump4"
+    dump.mkdir()
+    import uuid
+    from app.reverse_engineering.privacy import private_directory
+    ident = uuid.uuid4().hex
+    workspace = store.directory(ident)
+    workspace.mkdir(mode=0o700)
+    private_directory(workspace)
+    (workspace / "index").mkdir()
+    entry = {"path": "../outside.apk", "bytes": 1, "sha256": "a" * 64, "mtime": 0, "magic_hex": "", "type": "apk"}
+    (workspace / "index" / "files.ndjson").write_text(json.dumps(entry) + "\n", encoding="utf-8")
+    store.save({"id": ident, "target": str(dump.resolve()), "kind": "ffs", "status": "completed",
+                "question": "q", "evidence": [], "findings": [], "unknowns": [], "chain_of_custody": [],
+                "created_at": "2026-10-13T00:00:00+00:00"})
+    with pytest.raises(ValueError, match="Unsafe FFS entry path"):
+        apk_sidecar.prepare_apk(
+            "../outside.apk", "q", [], None, source_type="ffs", ffs_investigation_id=ident,
+        )
+
+
+def test_apk_api_device_and_ffs_prepare(env, monkeypatch):
+    src, _ = env
+    client = TestClient(app)
+    # device
+    base = make_apk(src / "api_base.apk")
+    remotes = {"/data/app/base.apk": base.read_bytes()}
+    fake = FakeADB(remotes)
+    fake.pm_path_stdout = "package:/data/app/base.apk\n"
+    _install_fake_adb(monkeypatch, fake, src)
+    res = client.post("/api/investigations/apk/prepare", json={
+        "source_type": "device", "package_name": "org.anzu.test", "device_serial": "serial-1",
+        "question": "API device prepare", "task_id": "t-dev",
+    })
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["source_kind"] == "device_pull" and body["status"] == "prepared"
+    # ffs
+    dump = src / "api_ffs"
+    apk_bytes = make_apk(src / "api_ffs_seed.apk").read_bytes()
+    ffs_id = _make_ffs_investigation(dump, "app.apk", apk_bytes)
+    res2 = client.post("/api/investigations/apk/prepare", json={
+        "source_type": "ffs", "target": "app.apk", "ffs_investigation_id": ffs_id,
+        "question": "API FFS prepare", "task_id": "t-ffs",
+    })
+    assert res2.status_code == 200, res2.text
+    assert res2.json()["source_kind"] == "ffs_reference"
+    # file path still works
+    res3 = client.post("/api/investigations/apk/prepare", json={
+        "source_type": "file", "target": str(make_apk(src / "still.apk")), "task_id": "t-file",
+    })
+    assert res3.status_code == 200, res3.text
+    assert res3.json()["source_kind"] == "local_path"
+    assert res3.json()["status"] == "prepared"
