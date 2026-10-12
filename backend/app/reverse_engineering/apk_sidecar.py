@@ -41,7 +41,8 @@ _ANDROID = "{http://schemas.android.com/apk/res/android}"
 _DECOMPILE_SLOTS = threading.BoundedSemaphore(2)
 _CLAIM_LOCK = threading.Lock()
 _CANCEL: dict[str, threading.Event] = {}
-_RUNNING: dict[str, list[str]] = {}
+_RUNNING: dict[str, list[Path]] = {}
+_OWNED: set[str] = set()
 
 
 class DecompileCancelled(Exception):
@@ -371,9 +372,16 @@ def cancel(ident: str) -> None:
         return
     event.set()
     for signal in ("-TERM", "-KILL"):
-        for marker in list(_RUNNING.get(ident, [])):
+        for pidfile in list(_RUNNING.get(ident, [])):
             try:
-                _wsl(["pkill", signal, "-f", marker], 30)
+                pid = pidfile.read_text(encoding="ascii").strip()
+            except OSError:
+                continue
+            if not pid.isdigit() or int(pid) < 2:
+                continue
+            try:
+                # coreutils timeout leads its own process group; signal the whole group by PID.
+                _wsl(["kill", signal, "--", f"-{pid}"], 30)
             except (OSError, subprocess.TimeoutExpired):
                 continue
         deadline = time.monotonic() + KILL_GRACE
@@ -383,12 +391,19 @@ def cancel(ident: str) -> None:
             return
 
 
-def _run_tool(ident: str, name: str, argv: list[str], seconds: int, out: Path, marker: str) -> dict:
-    """Run one tool under coreutils timeout: SIGTERM at the deadline, SIGKILL after 10 s."""
+def _run_tool(ident: str, name: str, argv: list[str], seconds: int, out: Path) -> dict:
+    """Run one tool under coreutils timeout: SIGTERM at the deadline, SIGKILL after 10 s.
+
+    The fixed sh prologue writes its PID (which exec hands to timeout) to a pid file so
+    cancel() can signal exactly this process group; argv is passed as "$@", never parsed.
+    """
     if _CANCEL[ident].is_set():
         raise DecompileCancelled(name)
-    wrapped = ["timeout", f"--kill-after={KILL_GRACE}s", f"{seconds}s", *argv]
-    _RUNNING.setdefault(ident, []).append(marker)
+    pidfile = out.parent / f".{name}.pid"
+    pidfile.unlink(missing_ok=True)
+    wrapped = ["sh", "-c", 'echo $$ > "$0"; exec "$@"', _linux_path(pidfile),
+               "timeout", f"--kill-after={KILL_GRACE}s", f"{seconds}s", *argv]
+    _RUNNING.setdefault(ident, []).append(pidfile)
     try:
         result = _wsl(wrapped, seconds + KILL_GRACE + 30)
         code = result.returncode
@@ -396,7 +411,8 @@ def _run_tool(ident: str, name: str, argv: list[str], seconds: int, out: Path, m
     except subprocess.TimeoutExpired:
         code, text = 124, ""
     finally:
-        _RUNNING[ident].remove(marker)
+        _RUNNING[ident].remove(pidfile)
+        pidfile.unlink(missing_ok=True)
     if _CANCEL[ident].is_set():
         out.mkdir(parents=True, exist_ok=True)
         (out / ".incomplete").write_text(f"{name} cancelled\n", encoding="utf-8")
@@ -435,8 +451,10 @@ def preflight(ident: str) -> dict:
 
 
 def release(ident: str) -> None:
-    """Undo a claim that never reached decompile() (e.g. the task could not be scheduled)."""
+    """Undo a preflight claim that decompile() never took over; a no-op while decompile owns it."""
     with _CLAIM_LOCK:
+        if ident in _OWNED:
+            return
         row = store.load(ident)
         if row["status"] == "analyzing":
             row["status"] = "interrupted"
@@ -451,6 +469,16 @@ def decompile(ident: str, skip_jadx: bool = False, claimed: dict | None = None) 
     ``claimed`` is the row returned by preflight(); without it the claim is taken here.
     """
     row = claimed if claimed is not None else preflight(ident)
+    with _CLAIM_LOCK:
+        _OWNED.add(ident)
+    try:
+        return _decompile_owned(ident, skip_jadx, row)
+    finally:
+        with _CLAIM_LOCK:
+            _OWNED.discard(ident)
+
+
+def _decompile_owned(ident: str, skip_jadx: bool, row: dict) -> dict:
     with _DECOMPILE_SLOTS:
         work = store.directory(ident) / "apk"
         apktool_out, jadx_out, meta = work / "apktool", work / "jadx", work / "metadata"
@@ -466,18 +494,21 @@ def decompile(ident: str, skip_jadx: bool = False, claimed: dict | None = None) 
             apktool = _run_tool(ident, "apktool", [
                 "env", f"JAVA_HOME={JAVA_HOME}", f"PATH={JAVA_HOME}/bin:/usr/bin:/bin", JDK, *JVM_HEAP,
                 "-jar", APKTOOL_JAR, "d", "-f", "--no-src", "-o", _linux_path(apktool_out), _linux_path(base)],
-                APKTOOL_TIMEOUT, apktool_out, _linux_path(apktool_out))
+                APKTOOL_TIMEOUT, apktool_out)
             if apktool["state"] != "ok":
                 unknowns.append(f"apktool resource decoding {apktool['state']} (exit {apktool['exit_code']}); "
                                 "manifest, permissions and components may be unavailable.")
             jadx = None
-            if not skip_jadx:
-                inputs = [base] + [Path(p["path"]) for p in row["apk"]["parts"] if p["role"] == "split" and p["dex"]]
+            inputs = [Path(p["path"]) for p in row["apk"]["parts"] if p["dex"]]
+            if not skip_jadx and not inputs:
+                jadx = {"tool": "jadx", "state": "skipped", "reason": "No classes*.dex in any APK part; nothing to decompile.",
+                        "java_files": 0, "inputs": []}
+            elif not skip_jadx:
                 jadx = _run_tool(ident, "jadx", [
                     "env", f"JAVA_HOME={JAVA_HOME}", f"PATH={JAVA_HOME}/bin:/usr/bin:/bin",
                     "JAVA_OPTS=" + " ".join(JVM_HEAP), JADX, "--no-res", "-d", _linux_path(jadx_out),
                     "--threads-count", "4", "--show-bad-code", "--escape-unicode",
-                    *[_linux_path(p) for p in inputs]], JADX_TIMEOUT, jadx_out, _linux_path(jadx_out))
+                    *[_linux_path(p) for p in inputs]], JADX_TIMEOUT, jadx_out)
                 jadx["java_files"] = sum(1 for _ in jadx_out.rglob("*.java")) if jadx_out.exists() else 0
                 jadx["inputs"] = [p.name for p in inputs]
                 if jadx["state"] == "timeout":
@@ -591,6 +622,11 @@ def decode_axml(buf: bytes) -> str:
         raise ValueError("binary manifest exceeds 16 MiB")
     strings: list[str] = []
     res_ids: list[int] = []
+
+    def sref(index: int) -> str:
+        if not 0 <= index < len(strings):
+            raise ValueError(f"binary XML string index {index} is out of range")
+        return strings[index]
     prefixes: dict[str, str] = {}
     out = ['<?xml version="1.0" encoding="utf-8"?>']
     pending_ns: list[tuple[str, str]] = []
@@ -606,8 +642,8 @@ def decode_axml(buf: bytes) -> str:
                 res_ids = list(struct.unpack_from(f"<{(size - header) // 4}I", buf, off + header))
             elif ctype == 0x0100:
                 prefix, uri = struct.unpack_from("<ii", buf, off + 16)
-                prefixes[strings[uri]] = strings[prefix]
-                pending_ns.append((strings[prefix], strings[uri]))
+                prefixes[sref(uri)] = sref(prefix)
+                pending_ns.append((sref(prefix), sref(uri)))
             elif ctype == 0x0102:
                 ns, name, _attr_start, attr_size, count = struct.unpack_from("<iiHHH", buf, off + 16)[:5]
                 attrs = [f"xmlns:{p}={quoteattr(u)}" for p, u in pending_ns]
@@ -618,12 +654,12 @@ def decode_axml(buf: bytes) -> str:
                     key = strings[a_name] if 0 <= a_name < len(strings) else ""
                     if not key and 0 <= a_name < len(res_ids):
                         key = _AXML_ATTR_IDS.get(res_ids[a_name], f"attr_{res_ids[a_name]:08x}")
-                    if a_ns >= 0:
-                        key = f"{prefixes.get(strings[a_ns], 'ns')}:{key}"
-                    if a_raw >= 0:
-                        value = strings[a_raw]
+                    if a_ns != -1:
+                        key = f"{prefixes.get(sref(a_ns), 'ns')}:{key}"
+                    if a_raw != -1:
+                        value = sref(a_raw)
                     elif vtype == 0x03:
-                        value = strings[vdata]
+                        value = sref(vdata)
                     elif vtype == 0x12:
                         value = "true" if vdata else "false"
                     elif vtype == 0x10:
@@ -635,10 +671,10 @@ def decode_axml(buf: bytes) -> str:
                     else:
                         value = f"0x{vdata:08x}"
                     attrs.append(f"{key}={quoteattr(value)}")
-                tag = strings[name]
+                tag = sref(name)
                 out.append(f"<{tag}{' ' if attrs else ''}{' '.join(attrs)}>")
             elif ctype == 0x0103:
-                out.append(f"</{strings[struct.unpack_from('<ii', buf, off + 16)[1]]}>")
+                out.append(f"</{sref(struct.unpack_from('<ii', buf, off + 16)[1])}>")
             off += size
     except (struct.error, IndexError) as exc:
         raise ValueError("malformed binary XML") from exc

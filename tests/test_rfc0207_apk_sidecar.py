@@ -103,6 +103,10 @@ class FakeWSL:
         timeout = kw.get("timeout")
         assert args[:6] == ["wsl.exe", "-d", apk_sidecar.provision.DISTRO, "-u", "root", "--exec"]
         argv = list(args[6:])
+        if argv[:2] == ["sh", "-c"]:
+            assert argv[2] == 'echo $$ > "$0"; exec "$@"'
+            Path(argv[3]).write_text("4242\n", encoding="ascii")
+            argv = argv[4:]
         self.calls.append((argv, timeout))
         done = lambda rc=0, out=b"", err=b"": subprocess.CompletedProcess(args, rc, out, err)
         if argv[0] == "wslpath":
@@ -551,15 +555,17 @@ async def test_android_decompile_routes_to_sidecar_and_cancel_stops_it(env, monk
     names = {t["name"] for t in (await service.catalog(row["id"], None))["operations"]}
     assert "android_decompile" not in names and "apk_decompile" in names
 
-    started, killed = threading.Event(), threading.Event()
+    started, killed, kills = threading.Event(), threading.Event(), []
     inner = fake.__call__
 
     def blocking(args, *a, **kw):
         argv = args[6:] if args and args[0] == "wsl.exe" else []
-        if argv[:1] == ["pkill"]:
+        if argv[:1] == ["kill"]:
+            kills.append(argv)
             killed.set()
             return subprocess.CompletedProcess(args, 0, b"", b"")
-        if argv[:1] == ["timeout"] and apk_sidecar.JADX in argv:
+        if argv[:2] == ["sh", "-c"] and apk_sidecar.APKTOOL_JAR in argv:
+            Path(argv[3]).write_text("4242\n", encoding="ascii")
             started.set()
             killed.wait(30)
             return subprocess.CompletedProcess(args, 143, b"", b"Terminated")
@@ -571,7 +577,8 @@ async def test_android_decompile_routes_to_sidecar_and_cancel_stops_it(env, monk
     assert service.active.get(row["id"]) is task
     closed = await service.close(row["id"], None, cancelled=True)
     assert closed["status"] == "cancelled" and killed.is_set() and task.done()
-    assert (store.directory(row["id"]) / "apk" / "jadx" / ".incomplete").read_text(encoding="utf-8") == "jadx cancelled\n"
+    assert kills[0] == ["kill", "-TERM", "--", "-4242"]  # exact process group, no pattern matching
+    assert (store.directory(row["id"]) / "apk" / "apktool" / ".incomplete").read_text(encoding="utf-8") == "apktool cancelled\n"
     assert store.load(row["id"])["status"] == "cancelled"
 
 
@@ -598,6 +605,8 @@ def test_real_toolchain_decompiles_fixture(env, monkeypatch):
             return subprocess.CompletedProcess(argv, 0 if Path(mapping[argv[-1]]).is_file() else 1, b"", b"")
         if argv[0] == "sha256sum":
             return subprocess.CompletedProcess(argv, 0, (hashlib.sha256(Path(REAL_APKTOOL).read_bytes()).hexdigest() + "  x").encode(), b"")
+        if argv[:2] == ["sh", "-c"]:
+            argv = argv[4:]
         assert argv[0] == "timeout"
         cmd, env_vars = argv[3:], dict(os.environ)
         if cmd[0] == "env":
@@ -616,4 +625,66 @@ def test_real_toolchain_decompiles_fixture(env, monkeypatch):
     manifest = apk_sidecar.metadata(row["id"], "manifest")
     assert manifest["package"] == "org.anzu.test" and manifest["min_sdk"] == "26" and manifest["target_sdk"] == "35"
     assert evidence(out, "E00003")["result"]["apktool"]["state"] == "ok"
-    assert evidence(out, "E00003")["result"]["jadx"]["state"] in {"ok", "failed"}  # no DEX in the fixture
+    assert evidence(out, "E00003")["result"]["jadx"]["state"] == "skipped"  # the fixture has no DEX
+
+
+def test_jadx_skipped_without_dex(env):
+    src, fake = env
+    row = prepare(make_apk(src / "nodex.apk", dex=False))
+    out = apk_sidecar.decompile(row["id"])
+    assert not any(argv[0] == "timeout" and apk_sidecar.JADX in argv for argv, _ in fake.calls)
+    assert evidence(out, "E00003")["result"]["jadx"]["state"] == "skipped" and out["status"] == "investigating"
+
+
+def test_axml_out_of_range_string_index_raises():
+    import struct
+    buf = bytearray(zipfile.ZipFile(FIXTURES / "minimal_valid.apk").read("AndroidManifest.xml"))
+    off = 8
+    while struct.unpack_from("<H", buf, off)[0] != 0x0102:
+        off += struct.unpack_from("<I", buf, off + 4)[0]
+    struct.pack_into("<i", buf, off + 20, -5)  # element name string index
+    with pytest.raises(ValueError, match="out of range"):
+        apk_sidecar.decode_axml(bytes(buf))
+
+
+async def test_failure_before_decompile_releases_claim_and_retry_succeeds(env, monkeypatch):
+    from app.reverse_engineering.runtime import Investigations
+    src, _ = env
+    row = prepare(make_apk(src / "a.apk"))
+    service = Investigations()
+    real_call = apk_sidecar.call
+
+    def broken(*a, **k):
+        raise RuntimeError("worker thread failed before decompile")
+    monkeypatch.setattr(apk_sidecar, "call", broken)
+    with pytest.raises(RuntimeError, match="before decompile"):
+        await service.run_apk(row["id"], "apk_decompile", {})
+    assert store.load(row["id"])["status"] == "interrupted"
+    assert row["id"] not in service.active
+    monkeypatch.setattr(apk_sidecar, "call", real_call)
+    out = await service.run_apk(row["id"], "apk_decompile", {})
+    assert out["investigation_status"] == "investigating"
+
+    # Same through REST: a failed sync request does not wedge the row in "analyzing".
+    other = prepare(make_apk(src / "b.apk"))
+    client = TestClient(app)
+    monkeypatch.setattr(apk_sidecar, "call", broken)
+    assert client.post(f"/api/investigations/{other['id']}/apk/decompile", json={}).status_code == 422
+    assert store.load(other["id"])["status"] == "interrupted"
+    monkeypatch.setattr(apk_sidecar, "call", real_call)
+    ok = client.post(f"/api/investigations/{other['id']}/apk/decompile", json={})
+    assert ok.status_code == 200 and ok.json()["status"] == "investigating"
+
+
+def test_release_is_noop_while_decompile_owns_claim(env):
+    src, _ = env
+    row = prepare(make_apk(src / "a.apk"))
+    apk_sidecar.preflight(row["id"])
+    apk_sidecar._OWNED.add(row["id"])
+    try:
+        apk_sidecar.release(row["id"])
+        assert store.load(row["id"])["status"] == "analyzing"
+    finally:
+        apk_sidecar._OWNED.discard(row["id"])
+    apk_sidecar.release(row["id"])
+    assert store.load(row["id"])["status"] == "interrupted"

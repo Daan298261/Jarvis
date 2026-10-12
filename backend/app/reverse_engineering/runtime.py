@@ -338,17 +338,22 @@ class Investigations:
         from . import apk_sidecar
         if operation == "apk_decompile" and claimed is None:
             claimed = await asyncio.to_thread(apk_sidecar.preflight, ident)
-        work = asyncio.ensure_future(asyncio.to_thread(apk_sidecar.call, ident, operation, arguments, claimed))
+        work = None
         self.active[ident] = asyncio.current_task()
         try:
+            work = asyncio.ensure_future(asyncio.to_thread(apk_sidecar.call, ident, operation, arguments, claimed))
             return await asyncio.shield(work)
         except asyncio.CancelledError:
             await asyncio.to_thread(apk_sidecar.cancel, ident)
-            await asyncio.wait([work], timeout=60)
-            if work.done() and not work.cancelled():
-                work.exception()
+            if work is not None:
+                await asyncio.wait([work], timeout=60)
+                if work.done() and not work.cancelled():
+                    work.exception()
             raise
         finally:
+            if claimed is not None:
+                # Frees a claim decompile() never took over; a no-op once decompile owns the row.
+                await asyncio.to_thread(apk_sidecar.release, ident)
             if self.active.get(ident) is asyncio.current_task():
                 self.active.pop(ident, None)
 

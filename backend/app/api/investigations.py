@@ -152,8 +152,11 @@ async def _apk_decompile_background(ident: str, skip_jadx: bool, claimed: dict):
         logger.info("APK decompile for investigation %s was cancelled", ident)
         raise
     except Exception:
-        # decompile() has already persisted status and last_error on the row; keep the traceback in the log.
+        # Status and last_error are on the row (decompile or release persisted them); keep the traceback here.
         logger.exception("Background APK decompile failed for investigation %s", ident)
+    finally:
+        # Covers a task cancelled before run_apk started; a no-op once decompile owns or finished the claim.
+        await asyncio.to_thread(apk_sidecar.release, ident)
 
 
 @router.post("/{ident}/apk/decompile")
@@ -165,7 +168,11 @@ async def apk_decompile(ident: str, body: ApkDecompileBody):
     except (ValueError, OSError, RuntimeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if body.background:
-        task = asyncio.create_task(_apk_decompile_background(ident, body.skip_jadx, row))
+        try:
+            task = asyncio.create_task(_apk_decompile_background(ident, body.skip_jadx, row))
+        except BaseException:
+            await asyncio.to_thread(apk_sidecar.release, ident)
+            raise
         _apk_tasks.add(task)
         task.add_done_callback(_apk_tasks.discard)
         return public_row(row)
@@ -173,6 +180,7 @@ async def apk_decompile(ident: str, body: ApkDecompileBody):
         await SERVICE.run_apk(ident, "apk_decompile", {"skip_jadx": body.skip_jadx}, row)
         return public_row(store.load(ident))
     except (ValueError, OSError, RuntimeError) as exc:
+        # run_apk already released any claim decompile() never took over.
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
