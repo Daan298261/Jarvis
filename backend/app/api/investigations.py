@@ -48,8 +48,11 @@ class IngestBody(BaseModel):
 
 
 class ApkPrepareBody(BaseModel):
-    source_type: Literal["file"] = "file"
-    target: str = Field(min_length=1, max_length=4096)
+    source_type: Literal["file", "device", "ffs"] = "file"
+    target: str = Field(default="", max_length=4096)
+    device_serial: str | None = Field(default=None, max_length=256)
+    package_name: str | None = Field(default=None, max_length=256)
+    ffs_investigation_id: str | None = Field(default=None, max_length=64)
     question: str = Field(default="Static APK analysis: manifest, permissions and exported components",
                           min_length=1, max_length=10000)
     task_id: str | None = None
@@ -138,10 +141,19 @@ async def ingest(body: IngestBody):
 @router.post("/apk/prepare")
 async def apk_prepare(body: ApkPrepareBody):
     try:
-        row = await asyncio.to_thread(apk_sidecar.prepare_apk, body.target, body.question,
-                                      load_settings().allowed_directories, body.task_id)
+        row = await asyncio.to_thread(
+            apk_sidecar.prepare_apk,
+            body.target or None,
+            body.question,
+            load_settings().allowed_directories,
+            body.task_id,
+            source_type=body.source_type,
+            device_serial=body.device_serial,
+            package_name=body.package_name,
+            ffs_investigation_id=body.ffs_investigation_id,
+        )
         return public_row(row)
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError, PermissionError, FileNotFoundError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
