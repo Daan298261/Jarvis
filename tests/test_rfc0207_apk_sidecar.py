@@ -918,7 +918,7 @@ def test_real_ndk_libraries_full_elf_inventory(env):
         assert lib["hardening"]["executable_stack"] is False
         assert lib["entropy"]["scope"] == "executable segments" and lib["entropy"]["blocks"] >= 1
         assert lib["sha256"] == hashlib.sha256(NDK64 if lib is a64 else NDK32).hexdigest()
-        assert Path(lib["copy"]).read_bytes() == (NDK64 if lib is a64 else NDK32)
+        assert (store.directory(row["id"]) / lib["derived_copy"]["path"]).read_bytes() == (NDK64 if lib is a64 else NDK32)
     assert a64["hardening"] == {"relro": "full", "stack_canary": True, "executable_stack": False}
     assert a32["hardening"] == {"relro": "partial", "stack_canary": False, "executable_stack": False}
     assert {h["kind"] for h in a32["hints"]} == {"relro", "no_stack_canary"}
@@ -1181,3 +1181,55 @@ def test_real_readelf_fallback_on_ndk_fixture(monkeypatch):
     assert out["needed"] == ["liblog.so", "libdl.so", "libc.so"]
     assert set(out["jni_exports"]) == {"JNI_OnLoad", "Java_org_anzu_test_MainActivity_stringFromJNI"}
     assert out["relro"] == "full" and out["stack_canary"] is True and out["executable_stack"] is False
+
+
+# --- RFC-0207 slice 2 follow-ups: ABI allow-list, e_shstrndx, evidence source, summary counts --
+
+def test_abi_filter_must_be_a_known_android_abi(env):
+    src, _ = env
+    row = prepare(_apk_with_libs(src / "a.apk", {"lib/arm64-v8a/libtestnative.so": NDK64}))
+    for bad in ("arm65", "ARM64-V8A", "x86_64 ", "lib", ""):
+        with pytest.raises(ValueError, match="abi must be one of"):
+            apk_sidecar.apk_inventory_native(row["id"], abi=bad)
+        with pytest.raises(ValueError, match="abi must be one of"):
+            apk_sidecar.call(row["id"], "apk_inventory_native", {"abi": bad})
+    assert store.load(row["id"])["status"] != "analyzing" and row["id"] not in apk_sidecar._CLAIMS
+    schema = apk_sidecar.CATALOG["apk_inventory_native"]["inputSchema"]["properties"]["abi"]
+    assert schema["enum"] == list(apk_sidecar.KNOWN_ABIS) and "riscv64" in schema["enum"]
+    assert apk_sidecar.apk_inventory_native(row["id"], abi="x86")["library_count"] == 0
+
+
+def test_section_name_index_is_not_used():
+    import struct
+    for value in (0, 0xFFFF, 1):
+        buf = bytearray(NDK64)
+        struct.pack_into("<H", buf, 62, value)  # e_shstrndx
+        out = apk_sidecar._parse_elf(bytes(buf))
+        assert out["soname"] == "libtestnative.so" and out["note"] is None
+        assert "Java_org_anzu_test_MainActivity_stringFromJNI" in out["jni_exports"]
+
+
+def test_evidence_distinguishes_apk_entry_from_derived_copy(env):
+    src, _ = env
+    row = prepare(_apk_with_libs(src / "a.apk", {"lib/arm64-v8a/libtestnative.so": NDK64}))
+    inv = apk_sidecar.apk_inventory_native(row["id"])
+    ev = json.loads((store.directory(row["id"]) / "evidence" / f"{inv['evidence_id']}.json").read_text(encoding="utf-8"))
+    lib = ev["result"]["libraries"][0]
+    assert lib["source"] == {"kind": "apk_entry", "part": inv["libraries"][0]["part"],
+                             "entry": "lib/arm64-v8a/libtestnative.so"}
+    assert lib["derived_copy"]["kind"] == "derived_copy" and lib["derived_copy"]["path"].startswith("apk/native/")
+    assert lib["derived_copy"]["sha256"] == lib["sha256"] == hashlib.sha256(NDK64).hexdigest()
+    copy = store.directory(row["id"]) / lib["derived_copy"]["path"]
+    assert copy.read_bytes() == NDK64 and lib["source"]["entry"] != lib["derived_copy"]["path"]
+
+
+def test_summary_reports_native_counts(env):
+    src, _ = env
+    row = prepare(_apk_with_libs(src / "a.apk", {"lib/arm64-v8a/libtestnative.so": NDK64,
+                                                  "lib/armeabi-v7a/libjiagu.so": NDK32}))
+    assert apk_sidecar.summary(row["id"])["native_inventory"] is None
+    apk_sidecar.apk_inventory_native(row["id"])
+    counts = TestClient(app).get(f"/api/investigations/{row['id']}/apk/summary").json()["native_inventory"]
+    assert counts == {"libraries": 2, "abis": ["arm64-v8a", "armeabi-v7a"], "jni_exports": 4,
+                      "packers_detected": ["Qihoo 360"], "high_entropy": 0, "partial_or_no_relro": 1,
+                      "no_stack_canary": 1, "executable_stack": 0, "unknowns": 1}

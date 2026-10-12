@@ -868,6 +868,14 @@ def _packer_for(name: str) -> str | None:
     return next((label for pat, label in PACKER_SO_PATTERNS if pat.fullmatch(name)), None)
 
 ELF_MACHINES = {3: "x86", 40: "ARM", 62: "x86_64", 183: "AArch64"}
+# Android ABIs (current plus legacy ones still found in old APKs); the abi filter must name one.
+KNOWN_ABIS = ("arm64-v8a", "armeabi-v7a", "armeabi", "x86", "x86_64", "riscv64", "mips", "mips64")
+
+
+def _check_abi(abi) -> None:
+    if abi is not None and abi not in KNOWN_ABIS:
+        raise ValueError(f"abi must be one of {', '.join(KNOWN_ABIS)}")
+
 _LIB_SO = re.compile(r"lib/([^/]+)/([^/]+\.so)")
 MAX_NATIVE_BYTES = 256 * 1024 * 1024
 MAX_NATIVE_LIBS = 4096
@@ -1182,7 +1190,11 @@ def _inspect_so(ident: str, cand: dict, data: bytes, digest: str, disk: Path, ca
     if elf["parseable"] and elf.get("stack_canary") is False:
         hints.append({"kind": "no_stack_canary", "detail": "__stack_chk_fail is not imported; no stack canaries."})
     return {"path": cand["path"], "abi": cand["abi"], "part": cand["part"], "name": name, "bytes": len(data),
-            "sha256": digest, "copy": str(disk),
+            "sha256": digest,
+            # The hashed bytes are the original APK entry; the file on disk is a derived working copy.
+            "source": {"kind": "apk_entry", "part": cand["part"], "entry": cand["path"]},
+            "derived_copy": {"kind": "derived_copy", "path": disk.relative_to(store.directory(ident)).as_posix(),
+                             "sha256": digest},
             "elf": {k: elf.get(k) for k in ("parseable", "elf_class", "endian", "machine", "machine_code", "note")},
             "soname": elf.get("soname"), "needed": elf.get("needed") or [],
             "hardening": {"relro": elf.get("relro"), "stack_canary": elf.get("stack_canary"),
@@ -1197,6 +1209,7 @@ def apk_inventory_native(ident: str, abi: str | None = None, claimed: dict | Non
     Holds the investigation claim for the whole run, so it never interleaves evidence or custody
     entries with a decompile; it is refused while another operation is analyzing.
     """
+    _check_abi(abi)
     claim = claimed if claimed is not None else _claim(ident, "native inventory")
     token = claim["_claim_token"]
     with _CLAIM_LOCK:
@@ -1236,8 +1249,8 @@ def apk_inventory_native(ident: str, abi: str | None = None, claimed: dict | Non
                 raise RuntimeError("Investigation claim was lost; native inventory results were not recorded")
             eid = _record(row, "apk_native_libs", {"abi": abi}, {
                 "provider": "ANZU APK sidecar", "abis": abis, "library_count": len(libraries),
-                "libraries": [{k: lib[k] for k in ("path", "abi", "part", "bytes", "sha256", "soname", "needed",
-                                                   "hardening", "jni_exports", "hints")} | {
+                "libraries": [{k: lib[k] for k in ("path", "abi", "part", "bytes", "sha256", "source", "derived_copy",
+                                                   "soname", "needed", "hardening", "jni_exports", "hints")} | {
                                    "elf_class": lib["elf"]["elf_class"], "machine": lib["elf"]["machine"]}
                               for lib in libraries],
                 "packers_detected": packers, "high_entropy_count": high, "unknowns": unknowns,
@@ -1291,7 +1304,7 @@ CATALOG = {
     "apk_inventory_native": {"name": "apk_inventory_native",
                              "description": "Inventory native .so libraries, ABIs, ELF headers, JNI exports and packer/entropy hints.",
                              "inputSchema": {"type": "object",
-                                             "properties": {"abi": {"type": "string", "pattern": r"^[A-Za-z0-9_-]{1,32}$"}},
+                                             "properties": {"abi": {"type": "string", "enum": list(KNOWN_ABIS)}},
                                              "additionalProperties": False}},
 }
 
@@ -1313,8 +1326,7 @@ def call(ident: str, operation: str, arguments: dict, claimed: dict | None = Non
         return {"status": "evidence", "evidence_id": eid, "manifest": manifest, "components": components}
     if operation == "apk_inventory_native":
         abi = arguments.get("abi")
-        if abi is not None and not (isinstance(abi, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,32}", abi)):
-            raise ValueError("abi must be an ABI name such as arm64-v8a")
+        _check_abi(abi)
         out = apk_inventory_native(ident, abi, claimed)
         return {"status": "evidence", "evidence_id": out["evidence_id"],
                 "investigation_status": out["investigation_status"], "native": out}
@@ -1342,6 +1354,18 @@ def summary(ident: str) -> dict:
     except FileNotFoundError:
         manifest = None
     abis = sorted({abi for p in apk["parts"] for abi in p["abis"]})
+    try:
+        native = metadata(ident, "native")
+    except FileNotFoundError:
+        native = None
+    native_counts = native and {
+        "libraries": native["library_count"], "abis": native["abis"],
+        "jni_exports": sum(len(lib["jni_exports"]) for lib in native["libraries"]),
+        "packers_detected": native["packers_detected"], "high_entropy": native["high_entropy_count"],
+        "partial_or_no_relro": sum(1 for lib in native["libraries"] if lib["hardening"]["relro"] in {"partial", "none"}),
+        "no_stack_canary": sum(1 for lib in native["libraries"] if lib["hardening"]["stack_canary"] is False),
+        "executable_stack": sum(1 for lib in native["libraries"] if lib["hardening"]["executable_stack"]),
+        "unknowns": len(native["unknowns"])}
     return {"id": ident, "status": row["status"], "format": apk["format"], "sha256": row.get("sha256"),
             "parts": len(apk["parts"]), "obb": len(apk["obb"]), "native_abis": abis,
             "native_libs": sum(len(p["native_libs"]) for p in apk["parts"]),
@@ -1353,4 +1377,5 @@ def summary(ident: str) -> dict:
             "exported": manifest["attack_surface"]["exported"] if manifest else None,
             "exported_unprotected": manifest["attack_surface"]["exported_unprotected_count"] if manifest else None,
             "high_risk_permissions": len(manifest["permissions"]["high_risk"]) if manifest else None,
-            "decompiled": manifest is not None, "unknowns": row.get("unknowns", [])}
+            "decompiled": manifest is not None, "native_inventory": native_counts,
+            "unknowns": row.get("unknowns", [])}
