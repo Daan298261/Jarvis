@@ -89,13 +89,13 @@ def _make_synthetic_identity(tmp: Path) -> dict[str, object]:
     }
 
 
-def _cms_encrypt_password(password: str, cert_path: Path, out_dir: Path) -> str:
+def _cms_encrypt_password(password: str, cert_path: Path, out_dir: Path, *, encoding: str = "utf-8") -> str:
     openssl = shutil.which("openssl")
     if not openssl:
         pytest.skip("OpenSSL CLI is required for the synthetic CMS integration fixture")
     plain = out_dir / "plain-password.bin"
     cms = out_dir / "access.p7"
-    plain.write_bytes(password.encode("utf-8"))
+    plain.write_bytes(password.encode(encoding))
     subprocess.check_call(
         [
             openssl,
@@ -117,11 +117,15 @@ def _cms_encrypt_password(password: str, cert_path: Path, out_dir: Path) -> str:
     return base64.b64encode(cms.read_bytes()).decode("ascii")
 
 
-def _build_bundle(tmp: Path, *, password: str = "synth-archive-pass-0198") -> dict[str, object]:
+def _build_bundle(
+    tmp: Path, *, password: str = "synth-archive-pass-0198", plaintext_encoding: str = "utf-8"
+) -> dict[str, object]:
     identity = _make_synthetic_identity(tmp / "keys")
     work = tmp / "bundle"
     work.mkdir(parents=True, exist_ok=True)
-    access_b64 = _cms_encrypt_password(password, identity["cert_path"], work)  # type: ignore[arg-type]
+    access_b64 = _cms_encrypt_password(  # type: ignore[arg-type]
+        password, identity["cert_path"], work, encoding=plaintext_encoding
+    )
     thumb = identity["thumbprint"]
     ski = identity["ski"]
     # Placeholder shape only — ciphertext is synthetic for this temp dir.
@@ -336,6 +340,207 @@ def test_wrong_key_decrypt_failed(lta_env):
     )
     assert job["status"] == "failed"
     assert job["error"] == "decrypt_failed"
+
+
+_GARBAGE_PLAINTEXTS = (
+    bytes.fromhex("9cff10d800fe81a7c4e2593b0d6f11e8"),
+    bytes.fromhex("d800dc41c0afe3b1009f7a5512ee86fd"),
+    bytes.fromhex("4e8a61e7f3d2a1009b7c0e1f88deadbe"),
+    bytes.fromhex("e4b8ade696870000d83dde00ffeeddcc"),
+)
+
+
+@pytest.mark.parametrize("garbage", _GARBAGE_PLAINTEXTS, ids=lambda g: g.hex()[:8])
+def test_wrong_key_garbage_plaintext_is_decrypt_failed(lta_env, monkeypatch, garbage):
+    """Regression: a wrong RSA key could "decrypt" CMS to random bytes (~1 in 256 CBC
+    paddings pass). Those bytes must classify as decrypt_failed, never archive_failed."""
+    import app.security.lta_archive as lta_archive
+
+    bundle = _build_bundle(lta_env["tmp"] / "case-garbage")
+    other = _make_synthetic_identity(lta_env["tmp"] / "other-key-garbage")
+    set_test_key_resolver(lambda _t, _s: other["key_pem"])  # type: ignore[arg-type,return-value]
+    real_run = subprocess.run
+    seen: list[list[str]] = []
+
+    def fake_run(argv, *args, **kwargs):
+        if len(argv) > 2 and argv[1:3] == ["cms", "-decrypt"]:
+            seen.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0, stdout=garbage, stderr=b"")
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(lta_archive.subprocess, "run", fake_run)
+    job = run_protected_folder_open(
+        manifest_path=str(bundle["manifest_path"]),
+        archive_path=str(bundle["archive_path"]),
+    )
+    assert seen, "CMS decrypt was not invoked"
+    assert job["status"] == "failed"
+    assert job["error"] == "decrypt_failed"
+
+
+def test_real_wrong_key_cms_decrypt_always_fails(tmp_path):
+    """Real OpenSSL: without -debug_decrypt about 1 in 256 wrong keys 'succeeded' with
+    garbage (1200 tries catch that regression with ~99% probability). Every wrong-key
+    decrypt must raise DecryptFailed."""
+    from app.security.lta_archive import _decrypt_openssl_cms
+    from app.security.lta_errors import DecryptFailed
+
+    right = _make_synthetic_identity(tmp_path / "right")
+    wrong = _make_synthetic_identity(tmp_path / "wrong")
+    for index in range(1200):
+        work = tmp_path / f"w{index}"
+        work.mkdir()
+        blob = base64.b64decode(_cms_encrypt_password("S3cret-pass_123", right["cert_path"], work))  # type: ignore[arg-type]
+        with pytest.raises(DecryptFailed):
+            _decrypt_openssl_cms(blob, wrong["key_pem"])  # type: ignore[arg-type]
+        shutil.rmtree(work)
+
+
+def test_openssl_cms_decrypt_passes_debug_decrypt(tmp_path, monkeypatch):
+    """Deterministic: the OpenSSL CMS command always carries -debug_decrypt."""
+    import app.security.lta_archive as lta_archive
+
+    seen: list[list[str]] = []
+
+    def fake_run(argv, *args, **kwargs):
+        seen.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout=b"S3cret-pass", stderr=b"")
+
+    monkeypatch.setattr(lta_archive.subprocess, "run", fake_run)
+    monkeypatch.setattr(lta_archive.shutil, "which", lambda _name: "/usr/bin/openssl")
+    assert lta_archive._decrypt_openssl_cms(b"blob", b"-----BEGIN PRIVATE KEY-----") == "S3cret-pass"
+    assert len(seen) == 1
+    assert seen[0][1:3] == ["cms", "-decrypt"]
+    assert "-debug_decrypt" in seen[0]
+
+
+def test_decode_cms_password_mapping():
+    from app.security.lta_archive import _decode_cms_password
+    from app.security.lta_errors import DecryptFailed
+
+    assert _decode_cms_password(b"S3cret-pass") == "S3cret-pass"
+    assert _decode_cms_password("S3cret-pässwörd".encode("utf-16-le")) == "S3cret-pässwörd"
+    assert _decode_cms_password("S3cret".encode("utf-16-le") + b"\x00\x00") == "S3cret"
+    assert _decode_cms_password("证据密码".encode("utf-16-le")) == "证据密码"
+    assert _decode_cms_password("пароль".encode("utf-8")) == "пароль"
+    assert _decode_cms_password(b"\x00\x00") == ""
+    # Format characters (Cf) such as ZWJ are legitimate password content.
+    assert _decode_cms_password("pass\u200dword".encode("utf-16-le")) == "pass\u200dword"
+    assert _decode_cms_password("pass\u200dword".encode("utf-8")) == "pass\u200dword"
+    # A leading BOM is stripped exactly once.
+    assert _decode_cms_password(b"\xff\xfe" + "S3cret-wide".encode("utf-16-le")) == "S3cret-wide"
+    assert _decode_cms_password("\ufeffS3cret".encode("utf-8")) == "S3cret"
+    bad = (
+        b"\xd8\x00\xd8",  # odd length, not UTF-8
+        b"\x00\xd8A\x00",  # unpaired surrogate
+        b"pass\x07word",  # control character
+        b"a\x00b",  # embedded NUL, odd length
+        "pass\ue000".encode("utf-16-le"),  # private use
+        "pass\u2028word".encode("utf-16-le"),  # line separator (Zl)
+        "pass\u2029word".encode("utf-16-le"),  # paragraph separator (Zp)
+        "pass\u0378".encode("utf-16-le"),  # unassigned
+    )
+    for raw in bad:
+        with pytest.raises(DecryptFailed):
+            _decode_cms_password(raw)
+
+
+def test_cjk_utf16_password_opens_real_archive(lta_env):
+    password = "证据密码二〇二六"
+    bundle = _build_bundle(lta_env["tmp"] / "case-cjk", password=password, plaintext_encoding="utf-16-le")
+    key_pem = bundle["key_pem"]
+    set_test_key_resolver(lambda _t, _s: key_pem)  # type: ignore[arg-type,return-value]
+    job = run_protected_folder_open(
+        manifest_path=str(bundle["manifest_path"]),
+        archive_path=str(bundle["archive_path"]),
+    )
+    assert job["status"] == "succeeded", job
+    assert job["error"] == ""
+
+
+def test_7z_failure_classification():
+    from app.security.lta_archive import _is_7z_encrypted_data_error, _is_7z_wrong_password
+
+    assert _is_7z_wrong_password(b"", b"ERROR: a.7z\nCannot open encrypted archive. Wrong password?\nHeaders Error")
+    # Per-file encrypted errors appear for corrupt data even with the right password.
+    for msg in (
+        b"ERROR: Data Error in encrypted file. Wrong password? : f.txt",
+        b"ERROR: CRC Failed in encrypted file. Wrong password? : f.txt",
+    ):
+        assert not _is_7z_wrong_password(b"", msg)
+        assert _is_7z_encrypted_data_error(b"", msg)
+    assert not _is_7z_wrong_password(b"", b"ERROR: x.7z\nCannot open the file as archive")
+    assert not _is_7z_encrypted_data_error(b"", b"ERROR: x.7z\nCannot open the file as archive")
+    assert not _is_7z_wrong_password(b"", b"ERROR: Disk full")
+
+
+def test_correct_key_corrupt_7z_data_is_archive_failed(lta_env):
+    """Right key + corrupted encrypted 7z payload must be archive_failed, never decrypt_failed."""
+    bundle = _build_bundle(lta_env["tmp"] / "case-corrupt")
+    archive = Path(bundle["archive_path"])  # type: ignore[arg-type]
+    data = bytearray(archive.read_bytes())
+    # Packed (encrypted) stream starts right after the 32-byte signature header.
+    for off in range(32, min(48, len(data))):
+        data[off] ^= 0xFF
+    archive.write_bytes(bytes(data))
+    key_pem = bundle["key_pem"]
+    set_test_key_resolver(lambda _t, _s: key_pem)  # type: ignore[arg-type,return-value]
+    job = run_protected_folder_open(
+        manifest_path=str(bundle["manifest_path"]),
+        archive_path=str(archive),
+    )
+    assert job["status"] == "failed", job
+    assert job["error"] == "archive_failed", job
+    assert job["error_detail"] == "7z_encrypted_data_error", job
+
+
+def test_7z_non_archive_is_archive_failed(lta_env):
+    from app.security.lta_archive import extract_with_7z
+    from app.security.lta_errors import ArchiveFailed, DecryptFailed
+
+    if not shutil.which("7z"):
+        pytest.skip("7-Zip CLI is required")
+    bogus = lta_env["tmp"] / "not-an-archive.7z"
+    bogus.write_bytes(b"this is not a 7z archive" * 8)
+    with pytest.raises(ArchiveFailed) as caught:
+        extract_with_7z(bogus, "any-password", lta_env["tmp"] / "lta-extract" / "bogus")
+    assert not isinstance(caught.value, DecryptFailed)
+
+
+def test_random_wrong_key_plaintexts_end_in_decrypt_failed(lta_env):
+    """Property: random 16-byte non-UTF-8 wrong-key plaintexts never open the archive.
+
+    Strict UTF-16-LE accepts any script (RFC-0198 passwords may be non-Latin), so about a
+    quarter of random buffers decode to plausible text. Those go to 7-Zip, which rejects
+    them as a wrong password; the rest are rejected at decode. Either way: decrypt_failed.
+    """
+    import random
+
+    from app.security.lta_archive import _decode_cms_password, extract_with_7z
+    from app.security.lta_errors import DecryptFailed
+
+    bundle = _build_bundle(lta_env["tmp"] / "case-property")
+    rng = random.Random(0x0198)
+    tried = rejected_at_decode = rejected_by_7z = 0
+    while tried < 2_000:
+        raw = bytes(rng.getrandbits(8) for _ in range(16))
+        try:
+            raw.decode("utf-8")
+            continue
+        except UnicodeDecodeError:
+            pass
+        tried += 1
+        try:
+            password = _decode_cms_password(raw)
+        except DecryptFailed:
+            rejected_at_decode += 1
+            continue
+        assert password
+        with pytest.raises(DecryptFailed):
+            extract_with_7z(bundle["archive_path"], password, lta_env["tmp"] / "lta-extract" / f"p{tried}")  # type: ignore[arg-type]
+        rejected_by_7z += 1
+    assert rejected_at_decode + rejected_by_7z == tried
+    assert rejected_at_decode > tried // 2
 
 
 def test_xml_invalid(lta_env):

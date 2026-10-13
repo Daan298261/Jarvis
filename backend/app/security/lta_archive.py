@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import unicodedata
 import uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -299,6 +300,42 @@ def decrypt_pkcs7_password(ciphertext_b64: str, key: ResolvedKey) -> str:
     return _decrypt_openssl_cms(blob, key.private_key_pem)
 
 
+# Password characters must be assigned, non-control, non-private-use text in any script
+# (RFC-0198 manifests may carry non-Latin passwords). 7-Zip then decides whether the
+# password is right; a wrong one maps to decrypt_failed there. Format characters (Cf,
+# e.g. U+200D ZWJ in emoji or Indic text) are legitimate password content and allowed.
+_REJECTED_PASSWORD_CATEGORIES = frozenset({"Cc", "Cs", "Co", "Cn", "Zl", "Zp"})
+
+
+def _strip_bom(text: str) -> str:
+    return text[1:] if text.startswith("\ufeff") else text
+
+
+def _plausible_password(text: str) -> bool:
+    return bool(text) and all(unicodedata.category(ch) not in _REJECTED_PASSWORD_CATEGORIES for ch in text)
+
+
+def _decode_cms_password(raw: bytes) -> str:
+    """CMS plaintext → password. Returns "" for empty plaintext; raises DecryptFailed for
+    bytes that are not a plausible password (a wrong key or corrupt ciphertext)."""
+    if not raw.strip(b"\x00").strip():
+        return ""
+    try:
+        text = _strip_bom(raw.decode("utf-8", errors="strict")).strip("\x00").strip()
+    except UnicodeError:
+        text = None
+    if text is not None and _plausible_password(text):
+        return text
+    if len(raw) % 2 == 0:
+        try:
+            wide = _strip_bom(raw.decode("utf-16-le", errors="strict")).strip("\x00").strip()
+        except UnicodeError:
+            wide = ""
+        if _plausible_password(wide):
+            return wide
+    raise DecryptFailed("CMS plaintext is not a usable password string", detail="password_encoding")
+
+
 def _decrypt_openssl_cms(blob: bytes, private_key_pem: bytes) -> str:
     openssl = shutil.which("openssl")
     if not openssl:
@@ -317,7 +354,12 @@ def _decrypt_openssl_cms(blob: bytes, private_key_pem: bytes) -> str:
             except OSError:
                 pass
         proc = subprocess.run(
-            [openssl, "cms", "-decrypt", "-inform", "DER", "-in", tmp, "-inkey", key_path],
+            # -debug_decrypt: fail on a wrong key instead of OpenSSL's MMA countermeasure,
+            # which decrypts with a random content key. AES-CBC padding then passes for
+            # ~1 in 256 wrong keys and yields garbage "plaintext" that broke later as
+            # archive_failed. Wrong key must always be decrypt_failed. The countermeasure
+            # protects network-facing padding oracles; this is a local, owner-run open.
+            [openssl, "cms", "-decrypt", "-debug_decrypt", "-inform", "DER", "-in", tmp, "-inkey", key_path],
             capture_output=True,
             check=False,
         )
@@ -330,13 +372,7 @@ def _decrypt_openssl_cms(blob: bytes, private_key_pem: bytes) -> str:
             elif "padding" in stderr:
                 err_class = "cms_padding_error"
             raise DecryptFailed("PKCS#7/CMS decrypt failed", detail=err_class)
-        password = proc.stdout.decode("utf-8", errors="strict").strip("\x00").strip()
-        if not password:
-            # Some LTA packs use UTF-16LE password bytes
-            try:
-                password = proc.stdout.decode("utf-16-le", errors="strict").strip("\x00").strip()
-            except UnicodeError as exc:
-                raise DecryptFailed("CMS plaintext is not a usable password string", detail="password_encoding") from exc
+        password = _decode_cms_password(proc.stdout)
         if not password:
             raise DecryptFailed("CMS plaintext empty", detail="empty_password")
         return password
@@ -423,14 +459,10 @@ def _decrypt_windows_cms(blob: bytes) -> str:
         if not CryptDecryptMessage(ctypes.byref(para), blob_buf, len(blob), out_buf, ctypes.byref(size), None):
             raise DecryptFailed("CryptDecryptMessage failed", detail="cms_decrypt_failed")
         raw = bytes(out_buf[: size.value])
-        for encoding_name in ("utf-8", "utf-16-le"):
-            try:
-                password = raw.decode(encoding_name).strip("\x00").strip()
-            except UnicodeError:
-                continue
-            if password:
-                return password
-        raise DecryptFailed("CMS plaintext is not a usable password string", detail="password_encoding")
+        password = _decode_cms_password(raw)
+        if not password:
+            raise DecryptFailed("CMS plaintext empty", detail="empty_password")
+        return password
     finally:
         for handle in stores:
             CertCloseStore(handle, 0)
@@ -447,6 +479,22 @@ def _validate_7z_password(password: str) -> str:
     if "\x00" in password or any(ord(ch) < 32 for ch in password):
         raise ArchiveFailed("archive password contains control characters", detail="password_invalid")
     return password
+
+
+def _7z_output_text(stdout: bytes | None, stderr: bytes | None) -> str:
+    return b"\n".join(part or b"" for part in (stdout, stderr)).decode("utf-8", errors="replace").lower()
+
+
+def _is_7z_wrong_password(stdout: bytes | None, stderr: bytes | None) -> bool:
+    """Only the archive-level "Cannot open encrypted archive. Wrong password?" is a definite
+    wrong password (encrypted headers, -mhe). Per-file "CRC Failed / Data Error in encrypted
+    file. Wrong password?" is also printed for corrupt data with the right password."""
+    return "cannot open encrypted archive" in _7z_output_text(stdout, stderr)
+
+
+def _is_7z_encrypted_data_error(stdout: bytes | None, stderr: bytes | None) -> bool:
+    text = _7z_output_text(stdout, stderr)
+    return "crc failed in encrypted file" in text or "data error in encrypted file" in text
 
 
 def extract_with_7z(archive_path: Path, password: str, dest_dir: Path) -> list[str]:
@@ -477,8 +525,18 @@ def extract_with_7z(archive_path: Path, password: str, dest_dir: Path) -> list[s
     except OSError as exc:
         raise ArchiveFailed("failed to invoke 7-Zip", detail=type(exc).__name__) from exc
     if proc.returncode != 0:
-        # Map common 7z codes without echoing stderr (may mention paths only — still scrub)
+        # Classify without echoing stderr (it may mention paths). Only the archive-level
+        # "Cannot open encrypted archive" is decrypt_failed; per-file encrypted CRC/data errors
+        # are almost always corruption (7-Zip cannot tell them apart from a wrong password).
         detail = f"7z_exit_{proc.returncode}"
+        if _is_7z_wrong_password(proc.stdout, proc.stderr):
+            raise DecryptFailed("7-Zip rejected the archive password", detail="7z_wrong_password")
+        if _is_7z_encrypted_data_error(proc.stdout, proc.stderr):
+            raise ArchiveFailed(
+                "7-Zip reported a CRC/data error in encrypted content: the archive is corrupt "
+                "or, rarely, the password is wrong",
+                detail="7z_encrypted_data_error",
+            )
         raise ArchiveFailed("7-Zip extract failed", detail=detail)
     return list_extract_tree(dest)
 
