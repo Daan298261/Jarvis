@@ -142,7 +142,7 @@ def install() -> dict:
                            check=True, timeout=300, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         # Dedicated distro root only; no user distribution or global Java changes.
         _state(status="installing", stage="Installing OS prerequisites")
-        wsl("bash", "-lc", "export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get install -y ca-certificates unzip xz-utils python3 gcc clang file", timeout=900)
+        wsl("bash", "-lc", "export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get install -y ca-certificates unzip xz-utils python3 gcc clang file binutils && test -x /usr/bin/readelf", timeout=900)
         paths = {}
         for key, filename in [("node", "node.tar.xz"), ("jdk", "jdk.tar.gz"), ("ghidra", "ghidra.zip"), ("jadx", "jadx.zip"),
                               ("apktool", "apktool.jar")]:
