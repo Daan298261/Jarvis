@@ -298,6 +298,51 @@ class CompanionPackManager(
         }
     }
 
+    /**
+     * Imports a GGUF the owner picked from storage. The bytes are copied into app storage, hashed, and
+     * only kept when they match a catalog model's pinned SHA-256; that model is then selected.
+     */
+    suspend fun importSideloaded(input: java.io.InputStream, declaredBytes: Long, onProgress: (Int) -> Unit = {}): CompanionPack = withContext(Dispatchers.IO) {
+        val maxBytes = (catalog.maxOfOrNull { it.sizeBytes } ?: 0L).coerceAtLeast(1L)
+        if (declaredBytes > maxBytes) error(ModelSideload.tooLargeCopy(maxBytes))
+        PackDownloadPlan.storageBlockReason(StatFs(packDir.absolutePath).availableBytes, declaredBytes.coerceAtLeast(0L), 0L)?.let { error(it) }
+        val temp = File(packDir, "sideload-${System.nanoTime()}.importing")
+        statusRef.set(CompanionPackStatus.DOWNLOADING)
+        progressRef.set(0)
+        errorRef.set("")
+        try {
+            val copied = ModelSideload.copyAndHash(input, temp, maxBytes, isCancelled = { !coroutineContext.isActive }) { bytes ->
+                if (declaredBytes > 0L) {
+                    val pct = ((bytes * 100) / declaredBytes).toInt().coerceIn(0, 99)
+                    progressRef.set(pct)
+                    onProgress(pct)
+                }
+            }
+            if (!copied.ggufHeader) error(ModelSideload.notGgufCopy())
+            val pack = ModelSideload.match(copied.digest, copied.bytes, catalog) ?: error(ModelSideload.unknownModelCopy(copied.digest))
+            engine.unload()
+            val target = packFile(pack)
+            digestCache.invalidate(target)
+            target.delete()
+            if (!temp.renameTo(target)) error("Could not move the model into ANZU storage")
+            digestCache.remember(target, pack.sha256)
+            selectPack(pack.id)
+            progressRef.set(100)
+            onProgress(100)
+            refreshStatus()
+            pack
+        } catch (error: Throwable) {
+            temp.delete()
+            // A rejected file must not mark an already-installed model as broken.
+            withContext(kotlinx.coroutines.NonCancellable) { refreshStatus() }
+            if (error !is CancellationException) {
+                Log.w(TAG, "Model import rejected: ${error.message}")
+                errorRef.set(error.message ?: "Model import failed")
+            }
+            throw error
+        }
+    }
+
     fun deleteSelected() {
         val pack = selectedPack()
         engine.unload()
