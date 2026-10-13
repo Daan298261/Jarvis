@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import unicodedata
 import uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -299,14 +300,14 @@ def decrypt_pkcs7_password(ciphertext_b64: str, key: ResolvedKey) -> str:
     return _decrypt_openssl_cms(blob, key.private_key_pem)
 
 
-# UTF-16-LE fallback is accepted only for plausible password text: Latin script up to
-# U+024F. Without this bound, random wrong-key bytes decode as "valid" UTF-16 (CJK and
-# other BMP code points) about 3 times in 4.
-_UTF16_PASSWORD_MAX_CODEPOINT = 0x024F
+# Password characters must be assigned, non-control, non-private-use text in any script
+# (RFC-0198 manifests may carry non-Latin passwords). 7-Zip then decides whether the
+# password is right; a wrong one maps to decrypt_failed there.
+_REJECTED_PASSWORD_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
 
 
 def _plausible_password(text: str) -> bool:
-    return bool(text) and text.isprintable()
+    return bool(text) and all(unicodedata.category(ch) not in _REJECTED_PASSWORD_CATEGORIES for ch in text)
 
 
 def _decode_cms_password(raw: bytes) -> str:
@@ -325,7 +326,7 @@ def _decode_cms_password(raw: bytes) -> str:
             wide = raw.decode("utf-16-le", errors="strict").strip("\x00").strip()
         except UnicodeError:
             wide = ""
-        if _plausible_password(wide) and all(ord(ch) <= _UTF16_PASSWORD_MAX_CODEPOINT for ch in wide):
+        if _plausible_password(wide):
             return wide
     raise DecryptFailed("CMS plaintext is not a usable password string", detail="password_encoding")
 
@@ -475,6 +476,13 @@ def _validate_7z_password(password: str) -> str:
     return password
 
 
+def _is_7z_wrong_password(stdout: bytes | None, stderr: bytes | None) -> bool:
+    text = b"\n".join(part or b"" for part in (stdout, stderr)).decode("utf-8", errors="replace").lower()
+    if "wrong password" in text:
+        return True
+    return "encrypted" in text and any(marker in text for marker in ("crc failed", "data error", "headers error"))
+
+
 def extract_with_7z(archive_path: Path, password: str, dest_dir: Path) -> list[str]:
     exe = find_7z_executable()
     if not exe:
@@ -503,8 +511,11 @@ def extract_with_7z(archive_path: Path, password: str, dest_dir: Path) -> list[s
     except OSError as exc:
         raise ArchiveFailed("failed to invoke 7-Zip", detail=type(exc).__name__) from exc
     if proc.returncode != 0:
-        # Map common 7z codes without echoing stderr (may mention paths only — still scrub)
+        # Classify without echoing stderr (it may mention paths). A wrong password shows up as
+        # "Wrong password?" or an encrypted-data/header/CRC failure: that is decrypt_failed.
         detail = f"7z_exit_{proc.returncode}"
+        if _is_7z_wrong_password(proc.stdout, proc.stderr):
+            raise DecryptFailed("7-Zip rejected the archive password", detail="7z_wrong_password")
         raise ArchiveFailed("7-Zip extract failed", detail=detail)
     return list_extract_tree(dest)
 
