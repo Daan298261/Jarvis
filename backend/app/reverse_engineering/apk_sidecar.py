@@ -1072,6 +1072,15 @@ def _parse_elf(data: bytes) -> dict:
     return out
 
 
+# readelf --dyn-syms row: "Num: Value Size Type Bind Vis Ndx Name"; binutils appends a version
+# ("@LIBC", "@@VERS_1") and a version index (" (2)") after the name, llvm-readelf only the version.
+_READELF_SYM = re.compile(r"^[ \t]*\d+:[ \t]+[0-9A-Fa-f]+(?:[ \t]+\S+){5}[ \t]+([^\s@]+)", re.M)
+
+
+def _readelf_symbols(text: str) -> set[str]:
+    return set(_READELF_SYM.findall(text))
+
+
 def _readelf_fallback(ident: str, path: Path) -> dict:
     """Ask binutils readelf in ANZU-REA for what the in-process reader could not get."""
     result = _wsl([READELF, "-W", "--dynamic", "--dyn-syms", "--program-headers", _linux_path(path)], READELF_TIMEOUT)
@@ -1080,7 +1089,7 @@ def _readelf_fallback(ident: str, path: Path) -> dict:
         raise RuntimeError((result.stderr.decode("utf-8", errors="replace") or "readelf failed")[-500:])
     needed = re.findall(r"\(NEEDED\)\s+Shared library: \[([^\]]+)\]", text)
     soname = re.search(r"\(SONAME\)\s+Library soname: \[([^\]]+)\]", text)
-    symbols = set(re.findall(r"\s(\S+?)(?:@\S+)?$", text, re.M))
+    symbols = _readelf_symbols(text)
     jni = sorted(s for s in symbols if s.startswith("Java_") or s in {"JNI_OnLoad", "JNI_OnUnload"})
     full = bool(re.search(r"\((?:FLAGS|FLAGS_1)\)\s+.*\b(?:BIND_NOW|NOW)\b", text) or "(BIND_NOW)" in text)
     relro = "GNU_RELRO" in text

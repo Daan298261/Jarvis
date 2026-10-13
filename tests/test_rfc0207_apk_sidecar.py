@@ -1233,3 +1233,16 @@ def test_summary_reports_native_counts(env):
     assert counts == {"libraries": 2, "abis": ["arm64-v8a", "armeabi-v7a"], "jni_exports": 4,
                       "packers_detected": ["Qihoo 360"], "high_entropy": 0, "partial_or_no_relro": 1,
                       "no_stack_canary": 1, "executable_stack": 0, "unknowns": 1}
+
+
+def test_readelf_symbol_names_versioned_and_unversioned():
+    text = """Symbol table '.dynsym' contains 4 entries:
+   Num:    Value          Size Type    Bind   Vis      Ndx Name
+     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT  UND 
+     1: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND __stack_chk_fail@LIBC (2)
+     2: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND __android_log_print@LIBLOG
+     3: 0000000000000720    48 FUNC    GLOBAL DEFAULT   12 Java_org_anzu_test_MainActivity_stringFromJNI
+     4: 0000000000000750    16 FUNC    GLOBAL DEFAULT   12 JNI_OnLoad@@VERS_1.0
+"""
+    assert apk_sidecar._readelf_symbols(text) == {
+        "__stack_chk_fail", "__android_log_print", "Java_org_anzu_test_MainActivity_stringFromJNI", "JNI_OnLoad"}
