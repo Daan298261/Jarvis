@@ -23,6 +23,8 @@
 
 **Slice 6 (implemented):** report synthesis citing E00001–E00006 via `apk_synthesize_report` (catalog + `POST /{id}/apk/report`). Observation findings are grounded only in recorded evidence/metadata; every finding cites real evidence IDs; investigation unknowns are carried into `report.json` / `report.md` through `store.write_report`; status is `partial` when unknowns remain. Custody event `apk_report_synthesized`. Tests cover synthesis citing E00001–E00006 on synthetic fixtures.
 
+**Slice 8 (implemented, `backend/app/reverse_engineering/apk_obfuscation.py` + `apk_sidecar.py`):** obfuscation, protector and decompile-coverage assessment (§4 Phase B diagnostics, §9.4 obfuscation unknowns, §11 anti-decompiler and packer rows) via `apk_assess_obfuscation(ident)`. It reads the `class_defs` → `type_ids` → `string_ids` chain of every `classes*.dex` in every APK part (bounds-checked, 1,000,000-class cap, 256 MiB per DEX, 2 GiB per assessment) and classifies each top-level class (inner and generated `R`/`BuildConfig`/`Manifest`/`BR` classes excluded) as ProGuard/R8-renamed when its simple name is one or two letters, optionally followed by one or two digits; packages whose every segment is renamed are counted too. At least 20 top-level classes with a renamed share of 40 % or more records the unknown "DEX code exhibits heavy identifier renaming (ProGuard/R8); N% of class names are obfuscated." Known DEX protector stub classes (SecNeo/Bangcle `com.secneo.apkwrapper`, Bangcle `com.bangcle`, Tencent Legu `com.tencent.StubShell`, Qihoo 360 Jiagu `com.stub.StubApp`, Baidu `com.baidu.protect`, Alibaba `com.ali.mobisecenhance`, Ijiami `com.shell.SuperApplication`) are each declared as an unknown (encrypted bytecode loaded at runtime). jadx-recovered sources are scanned for `JADX WARNING`, `JADX ERROR` and `Code decompiled incorrectly` markers (16 MiB per file, 2 GiB in total, ≤ 20 line-level samples), and any marker is declared as partial pseudo-code. Unparseable, oversized or unopenable DEX/parts, oversized/unreadable Java files and budget truncation are all explicit unknowns; with DEX parts present but no class table assessable, the state is `unassessed`. The step takes the same per-claim-token investigation claim as the other static steps (refused while any of them is analyzing, row reloaded under the claim lock, metadata written only after the evidence is recorded and rolled back if the row cannot be saved). Evidence `apk_obfuscation` (E00007 in pipeline order), custody event `apk_obfuscation_assessed` and `obfuscation_assessed_at`, metadata `apk/metadata/obfuscation.json`, catalog op `apk_assess_obfuscation`, REST `GET /{id}/apk/obfuscation` (the metadata route now also serves `smali`); `GET /{id}/apk/summary` adds `obfuscation`; report synthesis adds an obfuscation/coverage observation citing E00007 (and E00003 when jadx sources were scanned). Tests: synthetic DEX builder with real class tables (round trip, malformed tables, caps), name classification, protector matching, jadx marker scan, end-to-end assessment, claim/evidence/report/REST/catalog integration.
+
 **Later slices:** endpoint and crypto scanning of slice-5 recovered smali (`apk/smali/`); remaining fixtures (broader commercial/obfuscated APK corpus beyond synthetic, `minimal_valid.apk` and `dex_endpoints.apk`).
 ---
 
@@ -213,6 +215,11 @@ The decompile pipeline runs as a two-phase coordinated process:
 - Multi-DEX handling: automatically consumes `classes.dex`, `classes2.dex`, `classes3.dex`, etc.
 - Diagnostic collection: stdout and stderr are parsed for warnings, decompiler crashes, and skipped classes. Classes that failed decompilation are cataloged into `unknowns` to maintain honest coverage tracking.
 
+#### Obfuscation & Decompile Coverage Assessment (slice 8)
+- `apk_assess_obfuscation` walks the DEX `class_defs` of every part and reports the share of top-level classes with ProGuard/R8-style renamed names (one or two letters, optionally one or two digits), renamed packages, and known DEX protector stub classes.
+- jadx `/* JADX WARNING */`, `/* JADX ERROR */` and `Code decompiled incorrectly` markers in recovered Java are counted with line-level samples, so methods emitted as partial pseudo-code are catalogued as incomplete coverage.
+- Heavy renaming (≥ 40 % of ≥ 20 top-level classes), each protector stub and any jadx marker become declared unknowns; results are saved to `apk/metadata/obfuscation.json` and evidence `apk_obfuscation`.
+
 ---
 
 ### 5. Manifest, Permission, and Component Extraction
@@ -387,6 +394,7 @@ Under `<data_dir>/investigations/<id>/`:
 │       ├── native_libs.json
 │       ├── endpoints.json
 │       ├── crypto_hints.json
+│       ├── obfuscation.json
 │       └── strings.json
 ├── evidence/
 │   ├── E00001.json                   # Ingest & Unpack Evidence
@@ -394,7 +402,8 @@ Under `<data_dir>/investigations/<id>/`:
 │   ├── E00003.json                   # Decompile Pipeline Evidence
 │   ├── E00004.json                   # Native Libraries Evidence
 │   ├── E00005.json                   # Endpoints & Network Evidence
-│   └── E00006.json                   # Cryptographic Hints Evidence
+│   ├── E00006.json                   # Cryptographic Hints Evidence
+│   └── E00007.json                   # Obfuscation & Decompile Coverage Evidence (slice 8)
 ├── report.json                       # Final investigation report
 └── report.md                         # Markdown summary for owner/analyst
 ```
@@ -433,6 +442,7 @@ Each evidence entry follows the standard schema required by `store.py::record`:
 - `E00004` (`apk_native_libs`): Inventories of `.so` files, ABIs, JNI symbols, and packer detection results.
 - `E00005` (`apk_endpoints`): Classified URLs, IP addresses, WebSockets, and custom schemes with line-level references.
 - `E00006` (`apk_crypto_hints`): Flagged hardcoded credentials, weak ciphers, and network security config trust policies.
+- `E00007` (`apk_obfuscation`): ProGuard/R8 renaming share, DEX protector stubs and jadx WARNING/ERROR coverage markers.
 
 #### 9.4 Report Synthesis & Declared Unknowns
 When `store.write_report` produces `report.json` and `report.md`, findings cite these evidence IDs directly:
@@ -511,6 +521,7 @@ GET /api/investigations/{id}/apk/components
 GET /api/investigations/{id}/apk/native
 GET /api/investigations/{id}/apk/endpoints
 GET /api/investigations/{id}/apk/crypto
+GET /api/investigations/{id}/apk/obfuscation
 ```
 - Returns the specific structured JSON documents generated under `<investigation>/apk/metadata/`.
 
@@ -525,6 +536,7 @@ Registered under `STATIC_OPERATIONS` so agents can call them during investigatio
 | `apk_inventory_native` | Returns native `.so` libraries, ABIs, ELF headers, and JNI symbols. | `{ "abi": string }` (optional filter) |
 | `apk_extract_endpoints` | Returns extracted URLs, IPs, schemes, and backend endpoints. | `{ "category": string, "limit": integer }` |
 | `apk_crypto_hints` | Returns hardcoded secrets, weak cipher alerts, and network security config. | `{}` |
+| `apk_assess_obfuscation` | Assesses ProGuard/R8 renaming, DEX protector stubs and jadx coverage markers (slice 8). | `{}` |
 
 ---
 

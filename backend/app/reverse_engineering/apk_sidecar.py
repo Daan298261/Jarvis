@@ -2154,10 +2154,53 @@ def apk_crypto_hints(ident: str, claimed: dict | None = None) -> dict:
     return {**doc, "evidence_id": recorded["eid"], "investigation_status": row["status"]}
 
 
+# --- Obfuscation, protector and decompile coverage (RFC-0207 slice 8) --------------------
+
+def apk_assess_obfuscation(ident: str, claimed: dict | None = None) -> dict:
+    """Assess ProGuard/R8 identifier renaming, DEX protector stubs and jadx coverage markers.
+
+    Reads the class_defs of every ``classes*.dex`` in every APK part plus the jadx-recovered
+    sources when apk_decompile has run. Records ``apk_obfuscation`` evidence and
+    ``apk/metadata/obfuscation.json``; heavy renaming, protector stubs and partial pseudo-code are
+    declared as investigation unknowns (RFC-0207 §4 Phase B, §9.4, §11), so coverage stays honest.
+    """
+    from . import apk_obfuscation
+    with _static_op(ident, "obfuscation_assessment", claimed) as (claim, token):
+        result = apk_obfuscation.assess(store.directory(ident) / "apk", claim["apk"]["parts"],
+                                        _CANCEL.get(ident))
+        doc = {"investigation_id": ident, **result}
+        markers = result["jadx_markers"]
+        recorded: dict = {}
+
+        def write(row: dict) -> None:
+            recorded["eid"] = eid = _record(row, "apk_obfuscation", {}, {
+                "provider": "ANZU APK sidecar", "state": result["state"],
+                "class_count": result["class_count"], "top_level_classes": result["top_level_classes"],
+                "obfuscated_classes": result["obfuscated_classes"],
+                "obfuscated_ratio": result["obfuscated_ratio"],
+                "obfuscated_packages": result["obfuscated_packages"],
+                "heavily_obfuscated": result["heavily_obfuscated"], "threshold": result["threshold"],
+                "min_classes": result["min_classes"], "samples": result["samples"],
+                "protectors": result["protectors"], "jadx_markers": markers,
+                "dex_files": result["dex_files"][:EVIDENCE_RECORD_CAP],
+                "evidence_truncated": len(result["dex_files"]) > EVIDENCE_RECORD_CAP,
+                "coverage": result["coverage"], "unknowns": result["unknowns"],
+                "metadata": "apk/metadata/obfuscation.json", "limitations": result["limitations"]})
+            _coc(row, "apk_obfuscation_assessed",
+                 f"Assessed {result['top_level_classes']} top-level DEX class(es): "
+                 f"{round(result['obfuscated_ratio'] * 100)}% renamed, "
+                 f"{len(result['protectors'])} protector stub(s), "
+                 f"{markers['warnings'] + markers['errors'] + markers['bad_code_methods']} jadx marker(s).",
+                 {"evidence": eid, "state": result["state"], "obfuscated_ratio": result["obfuscated_ratio"],
+                  "protectors": [p["protector"] for p in result["protectors"]]})
+            _custody(row, obfuscation_assessed_at=_now())
+        row = _commit_step(ident, token, result["unknowns"], write, {"obfuscation.json": doc})
+    return {**doc, "evidence_id": recorded["eid"], "investigation_status": row["status"]}
+
 
 # --- Report synthesis (RFC-0207 §9.4) ---------------------------------------------------
 
-# Pipeline evidence operations in citation order (E00001..E00006 when run in order).
+# Pipeline evidence operations in citation order (E00001..E00007 when run in order).
 _REPORT_EVIDENCE_OPS = (
     "apk_unpack",
     "apk_manifest",
@@ -2165,6 +2208,7 @@ _REPORT_EVIDENCE_OPS = (
     "apk_native_libs",
     "apk_endpoints",
     "apk_crypto_hints",
+    "apk_obfuscation",
 )
 
 
@@ -2383,6 +2427,34 @@ def _synthesize_findings(ident: str, row: dict) -> list[dict]:
             "Secret material is not copied into the report claim.",
         ))
 
+    if "apk_obfuscation" in by_op:
+        eid = by_op["apk_obfuscation"]
+        obf = _optional_metadata(ident, "obfuscation")
+        if obf is None:
+            obf = _load_evidence_entry(ident, eid).get("result") or {}
+        top = obf.get("top_level_classes", 0)
+        ratio = obf.get("obfuscated_ratio", 0.0)
+        bits = [f"{round(ratio * 100)}% of {top} top-level DEX class name(s) look renamed (ProGuard/R8 style)"]
+        if obf.get("heavily_obfuscated"):
+            bits.append("heavy identifier renaming")
+        protectors = [f"{p.get('protector')} ({p.get('class')})" for p in obf.get("protectors") or []]
+        if protectors:
+            bits.append("protector stub(s): " + ", ".join(protectors))
+        markers = obf.get("jadx_markers") or {}
+        if markers.get("scanned"):
+            bits.append(f"jadx markers: {markers.get('warnings', 0)} warning(s), {markers.get('errors', 0)} "
+                        f"error(s), {markers.get('bad_code_methods', 0)} incorrectly decompiled method(s) "
+                        f"in {markers.get('files_with_markers', 0)} of {markers.get('java_files', 0)} Java file(s)")
+        cited = [eid]
+        if "apk_decompile" in by_op and markers.get("scanned"):
+            cited = [by_op["apk_decompile"], eid]
+        findings.append(_observation(
+            "Obfuscation and decompile coverage: " + "; ".join(bits) + ".",
+            cited,
+            "Renaming is inferred from short class names; protector detection matches known stub classes only; "
+            "no target code was executed.",
+        ))
+
     return findings
 
 
@@ -2462,9 +2534,13 @@ CATALOG = {
                          "description": "Flag hardcoded secrets, weak ciphers, static keys/IVs, network security "
                                         "config trust policy and AndroidKeyStore usage; records crypto evidence.",
                          "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+    "apk_assess_obfuscation": {"name": "apk_assess_obfuscation",
+                               "description": "Assess ProGuard/R8 identifier renaming, DEX protector stubs and jadx "
+                                              "WARNING/ERROR coverage markers; records obfuscation evidence and unknowns.",
+                               "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     "apk_synthesize_report": {"name": "apk_synthesize_report",
                              "description": "Synthesize report.json/report.md with observation findings citing "
-                                            "recorded APK evidence (E00001-E00006 as present) and declared unknowns.",
+                                            "recorded APK evidence (E00001-E00007 as present) and declared unknowns.",
                              "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
 }
 
@@ -2499,6 +2575,10 @@ def call(ident: str, operation: str, arguments: dict, claimed: dict | None = Non
         out = apk_crypto_hints(ident, claimed)
         return {"status": "evidence", "evidence_id": out["evidence_id"],
                 "investigation_status": out["investigation_status"], "crypto": out}
+    if operation == "apk_assess_obfuscation":
+        out = apk_assess_obfuscation(ident, claimed)
+        return {"status": "evidence", "evidence_id": out["evidence_id"],
+                "investigation_status": out["investigation_status"], "obfuscation": out}
     if operation == "apk_synthesize_report":
         row = apk_synthesize_report(ident)
         return {"status": "reported" if row["status"] == "reported" else "partial",
@@ -2511,7 +2591,7 @@ def call(ident: str, operation: str, arguments: dict, claimed: dict | None = Non
 
 METADATA_DOCUMENTS = {"manifest": "manifest", "components": "components", "native": "native",
                       "endpoints": "endpoints", "crypto": "crypto_hints", "strings": "strings",
-                      "smali": "smali"}
+                      "smali": "smali", "obfuscation": "obfuscation"}
 
 
 def _smali_summary(ident: str) -> dict | None:
@@ -2559,6 +2639,14 @@ def summary(ident: str) -> dict:
     summary_unknowns: list[str] = []
     endpoints = _optional_metadata(ident, "endpoints", summary_unknowns)
     crypto = _optional_metadata(ident, "crypto", summary_unknowns)
+    obfuscation = _optional_metadata(ident, "obfuscation", summary_unknowns)
+    obfuscation_view = obfuscation and {
+        "state": obfuscation["state"], "top_level_classes": obfuscation["top_level_classes"],
+        "obfuscated_ratio": obfuscation["obfuscated_ratio"],
+        "heavily_obfuscated": obfuscation["heavily_obfuscated"],
+        "protectors": [p["protector"] for p in obfuscation["protectors"]],
+        "jadx_markers": (obfuscation["jadx_markers"]["warnings"] + obfuscation["jadx_markers"]["errors"]
+                         + obfuscation["jadx_markers"]["bad_code_methods"])}
     return {"id": ident, "status": row["status"], "format": apk["format"], "sha256": row.get("sha256"),
             "parts": len(apk["parts"]), "obb": len(apk["obb"]), "native_abis": abis,
             "native_libs": sum(len(p["native_libs"]) for p in apk["parts"]),
@@ -2574,5 +2662,5 @@ def summary(ident: str) -> dict:
             "urls": endpoints["counts"]["url"] if endpoints else None,
             "crypto_alerts": crypto["alert_count"] if crypto else None,
             "decompiled": manifest is not None, "native_inventory": native_counts,
-            "smali_fallback": _smali_summary(ident),
+            "smali_fallback": _smali_summary(ident), "obfuscation": obfuscation_view,
             "unknowns": list(dict.fromkeys([*row.get("unknowns", []), *summary_unknowns]))}
