@@ -206,6 +206,18 @@ async def apk_summary(ident: str):
         raise HTTPException(status_code=404, detail="Unknown APK investigation") from exc
 
 
+@router.post("/{ident}/apk/report")
+async def apk_report(ident: str):
+    """Synthesize an APK investigation report from recorded evidence (RFC-0207 §9.4)."""
+    try:
+        row = await asyncio.to_thread(apk_sidecar.apk_synthesize_report, ident)
+        return public_row(row)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Unknown investigation") from exc
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("/{ident}/apk/{document}")
 async def apk_metadata(ident: str, document: Literal["manifest", "components", "native", "endpoints", "crypto"]):
     try:
