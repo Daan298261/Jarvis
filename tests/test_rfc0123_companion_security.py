@@ -12,7 +12,6 @@ from app.mobile import companion_security, connectivity, gateway, store
 def network_env(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
     monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
-    monkeypatch.delenv("JARVIS_RELAY_ENDPOINT", raising=False)
 
 
 @pytest.fixture

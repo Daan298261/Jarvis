@@ -9,9 +9,6 @@ from app.mobile import infrastructure, store
 @pytest.fixture
 def clean_env(monkeypatch):
     for name in (
-        "JARVIS_RELAY_URL",
-        "JARVIS_RELAY_CREDENTIAL",
-        "JARVIS_RELAY_ENDPOINT",
         "JARVIS_PUSH_URL",
         "JARVIS_PUSH_CREDENTIAL",
         "JARVIS_TURN_URL",

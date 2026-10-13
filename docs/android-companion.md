@@ -2,7 +2,7 @@
 
 **MVP LAN pairing (step-by-step):** [`ANDROID_MVP_LAN_CHECKLIST.md`](ANDROID_MVP_LAN_CHECKLIST.md) — preferred `JarvisCompanion-a1be0f1.apk` (1.2.0), `192.168.x.x:4781`, six-digit code, smoke tests, emulator vs phone gaps.
 
-**Reachability (LAN / port-forward TCP 4781 / mobile-relay) and anti-impersonation:** [`rfcs/0123-companion-reachability-and-anti-impersonation.md`](rfcs/0123-companion-reachability-and-anti-impersonation.md). Offline GGUF pack: [`rfcs/0108-phone-companion-offline-ai-model.md`](rfcs/0108-phone-companion-offline-ai-model.md).
+**Reachability:** LAN, or remote pairing over Tailscale only ([`rfcs/0215-remote-companion-pairing.md`](rfcs/0215-remote-companion-pairing.md); supersedes the port-forward / UPnP / mobile-relay paths of RFC-0123). Anti-impersonation: [`rfcs/0123-companion-reachability-and-anti-impersonation.md`](rfcs/0123-companion-reachability-and-anti-impersonation.md). Offline GGUF pack: [`rfcs/0108-phone-companion-offline-ai-model.md`](rfcs/0108-phone-companion-offline-ai-model.md).
 
 The native app lives in `android/`. Keep work on `cursor/android-companion-99ea`
 until the remaining release checks below are complete. This is an implementation
@@ -38,7 +38,6 @@ preview, not a production remote-access release.
   incoming intent handling, call mute/audio-route controls and queued voice follow-ups.
 - Desktop owner pairing/build controls and a personalized release APK builder with a
   persistent signing identity, live heartbeats and interrupted-build recovery.
-  Relay/push service source lives in `services/mobile-relay/`.
 - Owner-started TLS gateway lifecycle with verified local authentication, one-hour
   UPnP leases that preserve foreign mappings, and multi-endpoint Android fallback.
 - Regenerable six-digit pairing codes are HMAC-protected at rest, expire after ten
@@ -104,11 +103,8 @@ desktop Android companion panel, select **Prepare connection** before building:
 
 - Jarvis starts and probes the restricted TLS gateway itself.
 - Local Wi-Fi endpoints are added to the APK automatically.
-- Optional router discovery requests a one-hour lease only after the gateway proves
-  that device authentication is enforced. Existing foreign mappings are preserved.
-- A router lease is reported separately from verified internet reachability. Configure
-  `JARVIS_RELAY_ENDPOINT`, `JARVIS_RELAY_URL`, and `JARVIS_RELAY_CREDENTIAL` for the
-  hosted fallback after deploying `services/mobile-relay/`.
+- Off-network access is Tailscale only ([`rfcs/0215-remote-companion-pairing.md`](rfcs/0215-remote-companion-pairing.md)). There is no router port-forward,
+  UPnP, STUN, public tunnel or hosted relay path.
 
 Relevant owner APIs:
 
@@ -132,16 +128,12 @@ providers; this does not download model weights.
 
 ### Operator environment templates
 
-- Relay host: copy `services/mobile-relay/.env.example` to `.env` on the public
-  Linux machine (never commit secrets). See `services/mobile-relay/README.md`.
 - Jarvis desktop: copy `docs/examples/mobile-companion.env.example` and set values
   in your OS or service environment.
 
 | Variable | Role |
 | --- | --- |
-| `JARVIS_RELAY_URL` / `JARVIS_RELAY_CREDENTIAL` | Outbound relay agent (Jarvis → relay) |
-| `JARVIS_RELAY_ENDPOINT` | Phone HTTPS fallback origin after relay registration |
-| `JARVIS_PUSH_URL` / `JARVIS_PUSH_CREDENTIAL` | Opaque FCM broker on the relay |
+| `JARVIS_PUSH_URL` / `JARVIS_PUSH_CREDENTIAL` | Operator-hosted opaque FCM push broker |
 | `JARVIS_TURN_URL` / `JARVIS_TURN_SECRET` | coturn REST shared-secret ICE |
 | `JARVIS_FIREBASE_CLIENT_CONFIG` | Path to **public** Android client JSON for APK builds |
 
@@ -158,13 +150,12 @@ required.
 ### Operator checklist (remote voice and background calls)
 
 1. **Firebase** — Create a Firebase project. Download the **service account JSON**
-   for the relay host only (`FIREBASE_CREDENTIAL_FILE`). Download the **Android
+   for the push broker host only (`FIREBASE_CREDENTIAL_FILE`). Download the **Android
    client** public config for `JARVIS_FIREBASE_CLIENT_CONFIG` on the Jarvis PC
    (never the admin service account on Jarvis).
-2. **Mobile relay** — Deploy `services/mobile-relay/` on a public Linux host with
-   Compose, register this Jarvis installation via `POST /v1/register`, then set
-   `JARVIS_RELAY_*`, `JARVIS_PUSH_*` on the Jarvis desktop. Restart Jarvis so the
-   outbound relay agent connects.
+2. **Push broker** — Run an opaque FCM push broker you operate, then set
+   `JARVIS_PUSH_*` on the Jarvis desktop and restart Jarvis. Remote reachability is
+   Tailscale only ([`rfcs/0215-remote-companion-pairing.md`](rfcs/0215-remote-companion-pairing.md)).
 3. **TURN** — Deploy and configure coturn (REST shared-secret) on a reachable host;
    set `JARVIS_TURN_URL` and `JARVIS_TURN_SECRET` on Jarvis.
 4. **APK** — In the desktop companion panel, **Prepare connection**, then build a
