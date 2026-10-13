@@ -1672,9 +1672,96 @@ def test_custody_and_evidence_e00001_to_e00006(env):
         "apk_unpack", "apk_manifest", "apk_decompile", "apk_native_libs", "apk_endpoints", "apk_crypto_hints"]
     for i in range(1, 7):
         assert (store.directory(row["id"]) / "evidence" / f"E{i:05d}.json").is_file()
-    reported = store.write_report(final, [{"kind": "observation", "evidence_ids": ["E00005", "E00006"],
-        "claim": "Hardcoded AWS key ID in Vault.java and user CAs are trusted for all domains."}], [])
-    assert reported["status"] == "reported"
+    reported = apk_sidecar.apk_synthesize_report(row["id"])
+    cited = {eid for finding in reported["findings"] for eid in finding["evidence_ids"]}
+    assert cited >= {"E00001", "E00002", "E00003", "E00004", "E00005", "E00006"}
+    assert all(f["kind"] == "observation" and f.get("claim") for f in reported["findings"])
+    assert reported["status"] in {"reported", "partial"}
+    assert reported["status"] == ("partial" if reported.get("unknowns") else "reported")
+    assert (store.directory(row["id"]) / "report.json").is_file()
+    assert (store.directory(row["id"]) / "report.md").is_file()
+    custody = json.loads((store.directory(row["id"]) / "custody.json").read_text(encoding="utf-8"))
+    assert any(e.get("event") == "apk_report_synthesized" for e in custody.get("events", []))
+
+
+def test_report_synthesis_cites_e00001_to_e00006(env):
+    """RFC-0207 §9.4: synthesis produces findings citing each recorded evidence ID."""
+    src, fake = env
+    row = _decompiled_fixture(src, fake)
+    apk_sidecar.apk_inventory_native(row["id"])
+    apk_sidecar.apk_extract_endpoints(row["id"])
+    apk_sidecar.apk_crypto_hints(row["id"])
+    out = apk_sidecar.call(row["id"], "apk_synthesize_report", {})
+    assert out["investigation_status"] in {"reported", "partial"}
+    findings = out["findings"]
+    cited = {eid for finding in findings for eid in finding["evidence_ids"]}
+    assert cited == {"E00001", "E00002", "E00003", "E00004", "E00005", "E00006"} or cited >= {
+        "E00001", "E00002", "E00003", "E00004", "E00005", "E00006"}
+    for finding in findings:
+        assert finding["kind"] == "observation"
+        assert finding["claim"]
+        assert finding["evidence_ids"]
+        assert "limitations" in finding
+    # Secrets must not be pasted into report claims (masked forms from crypto are allowed).
+    blob = " ".join(f["claim"] for f in findings)
+    assert "AKIAIOSFODNN7EXAMPLE" not in blob
+    assert "AIzaSyD-x9SampleKeyForTestingPurpose123" not in blob
+    # Refuse double-finalize when status is already reported (no unknowns).
+    loaded = store.load(row["id"])
+    if loaded["status"] == "reported":
+        with pytest.raises(ValueError, match="reported"):
+            apk_sidecar.apk_synthesize_report(row["id"])
+    # REST surface
+    client = TestClient(app)
+    # Re-prepare a second investigation for the POST route (first may be reported).
+    rest_dir = src / "rest"
+    rest_dir.mkdir(exist_ok=True)
+    row2 = _decompiled_fixture(rest_dir, fake)
+    apk_sidecar.apk_inventory_native(row2["id"])
+    apk_sidecar.apk_extract_endpoints(row2["id"])
+    apk_sidecar.apk_crypto_hints(row2["id"])
+    resp = client.post(f"/api/investigations/{row2['id']}/apk/report")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    cited2 = {eid for finding in body["findings"] for eid in finding["evidence_ids"]}
+    assert cited2 >= {"E00001", "E00002", "E00003", "E00004", "E00005", "E00006"}
+    assert body["status"] in {"reported", "partial"}
+
+
+def test_report_synthesis_partial_when_unknowns(env):
+    src, fake = env
+    row = _decompiled_fixture(src, fake)
+    # Inject a declared unknown before synthesis (honest partial status).
+    stored = store.load(row["id"])
+    stored["unknowns"] = ["Synthetic fixture: native symbols unresolved for packed payload."]
+    store.save(stored)
+    reported = apk_sidecar.apk_synthesize_report(row["id"])
+    assert reported["status"] == "partial"
+    assert "Synthetic fixture: native symbols unresolved for packed payload." in reported["unknowns"]
+    cited = {eid for finding in reported["findings"] for eid in finding["evidence_ids"]}
+    assert cited >= {"E00001", "E00002", "E00003"}
+
+
+def test_report_synthesis_refuses_while_analyzing(env):
+    src, _ = env
+    row = prepare(make_apk(src / "a.apk"))
+    claimed = apk_sidecar._claim(row["id"], "decompilation")
+    with pytest.raises(ValueError, match="analyzing"):
+        apk_sidecar.apk_synthesize_report(row["id"])
+    apk_sidecar.release(row["id"], claimed["_claim_token"])
+
+
+def test_report_synthesis_requires_evidence(env):
+    src, _ = env
+    # Minimal prepared row without going through prepare() file intake: empty evidence.
+    # prepare() always records E00001; clear evidence to force the fail-closed path.
+    row = prepare(make_apk(src / "empty_report.apk"))
+    stored = store.load(row["id"])
+    stored["evidence"] = []
+    stored["unknowns"] = []
+    store.save(stored)
+    with pytest.raises(ValueError, match="No APK evidence"):
+        apk_sidecar.apk_synthesize_report(row["id"])
 
 
 def test_static_steps_never_overlap_decompile(env):
