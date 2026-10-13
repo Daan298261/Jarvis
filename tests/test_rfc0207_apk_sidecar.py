@@ -1676,8 +1676,9 @@ def test_custody_and_evidence_e00001_to_e00006(env):
     cited = {eid for finding in reported["findings"] for eid in finding["evidence_ids"]}
     assert cited >= {"E00001", "E00002", "E00003", "E00004", "E00005", "E00006"}
     assert all(f["kind"] == "observation" and f.get("claim") for f in reported["findings"])
-    assert reported["status"] in {"reported", "partial"}
-    assert reported["status"] == ("partial" if reported.get("unknowns") else "reported")
+    # The synthetic libtestnative.so is not an ELF, which is a declared unknown -> partial.
+    assert reported["status"] == "partial"
+    assert reported["unknowns"] == ["lib/arm64-v8a/libtestnative.so is not a parseable ELF (not ELF or truncated); only size and SHA-256 were recorded."]
     assert (store.directory(row["id"]) / "report.json").is_file()
     assert (store.directory(row["id"]) / "report.md").is_file()
     custody = json.loads((store.directory(row["id"]) / "custody.json").read_text(encoding="utf-8"))
@@ -1692,11 +1693,24 @@ def test_report_synthesis_cites_e00001_to_e00006(env):
     apk_sidecar.apk_extract_endpoints(row["id"])
     apk_sidecar.apk_crypto_hints(row["id"])
     out = apk_sidecar.call(row["id"], "apk_synthesize_report", {})
-    assert out["investigation_status"] in {"reported", "partial"}
+    assert out["investigation_status"] == "partial"
     findings = out["findings"]
     cited = {eid for finding in findings for eid in finding["evidence_ids"]}
-    assert cited == {"E00001", "E00002", "E00003", "E00004", "E00005", "E00006"} or cited >= {
-        "E00001", "E00002", "E00003", "E00004", "E00005", "E00006"}
+    assert cited == {"E00001", "E00002", "E00003", "E00004", "E00005", "E00006"}
+    sha = store.load(row["id"])["sha256"]
+    assert [(f["evidence_ids"], f["claim"]) for f in findings] == [
+        (["E00001"], f"Admitted apk package with 1 APK part(s); container SHA-256 {sha} (origin=local_path)."),
+        (["E00002"], "Manifest attack surface: package org.anzu.test; version 1.0 (1); 4 exported component(s); "
+                     "3 exported without a required permission; 2 high-risk permission(s) requested; "
+                     "manifest alerts: debuggable, allow_backup, uses_cleartext_traffic."),
+        (["E00003"], "Decompile pipeline: apktool=ok, jadx=ok (4 Java source file(s))."),
+        (["E00004"], "Native inventory: 1 native library; ABIs arm64-v8a."),
+        (["E00005"], "Extracted 4 static network endpoint(s) (1 custom_scheme, 2 url, 1 websocket)."),
+        (["E00005", "E00006"], "Cryptographic hints: 16 alert(s) (2 critical, 8 high, 2 info, 6 warning); notable: "
+                               "AWS access key ID (AKIA…MPLE); Embedded private key (PEM block); Hardcoded API key "
+                               "or secret assignment (Qw3r…bNm1); Hardcoded API key or secret assignment (Zx8Q…g0Ae); "
+                               "Block cipher in ECB mode."),
+    ]
     for finding in findings:
         assert finding["kind"] == "observation"
         assert finding["claim"]
@@ -1707,10 +1721,7 @@ def test_report_synthesis_cites_e00001_to_e00006(env):
     assert "AKIAIOSFODNN7EXAMPLE" not in blob
     assert "AIzaSyD-x9SampleKeyForTestingPurpose123" not in blob
     # Refuse double-finalize when status is already reported (no unknowns).
-    loaded = store.load(row["id"])
-    if loaded["status"] == "reported":
-        with pytest.raises(ValueError, match="reported"):
-            apk_sidecar.apk_synthesize_report(row["id"])
+    assert store.load(row["id"])["status"] == "partial"
     # REST surface
     client = TestClient(app)
     # Re-prepare a second investigation for the POST route (first may be reported).
@@ -1724,8 +1735,8 @@ def test_report_synthesis_cites_e00001_to_e00006(env):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     cited2 = {eid for finding in body["findings"] for eid in finding["evidence_ids"]}
-    assert cited2 >= {"E00001", "E00002", "E00003", "E00004", "E00005", "E00006"}
-    assert body["status"] in {"reported", "partial"}
+    assert cited2 == {"E00001", "E00002", "E00003", "E00004", "E00005", "E00006"}
+    assert body["status"] == "partial"
 
 
 def test_report_synthesis_partial_when_unknowns(env):
@@ -2947,3 +2958,53 @@ def test_colliding_part_names_get_distinct_smali_dirs(env):
     for o in outs:
         assert (Path(o) / "smali" / "org" / "anzu" / "test" / "MainActivity.smali").is_file()
     assert smali["smali_files"] == 3
+
+
+# --- RFC-0207 slice 6 (review fixes): cloud hints, latest evidence, native hardening claim ------
+
+def test_report_claims_cloud_services_from_real_dex_fixture(env):
+    src, _ = env
+    row = _dex_fixture(src)
+    apk_sidecar.apk_extract_endpoints(row["id"])
+    apk_sidecar.apk_crypto_hints(row["id"])
+    out = apk_sidecar.apk_synthesize_report(row["id"])
+    assert out["status"] == "reported" and out["unknowns"] == []
+    claims = {tuple(f["evidence_ids"]): f["claim"] for f in out["findings"]}
+    assert claims[("E00002",)] == ("Extracted 5 static network endpoint(s) (1 cloud_service, 3 url, 1 websocket); "
+                                   "cloud service hint(s): aws anzu-fixture.s3.amazonaws.com.")
+    assert claims[("E00002", "E00003")] == (
+        "Cryptographic hints: 7 alert(s) (1 critical, 2 high, 1 info, 4 warning); notable: "
+        "AWS access key ID (AKIA…2345); Block cipher in ECB mode; User-installed CAs trusted.")
+    with pytest.raises(ValueError, match="reported"):
+        apk_sidecar.apk_synthesize_report(row["id"])  # a reported investigation is final
+
+
+def test_report_native_hardening_claim_from_real_ndk_library(env):
+    src, _ = env
+    apk = _apk_with_libs(src / "hardening.apk",
+                         {"lib/armeabi-v7a/libtestnative.so": (FIXTURES / "libtestnative_armv7.so").read_bytes()})
+    row = prepare(apk)
+    apk_sidecar.apk_inventory_native(row["id"])
+    out = apk_sidecar.apk_synthesize_report(row["id"])
+    assert out["status"] == "reported"
+    native = [f for f in out["findings"] if f["evidence_ids"] == ["E00002"]]
+    assert [f["claim"] for f in native] == [
+        "Native inventory: 1 native library; ABIs armeabi-v7a; 1 with partial/none RELRO; 1 without stack canary."]
+
+
+def test_report_cites_latest_successful_rerun(env):
+    src, _ = env
+    row = _dex_fixture(src)
+    first = apk_sidecar.apk_extract_endpoints(row["id"])
+    second = apk_sidecar.apk_extract_endpoints(row["id"])
+    assert (first["evidence_id"], second["evidence_id"]) == ("E00002", "E00003")
+    assert apk_sidecar._evidence_id_by_operation(store.load(row["id"]))["apk_endpoints"] == "E00003"
+    out = apk_sidecar.apk_synthesize_report(row["id"])
+    cited = [f["evidence_ids"] for f in out["findings"] if f["claim"].startswith("Extracted ")]
+    assert cited == [["E00003"]]
+
+
+def test_report_ignores_failed_later_record(env):
+    row = {"evidence": [{"id": "E00001", "operation": "apk_endpoints", "success": True},
+                        {"id": "E00002", "operation": "apk_endpoints", "success": False}]}
+    assert apk_sidecar._evidence_id_by_operation(row) == {"apk_endpoints": "E00001"}

@@ -2169,11 +2169,12 @@ _REPORT_EVIDENCE_OPS = (
 
 
 def _evidence_id_by_operation(row: dict) -> dict[str, str]:
-    """First successful evidence id per operation (pipeline order)."""
+    """Latest successful evidence id per operation, so a re-run step is cited by its newest record
+    (which matches the metadata documents that step rewrote)."""
     out: dict[str, str] = {}
     for entry in row.get("evidence") or []:
         op = entry.get("operation")
-        if op in _REPORT_EVIDENCE_OPS and entry.get("success", True) and op not in out:
+        if op in _REPORT_EVIDENCE_OPS and entry.get("success", True):
             out[op] = entry["id"]
     return out
 
@@ -2309,7 +2310,10 @@ def _synthesize_findings(ident: str, row: dict) -> list[dict]:
         if total is None:
             total = len(endpoints.get("endpoints") or [])
         parts = [f"{n} {cat}" for cat, n in sorted(counts.items()) if n]
-        cloud = endpoints.get("cloud_services") or []
+        services = endpoints.get("cloud_services") or {}
+        # apk_strings returns {provider: [endpoint, ...]}; flatten to "provider endpoint" hints.
+        cloud = [f"{provider} {name}" for provider, names in sorted(services.items())
+                 for name in sorted(names or [])] if isinstance(services, dict) else []
         claim = f"Extracted {total} static network endpoint(s)"
         if parts:
             claim += " (" + ", ".join(parts) + ")"
@@ -2364,9 +2368,6 @@ def _synthesize_findings(ident: str, row: dict) -> list[dict]:
                 if isinstance(dc, dict) and dc.get("cleartext_permitted"):
                     cleartext = True
                     break
-            cleartext = cleartext or bool(
-                nsc.get("cleartext_permitted") or nsc.get("cleartextTrafficPermitted")
-                or nsc.get("allows_cleartext"))
         if not cleartext:
             cleartext = any(
                 "cleartext" in (i.get("rule") or "").lower()
