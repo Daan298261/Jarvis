@@ -41,6 +41,7 @@ class JarvisApi(private val context: Context) {
     var deviceId: String = prefs.getString("device", "") ?: ""
         private set
     val invitation: String get() = bootstrap.optString("invitation")
+    fun activeOrigin(): String = preferred.ifBlank { endpoint }
     val firebase: JSONObject? get() = bootstrap.optJSONObject("firebase")
     private var endpoints = runCatching {
         val supplied = JSONArray(prefs.getString("endpoints", null) ?: bootstrap.optJSONArray("endpoints")?.toString() ?: "[]")

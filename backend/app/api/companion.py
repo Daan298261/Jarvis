@@ -555,6 +555,98 @@ async def connection_setup(body: ConnectionSetup):
     return await CONNECTIVITY.configure(body.enabled, remote, body.tailscale)
 
 
+@owner_router.get("/phone-setup", dependencies=[Depends(require_owner_private_key_for_pairing)])
+async def phone_setup():
+    from ..mobile.phone_setup import tailscale_status, forwarding_instructions
+    from ..mobile.connectivity import preferred_lan_ipv4
+    return {"tailscale": await asyncio.to_thread(tailscale_status),
+            "instructions": forwarding_instructions(await asyncio.to_thread(preferred_lan_ipv4)),
+            "connection": CONNECTIVITY.snapshot()}
+
+
+class RouterApproval(BaseModel):
+    router: str = Field(max_length=64)
+    owned: bool = False
+    change_approved: bool = False
+    red_model_approved: bool = False
+
+
+@owner_router.post("/router-approval", dependencies=[Depends(require_owner_private_key)])
+def router_approval(body: RouterApproval):
+    from ..mobile.phone_setup import approve_router
+    return approve_router(body.router, body.owned, body.change_approved, body.red_model_approved)
+
+
+class RouterAdvice(BaseModel):
+    approval_id: uuid.UUID
+    router: str = Field(max_length=64)
+    question: str = Field(min_length=1, max_length=2000)
+    use_red_model: bool = False
+
+
+@owner_router.post("/router-advice", dependencies=[Depends(require_owner_private_key)])
+async def router_setup_advice(body: RouterAdvice):
+    from ..mobile.phone_setup import router_advice
+    return await router_advice(str(body.approval_id), body.router, body.question, body.use_red_model)
+
+
+@owner_router.delete("/router-approval/{approval_id}", dependencies=[Depends(require_owner_private_key)])
+async def revoke_router_approval(approval_id: uuid.UUID):
+    with database() as db:
+        approval = get(db, "router_setup_approval", str(approval_id))
+        if not approval:
+            raise HTTPException(404, "Approval not found")
+        approval["revoked"] = True
+        put(db, "router_setup_approval", str(approval_id), approval)
+    from ..mobile.phone_setup import cancel_router_advice
+    cancel_router_advice(str(approval_id))
+    return {"revoked": True}
+
+
+class RemoteCheck(BaseModel):
+    endpoint: str = Field(max_length=1024)
+    network: Literal["cellular", "other"] = "cellular"
+
+
+@router.post("/connection/verify")
+def verify_phone_connection(body: RemoteCheck, request: Request, device=Device):
+    from ..mobile.connectivity import origin
+    try:
+        endpoint = origin(body.endpoint)
+    except ValueError:
+        raise HTTPException(400, "Invalid endpoint")
+    snapshot = CONNECTIVITY.snapshot()
+    if endpoint not in snapshot.get("endpoints", []):
+        raise HTTPException(409, "Refresh the connection endpoints before verifying")
+    from ..mobile.remote_access import classify_endpoint
+    from urllib.parse import urlsplit
+    if classify_endpoint(endpoint) != "tailscale":
+        raise HTTPException(400, "Use a remote public or Tailscale endpoint with phone Wi-Fi off")
+    # This is authenticated phone-reported evidence, not an external internet probe.
+    evidence = {"device_id": device["id"], "endpoint": endpoint, "network": body.network,
+                "verified_at": time.time(), "source": "paired_phone", "client_ip": _client_ip(request)}
+    with database() as db:
+        put(db, "phone_connection", device["id"], evidence)
+    CONNECTIVITY.report(phone_verification=evidence)
+    return evidence
+
+
+class PhoneToolResult(BaseModel):
+    result: dict
+
+
+@router.get("/phone-tools")
+def phone_tool_pending(device=Device):
+    from ..mobile.phone_tools import pending
+    return {"commands": pending(device["id"])}
+
+
+@router.post("/phone-tools/{item_id}/result")
+def phone_tool_finish(item_id: uuid.UUID, body: PhoneToolResult, device=Device):
+    from ..mobile.phone_tools import finish
+    return finish(device["id"], str(item_id), body.result)
+
+
 @owner_router.get("/connection", dependencies=[Depends(require_owner_private_key_for_pairing)])
 def connection_status():
     from ..mobile.connectivity import CONNECTIVITY

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="anzu_app_control_description">With your permission, ANZU reads the current app screen and performs requested app actions. Choose apps and action permissions in ANZU. Stop or disable control at any time.</string>
     <string name="app_name">ANZU</string>
     <string name="anzu_is_calling">ANZU is calling</string>
     <string name="anzu_has_update">ANZU has an update</string>

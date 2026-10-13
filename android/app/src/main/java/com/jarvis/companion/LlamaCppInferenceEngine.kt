@@ -5,7 +5,6 @@ package com.jarvis.companion
  */
 class LlamaCppInferenceEngine : LocalInferenceEngine {
     override val runtimeName: String = "llama.cpp"
-    @Volatile private var promptStyle = ChatPromptFormat.Style.RAW
 
     override fun isRuntimeAvailable(): Boolean = CompanionNativeBridge.isLoaded()
 
@@ -13,13 +12,12 @@ class LlamaCppInferenceEngine : LocalInferenceEngine {
         if (!isRuntimeAvailable()) {
             return "On-device inference runtime is missing from this build"
         }
-        promptStyle = ChatPromptFormat.styleFor(modelPath)
         return CompanionNativeBridge.nativeLoad(modelPath, contextTokens).ifBlank { null }
     }
 
     override fun tokenize(text: String): Int {
         if (!isRuntimeAvailable()) return (text.length + 3) / 4
-        val n = CompanionNativeBridge.nativeTokenize(ChatPromptFormat.wrap(text, promptStyle))
+        val n = CompanionNativeBridge.nativeTokenize(text)
         return if (n > 0) n else (text.length + 3) / 4
     }
 
@@ -27,8 +25,8 @@ class LlamaCppInferenceEngine : LocalInferenceEngine {
         if (!isRuntimeAvailable()) {
             return GenerateOutcome(error = "On-device inference runtime is missing from this build")
         }
-        val style = promptStyle
-        val output = CompanionNativeBridge.nativeGenerate(ChatPromptFormat.wrap(prompt, style), maxTokens, OfflinePromptPlanner.N_BATCH)
+        val output = CompanionNativeBridge.nativeGenerate(prompt, maxTokens, OfflinePromptPlanner.N_BATCH,
+            object : NativeTokenListener { override fun onToken(token: String) = onToken(token) })
         if (output.startsWith("error:cancelled") || output == "cancelled") {
             return GenerateOutcome(cancelled = true)
         }
@@ -36,8 +34,6 @@ class LlamaCppInferenceEngine : LocalInferenceEngine {
             return GenerateOutcome(error = output.removePrefix("error:"))
         }
         val truncated = output.startsWith("truncated:")
-        val text = ChatPromptFormat.clean(if (truncated) output.removePrefix("truncated:") else output, style)
-        if (text.isNotEmpty()) onToken(text)
         return GenerateOutcome(truncated = truncated)
     }
 
@@ -49,6 +45,8 @@ class LlamaCppInferenceEngine : LocalInferenceEngine {
         if (isRuntimeAvailable()) CompanionNativeBridge.nativeGenerateCancel()
     }
 }
+
+interface NativeTokenListener { fun onToken(token: String) }
 
 object CompanionNativeBridge {
     private var loaded = false
@@ -64,7 +62,7 @@ object CompanionNativeBridge {
 
     external fun nativeLoad(modelPath: String, contextTokens: Int): String
     external fun nativeTokenize(text: String): Int
-    external fun nativeGenerate(prompt: String, maxTokens: Int, batchSize: Int): String
+    external fun nativeGenerate(prompt: String, maxTokens: Int, batchSize: Int, listener: NativeTokenListener): String
     external fun nativeGenerateCancel()
     external fun nativeUnload()
 }
