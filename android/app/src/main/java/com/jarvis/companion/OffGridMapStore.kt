@@ -50,8 +50,10 @@ class MapLibreMapStore(context: Context) : OffGridMapStore {
     private suspend fun status(region: OfflineRegion): OfflineRegionStatus = withContext(Dispatchers.Main) {
         suspendCancellableCoroutine { cont ->
             region.getStatus(object : OfflineRegion.OfflineRegionStatusCallback {
-                override fun onStatus(status: OfflineRegionStatus) { cont.resume(status) }
-                override fun onError(error: String) { cont.resumeWithException(IllegalStateException("Offline maps: $error")) }
+                override fun onStatus(status: OfflineRegionStatus?) {
+                    if (status == null) cont.resumeWithException(IllegalStateException("Offline maps: no status")) else cont.resume(status)
+                }
+                override fun onError(error: String?) { cont.resumeWithException(IllegalStateException("Offline maps: $error")) }
             })
         }
     }
