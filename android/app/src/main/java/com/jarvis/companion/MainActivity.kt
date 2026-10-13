@@ -47,7 +47,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 private val Gold = Color(0xFFF5A623)
 private val Ink = Color(0xFF070B12)
 private val Panel = Color(0xFF111B28)
-private val Muted = Color(0xFF8C9CAF)
+internal val Muted = Color(0xFF8C9CAF)
 /** Shared error text colour for settings rows (voice packs, sponsor credit). */
 internal val ErrorText = Color(0xFFE8A87C)
 

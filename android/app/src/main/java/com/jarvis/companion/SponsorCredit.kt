@@ -28,7 +28,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-private val SponsorMuted = Color(0xFF8C9CAF)
 
 object SponsorCredit {
     /** Default-browser intent for the Black Grid Publishing site (no WebView). */
@@ -77,7 +76,7 @@ fun SponsorCreditRow(modifier: Modifier = Modifier) {
             )
             Text(
                 text = AnzuBranding.SPONSOR_CREDIT,
-                color = SponsorMuted,
+                color = Muted,
                 fontSize = 12.sp,
                 modifier = Modifier.weight(1f),
             )
