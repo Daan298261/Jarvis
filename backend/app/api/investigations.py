@@ -60,6 +60,7 @@ class ApkPrepareBody(BaseModel):
 
 class ApkDecompileBody(BaseModel):
     skip_jadx: bool = False
+    decompile_smali_fallback: bool = True
     background: bool = False
 
 
@@ -157,9 +158,10 @@ async def apk_prepare(body: ApkPrepareBody):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-async def _apk_decompile_background(ident: str, skip_jadx: bool, claimed: dict):
+async def _apk_decompile_background(ident: str, skip_jadx: bool, decompile_smali_fallback: bool, claimed: dict):
     try:
-        await SERVICE.run_apk(ident, "apk_decompile", {"skip_jadx": skip_jadx}, claimed)
+        await SERVICE.run_apk(ident, "apk_decompile", {
+            "skip_jadx": skip_jadx, "decompile_smali_fallback": decompile_smali_fallback}, claimed)
     except asyncio.CancelledError:
         logger.info("APK decompile for investigation %s was cancelled", ident)
         raise
@@ -181,7 +183,7 @@ async def apk_decompile(ident: str, body: ApkDecompileBody):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if body.background:
         try:
-            task = asyncio.create_task(_apk_decompile_background(ident, body.skip_jadx, row))
+            task = asyncio.create_task(_apk_decompile_background(ident, body.skip_jadx, body.decompile_smali_fallback, row))
         except BaseException:
             await asyncio.to_thread(apk_sidecar.release, ident, row.get("_claim_token"))
             raise
@@ -189,7 +191,7 @@ async def apk_decompile(ident: str, body: ApkDecompileBody):
         task.add_done_callback(_apk_tasks.discard)
         return public_row(row)
     try:
-        await SERVICE.run_apk(ident, "apk_decompile", {"skip_jadx": body.skip_jadx}, row)
+        await SERVICE.run_apk(ident, "apk_decompile", {"skip_jadx": body.skip_jadx, "decompile_smali_fallback": body.decompile_smali_fallback}, row)
         return public_row(store.load(ident))
     except (ValueError, OSError, RuntimeError) as exc:
         # run_apk already released any claim decompile() never took over.
