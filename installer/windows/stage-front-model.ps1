@@ -13,6 +13,10 @@
   exists and matches the expected hash:
     - $env:JARVIS_FRONT_2B_GGUF (full path to the GGUF)
     - <repo>\models\Qwen3.5-2B-GGUF\Qwen3.5-2B-Q4_K_M.gguf
+
+  Hugging Face downloads retry a few times with backoff so transient rate
+  limits / network blips do not fail the installer build. Partial downloads
+  under the payload dir are removed before each retry and after a final failure.
 #>
 param(
     [switch]$Force
@@ -29,6 +33,7 @@ $Include = "Qwen3.5-2B-Q4_K_M.gguf"
 # Official unsloth/Qwen3.5-2B-GGUF Q4_K_M (1,280,835,840 bytes).
 $ExpectedBytes = 1280835840
 $ExpectedSha = "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223"
+$DownloadAttempts = 3
 
 function Get-FrontSha256([string]$Path) {
     return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
@@ -83,6 +88,24 @@ function Install-VerifiedFrontFile([string]$SourcePath) {
     }
     Assert-ExpectedFrontFile $Canonical "Staged Qwen3.5-2B front model"
     Write-FrontVerifiedMarker
+}
+
+function Clear-FrontDownloadPartials {
+    if (-not (Test-Path -LiteralPath $Payload)) { return }
+    Get-ChildItem -LiteralPath $Payload -Recurse -Force -ErrorAction SilentlyContinue |
+        Where-Object {
+            -not $_.PSIsContainer -and (
+                $_.Name -like '*.incomplete' -or
+                $_.Name -like '*.partial' -or
+                $_.Name -like '*.tmp' -or
+                $_.Name -like '*.gguf.lock' -or
+                ($_.Name -eq $Include -and [int64]$_.Length -ne $ExpectedBytes)
+            )
+        } |
+        ForEach-Object {
+            Write-Warning "Removing incomplete front-model download artifact: $($_.FullName) ($($_.Length) bytes)"
+            Remove-Item -Force -LiteralPath $_.FullName -ErrorAction SilentlyContinue
+        }
 }
 
 if ($Force) {
@@ -153,9 +176,59 @@ if (-not (Test-Path $Hf)) {
 if (-not (Test-Path $Hf)) { throw "hf CLI is unavailable after installing huggingface_hub." }
 
 $env:HF_XET_HIGH_PERFORMANCE = "1"
-Write-Host "Staging Qwen3.5-2B Q4_K_M front model..." -ForegroundColor Cyan
-& $Hf download $Repo --include $Include --local-dir $Payload
-if ($LASTEXITCODE -ne 0) { throw "Qwen3.5-2B front model download failed." }
+$lastDownloadLog = ""
+$downloadOk = $false
+for ($attempt = 1; $attempt -le $DownloadAttempts; $attempt++) {
+    Clear-FrontDownloadPartials
+    Write-Host "Staging Qwen3.5-2B Q4_K_M front model (attempt $attempt/$DownloadAttempts)..." -ForegroundColor Cyan
+    $downloadLog = Join-Path $env:TEMP ("jarvis-front-model-hf-{0}-{1}.log" -f $PID, $attempt)
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $Hf download $Repo --include $Include --local-dir $Payload *> $downloadLog
+        $hfExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
+    if (Test-Path -LiteralPath $downloadLog) {
+        $lastDownloadLog = (Get-Content -LiteralPath $downloadLog -Raw -ErrorAction SilentlyContinue)
+        if ($lastDownloadLog) { Write-Host $lastDownloadLog.TrimEnd() }
+    }
+    if ($hfExit -eq 0 -and (Test-Path -LiteralPath $Canonical) -and ([int64](Get-Item -LiteralPath $Canonical).Length -eq $ExpectedBytes)) {
+        $downloadOk = $true
+        break
+    }
+    # hf may nest the file; promote it before deciding failure
+    if ($hfExit -eq 0 -and -not (Test-Path -LiteralPath $Canonical)) {
+        $found = Get-ChildItem -Path $Payload -Recurse -File -Filter $Include -ErrorAction SilentlyContinue |
+            Where-Object { -not (Same-Path $_.FullName $Canonical) -and [int64]$_.Length -eq $ExpectedBytes } |
+            Select-Object -First 1
+        if ($found) {
+            Copy-Item -Force -LiteralPath $found.FullName -Destination $Canonical
+            $downloadOk = $true
+            break
+        }
+    }
+    Write-Warning "Front model download attempt $attempt failed (exit=$hfExit)."
+    if ($attempt -lt $DownloadAttempts) {
+        $delay = 5 * $attempt
+        Write-Host "Retrying in $delay seconds..." -ForegroundColor Yellow
+        Start-Sleep -Seconds $delay
+    }
+}
+
+if (-not $downloadOk) {
+    Clear-FrontDownloadPartials
+    $snippet = if ($lastDownloadLog) { ($lastDownloadLog.Trim() -split "`n" | Select-Object -Last 20) -join "`n" } else { "(no hf CLI output captured)" }
+    throw @"
+Qwen3.5-2B front model download failed after $DownloadAttempts attempts.
+Repo: $Repo
+File: $Include
+Tip: set JARVIS_FRONT_2B_GGUF to a verified local copy to skip the network download.
+Last hf output:
+$snippet
+"@
+}
 
 if (-not (Test-Path -LiteralPath $Canonical)) {
     $found = Get-ChildItem -Path $Payload -Recurse -File -Filter $Include |
