@@ -291,7 +291,7 @@ class CompanionPackManager(
                 error("Download checksum mismatch")
             }
         }
-        partial.renameTo(target)
+        PackDownloadPlan.replaceWithVerified(partial, target)
         digestCache.invalidate(partial)
         if (pack.sha256.isNotBlank()) digestCache.remember(target, pack.sha256)
         statusRef.set(CompanionPackStatus.READY)

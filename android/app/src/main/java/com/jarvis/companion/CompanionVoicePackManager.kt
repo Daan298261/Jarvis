@@ -245,7 +245,7 @@ class CompanionVoicePackManager(
                     error("Download checksum mismatch for ${art.filename}")
                 }
             }
-            partial.renameTo(target)
+            PackDownloadPlan.replaceWithVerified(partial, target)
             digestCache.invalidate(partial)
             if (art.sha256.isNotBlank()) digestCache.remember(target, art.sha256)
         }

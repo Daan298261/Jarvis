@@ -6,6 +6,19 @@ package com.jarvis.companion
  * and continued with an HTTP Range request instead of starting over.
  */
 object PackDownloadPlan {
+    /**
+     * Moves a verified download over the installed file in one step. Unlike File.renameTo, the result is
+     * checked and an existing target is replaced, so the old copy survives unless the new one is in place.
+     */
+    fun replaceWithVerified(partial: java.io.File, target: java.io.File) {
+        try {
+            java.nio.file.Files.move(partial.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE)
+        } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+            java.nio.file.Files.move(partial.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        }
+    }
+
     /** True when [name] is a plain entry directly inside [dir] (no separators, `.`/`..`, or escapes). */
     fun isDirectChild(dir: java.io.File, name: String): Boolean {
         if (name.isEmpty() || name == "." || name == ".." || '/' in name || '\\' in name) return false
