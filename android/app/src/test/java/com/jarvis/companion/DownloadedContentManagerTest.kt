@@ -238,6 +238,7 @@ class DownloadedContentManagerTest {
             override suspend fun entries(): List<DownloadedEntry> = error("offline DB unreadable")
             override suspend fun update(entry: DownloadedEntry) {}
             override suspend fun delete(entry: DownloadedEntry) {}
+            override fun busyReason(entry: DownloadedEntry): String? = null
         }
         val mixed = DownloadedContentManager(listOf(ModelPackSource(models), broken)).inventory()
         assertEquals(1, mixed.entries.size)
