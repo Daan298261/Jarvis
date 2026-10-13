@@ -2642,7 +2642,7 @@ def test_smali_fallback_on_no_useful_java(env):
     fake.jadx_mode = "empty"
     out = apk_sidecar.decompile(row["id"])
     assert out["status"] == "partial"
-    assert "jadx produced no Java; smali only." in out["unknowns"]
+    assert "jadx produced no Java; smali recovered." in out["unknowns"]
     assert evidence(out, "E00003")["result"]["jadx"]["state"] == "ok"
     smali = apk_sidecar.metadata(row["id"], "smali")
     assert smali["ran"] is True and smali["reason"] == "no_useful_java" and smali["smali_files"] == 1
@@ -2781,10 +2781,82 @@ def test_smali_classes_counts_class_directives(tmp_path):
     (tmp_path / "smali" / "a" / "One.smali").write_text(".class public La/One;\n.super Ljava/lang/Object;\n")
     (tmp_path / "smali" / "a" / "Empty.smali").write_text("# no class directive\n")
     counts = apk_sidecar._count_smali(tmp_path)
-    assert counts == {"smali_files": 2, "smali_classes": 1, "smali_roots": ["smali"]}
+    assert counts == {"smali_files": 2, "smali_classes": 1, "smali_roots": ["smali"], "unreadable": []}
 
 
 def test_part_dir_name_is_a_single_safe_component():
     assert apk_sidecar._part_dir_name("split_config.arm64_v8a.apk") == "split_config.arm64_v8a.apk"
     assert "/" not in apk_sidecar._part_dir_name("../evil/x.apk")
     assert apk_sidecar._part_dir_name("..") == "_part"
+
+
+# --- RFC-0207 slice 5 (review fixes 2): unreadable smali, no-Java wording, dedupe ----------------
+
+def test_unreadable_smali_file_is_an_unknown(env, monkeypatch):
+    src, fake = env
+    row = prepare(make_apk(src / "unreadable.apk"))
+    fake.jadx_mode = "timeout"
+    real_read = Path.read_bytes
+
+    def read_bytes(self):
+        if self.suffix == ".smali":
+            raise PermissionError(13, "Permission denied")
+        return real_read(self)
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    out = apk_sidecar.decompile(row["id"])
+    bad = [u for u in out["unknowns"] if u.startswith("smali file ")]
+    assert len(bad) == 1 and "smali/org/anzu/test/MainActivity.smali (Permission denied)" in bad[0]
+    smali = apk_sidecar.metadata(row["id"], "smali")
+    assert smali["smali_files"] == 1 and smali["smali_classes"] == 0
+
+
+def test_no_java_with_smali_disabled_reports_no_disassembly(env):
+    src, fake = env
+    row = prepare(make_apk(src / "nojava_disabled.apk"))
+    fake.jadx_mode = "empty"
+    out = apk_sidecar.decompile(row["id"], decompile_smali_fallback=False)
+    assert out["status"] == "partial"
+    assert "jadx produced no Java; no bytecode disassembly available." in out["unknowns"]
+    assert not any("smali recovered" in u for u in out["unknowns"])
+
+
+def test_no_java_with_every_smali_pass_failed_reports_no_disassembly(env, monkeypatch):
+    src, fake = env
+    split_dir = src / "nojava_failed"
+    split_dir.mkdir()
+    make_apk(split_dir / "base.apk")
+    make_apk(split_dir / "split_feature.apk", libs=())
+    row = prepare(split_dir)
+    fake.jadx_mode = "empty"
+    real = apk_sidecar._run_smali_fallback
+
+    def failing(ident, apk, out_dir):
+        result = real(ident, apk, out_dir)
+        result.update(state="failed", exit_code=1, smali_files=0, smali_classes=0, smali_roots=[], unreadable=[])
+        return result
+    monkeypatch.setattr(apk_sidecar, "_run_smali_fallback", failing)
+    out = apk_sidecar.decompile(row["id"])
+    assert out["status"] == "partial"
+    assert "jadx produced no Java; no bytecode disassembly available." in out["unknowns"]
+    assert sum(1 for u in out["unknowns"] if u.startswith("smali fallback failed for")) == 2
+    assert apk_sidecar.metadata(row["id"], "smali")["smali_files"] == 0
+
+
+def test_colliding_part_names_get_distinct_smali_dirs(env):
+    src, fake = env
+    split_dir = src / "collide"
+    split_dir.mkdir()
+    make_apk(split_dir / "base.apk")
+    make_apk(split_dir / "split a.apk", libs=())
+    make_apk(split_dir / "split_a.apk", libs=())  # "split a.apk" sanitises to the same name
+    row = prepare(split_dir)
+    names = [p["name"] for p in row["apk"]["parts"] if p["dex"]]
+    assert len({apk_sidecar._part_dir_name(n) for n in names}) == 2  # one collision among three parts
+    fake.jadx_mode = "timeout"
+    apk_sidecar.decompile(row["id"])
+    smali = apk_sidecar.metadata(row["id"], "smali")
+    outs = [p["smali_output"] for p in smali["parts"]]
+    assert len(outs) == 3 and len(set(outs)) == 3
+    for o in outs:
+        assert (Path(o) / "smali" / "org" / "anzu" / "test" / "MainActivity.smali").is_file()
+    assert smali["smali_files"] == 3
