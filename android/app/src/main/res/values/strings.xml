@@ -28,6 +28,12 @@
     <string name="what_should_anzu_do">What should ANZU do?</string>
     <string name="schedule_on_anzu">Schedule on ANZU</string>
     <string name="about">About</string>
+    <string name="voice_credit_open_failed">Could not open the voice credit link in a browser.</string>
+    <string name="voice_credit_open_label">Open voice credit</string>
+    <string name="voice_credit_link_voice">Open Alba MacKenna voice</string>
+    <string name="voice_credit_link_license">Open CC BY 4.0 licence</string>
+    <string name="voice_credit_link_model">Open Kyutai Pocket TTS model</string>
+    <string name="voice_credit_link_conversion">Open soniqo ONNX INT8 conversion</string>
     <string name="sponsor_open_failed">Could not open Black Grid Publishing in a browser.</string>
     <string name="critical_call_body">A critical event needs your attention</string>
 </resources>
