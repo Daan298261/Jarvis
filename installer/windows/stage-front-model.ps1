@@ -14,9 +14,16 @@
     - $env:JARVIS_FRONT_2B_GGUF (full path to the GGUF)
     - <repo>\models\Qwen3.5-2B-GGUF\Qwen3.5-2B-Q4_K_M.gguf
 
-  Hugging Face downloads retry a few times with backoff so transient rate
-  limits / network blips do not fail the installer build. Partial downloads
-  under the payload dir are removed before each retry and after a final failure.
+  Otherwise the file is fetched over HTTPS from
+  https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf
+  by front-model-download.ps1 into a resumable "<file>.part". Each of up to
+  $DownloadAttempts attempts (with backoff) keeps that .part and resumes it with an
+  HTTP Range request, so a network blip only re-fetches the missing bytes; a
+  .part from an interrupted earlier run is resumed the same way. Once the .part is
+  full size its SHA-256 is checked inside the retry loop: a mismatch deletes it and
+  the next attempt downloads from zero. The .part is removed only after the final
+  failed attempt. No temp logs are written. $env:JARVIS_FRONT_2B_URL overrides the
+  source URL (mirror or test server); the size and SHA-256 checks still apply.
 #>
 param(
     [switch]$Force
