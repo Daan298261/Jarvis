@@ -102,6 +102,9 @@ def _run(server: _Server, dest: Path, attempts: int = 3) -> subprocess.Completed
     )
 
 
+if _shell() is None and os.environ.get("CI"):
+    raise RuntimeError("CI must run the front-model download tests, but pwsh/powershell was not found")
+
 pytestmark = pytest.mark.skipif(_shell() is None, reason="PowerShell is not installed")
 
 
@@ -227,3 +230,4 @@ def test_stage_script_resumes_interrupted_download_and_leaves_no_temp_logs(serve
     )
     assert res2.returncode == 0, res2.stdout + res2.stderr
     assert len(server.requests) == 2
+
