@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 
@@ -19,6 +20,27 @@ from app.decision.owner_turn import (
 )
 from app.decision.types import Answer, DecisionResult
 from app.persona.owner_chat import stream_owner_chat
+
+
+# Wall-clock bounds flake on loaded CI runners (134 ms seen against 120 ms) because
+# they also measure thread and event-loop scheduling. The deadline is proven
+# structurally instead: the stubbed decision blocks until the test releases it, so
+# the turn can only return through the 50 ms deadline. The cold-Laya test has no
+# stub to block on; HANG_GUARD_MS there still fails a turn that waited on a model
+# load, which takes seconds.
+HANG_GUARD_MS = 1000.0
+
+
+class _Blocker:
+    def __init__(self) -> None:
+        self.release = threading.Event()
+        self.started = threading.Event()
+        self.finished = threading.Event()
+
+    def block(self) -> None:
+        self.started.set()
+        self.release.wait(10)
+        self.finished.set()
 
 
 def test_verify_command_intake_hooks_owner_turn_decide():
@@ -107,8 +129,10 @@ async def test_local_tier_opens_no_jev_socket(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_deadline_fallback_within_50ms(monkeypatch):
+    blocker = _Blocker()
+
     def blocking(*_args, **_kwargs):
-        time.sleep(0.25)
+        blocker.block()
         return DecisionResult(
             answers={
                 "request_route": Answer("request_route", "choice", DIRECT_REPLY, 0.9),
@@ -120,10 +144,12 @@ async def test_deadline_fallback_within_50ms(monkeypatch):
         )
 
     monkeypatch.setattr("app.decision.owner_turn.decide", blocking)
-    started = time.perf_counter()
-    turn = await decide_owner_turn("Hello there", baseline=route_request("Hello there"), decision_tier="local")
-    elapsed_ms = (time.perf_counter() - started) * 1000.0
-    assert elapsed_ms < 120.0
+    try:
+        turn = await decide_owner_turn("Hello there", baseline=route_request("Hello there"), decision_tier="local")
+        assert blocker.started.is_set(), "decide() was never called"
+        assert not blocker.finished.is_set(), "turn waited for the slow decision instead of the deadline"
+    finally:
+        blocker.release.set()
     assert turn.reflex is not None
     assert turn.reflex.fallback_used is True
     assert turn.reflex.source == "deadline_fallback"
@@ -414,7 +440,7 @@ async def test_cold_laya_does_not_stall_the_turn(jarvis_env):
         decision_tier="local",
     )
     elapsed_ms = (time.perf_counter() - started) * 1000.0
-    assert elapsed_ms < 120.0
+    assert elapsed_ms < HANG_GUARD_MS
     assert turn.reflex is not None
     assert turn.reflex.source != "laya"
     assert turn.route.kind == DIRECT_REPLY
@@ -433,8 +459,10 @@ async def test_slow_laya_fixture_falls_back_inside_deadline(jarvis_env, monkeypa
     laya_pins.write_test_install()
     laya_runtime.enable(warm=True)
 
+    blocker = _Blocker()
+
     def slow_decide(**_kwargs):
-        time.sleep(0.25)
+        blocker.block()
         return {
             "request_route": Answer("request_route", "choice", DIRECT_REPLY, 0.99),
             "reply_shape": Answer("reply_shape", "choice", "social", 0.99),
@@ -442,17 +470,16 @@ async def test_slow_laya_fixture_falls_back_inside_deadline(jarvis_env, monkeypa
 
     laya_runtime.set_decide_fn(slow_decide)
     try:
-        started = time.perf_counter()
         turn = await decide_owner_turn(
             "Hello there",
             baseline=route_request("Hello there"),
             decision_tier="local",
         )
-        elapsed_ms = (time.perf_counter() - started) * 1000.0
-        assert elapsed_ms < 120.0
+        assert not blocker.finished.is_set(), "turn waited for the slow Laya fixture"
         assert turn.reflex is not None
         assert turn.reflex.source != "laya" or turn.reflex.fallback_used is True
         assert turn.reflex.source in {"rules", "generative", "deadline_fallback"} or turn.reflex.fallback_used
     finally:
+        blocker.release.set()
         laya_runtime.reset_runtime()
         laya_pins.clear_install()
