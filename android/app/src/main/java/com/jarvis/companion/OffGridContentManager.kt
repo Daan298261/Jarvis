@@ -28,6 +28,8 @@ data class OffGridItemState(
     val error: String? = null,
     /** Bytes already on disk from an interrupted/cancelled download (resumed next time). */
     val partialBytes: Long = 0L,
+    /** Bytes on disk for a READY item (ZIM file length, or MapLibre's completed resource size). */
+    val diskBytes: Long = 0L,
 )
 
 /** Map regions live in MapLibre's offline DB; abstracted so the manager is testable on the JVM. */
@@ -79,7 +81,7 @@ class OffGridContentManager(
             if (stateOf(item.id).status == OffGridStatus.DOWNLOADING) continue
             val f = file(item)
             val s = when {
-                f.isFile && digestCache.digestOf(f).equals(item.sha256, ignoreCase = true) -> OffGridItemState(OffGridStatus.READY, 100)
+                f.isFile && digestCache.digestOf(f).equals(item.sha256, ignoreCase = true) -> OffGridItemState(OffGridStatus.READY, 100, diskBytes = f.length())
                 f.isFile -> OffGridItemState(OffGridStatus.ERROR, error = "${item.title} failed verification. Delete it and download again.")
                 else -> OffGridItemState(partialBytes = partial(item).length(),
                     progress = progressOf(partial(item).length(), item.sizeBytes))
@@ -155,7 +157,7 @@ class OffGridContentManager(
             return@withContext
         }
         digestCache.remember(target, item.sha256)
-        set(item.id, OffGridItemState(OffGridStatus.READY, 100))
+        set(item.id, OffGridItemState(OffGridStatus.READY, 100, diskBytes = target.length()))
     }
 
     private suspend fun downloadOnce(item: OffGridItem, part: File) {
@@ -199,6 +201,21 @@ class OffGridContentManager(
             digestCache.invalidate(file(item)); file(item).delete(); partial(item).delete()
         }
         set(id, OffGridItemState())
+    }
+
+    /** Directory holding ZIMs and their `.partial` files; read by the S5 inventory. */
+    fun storageDir(): File = root
+
+    /**
+     * Deletes one file in [storageDir] that is not the current catalogue file of any item (an older ZIM
+     * version or an orphaned partial). Catalogue items go through [delete].
+     */
+    suspend fun deleteStrayFile(name: String) = withContext(Dispatchers.IO) {
+        val f = File(root, name)
+        require(f.parentFile?.canonicalPath == root.canonicalPath && f.name == name) { "Not an off-grid file: $name" }
+        require(catalog.none { it.fileName == name }) { "$name is a catalogue item; delete it by id" }
+        digestCache.invalidate(f)
+        if (f.exists() && !f.delete()) error("Could not delete $name")
     }
 
     /** Fail closed: returns the verified ZIM file or throws with owner-facing copy. */

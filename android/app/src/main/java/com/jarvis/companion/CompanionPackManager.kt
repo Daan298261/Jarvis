@@ -153,6 +153,27 @@ class CompanionPackManager(
 
     fun selectedPack(): CompanionPack? = catalog.firstOrNull { it.id == selectedPackId() }
 
+    /** Current (Leader-merged) catalogue; read by the RFC-0216 S5 downloaded-content inventory. */
+    fun catalog(): List<CompanionPack> = catalog
+
+    /** App-private directory holding model packs (and their `.partial` / `.importing` files). */
+    fun packRoot(): File = packDir
+
+    /**
+     * Deletes one file from [packRoot] by name (installed, retired, partial or import temp). The engine
+     * is unloaded first so a mapped model is released; status falls back to MISSING when the selected
+     * pack is gone, so chat routing fails closed.
+     */
+    suspend fun deleteInstalledFile(name: String) = withContext(llamaDispatcher) {
+        val file = File(packDir, name)
+        require(file.parentFile?.canonicalPath == packDir.canonicalPath && file.name == name) { "Not a model pack file: $name" }
+        engine.unload()
+        digestCache.invalidate(file)
+        if (file.exists() && !file.delete()) error("Could not delete $name")
+        refreshStatus()
+        progressRef.set(0)
+    }
+
     fun packFile(pack: CompanionPack): File = File(packDir, pack.filename)
 
     fun packCanLoad(pack: CompanionPack): Boolean {
@@ -209,8 +230,23 @@ class CompanionPackManager(
         errorRef.set("")
     }
 
-    suspend fun downloadSelected(onProgress: (Int) -> Unit = {}) = withContext(Dispatchers.IO) {
-        val pack = selectedPack() ?: error("No pack selected")
+    suspend fun downloadSelected(onProgress: (Int) -> Unit = {}) =
+        downloadPack(selectedPack() ?: error("No pack selected"), onProgress)
+
+    /**
+     * Downloads [pack] into a `.partial` and only replaces the installed file after the pinned SHA-256
+     * verifies, so a failed update never removes the last good copy. Status reflects the selected pack
+     * again afterwards when [pack] is not the selected one.
+     */
+    suspend fun downloadPack(pack: CompanionPack, onProgress: (Int) -> Unit = {}) {
+        try {
+            downloadPackInternal(pack, onProgress)
+        } finally {
+            if (pack.id != selectedPackId()) withContext(kotlinx.coroutines.NonCancellable) { refreshStatus() }
+        }
+    }
+
+    private suspend fun downloadPackInternal(pack: CompanionPack, onProgress: (Int) -> Unit) = withContext(Dispatchers.IO) {
         require(pack.url.isNotBlank()) { "ANZU desktop has not published a download URL for this pack yet" }
         DeviceInferenceGuard.blockReason(app, pack)?.let { error(it) }
         statusRef.set(CompanionPackStatus.DOWNLOADING)

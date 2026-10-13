@@ -87,6 +87,29 @@ class CompanionVoicePackManager(
 
     fun storageBytes(): Long = packRoot.walkTopDown().filter { it.isFile }.map { it.length() }.sum()
 
+    /** Current (Leader-merged) catalogue; read by the RFC-0216 S5 downloaded-content inventory. */
+    fun catalog(): List<CompanionVoicePack> = catalog
+
+    /** App-private directory holding one sub-directory per installed voice pack. */
+    fun packRoot(): File = packRoot
+
+    /** null = some artifact missing, "" = every artifact matches its pinned SHA-256, else the mismatch copy. */
+    fun verifyInstalled(pack: CompanionVoicePack): String? = verifyPack(pack)
+
+    /**
+     * Deletes one pack directory by name: catalogue packs go through [deletePackAwait] (engine unload +
+     * MISSING status); directories of packs no longer in the catalogue are removed directly.
+     */
+    suspend fun deleteInstalledDir(name: String) {
+        val dir = File(packRoot, name)
+        require(dir.parentFile?.canonicalPath == packRoot.canonicalPath && dir.name == name) { "Not a voice pack directory: $name" }
+        if (catalog.any { it.id == name }) deletePackAwait(name) else withContext(Dispatchers.IO) {
+            dir.walkTopDown().filter { it.isFile }.forEach { digestCache.invalidate(it) }
+            if (dir.exists() && !dir.deleteRecursively()) error("Could not delete $name")
+        }
+        refreshStatus()
+    }
+
     fun selectedSttPack(): CompanionVoicePack? = catalog.firstOrNull { it.id == selectedSttPackId() }
     fun selectedTtsPack(): CompanionVoicePack? = catalog.firstOrNull { it.id == selectedTtsPackId() }
 

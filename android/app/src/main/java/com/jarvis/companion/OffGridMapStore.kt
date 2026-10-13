@@ -17,13 +17,13 @@ import kotlin.coroutines.resumeWithException
 
 /** Maps MapLibre's region status onto the off-grid status model. Pure for tests. */
 object OffGridMapStatus {
-    fun of(complete: Boolean, active: Boolean, completed: Long, required: Long, error: String? = null): OffGridItemState {
+    fun of(complete: Boolean, active: Boolean, completed: Long, required: Long, error: String? = null, bytes: Long = 0L): OffGridItemState {
         val pct = OffGridContentManager.progressOf(completed, required).coerceAtMost(if (complete) 100 else 99)
         return when {
             error != null -> OffGridItemState(OffGridStatus.ERROR, pct, error)
-            complete -> OffGridItemState(OffGridStatus.READY, 100)
-            active -> OffGridItemState(OffGridStatus.DOWNLOADING, pct)
-            else -> OffGridItemState(OffGridStatus.MISSING, pct)
+            complete -> OffGridItemState(OffGridStatus.READY, 100, diskBytes = bytes)
+            active -> OffGridItemState(OffGridStatus.DOWNLOADING, pct, partialBytes = bytes)
+            else -> OffGridItemState(OffGridStatus.MISSING, pct, partialBytes = bytes)
         }
     }
 }
@@ -63,7 +63,7 @@ class MapLibreMapStore(context: Context) : OffGridMapStore {
         return items.associate { item ->
             val r = existing[item.id]
             item.id to if (r == null) OffGridItemState() else status(r).let {
-                OffGridMapStatus.of(it.isComplete, false, it.completedResourceCount, it.requiredResourceCount)
+                OffGridMapStatus.of(it.isComplete, false, it.completedResourceCount, it.requiredResourceCount, bytes = it.completedResourceSize)
             }
         }
     }
