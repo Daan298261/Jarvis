@@ -93,7 +93,9 @@ class PlatformVoice(
     ) {
         val kind = candidates[index]
         val next = when (kind) {
-            PlatformRecognizerKind.ON_DEVICE -> SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+            // ON_DEVICE is only a candidate on API 31+ (onDeviceRecognizerAvailable); explicit guard for lint NewApi.
+            PlatformRecognizerKind.ON_DEVICE -> if (Build.VERSION.SDK_INT >= 31) SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+                else SpeechRecognizer.createSpeechRecognizer(context)
             PlatformRecognizerKind.DEFAULT -> SpeechRecognizer.createSpeechRecognizer(context)
         }
         var heardSpeech = false
