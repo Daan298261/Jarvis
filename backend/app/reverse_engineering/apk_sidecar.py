@@ -1022,16 +1022,18 @@ _SMALI_CLASS = re.compile(rb"^[ \t]*\.class\b", re.M)
 def _count_smali(smali_out: Path) -> dict:
     """Count recovered .smali files and the ``.class`` directives they contain."""
     if not smali_out.exists():
-        return {"smali_files": 0, "smali_classes": 0, "smali_roots": []}
+        return {"smali_files": 0, "smali_classes": 0, "smali_roots": [], "unreadable": []}
     files = [p for p in smali_out.rglob("*.smali") if p.is_file()]
     classes = 0
+    unreadable: list[str] = []
     for f in files:
         try:
             classes += len(_SMALI_CLASS.findall(f.read_bytes()))
-        except OSError:
-            continue
+        except OSError as exc:
+            # Reported by the caller as an unknown; its classes are not counted.
+            unreadable.append(f"{f.relative_to(smali_out).as_posix()} ({exc.strerror or exc})")
     roots = sorted({p.relative_to(smali_out).parts[0] for p in files if p.relative_to(smali_out).parts})
-    return {"smali_files": len(files), "smali_classes": classes, "smali_roots": roots}
+    return {"smali_files": len(files), "smali_classes": classes, "smali_roots": roots, "unreadable": unreadable}
 
 
 def _part_dir_name(name: str) -> str:
@@ -1135,8 +1137,6 @@ def _decompile_owned(ident: str, skip_jadx: bool, decompile_smali_fallback: bool
             smali: dict | None = None
             run_smali, smali_reason = _should_run_smali_fallback(
                 enabled=decompile_smali_fallback, has_dex=bool(inputs), skip_jadx=skip_jadx, jadx=jadx)
-            if jadx and jadx.get("state") == "ok" and not jadx.get("java_files"):
-                unknowns.append("jadx produced no Java; smali only.")
             if run_smali:
                 smali_out.mkdir(parents=True, mode=0o700, exist_ok=True)
                 parts_out: list[dict] = []
@@ -1148,14 +1148,19 @@ def _decompile_owned(ident: str, skip_jadx: bool, decompile_smali_fallback: bool
                                           "smali_files": 0, "smali_classes": 0})
                         continue
                     sub = _part_dir_name(part["name"])
-                    if sub in used:
-                        sub = f"{sub}_{len(used)}"
+                    candidate, n = sub, 1
+                    while candidate in used:  # sanitised names can collide; never reuse a directory
+                        candidate = f"{sub}_{n}"
+                        n += 1
+                    sub = candidate
                     used.add(sub)
                     run = _run_smali_fallback(ident, Path(part["path"]), smali_out / sub)
                     entry = {"part": part["name"], "state": run["state"], "exit_code": run.get("exit_code"),
                              "smali_output": run["smali_output"], "smali_files": run["smali_files"],
                              "smali_classes": run["smali_classes"], "smali_roots": run["smali_roots"]}
                     parts_out.append(entry)
+                    for bad in run.get("unreadable") or []:
+                        unknowns.append(f"smali file {sub}/{bad} could not be read; its classes were not counted.")
                     if run["state"] != "ok":
                         unknowns.append(
                             f"smali fallback {run['state']} for {part['name']} (exit {run['exit_code']}; "
@@ -1176,6 +1181,9 @@ def _decompile_owned(ident: str, skip_jadx: bool, decompile_smali_fallback: bool
                                                for e in ran for r in e.get("smali_roots") or [])}
                 if failed_classes:
                     smali["failed_java_classes"] = failed_classes
+                if jadx and jadx.get("state") == "ok" and not jadx.get("java_files"):
+                    unknowns.append("jadx produced no Java; smali recovered." if smali["smali_files"] else
+                                    "jadx produced no Java; no bytecode disassembly available.")
                 store.atomic_json(meta / "smali.json", {
                     "ran": True, "reason": smali_reason, "state": smali["state"],
                     "exit_code": smali.get("exit_code"), "smali_output": smali.get("smali_output"),
@@ -1194,6 +1202,8 @@ def _decompile_owned(ident: str, skip_jadx: bool, decompile_smali_fallback: bool
                      {"reason": smali_reason, "smali_files": smali.get("smali_files", 0),
                       "state": smali["state"]})
             else:
+                if jadx and jadx.get("state") == "ok" and not jadx.get("java_files"):
+                    unknowns.append("jadx produced no Java; no bytecode disassembly available.")
                 store.atomic_json(meta / "smali.json", {
                     "ran": False, "reason": smali_reason, "state": "skipped",
                     "smali_files": 0, "smali_classes": 0, "smali_roots": [],
