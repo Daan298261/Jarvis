@@ -4,7 +4,11 @@ project(jarvis_native)
 set(CMAKE_CXX_STANDARD 17)
 
 include(FetchContent)
-set(LLAMA_BUILD_COMMON ON CACHE BOOL "" FORCE)
+# jarvis_llama only uses the public llama.h API; common/tools/server/app are not needed.
+set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_APP OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_UI OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
@@ -13,8 +17,9 @@ set(GGML_LLAMAFILE OFF CACHE BOOL "" FORCE)
 
 FetchContent_Declare(
     llama
-    GIT_REPOSITORY https://github.com/ggerganov/llama.cpp.git
-    GIT_TAG b4586
+    GIT_REPOSITORY https://github.com/ggml-org/llama.cpp.git
+    # v0.6.0 (2026-10-05): needed for qwen35 (Qwen3.5) and gemma3 GGUF architectures.
+    GIT_TAG v0.6.0
     GIT_SHALLOW TRUE
     GIT_CONFIG core.longpaths=true
 )

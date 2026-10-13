@@ -42,14 +42,6 @@ def _https_push_url(value: str) -> bool:
     )
 
 
-def _relay_hostname_present() -> bool:
-    for name in ("JARVIS_RELAY_URL", "JARVIS_RELAY_ENDPOINT"):
-        host = urlsplit(_env(name)).hostname
-        if host:
-            return True
-    return False
-
-
 def firebase_client_config_ready() -> bool:
     path_value = _env("JARVIS_FIREBASE_CLIENT_CONFIG")
     if not path_value:
@@ -69,17 +61,11 @@ def firebase_client_config_ready() -> bool:
 
 
 def infrastructure_readiness() -> dict[str, bool]:
-    relay_url = _env("JARVIS_RELAY_URL")
-    relay_credential = _env("JARVIS_RELAY_CREDENTIAL")
-    relay_endpoint = _env("JARVIS_RELAY_ENDPOINT")
     push_url = _env("JARVIS_PUSH_URL")
     push_credential = _env("JARVIS_PUSH_CREDENTIAL")
     turn_url = _env("JARVIS_TURN_URL")
     turn_secret = _env("JARVIS_TURN_SECRET")
     return {
-        "relay_agent_configured": bool(relay_url and relay_credential and _https_origin(relay_url)),
-        "relay_endpoint_configured": bool(relay_endpoint and _https_origin(relay_endpoint)),
-        "relay_hostname_present": _relay_hostname_present(),
         "push_configured": bool(push_url and push_credential and _https_push_url(push_url)),
         "turn_configured": bool(turn_url and turn_secret),
         "firebase_client_config_configured": firebase_client_config_ready(),

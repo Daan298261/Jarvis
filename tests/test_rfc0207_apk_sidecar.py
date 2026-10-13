@@ -620,14 +620,8 @@ REAL_JADX = os.environ.get("ANZU_TEST_JADX")
 REAL_READELF = os.environ.get("ANZU_TEST_READELF") or shutil.which("readelf")
 
 
-@pytest.mark.skipif(not (REAL_JAVA and REAL_APKTOOL and REAL_JADX and Path(REAL_APKTOOL).is_file() and Path(REAL_JADX).is_file()),
-                    reason="real toolchain not available; set ANZU_TEST_JAVA, ANZU_TEST_APKTOOL_JAR and ANZU_TEST_JADX")
-def test_real_toolchain_decompiles_fixture(env, monkeypatch):
-    """Runs the real apktool and jadx on minimal_valid.apk through the sidecar's orchestration, on the host."""
-    src, _ = env
-    copy = src / "minimal_valid.apk"
-    copy.write_bytes((FIXTURES / "minimal_valid.apk").read_bytes())
-    row = prepare(copy)
+def _real_host_wsl():
+    """A _wsl stand-in that runs the real JDK/apktool/jadx on the host instead of in ANZU-REA."""
     real_run = REAL_RUN
     mapping = {apk_sidecar.JDK: REAL_JAVA, apk_sidecar.APKTOOL_JAR: REAL_APKTOOL, apk_sidecar.JADX: REAL_JADX,
                apk_sidecar.READELF: REAL_READELF or REAL_JAVA}  # readelf is checked by readiness, not run here
@@ -652,7 +646,18 @@ def test_real_toolchain_decompiles_fixture(env, monkeypatch):
             env_vars["JAVA_HOME"] = str(Path(REAL_JAVA).resolve().parents[1])
         cmd = [mapping.get(c, c) for c in cmd]
         return real_run(cmd, capture_output=True, timeout=timeout, env=env_vars)
-    monkeypatch.setattr(apk_sidecar, "_wsl", host_wsl)
+    return host_wsl
+
+
+@pytest.mark.skipif(not (REAL_JAVA and REAL_APKTOOL and REAL_JADX and Path(REAL_APKTOOL).is_file() and Path(REAL_JADX).is_file()),
+                    reason="real toolchain not available; set ANZU_TEST_JAVA, ANZU_TEST_APKTOOL_JAR and ANZU_TEST_JADX")
+def test_real_toolchain_decompiles_fixture(env, monkeypatch):
+    """Runs the real apktool and jadx on minimal_valid.apk through the sidecar's orchestration, on the host."""
+    src, _ = env
+    copy = src / "minimal_valid.apk"
+    copy.write_bytes((FIXTURES / "minimal_valid.apk").read_bytes())
+    row = prepare(copy)
+    monkeypatch.setattr(apk_sidecar, "_wsl", _real_host_wsl())
     out = apk_sidecar.decompile(row["id"])
     work = store.directory(row["id"]) / "apk"
     assert (work / "apktool" / "AndroidManifest.xml").is_file(), evidence(out, "E00003")
@@ -1862,6 +1867,355 @@ def test_real_aapt2_apk_string_scan(env):
     crypto = apk_sidecar.apk_crypto_hints(row["id"])
     assert crypto["unknowns"] == [] and crypto["network_security_config"]["present"] is False
     assert crypto["key_storage"]["posture"] == "no_crypto_api_observed"
+
+
+# --- RFC-0207 slice 3 (review fixes): metadata under the claim, corrupt metadata, soft-fails,
+# cancellation, a real d8/aapt2 DEX fixture and a real-tool endpoints/crypto run --------------
+
+from datetime import date as _date
+
+from app.reverse_engineering import apk_strings
+
+DEX_FIXTURE = FIXTURES / "dex_endpoints.apk"
+
+
+def _dex_fixture(src: Path) -> dict:
+    copy = src / "dex_endpoints.apk"
+    copy.write_bytes(DEX_FIXTURE.read_bytes())
+    return prepare(copy)
+
+
+def _meta(row: dict) -> Path:
+    return store.directory(row["id"]) / "apk" / "metadata"
+
+
+def test_dex_fixture_is_a_real_d8_aapt2_build():
+    with zipfile.ZipFile(DEX_FIXTURE) as z:
+        dex = z.read("classes.dex")
+        assert z.read("AndroidManifest.xml")[:4] == b"\x03\x00\x08\x00"
+        assert z.read("res/xml/network_security_config.xml")[:4] == b"\x03\x00\x08\x00"
+        assert "resources.arsc" in z.namelist()
+    assert dex[:5] == b"dex\n0" and dex[7] == 0  # d8 --min-api 26 emits DEX 038
+    strings = apk_strings.dex_strings(dex)
+    assert "Lorg/anzu/fixture/Main;" in strings and "AES/ECB/PKCS5Padding" in strings
+
+
+def test_endpoints_over_real_dex_fixture(env):
+    src, _ = env
+    row = _dex_fixture(src)
+    out = apk_sidecar.apk_extract_endpoints(row["id"])
+    by = {(r["category"], r["endpoint"]): r for r in out["endpoints"]}
+    ref = "dex_endpoints.apk!classes.dex"
+    assert by[("url", "https://api.fixture.anzu-test.example.com/v1/login")]["references"] == [ref]
+    assert by[("websocket", "wss://push.fixture.anzu-test.example.com/socket")]["sources"] == ["dex"]
+    assert by[("cloud_service", "anzu-fixture.s3.amazonaws.com")]["provider"]
+    assert by[("url", "https://cdn.fixture.anzu-test.example.com/assets")]["sources"] == ["resource"]
+    assert out["coverage"]["sources"]["dex"] == 1 and out["coverage"]["dex_strings"] > 20
+    assert out["unknowns"] == [] and out["investigation_status"] == "investigating"
+    saved = apk_sidecar.metadata(row["id"], "endpoints")
+    assert saved["endpoint_count"] == out["endpoint_count"]
+    assert "https://api.fixture.anzu-test.example.com/v1/login" in apk_sidecar.metadata(row["id"], "strings")["strings"]
+
+
+def test_crypto_hints_over_real_dex_fixture(env):
+    src, _ = env
+    row = _dex_fixture(src)
+    out = apk_sidecar.apk_crypto_hints(row["id"])
+    rules = {f["rule"]: f for f in out["findings"]}
+    assert rules["aws_access_key_id"]["value"] == "AKIAFIXTUREANZU12345"
+    assert rules["google_api_key"]["value"] == "AIzaSyFixtureKeyForAnzuTesting012345678"
+    assert rules["ecb_mode"]["value"] == "AES/ECB/PKCS5Padding" and rules["ecb_mode"]["confidence"] == "medium"
+    assert rules["nsc_user_trust_anchor"]["severity"] == "high"
+    assert rules["nsc_cleartext_permitted"]["scope"] == "base-config"
+    assert rules["nsc_pin_set_expired"]["expiration"] == "2020-01-01"
+    nsc = out["network_security_config"]
+    assert nsc["state"] == "present" and nsc["source"] == "dex_endpoints.apk!res/xml/network_security_config.xml"
+    assert out["unknowns"] == []
+
+
+# 1. Metadata is written under the claim lock, after evidence is recorded, with rollback.
+
+def test_endpoint_metadata_not_written_when_claim_lost(env, monkeypatch):
+    src, _ = env
+    row = _dex_fixture(src)
+    real = apk_strings.extract_endpoints
+
+    def lose_claim(*a, **kw):
+        out = real(*a, **kw)
+        apk_sidecar._CLAIMS[row["id"]] = "someone-else"
+        return out
+    monkeypatch.setattr(apk_strings, "extract_endpoints", lose_claim)
+    with pytest.raises(RuntimeError, match="claim was lost"):
+        apk_sidecar.apk_extract_endpoints(row["id"])
+    apk_sidecar._CLAIMS.pop(row["id"], None)
+    assert not (_meta(row) / "endpoints.json").exists() and not (_meta(row) / "strings.json").exists()
+    assert not any(e["operation"] == "apk_endpoints" for e in store.load(row["id"])["evidence"])
+
+
+def test_crypto_metadata_not_written_when_claim_lost(env, monkeypatch):
+    src, _ = env
+    row = _dex_fixture(src)
+    real = apk_strings.crypto_hints
+
+    def lose_claim(*a, **kw):
+        out = real(*a, **kw)
+        apk_sidecar._CLAIMS[row["id"]] = "someone-else"
+        return out
+    monkeypatch.setattr(apk_strings, "crypto_hints", lose_claim)
+    with pytest.raises(RuntimeError, match="claim was lost"):
+        apk_sidecar.apk_crypto_hints(row["id"])
+    apk_sidecar._CLAIMS.pop(row["id"], None)
+    assert not (_meta(row) / "crypto_hints.json").exists()
+
+
+def test_step_metadata_rolled_back_when_save_fails(env, monkeypatch):
+    src, _ = env
+    row = _dex_fixture(src)
+    apk_sidecar.apk_extract_endpoints(row["id"])
+    apk_sidecar.apk_crypto_hints(row["id"])
+    names = ("endpoints.json", "strings.json", "crypto_hints.json")
+    before = {n: (_meta(row) / n).read_bytes() for n in names}
+    seen: dict[str, bytes] = {}
+    real_save = store.save
+
+    def failing_save(r):
+        last = r["evidence"][-1]["operation"] if r["evidence"] else None
+        if r["status"] != "analyzing" and last in {"apk_endpoints", "apk_crypto_hints"} and \
+                len(r["evidence"]) > len(store.load(r["id"])["evidence"]):
+            for n in names:
+                seen[n] = (_meta(row) / n).read_bytes()
+            raise OSError("disk full")
+        return real_save(r)
+    monkeypatch.setattr(store, "save", failing_save)
+    monkeypatch.setattr(apk_strings, "extract_endpoints", _with_extra_endpoint)
+    with pytest.raises(OSError, match="disk full"):
+        apk_sidecar.apk_extract_endpoints(row["id"])
+    assert seen["endpoints.json"] != before["endpoints.json"]  # the new document was written before the save
+    for n in ("endpoints.json", "strings.json"):
+        assert (_meta(row) / n).read_bytes() == before[n]
+    with pytest.raises(OSError, match="disk full"):
+        apk_sidecar.apk_crypto_hints(row["id"])
+    assert (_meta(row) / "crypto_hints.json").read_bytes() == before["crypto_hints.json"]
+
+
+_REAL_EXTRACT = apk_strings.extract_endpoints
+
+
+def _with_extra_endpoint(*a, **kw):
+    out = _REAL_EXTRACT(*a, **kw)
+    out["unknowns"] = out["unknowns"] + ["changed run"]
+    return out
+
+
+def test_new_step_metadata_removed_when_first_save_fails(env, monkeypatch):
+    src, _ = env
+    row = _dex_fixture(src)
+    real_save = store.save
+
+    def failing_save(r):
+        if r["evidence"] and r["evidence"][-1]["operation"] == "apk_endpoints":
+            assert (_meta(row) / "endpoints.json").is_file()  # written under the lock before the save
+            raise OSError("disk full")
+        return real_save(r)
+    monkeypatch.setattr(store, "save", failing_save)
+    with pytest.raises(OSError):
+        apk_sidecar.apk_extract_endpoints(row["id"])
+    assert not (_meta(row) / "endpoints.json").exists() and not (_meta(row) / "strings.json").exists()
+
+
+# 2. Corrupt metadata is never silently treated as missing.
+
+def test_corrupt_components_recorded_as_unknown(env):
+    src, fake = env
+    row = _decompiled_fixture(src, fake)
+    (_meta(row) / "components.json").write_text("{not json", encoding="utf-8")
+    out = apk_sidecar.apk_extract_endpoints(row["id"])
+    assert any("components.json is corrupt" in u for u in out["unknowns"])
+    assert "Deep links from components.json were not extracted." in out["unknowns"]
+    assert not any(r.get("deep_link") for r in out["endpoints"])
+    assert out["investigation_status"] == "partial"
+    with pytest.raises(ValueError, match="components.json is corrupt"):
+        apk_sidecar._optional_metadata(row["id"], "components")
+    assert apk_sidecar._optional_metadata(row["id"], "native") is None  # missing is still a plain None
+
+
+def test_corrupt_manifest_recorded_as_unknown_for_crypto(env):
+    src, fake = env
+    row = _decompiled_fixture(src, fake)
+    (_meta(row) / "manifest.json").write_bytes(b"\xff\xfe garbage")
+    out = apk_sidecar.apk_crypto_hints(row["id"])
+    assert any("manifest.json is corrupt" in u for u in out["unknowns"])
+    assert any("could not be evaluated" in u for u in out["unknowns"])
+    assert out["investigation_status"] == "partial"
+
+
+def test_summary_reports_corrupt_endpoint_metadata(env):
+    src, _ = env
+    row = _dex_fixture(src)
+    apk_sidecar.apk_extract_endpoints(row["id"])
+    (_meta(row) / "endpoints.json").write_text("[", encoding="utf-8")
+    summary = apk_sidecar.summary(row["id"])
+    assert summary["endpoints"] is None and any("endpoints.json is corrupt" in u for u in summary["unknowns"])
+
+
+# 3. apk_strings soft-fails are reported, not silently resolved.
+
+def _nsc_doc(expiration: str) -> dict:
+    return apk_strings.parse_nsc(
+        '<network-security-config><domain-config><domain>pin.example.com</domain>'
+        f'<pin-set expiration="{expiration}"><pin digest="SHA-256">AAAA</pin></pin-set>'
+        '</domain-config></network-security-config>')
+
+
+def test_bad_pin_set_expiration_is_unknown_not_unexpired():
+    unknowns: list[str] = []
+    nsc = _nsc_doc("2020-13-45")
+    findings = apk_strings._nsc_findings(nsc, "res/xml/nsc.xml", True, False, 34, _date(2026, 1, 1), unknowns)
+    assert not any(f["rule"] == "nsc_pin_set_expired" for f in findings)
+    assert nsc["domain_configs"][0]["pin_set"]["expired"] is None
+    assert unknowns and "2020-13-45" in unknowns[0] and "unknown" in unknowns[0]
+    ok: list[str] = []
+    nsc = _nsc_doc("2020-01-01")
+    findings = apk_strings._nsc_findings(nsc, "r", True, False, 34, _date(2026, 1, 1), ok)
+    assert ok == [] and nsc["domain_configs"][0]["pin_set"]["expired"] is True
+    assert any(f["rule"] == "nsc_pin_set_expired" for f in findings)
+
+
+def test_oversized_nsc_reported_unreadable_not_absent(tmp_path, monkeypatch):
+    res = tmp_path / "apktool" / "res" / "xml"
+    res.mkdir(parents=True)
+    (res / "network_security_config.xml").write_text("<network-security-config/>" + " " * 64, encoding="utf-8")
+    monkeypatch.setattr(apk_strings, "MAX_TEXT_FILE_BYTES", 16)
+    manifest = {"target_sdk": "34", "application": {"network_security_config": "@xml/network_security_config"}}
+    doc, findings, unknowns = apk_strings.network_security(tmp_path, [], manifest)
+    assert doc["present"] is False and doc["state"] == "unreadable" and doc["unreadable"]
+    assert any("Network security config unreadable" in u and "over the 16-byte cap" in u for u in unknowns)
+    assert not any("was not found" in u for u in unknowns)
+    assert findings == []  # no platform-default findings inferred from a config that exists
+
+
+def test_unopenable_part_reported_unreadable(tmp_path):
+    bad = tmp_path / "base.apk"
+    bad.write_bytes(b"not a zip")
+    doc, findings, unknowns = apk_strings.network_security(
+        tmp_path, [{"name": "base.apk", "path": str(bad), "role": "base"}],
+        {"target_sdk": "23", "application": {"network_security_config": "@xml/network_security_config"}})
+    assert doc["state"] == "unreadable" and any("could not be opened" in u for u in unknowns)
+    assert findings == []
+
+
+def test_absent_nsc_still_uses_platform_defaults(tmp_path):
+    doc, findings, unknowns = apk_strings.network_security(tmp_path, [], {"target_sdk": "23", "application": {}})
+    assert doc["state"] == "absent" and unknowns == []
+    assert {f["rule"] for f in findings} == {"default_cleartext", "default_user_trust"}
+
+
+def test_malformed_target_sdk_recorded(tmp_path):
+    doc, findings, unknowns = apk_strings.network_security(tmp_path, [], {"target_sdk": "thirty", "application": {}})
+    assert doc["target_sdk_malformed"] is True
+    assert any("'thirty' is malformed" in u for u in unknowns)
+    assert findings == []
+
+
+# 4. Cancellation of the string scan.
+
+def test_cancel_inside_dex_loop_raises():
+    with zipfile.ZipFile(DEX_FIXTURE) as z:
+        dex = z.read("classes.dex")
+    ev = threading.Event()
+    ev.set()
+    with pytest.raises(apk_sidecar.DecompileCancelled, match="DEX"):
+        apk_strings.dex_strings(dex, ev)
+
+
+def test_cancel_between_sources_and_inside_java_loop(tmp_path):
+    java = tmp_path / "jadx" / "sources" / "a"
+    java.mkdir(parents=True)
+    for i in range(3):
+        (java / f"C{i}.java").write_text('class C { String u = "https://x.example.com"; }', encoding="utf-8")
+    ev = threading.Event()
+    stats = apk_strings.ScanStats()
+    it = apk_strings.iter_sources(tmp_path, [], stats, ev)
+    assert next(it).kind == "java"
+    ev.set()
+    with pytest.raises(apk_sidecar.DecompileCancelled, match="Java"):
+        next(it)
+    ev2 = threading.Event()
+    ev2.set()
+    with pytest.raises(apk_sidecar.DecompileCancelled):
+        next(apk_strings.iter_sources(tmp_path, [], apk_strings.ScanStats(), ev2))
+
+
+def test_cancelled_endpoint_scan_records_nothing(env, monkeypatch):
+    src, _ = env
+    row = _dex_fixture(src)
+    real = apk_strings.dex_strings
+
+    def cancel_mid_scan(buf, cancel=None):
+        apk_sidecar._CANCEL[row["id"]].set()
+        return real(buf, cancel)
+    monkeypatch.setattr(apk_strings, "dex_strings", cancel_mid_scan)
+    with pytest.raises(apk_sidecar.DecompileCancelled):
+        apk_sidecar.apk_extract_endpoints(row["id"])
+    saved = store.load(row["id"])
+    assert saved["status"] == "cancelled"
+    assert not (_meta(row) / "endpoints.json").exists()
+    assert not any(e["operation"] == "apk_endpoints" for e in saved["evidence"])
+
+
+def test_cancelled_crypto_scan_records_nothing(env, monkeypatch):
+    src, _ = env
+    row = _dex_fixture(src)
+    real = apk_strings.dex_strings
+
+    def cancel_mid_scan(buf, cancel=None):
+        apk_sidecar._CANCEL[row["id"]].set()
+        return real(buf, cancel)
+    monkeypatch.setattr(apk_strings, "dex_strings", cancel_mid_scan)
+    with pytest.raises(apk_sidecar.DecompileCancelled):
+        apk_sidecar.apk_crypto_hints(row["id"])
+    assert store.load(row["id"])["status"] == "cancelled"
+    assert not (_meta(row) / "crypto_hints.json").exists()
+
+
+# 6. Real apktool + jadx on the DEX fixture, then endpoints and crypto over the recovered layers.
+
+@pytest.mark.skipif(not (REAL_JAVA and REAL_APKTOOL and REAL_JADX and Path(REAL_APKTOOL).is_file() and Path(REAL_JADX).is_file()),
+                    reason="real toolchain not available; set ANZU_TEST_JAVA, ANZU_TEST_APKTOOL_JAR and ANZU_TEST_JADX")
+def test_real_toolchain_endpoints_and_crypto_on_dex_fixture(env, monkeypatch):
+    src, _ = env
+    row = _dex_fixture(src)
+    monkeypatch.setattr(apk_sidecar, "_wsl", _real_host_wsl())
+    out = apk_sidecar.decompile(row["id"])
+    assert evidence(out, "E00003")["result"]["apktool"]["state"] == "ok"
+    assert evidence(out, "E00003")["result"]["jadx"]["state"] == "ok"
+    manifest = apk_sidecar.metadata(row["id"], "manifest")
+    assert manifest["package"] == "org.anzu.fixture" and manifest["target_sdk"] == "34"
+    main_java = "sources/org/anzu/fixture/Main.java"
+
+    ends = apk_sidecar.apk_extract_endpoints(row["id"])
+    assert ends["coverage"]["java_sources"] is True and ends["coverage"]["decoded_resources"] is True
+    by = {(r["category"], r["endpoint"]): r for r in ends["endpoints"]}
+    api = by[("url", "https://api.fixture.anzu-test.example.com/v1/login")]
+    assert set(api["sources"]) >= {"dex", "java"} and any(r.startswith(main_java + ":") for r in api["references"])
+    assert ("websocket", "wss://push.fixture.anzu-test.example.com/socket") in by
+    assert by[("url", "https://cdn.fixture.anzu-test.example.com/assets")]["references"][0].startswith("res/values/strings.xml:")
+    deep = by[("custom_scheme", "anzufixture://open")]
+    assert deep["deep_link"] is True and deep["component"] == "org.anzu.fixture.Main"
+
+    crypto = apk_sidecar.apk_crypto_hints(row["id"])
+    rules: dict[str, list[dict]] = {}
+    for f in crypto["findings"]:
+        rules.setdefault(f["rule"], []).append(f)
+    assert any(any(r.startswith(main_java) for r in f["references"]) for f in rules["google_api_key"])
+    assert rules["aws_access_key_id"][0]["value"] == "AKIAFIXTUREANZU12345"
+    assert any(f["confidence"] == "high" for f in rules["ecb_mode"])
+    assert rules["static_key"][0]["value"] == "0123456789ABCDEF"
+    assert rules["weak_hash"][0]["value"] == "MD5"
+    nsc = crypto["network_security_config"]
+    assert nsc["state"] == "present" and nsc["referenced_by_manifest"] is True
+    assert rules["nsc_user_trust_anchor"][0]["severity"] == "high"
+    assert rules["nsc_pin_set_expired"][0]["expiration"] == "2020-01-01"
 
 
 # --- Slice 4: device (ADB) + FFS origins -------------------------------------------------

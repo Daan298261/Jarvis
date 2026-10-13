@@ -12,7 +12,6 @@ from app.mobile import companion_security, connectivity, gateway, store
 def network_env(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
     monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
-    monkeypatch.delenv("JARVIS_RELAY_ENDPOINT", raising=False)
 
 
 @pytest.fixture
@@ -112,7 +111,12 @@ async def test_companion_models_still_401_without_pairing(network_env, monkeypat
         import httpx
 
         async with httpx.AsyncClient(verify=context, trust_env=False) as client:
-            response = await client.get(f"https://127.0.0.1:{connectivity.PORT}/api/companion/models")
+            from app.mobile.gateway import SELF_TEST_HEADER, SELF_TEST_SECRET
+
+            response = await client.get(
+                f"https://127.0.0.1:{connectivity.PORT}/api/companion/models",
+                headers={SELF_TEST_HEADER: SELF_TEST_SECRET},
+            )
         assert response.status_code == 401
     finally:
         await connection.stop_gateway()

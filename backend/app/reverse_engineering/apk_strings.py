@@ -19,6 +19,7 @@ import ipaddress
 import math
 import re
 import struct
+import threading
 import zipfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -27,7 +28,7 @@ from pathlib import Path
 from typing import Iterator
 from xml.sax.saxutils import unescape
 
-from .apk_sidecar import _axml_strings, decode_axml
+from .apk_sidecar import DecompileCancelled, _axml_strings, decode_axml
 
 MAX_TEXT_FILE_BYTES = 16 * 1024 * 1024
 MAX_DEX_BYTES = 256 * 1024 * 1024
@@ -45,6 +46,13 @@ TEXT_SUFFIXES = {".json", ".xml", ".txt", ".properties", ".js", ".mjs", ".html",
 _DEX_NAME = re.compile(r"classes\d*\.dex")
 _AXML_MAGIC = b"\x03\x00\x08\x00"
 _XML_ENTITIES = {"&quot;": '"', "&apos;": "'"}
+_CANCEL_EVERY = 4096
+
+
+def _check_cancel(cancel: threading.Event | None, where: str) -> None:
+    """Raise DecompileCancelled when the investigation's cancel event is set."""
+    if cancel is not None and cancel.is_set():
+        raise DecompileCancelled(where)
 
 
 # --- Source enumeration ------------------------------------------------------------------
@@ -104,7 +112,7 @@ def _mutf8(raw: bytes) -> str:
         return raw.decode("utf-8", errors="replace")
 
 
-def dex_strings(buf: bytes) -> list[str]:
+def dex_strings(buf: bytes, cancel: threading.Event | None = None) -> list[str]:
     """Return every entry of a DEX file's string_ids table (header fields at 0x38/0x3C)."""
     if len(buf) < 0x70 or buf[:4] != b"dex\n" or buf[7] != 0:
         raise ValueError("not a DEX file")
@@ -115,6 +123,8 @@ def dex_strings(buf: bytes) -> list[str]:
         raise ValueError("string_ids table lies outside the file")
     out = []
     for i in range(count):
+        if i % _CANCEL_EVERY == 0:
+            _check_cancel(cancel, "DEX string scan")
         p = struct.unpack_from("<I", buf, ids_off + 4 * i)[0]
         shift = 0
         while True:  # uleb128 utf16_size; only its length matters here
@@ -200,7 +210,8 @@ def _decoded_files(apktool: Path) -> list[tuple[Path, str, bool]]:
     return files
 
 
-def _zip_sources(part: dict, resources_decoded: bool, want_manifest: bool, stats: ScanStats) -> Iterator[Source]:
+def _zip_sources(part: dict, resources_decoded: bool, want_manifest: bool, stats: ScanStats,
+                 cancel: threading.Event | None = None) -> Iterator[Source]:
     name = part["name"]
     try:
         archive = zipfile.ZipFile(part["path"])
@@ -209,6 +220,7 @@ def _zip_sources(part: dict, resources_decoded: bool, want_manifest: bool, stats
         return
     with archive as z:
         for info in z.infolist():
+            _check_cancel(cancel, "string scan")
             if info.is_dir():
                 continue
             entry = info.filename.replace("\\", "/")
@@ -221,7 +233,7 @@ def _zip_sources(part: dict, resources_decoded: bool, want_manifest: bool, stats
                     return
                 data = z.read(info)
                 try:
-                    strings = dex_strings(data)
+                    strings = dex_strings(data, cancel)
                 except ValueError as exc:
                     strings = [m.decode("ascii") for m in re.findall(rb"[\x20-\x7e]{6,}", data)]
                     stats.unknowns.append(f"{ref}: DEX string table could not be parsed ({exc}); "
@@ -283,8 +295,13 @@ def _zip_sources(part: dict, resources_decoded: bool, want_manifest: bool, stats
                 yield Source("asset", ref, _lines(data.decode("utf-8", errors="replace"), suffix == ".xml"))
 
 
-def iter_sources(apk_root: Path, parts: list[dict], stats: ScanStats) -> Iterator[Source]:
-    """Yield every scannable document of an APK investigation, decoded layers first."""
+def iter_sources(apk_root: Path, parts: list[dict], stats: ScanStats,
+                 cancel: threading.Event | None = None) -> Iterator[Source]:
+    """Yield every scannable document of an APK investigation, decoded layers first.
+
+    ``cancel`` is checked before every source and inside the DEX and Java loops; a set event
+    raises DecompileCancelled so a cancelled scan never records partial results."""
+    _check_cancel(cancel, "string scan")
     apktool = apk_root / "apktool"
     decoded = (apktool / "res").is_dir() and not (apktool / ".incomplete").exists()
     stats.decoded_resources = decoded
@@ -297,19 +314,22 @@ def iter_sources(apk_root: Path, parts: list[dict], stats: ScanStats) -> Iterato
             break
     if decoded:
         for path, kind, sniff in _decoded_files(apktool):
+            _check_cancel(cancel, "string scan")
             src = _file_source(path, kind, path.relative_to(apktool).as_posix(), stats, sniff=sniff)
             if src is not None:
                 yield src
     sources_dir = apk_root / "jadx" / "sources"
     if sources_dir.is_dir():
         for path in sorted(sources_dir.rglob("*.java")):
+            _check_cancel(cancel, "Java source scan")
             src = _file_source(path, "java", "sources/" + path.relative_to(sources_dir).as_posix(), stats)
             if src is not None:
                 stats.java_sources = True
                 yield src
     for part in parts:
         base = part.get("role") == "base"
-        yield from _zip_sources(part, decoded and base, base and not manifest_done, stats)
+        _check_cancel(cancel, "string scan")
+        yield from _zip_sources(part, decoded and base, base and not manifest_done, stats, cancel)
 
 
 def _ref(src: Source, line: int | None) -> str:
@@ -538,14 +558,16 @@ class EndpointScanner:
         return sorted(self.found.records(), key=lambda r: (order[r["category"]], -r["occurrences"], r["endpoint"]))
 
 
-def extract_endpoints(apk_root: Path, parts: list[dict], components: dict | None) -> dict:
+def extract_endpoints(apk_root: Path, parts: list[dict], components: dict | None,
+                      cancel: threading.Event | None = None) -> dict:
     """Scan every source and return the endpoints document plus the strings inventory."""
     stats = ScanStats()
     scanner = EndpointScanner()
     strings: dict[str, None] = {}
     total_strings = 0
     strings_truncated = False
-    for src in iter_sources(apk_root, parts, stats):
+    for src in iter_sources(apk_root, parts, stats, cancel):
+        _check_cancel(cancel, "endpoint scan")
         for line, text in _fragments(src):
             scanner.scan(text, _ref(src, line), src.kind)
         for value in _strings_of(src):
@@ -891,7 +913,8 @@ def parse_nsc(text: str) -> dict:
 
 
 def _nsc_findings(nsc: dict, ref: str, applied: bool, debuggable: bool | None, target_sdk: int | None,
-                  today: date) -> list[dict]:
+                  today: date, unknowns: list[str] | None = None) -> list[dict]:
+    unknowns = unknowns if unknowns is not None else []
     out: list[dict] = []
 
     def add(rule: str, detail: str, severity: str | None = None, **extra) -> None:
@@ -942,7 +965,12 @@ def _nsc_findings(nsc: dict, ref: str, applied: bool, debuggable: bool | None, t
                 try:
                     expired = date.fromisoformat(ps["expiration"]) < today
                 except ValueError:
-                    expired = False
+                    expired = None
+                    unknowns.append(f"{ref}: pin-set expiration {ps['expiration']!r} for {', '.join(names(dc))} is not "
+                                    "a valid YYYY-MM-DD date; whether pinning is still enforced is unknown.")
+                    ps["expired"] = None
+                else:
+                    ps["expired"] = expired
                 if expired:
                     add("nsc_pin_set_expired", f"pin-set for {', '.join(names(dc))} expired on {ps['expiration']}; "
                         "pinning is no longer enforced.", domains=names(dc), expiration=ps["expiration"])
@@ -956,11 +984,22 @@ def _nsc_findings(nsc: dict, ref: str, applied: bool, debuggable: bool | None, t
     return out
 
 
-def _find_nsc(apk_root: Path, parts: list[dict], name: str) -> tuple[str, str] | None:
+def _find_nsc(apk_root: Path, parts: list[dict], name: str,
+              unreadable: list[str] | None = None) -> tuple[str, str] | None:
+    """Locate and read the NSC. Copies that exist but cannot be read (over the size cap, part not
+    openable, file unreadable) are appended to ``unreadable`` so they are reported, never treated as absent."""
+    unreadable = unreadable if unreadable is not None else []
     res = apk_root / "apktool" / "res"
     for path in sorted(res.glob(f"xml*/{name}.xml")) if res.is_dir() else []:
-        if path.stat().st_size <= MAX_TEXT_FILE_BYTES:
-            return path.relative_to(apk_root / "apktool").as_posix(), _xml_text(path.read_bytes())
+        rel = path.relative_to(apk_root / "apktool").as_posix()
+        try:
+            size = path.stat().st_size
+            if size > MAX_TEXT_FILE_BYTES:
+                unreadable.append(f"{rel} is {size} bytes, over the {MAX_TEXT_FILE_BYTES}-byte cap")
+                continue
+            return rel, _xml_text(path.read_bytes())
+        except OSError as exc:
+            unreadable.append(f"{rel} could not be read ({exc})")
     for part in parts:
         if part.get("role") != "base":
             continue
@@ -968,10 +1007,15 @@ def _find_nsc(apk_root: Path, parts: list[dict], name: str) -> tuple[str, str] |
             with zipfile.ZipFile(part["path"]) as z:
                 for info in z.infolist():
                     entry = info.filename.replace("\\", "/")
-                    if re.fullmatch(rf"res/xml[^/]*/{re.escape(name)}\.xml", entry) and info.file_size <= MAX_TEXT_FILE_BYTES:
-                        return f"{part['name']}!{entry}", _xml_text(z.read(info))
-        except (OSError, zipfile.BadZipFile):
-            continue
+                    if not re.fullmatch(rf"res/xml[^/]*/{re.escape(name)}\.xml", entry):
+                        continue
+                    if info.file_size > MAX_TEXT_FILE_BYTES:
+                        unreadable.append(f"{part['name']}!{entry} is {info.file_size} bytes, over the "
+                                          f"{MAX_TEXT_FILE_BYTES}-byte cap")
+                        continue
+                    return f"{part['name']}!{entry}", _xml_text(z.read(info))
+        except (OSError, zipfile.BadZipFile) as exc:
+            unreadable.append(f"APK part {part['name']} could not be opened to look for {name}.xml ({exc})")
     return None
 
 
@@ -983,22 +1027,33 @@ def network_security(apk_root: Path, parts: list[dict], manifest: dict | None,
     app = (manifest or {}).get("application") or {}
     attr = app.get("network_security_config")
     debuggable = app.get("debuggable")
+    raw_sdk = manifest.get("target_sdk") if manifest else None
+    target_sdk_malformed = False
     try:
-        target_sdk = int(manifest["target_sdk"]) if manifest and manifest.get("target_sdk") else None
+        target_sdk = int(raw_sdk) if raw_sdk not in (None, "") else None
     except (TypeError, ValueError):
-        target_sdk = None
+        target_sdk, target_sdk_malformed = None, True
+        unknowns.append(f"Manifest targetSdkVersion {raw_sdk!r} is malformed; platform-default trust and cleartext "
+                        "rules that depend on it were not evaluated.")
     name = attr[5:] if isinstance(attr, str) and attr.startswith("@xml/") else "network_security_config"
     referenced = None if manifest is None else bool(attr)
     if isinstance(attr, str) and attr.startswith("@0x"):
         unknowns.append(f"Manifest references network security config {attr} by unresolved resource ID; "
                         "looked for res/xml/network_security_config.xml instead.")
+    unreadable: list[str] = []
     try:
-        located = _find_nsc(apk_root, parts, name)
+        located = _find_nsc(apk_root, parts, name, unreadable)
     except ValueError as exc:
         located = None
-        unknowns.append(f"Network security config {name}.xml could not be decoded: {exc}")
-    doc: dict = {"present": located is not None, "name": name, "manifest_attribute": attr,
-                 "referenced_by_manifest": referenced}
+        unreadable.append(f"{name}.xml could not be decoded ({exc})")
+    for why in unreadable:
+        unknowns.append(f"Network security config unreadable: {why}; its trust policy was not evaluated.")
+    # "unreadable" is distinct from absent: a config that exists but could not be read is not
+    # evidence that the app relies on platform defaults.
+    state = "present" if located is not None else ("unreadable" if unreadable else "absent")
+    doc: dict = {"present": located is not None, "state": state, "unreadable": unreadable, "name": name,
+                 "manifest_attribute": attr, "referenced_by_manifest": referenced,
+                 "target_sdk_malformed": target_sdk_malformed}
     findings: list[dict] = []
     if located is not None:
         ref, text = located
@@ -1009,11 +1064,11 @@ def network_security(apk_root: Path, parts: list[dict], manifest: dict | None,
             unknowns.append(f"{ref} could not be parsed: {exc}")
         else:
             doc.update(parsed)
-            findings = _nsc_findings(parsed, ref, referenced is not False, debuggable, target_sdk, today)
-    elif attr and not attr.startswith("@0x"):
+            findings = _nsc_findings(parsed, ref, referenced is not False, debuggable, target_sdk, today, unknowns)
+    elif attr and not attr.startswith("@0x") and not unreadable:
         unknowns.append(f"Manifest references network security config {attr} but the resource was not found "
                         "(resource paths may be obfuscated).")
-    if (located is None or referenced is False) and manifest is not None:
+    if ((located is None and not unreadable) or referenced is False) and manifest is not None:
         ref = "AndroidManifest.xml"
         if app.get("uses_cleartext_traffic"):
             category, severity, title = RULES["manifest_cleartext"]
@@ -1038,12 +1093,15 @@ def network_security(apk_root: Path, parts: list[dict], manifest: dict | None,
     return doc, findings, unknowns
 
 
-def crypto_hints(apk_root: Path, parts: list[dict], manifest: dict | None, today: date | None = None) -> dict:
+def crypto_hints(apk_root: Path, parts: list[dict], manifest: dict | None, today: date | None = None,
+                 cancel: threading.Event | None = None) -> dict:
     """Scan every source for key material, weak crypto, NSC trust policy and key-storage posture."""
     stats = ScanStats()
     scanner = CryptoScanner()
-    for src in iter_sources(apk_root, parts, stats):
+    for src in iter_sources(apk_root, parts, stats, cancel):
+        _check_cancel(cancel, "crypto scan")
         scanner.scan(src)
+    _check_cancel(cancel, "crypto scan")
     nsc, nsc_findings, nsc_unknowns = network_security(apk_root, parts, manifest, today)
     storage = scanner.key_storage()
     findings = scanner.findings() + nsc_findings

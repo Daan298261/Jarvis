@@ -332,7 +332,9 @@ Each extracted endpoint record includes:
 
 ### 8. Cryptographic & Key-Material Hints
 
-Static heuristic detection flags potential cryptographic vulnerabilities and embedded credentials across Java sources, smali, and decoded resources, saved into `<investigation>/apk/metadata/crypto_hints.json`.
+Static heuristic detection flags potential cryptographic vulnerabilities and embedded credentials across DEX string pools, recovered Java sources, the decoded manifest and decoded resources, saved into `<investigation>/apk/metadata/crypto_hints.json`.
+
+> **Smali scope (slice 3):** Phase A runs apktool with `--no-src`, so no smali exists when slice 3 scans and smali is **not** scanned here. Scanning smali recovered by the slice 5 fallback (`apk/smali/`) is deferred to slice 5. Until then a jadx failure leaves DEX string pools as the only bytecode-level layer, and the call-site rules (static IV/key, weak hashes, `Cipher.getInstance`) are reported as limitations rather than evaluated.
 
 #### 8.1 Hardcoded Secrets & Credentials
 - **Google API Keys:** `AIza[0-9A-Za-z\-_]{35}`

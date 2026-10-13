@@ -254,6 +254,10 @@ class MainActivity : FragmentActivity() {
                             Text(AnzuBranding.DISPLAY_NAME, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                             Text(if (state.connected) "● CONNECTED" else "○ OFFLINE", fontSize = 10.sp, color = if (state.connected) Color(0xFF74DCCD) else Muted)
                         }
+                        val offlineBanner = if (paired) CompanionOfflineStatus.offlineBannerText(state) else ""
+                        if (offlineBanner.isNotEmpty()) Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF1D2A34)), modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                            Text(offlineBanner, Modifier.padding(12.dp), fontSize = 12.sp)
+                        }
                         if (state.error != null) Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF34251D)), modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
                             Text(state.error.orEmpty(), Modifier.padding(12.dp), fontSize = 12.sp)
                         }

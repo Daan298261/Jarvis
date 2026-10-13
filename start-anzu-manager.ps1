@@ -10,6 +10,8 @@ try { $running = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 $health).Stat
 if (-not $running) {
     $args = @('-m','uvicorn','app.manager.main:app','--host','127.0.0.1','--port','4782','--app-dir',(Join-Path $Root 'backend'))
     $log = Join-Path $Root 'logs\anzu-manager.log'; New-Item -ItemType Directory -Force (Split-Path $log) | Out-Null
+    # Keep ANZU core running: the manager restarts a crashed or hung backend with backoff.
+    $env:JARVIS_MANAGER_WATCHDOG = '1'
     Start-Process -FilePath $python -ArgumentList $args -WorkingDirectory $Root -RedirectStandardOutput $log -RedirectStandardError ($log + '.err') -WindowStyle Hidden
 }
 $managerExe = Join-Path $Root 'desktop\AnzuManager.exe'

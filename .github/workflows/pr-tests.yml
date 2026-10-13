@@ -30,6 +30,25 @@ jobs:
           grep -Ev '^(pywinauto|pywin32|comtypes)' backend/requirements.txt > /tmp/requirements-linux.txt
           python -m pip install -r /tmp/requirements-linux.txt
 
+      - name: Cache pinned RE toolchain downloads
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/re-tools/downloads
+          key: re-tools-${{ hashFiles('backend/app/reverse_engineering/engine-lock.json') }}
+
+      - name: Provision pinned JDK 21, apktool and jadx (SHA-256 verified against engine-lock.json)
+        shell: bash
+        run: python .github/scripts/fetch_re_toolchain.py "$RUNNER_TEMP/re-tools"
+
+      - name: Run RFC-0207 APK sidecar tests with the real toolchain (no skips allowed)
+        shell: bash
+        run: |
+          python -m pytest -q -rs tests/test_rfc0207_apk_sidecar.py tests/test_ci_re_toolchain.py | tee "$RUNNER_TEMP/apk-tests.txt"
+          if grep -q SKIPPED "$RUNNER_TEMP/apk-tests.txt"; then
+            echo "::error::RFC-0207 real-toolchain tests were skipped"
+            exit 1
+          fi
+
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -49,9 +68,8 @@ jobs:
             tests/test_nkeep_context.py \
             tests/test_tool_exposure.py
 
-      - name: Run full backend suite (baseline report)
-        continue-on-error: true
-        run: python -m pytest -q
+      - name: Run full backend suite
+        run: python -m pytest -q -rs
 
   frontend-build:
     runs-on: ubuntu-latest
@@ -73,6 +91,12 @@ jobs:
 
       - name: Build frontend
         run: npm run build
+
+      - name: Companion pairing recovery tests
+        run: npm run test:companion-pairing-recovery
+
+      - name: Remote access helper tests (RFC-0215)
+        run: npm run test:companion-remote-access
 
   installer-compile:
     name: installer-compile
