@@ -110,6 +110,9 @@ object OffGridContentCatalog {
                 require(r.west < r.east && r.south < r.north && r.minZoom in 0..r.maxZoom && r.maxZoom <= 16) {
                     "Off-grid map ${item.id} has bad bounds/zoom"
                 }
+                require(OffGridMapMath.tileCount(r) <= OffGridMapMath.MAX_REGION_TILES) {
+                    "Off-grid map ${item.id} needs ${OffGridMapMath.tileCount(r)} tiles (limit ${OffGridMapMath.MAX_REGION_TILES})"
+                }
             } else {
                 require(item.category != OffGridCategory.MAPS) { "ZIM ${item.id} filed under maps" }
                 require(item.sha256.matches(Regex("[0-9a-f]{64}"))) { "Off-grid item ${item.id} missing real sha256" }
@@ -123,6 +126,9 @@ object OffGridContentCatalog {
 
 /** Web-mercator tile math for the size estimate shown before a map region downloads. */
 object OffGridMapMath {
+    /** MapLibre's offline tile-count limit is raised to this; regions above it are refused before download. */
+    const val MAX_REGION_TILES = 200_000L
+
     private fun tileX(lon: Double, z: Int): Long = floor((lon + 180.0) / 360.0 * (1L shl z)).toLong().coerceIn(0, (1L shl z) - 1)
     private fun tileY(lat: Double, z: Int): Long {
         val r = Math.toRadians(lat.coerceIn(-85.0511, 85.0511))

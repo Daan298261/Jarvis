@@ -84,6 +84,11 @@ class MapLibreMapStore(context: Context) : OffGridMapStore {
     }
 
     override suspend fun download(item: OffGridItem, onState: (OffGridItemState) -> Unit) {
+        val tiles = OffGridMapMath.tileCount(item.mapRegion!!)
+        if (tiles > TILE_LIMIT) {
+            onState(OffGridItemState(OffGridStatus.ERROR, error = "${item.title} needs $tiles tiles, above the $TILE_LIMIT offline limit."))
+            return
+        }
         val region = regions()[item.id] ?: create(item)
         withContext(Dispatchers.Main) {
             try {
@@ -141,6 +146,6 @@ class MapLibreMapStore(context: Context) : OffGridMapStore {
 
     companion object {
         /** Netherlands z0-14 is ~50k tiles plus glyph/sprite resources. */
-        const val TILE_LIMIT = 200_000L
+        const val TILE_LIMIT = OffGridMapMath.MAX_REGION_TILES
     }
 }

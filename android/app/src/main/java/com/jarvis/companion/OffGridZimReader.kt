@@ -45,14 +45,30 @@ object ZimUrls {
         if (url.startsWith(BASE)) android.net.Uri.decode(url.removePrefix(BASE).substringBefore('#').substringBefore('?')) else null
 }
 
+/** Something the reader WebView can pull archive entries from. */
+fun interface ZimSource { fun load(path: String): Pair<ByteArray, String>? }
+
+/**
+ * Serialises reads against [close]: once closed, reads return null and never touch the native archive,
+ * so a WebView request racing dialog dismissal cannot use a disposed handle.
+ */
+class GuardedZimSource(private val read: (String) -> Pair<ByteArray, String>?, private val dispose: () -> Unit) : ZimSource, AutoCloseable {
+    private val lock = Any()
+    @Volatile var closed = false
+        private set
+    override fun load(path: String): Pair<ByteArray, String>? = synchronized(lock) { if (closed) null else read(path) }
+    override fun close() = synchronized(lock) { if (!closed) { closed = true; dispose() } }
+}
+
 /** A verified, opened ZIM archive. Use from a background thread; [close] when done. */
-class ZimBook(file: File) : AutoCloseable {
+class ZimBook(file: File) : ZimSource, AutoCloseable {
     private val archive = Archive(file.absolutePath)
+    private val guard = GuardedZimSource(::loadUnguarded) { archive.dispose() }
 
     val mainPath: String? get() = if (archive.hasMainEntry()) archive.mainEntry.getItem(true).path else null
 
     fun search(text: String, limit: Int = 30): List<ZimHit> {
-        if (text.isBlank()) return emptyList()
+        if (text.isBlank() || guard.closed) return emptyList()
         val hits = LinkedHashMap<String, ZimHit>()
         if (archive.hasTitleIndex()) {
             val it = SuggestionSearcher(archive).suggest(text).getResults(0, limit)
@@ -68,18 +84,20 @@ class ZimBook(file: File) : AutoCloseable {
         return hits.values.toList()
     }
 
-    /** Bytes + mime for a path, following redirects; null when absent. */
-    fun load(path: String): Pair<ByteArray, String>? {
+    /** Bytes + mime for a path, following redirects; null when absent or closed. */
+    override fun load(path: String): Pair<ByteArray, String>? = guard.load(path)
+
+    private fun loadUnguarded(path: String): Pair<ByteArray, String>? {
         if (!archive.hasEntryByPath(path)) return null
         val item = archive.getEntryByPath(path).getItem(true)
         return item.data.data to item.mimetype
     }
 
-    override fun close() = archive.dispose()
+    override fun close() = guard.close()
 }
 
 /** Serves ZIM entries to the WebView and blocks every other request, so reading never touches the network. */
-class ZimWebViewClient(private val book: ZimBook, private val onError: (String) -> Unit) : WebViewClient() {
+class ZimWebViewClient(private val book: ZimSource, private val onError: (String) -> Unit) : WebViewClient() {
     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse {
         val path = ZimUrls.pathOf(request.url.toString())
             ?: return WebResourceResponse("text/plain", "utf-8", 403, "Offline", emptyMap(), ByteArrayInputStream(ByteArray(0)))

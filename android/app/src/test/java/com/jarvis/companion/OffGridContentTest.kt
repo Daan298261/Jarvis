@@ -1,8 +1,6 @@
 package com.jarvis.companion
 
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -16,7 +14,6 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
-import java.io.File
 import java.security.MessageDigest
 
 class OffGridCatalogTest {
@@ -64,6 +61,13 @@ class OffGridCatalogTest {
         val nl = OffGridContentCatalog.builtIn.first { it.id == "map-nl" }.mapRegion!!
         assertTrue(OffGridMapMath.tileCount(nl) in 40_000L..60_000L)
         assertTrue(OffGridMapMath.tileCount(nl) < MapLibreMapStore.TILE_LIMIT)
+    }
+
+    @Test fun oversized_map_region_fails_validation() {
+        val map = OffGridContentCatalog.builtIn.first { it.id == "map-nl" }
+        val europe = map.copy(mapRegion = OffGridMapRegion(-10.0, 35.0, 30.0, 70.0, 0, 15))
+        assertTrue(OffGridMapMath.tileCount(europe.mapRegion!!) > OffGridMapMath.MAX_REGION_TILES)
+        assertThrows(IllegalArgumentException::class.java) { OffGridContentCatalog.validate(listOf(europe)) }
     }
 
     @Test fun map_status_never_ready_until_complete() {
@@ -127,16 +131,13 @@ class OffGridContentManagerTest {
 
     @Test fun interrupted_download_resumes_with_range() = runBlocking {
         val half = payload.size / 2
-        server.enqueue(MockResponse().setBody(Buffer().write(payload, 0, half)).setHeader("Content-Length", payload.size)
-            .setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY))
-        server.enqueue(MockResponse().setResponseCode(206).setBody(Buffer().write(payload, half, payload.size - half)))
         val m = manager(zim())
         // First attempt drops; TransientRetry resumes from the partial with a Range header.
+        val ranges = java.util.Collections.synchronizedList(mutableListOf<String?>())
         server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
-            var n = 0
             override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
-                n++
                 val range = request.getHeader("Range")
+                ranges += range
                 if (range == null) return MockResponse().setBody(Buffer().write(payload, 0, half))
                     .setHeader("Content-Length", payload.size).setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY)
                 val from = range.removePrefix("bytes=").removeSuffix("-").toInt()
@@ -146,6 +147,8 @@ class OffGridContentManagerTest {
         m.download("zim-test")
         assertEquals(OffGridStatus.READY, m.stateOf("zim-test").status)
         assertArrayEquals(payload, m.verifiedZim("zim-test").readBytes())
+        assertNull(ranges.first())
+        assertTrue(ranges.drop(1).any { it != null && it.startsWith("bytes=") })
     }
 
     @Test fun cancel_mid_download_leaves_no_ready_file() = runBlocking {

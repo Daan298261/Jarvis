@@ -3,6 +3,7 @@ package com.jarvis.companion
 import android.app.Application
 import android.content.Context
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -104,19 +105,7 @@ fun OffGridContentSection(vm: OffGridViewModel = viewModel()) {
     var mapFor by remember { mutableStateOf<OffGridItem?>(null) }
     Column(Modifier.padding(top = 18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Off-grid content", fontSize = 20.sp)
-        Row(
-            Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = "Choose off-grid content") { picker = true }
-                .padding(vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Image(painterResource(R.drawable.bgp_logo), contentDescription = "Power pylon: choose off-grid content", Modifier.size(40.dp))
-            Column(Modifier.weight(1f)) {
-                Text("Choose offline maps & knowledge")
-                Text("Pick what to keep on this phone for when the grid and network are down. Sizes are shown before anything downloads.",
-                    fontSize = 12.sp, color = Muted)
-            }
-        }
+        OffGridPylonEntry { picker = true }
         vm.message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         vm.manager.catalog.filter { (states[it.id]?.status ?: OffGridStatus.MISSING) != OffGridStatus.MISSING || (states[it.id]?.partialBytes ?: 0) > 0 }
             .forEach { item ->
@@ -159,6 +148,24 @@ private fun OffGridRow(item: OffGridItem, s: OffGridItemState, onOpen: () -> Uni
                 TextButton(onClick = onRetry) { Text("Resume") }
                 TextButton(onClick = onDelete) { Text("Delete") }
             }
+        }
+    }
+}
+
+/** Power-pylon entry (Black Grid Publishing mark). */
+@Composable
+fun OffGridPylonEntry(onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = "Choose off-grid content", onClick = onClick)
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Image(painterResource(R.drawable.bgp_logo), contentDescription = "Power pylon: choose off-grid content", Modifier.size(40.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Choose offline maps & knowledge")
+            Text("Pick what to keep on this phone for when the grid and network are down. Sizes are shown before anything downloads.",
+                fontSize = 12.sp, color = Muted)
         }
     }
 }
@@ -240,6 +247,7 @@ private fun ZimReaderDialog(vm: OffGridViewModel, item: OffGridItem, onClose: ()
     var query by remember { mutableStateOf("") }
     var hits by remember { mutableStateOf<List<ZimHit>>(emptyList()) }
     var page by remember { mutableStateOf<String?>(null) }
+    var webView by remember { mutableStateOf<WebView?>(null) }
     LaunchedEffect(item.id) {
         error = ZimNative.ensureLoaded(context)
         if (error == null) error = runCatching {
@@ -252,7 +260,14 @@ private fun ZimReaderDialog(vm: OffGridViewModel, item: OffGridItem, onClose: ()
         val b = book ?: return@LaunchedEffect
         hits = withContext(Dispatchers.IO) { runCatching { b.search(query) }.getOrDefault(emptyList()) }
     }
-    DisposableEffect(Unit) { onDispose { book?.close() } }
+    DisposableEffect(Unit) {
+        onDispose {
+            // Stop the WebView before the archive goes away; any request still in flight then gets null (404).
+            webView?.let { it.stopLoading(); it.webViewClient = WebViewClient(); it.destroy() }
+            webView = null
+            book?.close()
+        }
+    }
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize()) {
             Column(Modifier.padding(12.dp)) {
@@ -277,7 +292,7 @@ private fun ZimReaderDialog(vm: OffGridViewModel, item: OffGridItem, onClose: ()
                     val start = page
                     if (start == null) Text("This archive has no main page; search above.", color = Muted)
                     else AndroidView(
-                        factory = { ctx -> WebView(ctx).apply { ZimWebViewClient.configure(this); webViewClient = ZimWebViewClient(b) { error = it } } },
+                        factory = { ctx -> WebView(ctx).apply { ZimWebViewClient.configure(this); webViewClient = ZimWebViewClient(b) { error = it } }.also { webView = it } },
                         update = { web -> val url = ZimUrls.forPath(start); if (web.url != url) web.loadUrl(url) },
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                     )
