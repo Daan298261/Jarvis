@@ -11,6 +11,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
 import android.util.Log
 import androidx.core.content.ContextCompat
 import java.util.Locale
@@ -26,7 +27,11 @@ private const val TAG = "PlatformVoice"
  */
 class PlatformVoice(
     private val context: Context,
-    private val sttLanguage: SttLanguageSource = SttLanguageSource.ANZU_DEFAULT,
+    /** RFC-0216 S4 voice-language setting: the single language source for TTS and STT. */
+    private val language: () -> VoiceLanguageSetting = { VoiceLanguageSetting() },
+    private val sttLanguage: SttLanguageSource = SttLanguageSource.fromVoiceLanguage(language),
+    /** Called on the main thread once the TextToSpeech engine finished starting (or failed). */
+    private val onTtsReady: (Boolean) -> Unit = {},
 ) {
     private var recognizer: SpeechRecognizer? = null
     @Volatile var ttsReady: Boolean = false
@@ -44,6 +49,7 @@ class PlatformVoice(
         tts = TextToSpeech(context.applicationContext) { status ->
             ttsReady = status == TextToSpeech.SUCCESS
             if (!ttsReady) Log.w(TAG, "Built-in text-to-speech failed to start (status $status)")
+            onTtsReady(ttsReady)
         }
     }
 
@@ -142,12 +148,45 @@ class PlatformVoice(
         release()
     }
 
+    /** Installed voices for the given ANZU voice language, best first (RFC-0216 S4). */
+    fun voicesFor(setting: VoiceLanguageSetting = language()): List<TtsVoiceCandidate> {
+        val engine = tts ?: return emptyList()
+        if (!ttsReady) return emptyList()
+        return VoiceLanguagePrefs.rankVoices(candidates(engine), setting)
+    }
+
+    /** True when this phone can speak [setting]'s language without falling back to another locale. */
+    fun supportsLanguage(setting: VoiceLanguageSetting = language()): Boolean = voicesFor(setting).isNotEmpty()
+
+    private fun candidates(engine: TextToSpeech): List<TtsVoiceCandidate> = try {
+        engine.voices.orEmpty().map { v ->
+            TtsVoiceCandidate(v.name, v.locale, v.quality, v.latency, v.isNetworkConnectionRequired,
+                v.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == true)
+        }
+    } catch (e: RuntimeException) {
+        Log.w(TAG, "Could not list text-to-speech voices", e)
+        emptyList()
+    }
+
+    /** Applies ANZU's voice language/voice, never the raw system locale. Returns an error message or null. */
+    private fun applyLanguage(engine: TextToSpeech): String? {
+        val setting = language()
+        val pick = VoiceLanguagePrefs.pickVoice(candidates(engine), setting)
+            ?: return VoiceLanguagePrefs.missingVoiceMessage(setting)
+        val voice: Voice? = engine.voices.orEmpty().firstOrNull { it.name == pick.name }
+        if (voice == null || engine.setVoice(voice) != TextToSpeech.SUCCESS) {
+            return VoiceLanguagePrefs.missingVoiceMessage(setting)
+        }
+        return null
+    }
+
     fun speak(text: String, onDone: () -> Unit, onError: (String) -> Unit) {
         val engine = tts
         if (engine == null || !ttsReady) {
             onError("This phone's text-to-speech is not ready")
             return
         }
+        applyLanguage(engine)?.let { onError(it); return }
         val id = UUID.randomUUID().toString()
         engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) { speaking = true }
@@ -222,14 +261,15 @@ class PlatformVoice(
 }
 
 /**
- * The single source of the speech-recognition language (BCP-47 tag). The system locale (e.g. nl-NL) must not
- * pick it. RFC-0216 S4's voice-language setting plugs in here; until then ANZU's product language is used.
+ * The speech-recognition language (BCP-47 tag) handed to Android recognizers. The system locale (e.g. nl-NL)
+ * must not pick it. RFC-0216 S4: it is always derived from the voice-language setting (one source), resolved
+ * to a regioned tag because recognizers reject bare tags (`en` → `en-US`).
  */
 fun interface SttLanguageSource {
     fun languageTag(): String
 
     companion object {
-        val ANZU_DEFAULT = SttLanguageSource { "en-US" }
+        fun fromVoiceLanguage(setting: () -> VoiceLanguageSetting) = SttLanguageSource { setting().recognizerLanguage }
     }
 }
 

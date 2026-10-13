@@ -1125,6 +1125,7 @@ private fun formatStorageBytes(bytes: Long): String {
         }
         item { CompanionModelsSection(deviceChrome, devicePack, state, pickModelFile) }
         item { PhoneNotesSection(model, state) }
+        item { VoiceLanguageSettings(model, state) }
         item { CompanionVoicePacksSection(model, state) }
         item {
             Text("Voice & presence", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
