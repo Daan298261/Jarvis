@@ -1560,6 +1560,47 @@ def _settle(row: dict, unknowns: list[str]) -> None:
     row["status"] = "partial" if row["unknowns"] else "investigating"
 
 
+def _obfuscation_view(doc: object, unknowns: list[str]) -> dict:
+    """Summary view of obfuscation.json; every missing or malformed field becomes ``None`` plus an unknown."""
+    def bad(field: str) -> None:
+        unknowns.append(f"APK metadata obfuscation.json is missing or has a malformed '{field}'; "
+                        "that part of the obfuscation summary is unknown.")
+
+    if not isinstance(doc, dict):
+        bad("document")
+        doc = {}
+
+    def field(name: str, types: tuple[type, ...]):
+        value = doc.get(name)
+        if isinstance(value, bool) and bool not in types:
+            value = None
+        if not isinstance(value, types):
+            bad(name)
+            return None
+        return value
+
+    state = field("state", (str,))
+    top = field("top_level_classes", (int,))
+    ratio = field("obfuscated_ratio", (int, float))
+    heavy = field("heavily_obfuscated", (bool,))
+    protectors_raw = field("protectors", (list,))
+    protectors = None
+    if protectors_raw is not None:
+        protectors = [p["protector"] for p in protectors_raw if isinstance(p, dict) and isinstance(p.get("protector"), str)]
+        if len(protectors) != len(protectors_raw):
+            bad("protectors[].protector")
+    markers = field("jadx_markers", (dict,))
+    marker_total = None
+    if markers is not None:
+        counts = [markers.get(k) for k in ("warnings", "errors", "bad_code_methods")]
+        if all(isinstance(c, int) and not isinstance(c, bool) for c in counts):
+            marker_total = sum(counts)
+        else:
+            bad("jadx_markers.warnings/errors/bad_code_methods")
+    return {"state": state, "top_level_classes": top, "obfuscated_ratio": ratio, "heavily_obfuscated": heavy,
+            "protectors": protectors, "jadx_markers": marker_total}
+
+
 def _optional_metadata(ident: str, name: str, unknowns: list[str] | None = None) -> dict | None:
     """Load a metadata document that may not exist yet.
 
@@ -2640,13 +2681,7 @@ def summary(ident: str) -> dict:
     endpoints = _optional_metadata(ident, "endpoints", summary_unknowns)
     crypto = _optional_metadata(ident, "crypto", summary_unknowns)
     obfuscation = _optional_metadata(ident, "obfuscation", summary_unknowns)
-    obfuscation_view = obfuscation and {
-        "state": obfuscation["state"], "top_level_classes": obfuscation["top_level_classes"],
-        "obfuscated_ratio": obfuscation["obfuscated_ratio"],
-        "heavily_obfuscated": obfuscation["heavily_obfuscated"],
-        "protectors": [p["protector"] for p in obfuscation["protectors"]],
-        "jadx_markers": (obfuscation["jadx_markers"]["warnings"] + obfuscation["jadx_markers"]["errors"]
-                         + obfuscation["jadx_markers"]["bad_code_methods"])}
+    obfuscation_view = _obfuscation_view(obfuscation, summary_unknowns) if obfuscation is not None else None
     return {"id": ident, "status": row["status"], "format": apk["format"], "sha256": row.get("sha256"),
             "parts": len(apk["parts"]), "obb": len(apk["obb"]), "native_abis": abis,
             "native_libs": sum(len(p["native_libs"]) for p in apk["parts"]),

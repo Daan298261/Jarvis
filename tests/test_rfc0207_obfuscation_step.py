@@ -177,3 +177,27 @@ def test_class_table_of_real_d8_fixture(tmp_path):
     assert result["state"] == "assessed" and result["class_count"] == len(descriptors)
     assert result["heavily_obfuscated"] is False and result["protectors"] == []
     assert result["unknowns"] == [] and result["jadx_markers"]["scanned"] is False
+
+
+def test_summary_with_partial_obfuscation_metadata(env):
+    src, fake = env
+    row = _decompiled(src, fake)
+    apk_sidecar.apk_assess_obfuscation(row["id"])
+    meta = store.directory(row["id"]) / "apk" / "metadata" / "obfuscation.json"
+    doc = json.loads(meta.read_text(encoding="utf-8"))
+    for key in ("top_level_classes", "jadx_markers"):
+        doc.pop(key)
+    doc["protectors"] = [{"class": "x"}]
+    store.atomic_json(meta, doc)
+    res = TestClient(app).get(f"/api/investigations/{row['id']}/apk/summary")
+    assert res.status_code == 200
+    view = res.json()["obfuscation"]
+    assert view["state"] == "assessed" and view["heavily_obfuscated"] is True
+    assert view["top_level_classes"] is None and view["jadx_markers"] is None and view["protectors"] == []
+    unknowns = res.json()["unknowns"]
+    for field in ("top_level_classes", "jadx_markers", "protectors[].protector"):
+        assert any(f"malformed '{field}'" in u for u in unknowns)
+
+    store.atomic_json(meta, ["not", "an", "object"])
+    res = TestClient(app).get(f"/api/investigations/{row['id']}/apk/summary")
+    assert res.status_code == 200 and res.json()["obfuscation"]["state"] is None

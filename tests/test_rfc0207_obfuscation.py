@@ -303,3 +303,23 @@ def test_unopenable_part_is_unknown(tmp_path):
     result = obf.assess(apk_root, parts)
 
     assert "APK part bad.apk could not be opened for class-table assessment." in result["unknowns"]
+
+
+def test_scan_jadx_markers_symlinks_are_unknowns_not_followed(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "Evil.java").write_text("/* JADX ERROR: outside */\n")
+    sources = tmp_path / "apk" / "jadx" / "sources"
+    (sources / "a").mkdir(parents=True)
+    (sources / "a" / "A.java").write_text("class A {}\n")
+    (sources / "a" / "Link.java").symlink_to(outside / "Evil.java")
+    (sources / "linkdir").symlink_to(outside, target_is_directory=True)
+
+    result = obf.scan_jadx_markers(sources)
+    assert result["java_files"] == 1
+    assert result["errors"] == 0
+    assert result["symlinks"] == ["a/Link.java", "linkdir/"]
+
+    doc = obf.assess(tmp_path / "apk", [])
+    assert any("a/Link.java is a symlink and was not followed" in u for u in doc["unknowns"])
+    assert any("directory linkdir/ is a symlink and was not followed" in u for u in doc["unknowns"])

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import struct
 import threading
@@ -173,6 +174,7 @@ def scan_jadx_markers(sources: Path, cancel: threading.Event | None = None) -> d
             "oversized": [],
             "truncated": False,
             "unreadable": [],
+            "symlinks": [],
         }
 
     java_files = 0
@@ -183,10 +185,30 @@ def scan_jadx_markers(sources: Path, cancel: threading.Event | None = None) -> d
     samples: list[dict] = []
     oversized: list[str] = []
     unreadable: list[str] = []
+    symlinks: list[str] = []
     truncated = False
     total_bytes = 0
 
-    for p in sorted(p for p in sources.rglob("*.java") if p.is_file() and not p.is_symlink()):
+    candidates: list[Path] = []
+    # os.walk(followlinks=False) never descends into symlinked directories; a symlinked directory
+    # is reported (its contents could point anywhere) and a symlinked .java file is never read.
+    for dirpath, dirnames, filenames in os.walk(sources, followlinks=False):
+        base = Path(dirpath)
+        for d in sorted(dirnames):
+            if (base / d).is_symlink():
+                symlinks.append((base / d).relative_to(sources).as_posix() + "/")
+        dirnames[:] = sorted(d for d in dirnames if not (base / d).is_symlink())
+        for name in filenames:
+            if not name.endswith(".java"):
+                continue
+            path = base / name
+            if path.is_symlink():
+                symlinks.append(path.relative_to(sources).as_posix())
+            elif path.is_file():
+                candidates.append(path)
+    symlinks.sort()
+
+    for p in sorted(candidates):
         _check_cancel(cancel, "jadx marker scan")
 
         rel = p.relative_to(sources).as_posix()
@@ -247,6 +269,7 @@ def scan_jadx_markers(sources: Path, cancel: threading.Event | None = None) -> d
         "oversized": oversized,
         "truncated": truncated,
         "unreadable": unreadable,
+        "symlinks": symlinks,
     }
 
 
@@ -350,6 +373,10 @@ def assess(apk_root: Path, parts: list[dict], cancel: threading.Event | None = N
 
     for bad in markers["unreadable"]:
         unknowns.append(f"Recovered Java file {bad} could not be read; it was not checked for jadx markers.")
+
+    for link in markers.get("symlinks", []):
+        kind = "directory" if link.endswith("/") else "file"
+        unknowns.append(f"Recovered Java {kind} {link} is a symlink and was not followed; it was not checked for jadx markers.")
 
     state = "no_dex" if dex_parts == 0 else ("assessed" if dex_files else "unassessed")
     if state == "unassessed" and not truncated:
