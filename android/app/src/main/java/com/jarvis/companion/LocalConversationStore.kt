@@ -15,8 +15,9 @@ class LocalConversationStore(
     context: Context,
     crypto: OutboxQueueCrypto = AndroidKeystoreOutboxQueueCrypto("anzu-local-conversations-v1"),
     private val clock: () -> Long = System::currentTimeMillis,
+    onRecovered: (File) -> Unit = {},
 ) {
-    private val file = EncryptedJsonFile(File(context.noBackupFilesDir, "local-conversations"), crypto)
+    private val file = EncryptedJsonFile(File(context.noBackupFilesDir, "local-conversations"), crypto, clock, onRecovered)
 
     /** Newest first; each item has id, title, updated_at, message_count and local=true. */
     fun conversations(): List<JSONObject> {

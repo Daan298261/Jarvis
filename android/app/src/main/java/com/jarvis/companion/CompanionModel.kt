@@ -117,9 +117,9 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private var playerFile: File? = null
     private val outbox = Outbox(app)
     private val uploadOutbox = UploadOutbox(app)
-    private val offlineQueue = OutboxQueue(app)
-    private val localConversations = LocalConversationStore(app)
-    private val localNotes = LocalNotesStore(app)
+    private val offlineQueue = OutboxQueue(app, onRecovered = { reportStoreRecovery("offline messages waiting for the desktop") })
+    private val localConversations = LocalConversationStore(app, onRecovered = { reportStoreRecovery("conversations") })
+    private val localNotes = LocalNotesStore(app, onRecovered = { reportStoreRecovery("notes") })
     private val platformVoice = PlatformVoice(app)
     val packManager = CompanionPackManager(app)
     val voicePackManager = CompanionVoicePackManager(app)
@@ -137,6 +137,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private var onDeviceListening = false
     private var pickedTextForPrompt: String? = null
     private val heartbeat = LeaderHeartbeat()
+    @Volatile private var offlineSyncIncomplete = false
     private val networkChanged = Channel<Unit>(Channel.CONFLATED)
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     init {
@@ -269,6 +270,11 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         catch (e: Exception) { mutable.value = mutable.value.copy(error = e.message) }
         finally { mutable.value = mutable.value.copy(busy = false) }
     }
+    /** A phone store was unreadable and was moved aside; tell the owner instead of failing every send. */
+    private fun reportStoreRecovery(what: String) {
+        mutable.value = mutable.value.copy(error = EncryptedJsonFile.recoveryCopy(what))
+    }
+
     fun offlineStatusJson(): JSONObject = CompanionOfflineHooks.statusSnapshot(this)
 
     /** Loads phone-held conversations and notes; an unpaired phone reopens its latest conversation. */
@@ -539,9 +545,16 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             offlineQueueDepth = offlineQueue.pendingCount(),
         )
         publishVoiceRoute()
-        if (CompanionRouting.shouldSyncAfterLeaderReturn(wasOffline, true, offlineQueue.pendingCount())) {
+        if (CompanionRouting.shouldSyncAfterLeaderReturn(wasOffline || offlineSyncIncomplete, true, offlineQueue.pendingCount())) {
             mutable.value = mutable.value.copy(activity = CompanionOfflineStatus.desktopBackBanner())
-            syncOfflineTurns()
+            // A failed batch stays queued and is retried on the next poll; the desktop is still reachable.
+            offlineSyncIncomplete = true
+            runCatching { syncOfflineTurns() }
+                .onSuccess { offlineSyncIncomplete = false }
+                .onFailure {
+                    if (it is kotlinx.coroutines.CancellationException) throw it
+                    Log.w(TAG, "Offline turn sync failed; will retry: ${it.message}")
+                }
         }
         if (!LocalConversationStore.isLocal(mutable.value.conversationId)) cacheConversationSnapshot(payload.messages)
     }
@@ -727,6 +740,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                     text,
                     consequential = decision.consequential,
                     autoReplay = decision.autoReplay && !neverDone,
+                    conversationKey = conversationId,
                 ),
             )
             offlineQueue.append(
@@ -735,6 +749,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                     reply,
                     consequential = decision.consequential,
                     autoReplay = decision.autoReplay && !neverDone,
+                    conversationKey = conversationId,
                 ),
             )
         }
@@ -767,21 +782,22 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private suspend fun syncOfflineTurns() {
         val pending = offlineQueue.readAll().filter { StandaloneMode.shouldAutoReplay(it) }
         if (pending.isEmpty()) return
-        val turns = JSONArray()
-        pending.forEach { turns.put(it) }
-        val body = JSONObject().put("turns", turns)
-        val current = mutable.value.conversationId
-        val target = if (LocalConversationStore.isLocal(current)) localConversations.linkedDesktopId(current!!) else current
-        target?.let { body.put("conversation_id", it) }
-        val result = api.json("/sync/offline-turns", "POST", body)
-        val syncedIds = pending.map { it.optString("client_message_id").ifBlank { it.optString("request_id") } }
-        offlineQueue.markSynced(syncedIds)
+        // One request per conversation, so each offline chat lands in its own desktop thread.
+        val joined = HashMap<String, String>()
+        for (batch in OfflineSyncPlanner.plan(pending) { localConversations.linkedDesktopId(it) }) {
+            val target = batch.desktopConversationId ?: joined[batch.conversationKey]
+            val body = JSONObject().put("turns", JSONArray().also { arr -> batch.turns.forEach { arr.put(OfflineSyncPlanner.wireTurn(it)) } })
+            target?.let { body.put("conversation_id", it) }
+            val result = api.json("/sync/offline-turns", "POST", body)
+            offlineQueue.markSynced(batch.turns.map(OfflineSyncPlanner::turnId))
+            val synced = result.optString("conversation_id").takeIf { it.isNotBlank() }
+            if (synced != null && LocalConversationStore.isLocal(batch.conversationKey)) {
+                joined[batch.conversationKey] = synced
+                if (target == null) localConversations.linkDesktop(batch.conversationKey, synced)
+            }
+        }
         offlineQueue.pruneSynced()
-        val synced = result.optString("conversation_id").takeIf { it.isNotBlank() }
-        if (synced != null && LocalConversationStore.isLocal(current)) localConversations.linkDesktop(current!!, synced)
         mutable.value = mutable.value.copy(
-            // Keep showing the phone conversation; it now continues the desktop one when the owner sends next.
-            conversationId = if (LocalConversationStore.isLocal(current)) current else synced ?: current,
             offlineQueueDepth = offlineQueue.pendingCount(),
             activity = CompanionOfflineStatus.desktopBackBanner(),
         )
@@ -945,8 +961,8 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         val conversationId = ensureLocalConversation(userText)
         localConversations.append(conversationId, userMessage)
         localConversations.append(conversationId, assistantMessage)
-        offlineQueue.append(StandaloneActions.userTurnJson(userId, userText, consequential, autoReplay = !consequential))
-        offlineQueue.append(StandaloneActions.assistantTurnJson(assistantId, assistantText, consequential, autoReplay = !consequential))
+        offlineQueue.append(StandaloneActions.userTurnJson(userId, userText, consequential, autoReplay = !consequential, conversationKey = conversationId))
+        offlineQueue.append(StandaloneActions.assistantTurnJson(assistantId, assistantText, consequential, autoReplay = !consequential, conversationKey = conversationId))
         mutable.value = mutable.value.copy(
             messages = mutable.value.messages + userMessage + assistantMessage,
             conversationId = conversationId,

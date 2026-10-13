@@ -1,7 +1,6 @@
 package com.jarvis.companion
 
 import android.content.Context
-import android.util.AtomicFile
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -12,77 +11,56 @@ import java.io.File
  */
 class OutboxQueue(
     context: Context,
-    private val crypto: OutboxQueueCrypto = AndroidKeystoreOutboxQueueCrypto("jarvis-offline-queue-v1"),
+    crypto: OutboxQueueCrypto = AndroidKeystoreOutboxQueueCrypto("jarvis-offline-queue-v1"),
+    onRecovered: (File) -> Unit = {},
 ) {
-    private val file = AtomicFile(File(context.noBackupFilesDir, "offline-turn-queue"))
+    private val file = EncryptedJsonFile(File(context.noBackupFilesDir, "offline-turn-queue"), crypto, onRecovered = onRecovered)
 
     fun readAll(): List<JSONObject> {
-        val root = readRoot()
-        val items = root.optJSONArray("items") ?: JSONArray()
+        val items = file.read().optJSONArray("items") ?: JSONArray()
         return (0 until items.length()).mapNotNull { items.optJSONObject(it) }
     }
 
     fun pendingCount(): Int = readAll().count { !it.optBoolean("synced", false) }
 
     fun append(turn: JSONObject) {
-        val root = readRoot()
-        val items = root.optJSONArray("items") ?: JSONArray()
-        val copy = JSONObject(turn.toString())
-        copy.put("queued_at", System.currentTimeMillis())
-        copy.put("synced", false)
-        items.put(copy)
-        root.put("items", items)
-        writeRoot(root)
+        file.update { root ->
+            val items = root.optJSONArray("items") ?: JSONArray()
+            val copy = JSONObject(turn.toString())
+            copy.put("queued_at", System.currentTimeMillis())
+            copy.put("synced", false)
+            items.put(copy)
+            root.put("items", items)
+        }
     }
 
     fun markSynced(clientMessageIds: Collection<String>) {
         if (clientMessageIds.isEmpty()) return
-        val root = readRoot()
-        val items = root.optJSONArray("items") ?: JSONArray()
         val wanted = clientMessageIds.toSet()
-        for (index in 0 until items.length()) {
-            val item = items.optJSONObject(index) ?: continue
-            val id = item.optString("client_message_id").ifBlank { item.optString("request_id") }
-            if (wanted.contains(id)) item.put("synced", true)
+        file.update { root ->
+            val items = root.optJSONArray("items") ?: JSONArray()
+            for (index in 0 until items.length()) {
+                val item = items.optJSONObject(index) ?: continue
+                val id = item.optString("client_message_id").ifBlank { item.optString("request_id") }
+                if (wanted.contains(id)) item.put("synced", true)
+            }
+            root.put("items", items)
         }
-        root.put("items", items)
-        writeRoot(root)
     }
 
     fun pruneSynced() {
-        val root = readRoot()
-        val items = root.optJSONArray("items") ?: JSONArray()
-        val kept = JSONArray()
-        for (index in 0 until items.length()) {
-            val item = items.optJSONObject(index) ?: continue
-            if (!item.optBoolean("synced", false)) kept.put(item)
+        file.update { root ->
+            val items = root.optJSONArray("items") ?: JSONArray()
+            val kept = JSONArray()
+            for (index in 0 until items.length()) {
+                val item = items.optJSONObject(index) ?: continue
+                if (!item.optBoolean("synced", false)) kept.put(item)
+            }
+            root.put("items", kept)
         }
-        root.put("items", kept)
-        writeRoot(root)
     }
 
     fun clear() {
         file.delete()
-    }
-
-    private fun readRoot(): JSONObject {
-        val bytes = try {
-            file.openRead().use { it.readBytes() }
-        } catch (_: java.io.FileNotFoundException) {
-            return JSONObject().put("items", JSONArray())
-        }
-        return JSONObject(crypto.decrypt(bytes).toString(Charsets.UTF_8))
-    }
-
-    private fun writeRoot(value: JSONObject) {
-        val bytes = crypto.encrypt(value.toString().toByteArray())
-        val stream = file.startWrite()
-        try {
-            stream.write(bytes)
-            file.finishWrite(stream)
-        } catch (error: Exception) {
-            file.failWrite(stream)
-            throw error
-        }
     }
 }

@@ -399,8 +399,15 @@ object StandaloneActions {
             name.endsWith(".txt") || name.endsWith(".md") || name.endsWith(".markdown")
     }
 
-    fun userTurnJson(id: String, text: String, consequential: Boolean, autoReplay: Boolean): JSONObject =
+    fun userTurnJson(
+        id: String,
+        text: String,
+        consequential: Boolean,
+        autoReplay: Boolean,
+        conversationKey: String? = null,
+    ): JSONObject =
         JSONObject()
+            .put(OfflineSyncPlanner.CONVERSATION_KEY, conversationKey.orEmpty())
             .put("request_id", id)
             .put("client_message_id", id)
             .put("role", "user")
@@ -409,8 +416,15 @@ object StandaloneActions {
             .put("consequential", consequential)
             .put("auto_replay", autoReplay)
 
-    fun assistantTurnJson(id: String, text: String, consequential: Boolean, autoReplay: Boolean): JSONObject =
+    fun assistantTurnJson(
+        id: String,
+        text: String,
+        consequential: Boolean,
+        autoReplay: Boolean,
+        conversationKey: String? = null,
+    ): JSONObject =
         JSONObject()
+            .put(OfflineSyncPlanner.CONVERSATION_KEY, conversationKey.orEmpty())
             .put("request_id", id)
             .put("client_message_id", id)
             .put("role", "assistant")

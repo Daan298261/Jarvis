@@ -27,7 +27,7 @@ class LocalStoresTest {
     @Test
     fun conversationsPersistAcrossInstancesNewestFirst() {
         val crypto = JvmAesOutboxQueueCrypto()
-        val store = LocalConversationStore(context, crypto) { now }
+        val store = LocalConversationStore(context, crypto, clock = { now })
         val first = store.create("What is the capital of France?")
         store.append(first, StandaloneActions.chatMessage("u1", "user", "What is the capital of France?", StandaloneActions.ORIGIN_USER))
         now = 2_000L
@@ -36,7 +36,7 @@ class LocalStoresTest {
         now = 3_000L
         store.append(first, StandaloneActions.chatMessage("a1", "assistant", "Paris.", StandaloneActions.ORIGIN_ASSISTANT))
 
-        val reopened = LocalConversationStore(context, crypto) { now }
+        val reopened = LocalConversationStore(context, crypto, clock = { now })
         val list = reopened.conversations()
         assertEquals(listOf(first, second), list.map { it.getString("id") })
         assertTrue(list.all { it.getBoolean("local") })
@@ -49,7 +49,7 @@ class LocalStoresTest {
 
     @Test
     fun storedBytesAreEncrypted() {
-        val store = LocalConversationStore(context, JvmAesOutboxQueueCrypto()) { now }
+        val store = LocalConversationStore(context, JvmAesOutboxQueueCrypto(), clock = { now })
         val id = store.create("case 4471 suspect address")
         store.append(id, StandaloneActions.chatMessage("u", "user", "case 4471 suspect address", StandaloneActions.ORIGIN_USER))
         val raw = File(context.noBackupFilesDir, "local-conversations").readBytes().toString(Charsets.ISO_8859_1)
@@ -58,7 +58,7 @@ class LocalStoresTest {
 
     @Test
     fun localIdsLinkAndDelete() {
-        val store = LocalConversationStore(context, JvmAesOutboxQueueCrypto()) { now }
+        val store = LocalConversationStore(context, JvmAesOutboxQueueCrypto(), clock = { now })
         val id = store.create("x")
         assertTrue(LocalConversationStore.isLocal(id))
         assertFalse(LocalConversationStore.isLocal("abc"))
@@ -72,14 +72,14 @@ class LocalStoresTest {
 
     @Test
     fun localConversationNeverLinksToAnotherLocalId() {
-        val store = LocalConversationStore(context, JvmAesOutboxQueueCrypto()) { now }
+        val store = LocalConversationStore(context, JvmAesOutboxQueueCrypto(), clock = { now })
         val id = store.create("x", linkedDesktopId = "local-other")
         assertNull(store.linkedDesktopId(id))
     }
 
     @Test
     fun messageHistoryIsBounded() {
-        val store = LocalConversationStore(context, JvmAesOutboxQueueCrypto()) { now }
+        val store = LocalConversationStore(context, JvmAesOutboxQueueCrypto(), clock = { now })
         val id = store.create("long")
         repeat(LocalConversationStore.MAX_MESSAGES + 5) { i ->
             store.append(id, StandaloneActions.chatMessage("m$i", "user", "m$i", StandaloneActions.ORIGIN_USER))
@@ -101,11 +101,11 @@ class LocalStoresTest {
     @Test
     fun notesPersistNewestFirstAndDelete() {
         val crypto = JvmAesOutboxQueueCrypto()
-        val notes = LocalNotesStore(context, crypto) { now }
+        val notes = LocalNotesStore(context, crypto, clock = { now })
         val first = notes.add("buy milk")
         now = 5_000L
         notes.add("  call the lab  ")
-        val reopened = LocalNotesStore(context, crypto) { now }
+        val reopened = LocalNotesStore(context, crypto, clock = { now })
         assertEquals(listOf("call the lab", "buy milk"), reopened.notes().map { it.getString("text") })
         reopened.delete(first.getString("id"))
         assertEquals(listOf("call the lab"), reopened.notes().map { it.getString("text") })
@@ -113,6 +113,6 @@ class LocalStoresTest {
 
     @Test(expected = IllegalArgumentException::class)
     fun emptyNoteIsRejected() {
-        LocalNotesStore(context, JvmAesOutboxQueueCrypto()) { now }.add("   ")
+        LocalNotesStore(context, JvmAesOutboxQueueCrypto(), clock = { now }).add("   ")
     }
 }
