@@ -1,7 +1,9 @@
 package com.jarvis.companion
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.speech.RecognitionListener
@@ -10,6 +12,7 @@ import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
+import androidx.core.content.ContextCompat
 import java.util.Locale
 import java.util.UUID
 
@@ -21,7 +24,10 @@ private const val TAG = "PlatformVoice"
  * on-device recognizer so it keeps working in airplane mode when the phone has the language pack.
  * All recognizer calls must happen on the main thread.
  */
-class PlatformVoice(private val context: Context) {
+class PlatformVoice(
+    private val context: Context,
+    private val sttLanguage: SttLanguageSource = SttLanguageSource.ANZU_DEFAULT,
+) {
     private var recognizer: SpeechRecognizer? = null
     @Volatile var ttsReady: Boolean = false
         private set
@@ -30,6 +36,9 @@ class PlatformVoice(private val context: Context) {
         private set
     @Volatile var speaking: Boolean = false
         private set
+    @Volatile private var stopRequested: Boolean = false
+    /** Bumped on every startListening/cancel so a previous session's late callbacks are ignored. */
+    private var session: Int = 0
 
     init {
         tts = TextToSpeech(context.applicationContext) { status ->
@@ -38,49 +47,96 @@ class PlatformVoice(private val context: Context) {
         }
     }
 
-    fun sttAvailable(): Boolean = onDeviceRecognizerAvailable() || SpeechRecognizer.isRecognitionAvailable(context)
+    fun sttAvailable(): Boolean = recognizerCandidates().isNotEmpty()
 
     private fun onDeviceRecognizerAvailable(): Boolean =
         Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
 
+    private fun recognizerCandidates(): List<PlatformRecognizerKind> = PlatformSttPlan.candidates(
+        onDeviceAvailable = onDeviceRecognizerAvailable(),
+        defaultAvailable = SpeechRecognizer.isRecognitionAvailable(context),
+    )
+
     fun startListening(onPartial: (String) -> Unit, onResult: (String) -> Unit, onError: (String) -> Unit) {
-        stopListening()
-        val next = if (onDeviceRecognizerAvailable()) SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
-        else SpeechRecognizer.createSpeechRecognizer(context)
+        // Cancel + destroy any previous recognizer first: its late onResults/onError must not reach this session.
+        cancelListening()
+        stopRequested = false
+        val current = session
+        val languageTag = sttLanguage.languageTag()
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            onError(errorCopy(SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS, languageTag))
+            return
+        }
+        val candidates = recognizerCandidates()
+        if (candidates.isEmpty()) {
+            onError(PlatformSttPlan.NO_RECOGNIZER_COPY)
+            return
+        }
+        listening = true
+        attempt(current, languageTag, candidates, 0, onPartial, onResult, onError)
+    }
+
+    private fun attempt(
+        current: Int,
+        languageTag: String,
+        candidates: List<PlatformRecognizerKind>,
+        index: Int,
+        onPartial: (String) -> Unit,
+        onResult: (String) -> Unit,
+        onError: (String) -> Unit,
+    ) {
+        val kind = candidates[index]
+        val next = when (kind) {
+            PlatformRecognizerKind.ON_DEVICE -> SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+            PlatformRecognizerKind.DEFAULT -> SpeechRecognizer.createSpeechRecognizer(context)
+        }
+        var heardSpeech = false
+        fun stale() = current != session || recognizer !== next
         next.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {}
-            override fun onBeginningOfSpeech() {}
+            override fun onBeginningOfSpeech() { if (!stale()) heardSpeech = true }
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
             override fun onPartialResults(partialResults: Bundle?) {
+                if (stale()) return
                 bestResult(partialResults)?.let(onPartial)
             }
             override fun onResults(results: Bundle?) {
+                if (stale()) return
                 listening = false
                 release()
                 val text = bestResult(results)
-                if (text.isNullOrBlank()) onError(errorCopy(SpeechRecognizer.ERROR_NO_MATCH)) else onResult(text)
+                if (text.isNullOrBlank()) onError(errorCopy(SpeechRecognizer.ERROR_NO_MATCH, languageTag)) else onResult(text)
             }
             override fun onError(error: Int) {
-                listening = false
+                if (stale()) {
+                    Log.w(TAG, "Ignoring late speech recognition error $error from a previous session")
+                    return
+                }
                 release()
-                Log.w(TAG, "Built-in speech recognition error $error")
-                onError(errorCopy(error))
+                Log.w(TAG, "Built-in speech recognition error $error from $kind recognizer")
+                if (listening && !stopRequested && PlatformSttPlan.shouldFallBack(error, heardSpeech, hasNext = index + 1 < candidates.size)) {
+                    attempt(current, languageTag, candidates, index + 1, onPartial, onResult, onError)
+                    return
+                }
+                listening = false
+                onError(errorCopy(error, languageTag))
             }
         })
         recognizer = next
-        listening = true
-        next.startListening(recognizerIntent())
+        next.startListening(recognizerIntent(languageTag))
     }
 
     /** Ends capture; the recognizer then delivers its final result through the listener. */
     fun stopListening() {
+        stopRequested = true
         recognizer?.stopListening()
     }
 
     fun cancelListening() {
+        session++
         listening = false
         recognizer?.cancel()
         release()
@@ -137,21 +193,73 @@ class PlatformVoice(private val context: Context) {
     private fun bestResult(bundle: Bundle?): String? =
         bundle?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }
 
-    private fun recognizerIntent(): Intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+    private fun recognizerIntent(languageTag: String): Intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
         .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-        .putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+        .putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag)
         .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
 
     companion object {
-        fun errorCopy(code: Int): String = when (code) {
+        fun languageDisplayName(languageTag: String): String =
+            Locale.forLanguageTag(languageTag).getDisplayName(Locale.ENGLISH).ifBlank { languageTag }
+
+        fun errorCopy(code: Int, languageTag: String): String = when (code) {
             SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "I didn't catch that. Tap the mic and try again."
-            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission is required to talk to ANZU."
+            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
+                "Microphone permission is required to talk to ANZU. Allow it in Settings → Apps → ANZU → Permissions → Microphone."
             SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT, SpeechRecognizer.ERROR_SERVER ->
                 "This phone has no offline speech pack for your language. Install one in Android settings (Speech recognition → offline languages) or download ANZU's voice pack in More → Voice."
+            SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED, SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ->
+                "This phone's speech recognizer has no ${languageDisplayName(languageTag)} language pack. Download it in Android settings (Google → Speech recognition → offline languages) or download ANZU's voice pack in More → Voice."
+            SpeechRecognizer.ERROR_SERVER_DISCONNECTED, SpeechRecognizer.ERROR_CANNOT_CHECK_SUPPORT ->
+                "This phone's speech service stopped responding. Make sure Speech Recognition and Synthesis from Google is installed and enabled, or download ANZU's voice pack in More → Voice."
+            SpeechRecognizer.ERROR_TOO_MANY_REQUESTS -> "Speech recognition is rate-limited right now. Try again in a moment."
             SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Speech recognition is busy. Try again in a moment."
-            SpeechRecognizer.ERROR_AUDIO -> "The microphone is unavailable."
+            SpeechRecognizer.ERROR_AUDIO -> "The microphone is unavailable. Another app or a call may be using it."
             else -> "Speech recognition failed on this phone (code $code)."
         }
     }
+}
+
+/**
+ * The single source of the speech-recognition language (BCP-47 tag). The system locale (e.g. nl-NL) must not
+ * pick it. RFC-0216 S4's voice-language setting plugs in here; until then ANZU's product language is used.
+ */
+fun interface SttLanguageSource {
+    fun languageTag(): String
+
+    companion object {
+        val ANZU_DEFAULT = SttLanguageSource { "en-US" }
+    }
+}
+
+enum class PlatformRecognizerKind { ON_DEVICE, DEFAULT }
+
+/**
+ * Which Android recognizer to try, in order, and when a failure means "try the next one" (RFC-0216 S3).
+ *
+ * Samsung phones report an on-device recognition service, but it often lacks the requested language pack
+ * and answers ERROR_LANGUAGE_NOT_SUPPORTED / ERROR_LANGUAGE_UNAVAILABLE (or drops the binding) before any
+ * audio is captured. That must fall through to the phone's default recognizer instead of ending the listen.
+ */
+object PlatformSttPlan {
+    const val NO_RECOGNIZER_COPY =
+        "This phone has no speech recognizer ANZU can use. Install or enable Speech Recognition and Synthesis from Google, or download ANZU's voice pack in More → Voice."
+
+    private val FALLBACK_ERRORS = setOf(
+        SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED,
+        SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE,
+        SpeechRecognizer.ERROR_CANNOT_CHECK_SUPPORT,
+        SpeechRecognizer.ERROR_SERVER_DISCONNECTED,
+        SpeechRecognizer.ERROR_CLIENT,
+    )
+
+    fun candidates(onDeviceAvailable: Boolean, defaultAvailable: Boolean): List<PlatformRecognizerKind> = buildList {
+        if (onDeviceAvailable) add(PlatformRecognizerKind.ON_DEVICE)
+        if (defaultAvailable) add(PlatformRecognizerKind.DEFAULT)
+    }
+
+    /** Fall back only for recognizer/binding failures that happened before the owner started speaking. */
+    fun shouldFallBack(error: Int, heardSpeech: Boolean, hasNext: Boolean): Boolean =
+        hasNext && !heardSpeech && error in FALLBACK_ERRORS
 }

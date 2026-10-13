@@ -122,7 +122,7 @@ class MainActivity : FragmentActivity() {
                     incomingCall = null
                 }
             }
-            val mic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) model.toggleRecord() }
+            val mic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) model.toggleRecord() else model.micPermissionDenied() }
             val modelFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(model::importModel) }
             val pickModelFile = { modelFile.launch(arrayOf("application/octet-stream", "*/*")) }
             val attachment = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let(model::upload) }
