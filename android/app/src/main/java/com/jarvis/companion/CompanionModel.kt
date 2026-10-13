@@ -1081,6 +1081,14 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** The owner refused RECORD_AUDIO from the mic button; say so instead of doing nothing. */
+    fun micPermissionDenied() {
+        mutable.value = mutable.value.copy(
+            recording = false,
+            error = PlatformVoice.errorCopy(android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS),
+        )
+    }
+
     private fun togglePlatformListen() {
         if (platformVoice.listening) {
             platformVoice.stopListening()
@@ -1124,7 +1132,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         stopSpeaking()
         val minBuf = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val record = try {
-            AudioRecord(AudioSource.VOICE_COMMUNICATION, 16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, minBuf * 2)
+            AudioRecord(AudioSource.VOICE_RECOGNITION, 16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, minBuf * 2)
         } catch (_: SecurityException) {
             mutable.value = mutable.value.copy(error = "Microphone permission is required for on-device voice")
             return@action
@@ -1201,7 +1209,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         session.startTurn()
         val minBuf = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val record = try {
-            AudioRecord(AudioSource.VOICE_COMMUNICATION, 16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, minBuf * 2)
+            AudioRecord(AudioSource.VOICE_RECOGNITION, 16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, minBuf * 2)
         } catch (_: SecurityException) {
             session.close()
             realtime = null
