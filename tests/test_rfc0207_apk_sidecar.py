@@ -1246,3 +1246,10 @@ def test_readelf_symbol_names_versioned_and_unversioned():
 """
     assert apk_sidecar._readelf_symbols(text) == {
         "__stack_chk_fail", "__android_log_print", "Java_org_anzu_test_MainActivity_stringFromJNI", "JNI_OnLoad"}
+
+
+def test_readelf_gnu_stack_flags_binutils_and_llvm_layouts():
+    head = "  GNU_STACK      0x000000 0x0000000000000000 0x0000000000000000 0x000000 0x000000 "
+    assert apk_sidecar._readelf_stack_flags(head + "RW  0\n") == "RW"      # binutils
+    assert apk_sidecar._readelf_stack_flags(head + "RWE 0x10\n") == "RWE"  # llvm-readelf
+    assert apk_sidecar._readelf_stack_flags("no program headers\n") is None

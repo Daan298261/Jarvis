@@ -1081,6 +1081,15 @@ def _readelf_symbols(text: str) -> set[str]:
     return set(_READELF_SYM.findall(text))
 
 
+# GNU_STACK flags sit between MemSiz and Align; binutils prints Align as "0", llvm-readelf as "0x10".
+_READELF_STACK = re.compile(r"GNU_STACK(?:[ \t]+\S+){5}[ \t]+([RWE ]+?)[ \t]+(?:0x)?[0-9A-Fa-f]+[ \t]*$", re.M)
+
+
+def _readelf_stack_flags(text: str) -> str | None:
+    m = _READELF_STACK.search(text)
+    return m.group(1).replace(" ", "") if m else None
+
+
 def _readelf_fallback(ident: str, path: Path) -> dict:
     """Ask binutils readelf in ANZU-REA for what the in-process reader could not get."""
     result = _wsl([READELF, "-W", "--dynamic", "--dyn-syms", "--program-headers", _linux_path(path)], READELF_TIMEOUT)
@@ -1093,11 +1102,11 @@ def _readelf_fallback(ident: str, path: Path) -> dict:
     jni = sorted(s for s in symbols if s.startswith("Java_") or s in {"JNI_OnLoad", "JNI_OnUnload"})
     full = bool(re.search(r"\((?:FLAGS|FLAGS_1)\)\s+.*\b(?:BIND_NOW|NOW)\b", text) or "(BIND_NOW)" in text)
     relro = "GNU_RELRO" in text
-    stack = re.search(r"GNU_STACK(?:\s+\S+){5}\s+([RWE ]+?)\s+0x", text)
+    stack = _readelf_stack_flags(text)
     return {"needed": needed, "soname": soname.group(1) if soname else None, "jni_exports": jni,
             "stack_canary": any(s == "__stack_chk_fail" for s in symbols),
             "relro": ("full" if full else "partial") if relro else "none",
-            "executable_stack": ("E" in stack.group(1)) if stack else None}
+            "executable_stack": ("E" in stack) if stack else None}
 
 
 def _native_candidates(row: dict, abi: str | None) -> tuple[list[dict], list[str]]:
