@@ -801,10 +801,17 @@ _SMALI_IV_INIT = re.compile(r"^Ljavax/crypto/spec/IvParameterSpec;-><init>\(")
 _SMALI_KEYSTORE_GET = re.compile(r"^Ljava/security/KeyStore;->getInstance\(Ljava/lang/String;\)")
 _SMALI_CONST_STRING_REG = re.compile(
     r'const-string(?:/jumbo)?\s+([vp]\d+)\s*,\s*"((?:[^"\\]|\\.)*)"')
-_SMALI_ARRAY_EMPTY = re.compile(
-    r"new-array\s+([vp]\d+)\s*,\s*([vp]\d+)\s*,\s*\[B|"
-    r"fill-array-data\s+([vp]\d+)\s*,")
-_SMALI_CONST_INT = re.compile(r"const(?:/\d+|/(?:high)?16)?\s+([vp]\d+)\s*,\s*(-?0x[0-9a-fA-F]+|-?\d+)")
+_SMALI_CONST_INT_REG = re.compile(r"const(?:/4|/16|/high16)?\s+([vp]\d+)\s*,\s*(-?0x[0-9a-fA-F]+|-?\d+)\s*$")
+_SMALI_NEW_ARRAY = re.compile(r"new-array\s+([vp]\d+)\s*,\s*([vp]\d+)\s*,\s*\[B\s*$")
+_SMALI_FILL_ARRAY = re.compile(r"fill-array-data\s+([vp]\d+)\s*,")
+_SMALI_APUT = re.compile(r"aput(?:-[a-z]+)?\s+[vp]\d+\s*,\s*([vp]\d+)\s*,")
+_SMALI_MOVE_RESULT = re.compile(r"move-result(?:-object|-wide)?\s+([vp]\d+)\s*$")
+_SMALI_TO_BYTES = re.compile(r"^(?:Ljava/lang/String;->getBytes\(|Landroid/util/Base64;->decode\(Ljava/lang/String;|"
+                             r"Ljava/util/Base64\$Decoder;->decode\(Ljava/lang/String;)")
+_SMALI_INSN = re.compile(r"\s*([a-z][a-z0-9-]*(?:/[a-z0-9]+)?)\s+([vp]\d+)\b")
+# Opcodes whose first register operand is only read (everything else writes it).
+_SMALI_NON_DEST = ("if-", "return", "throw", "monitor-", "aput", "iput", "sput", "fill-array-data",
+                   "filled-new-array", "packed-switch", "sparse-switch", "goto", "nop", "invoke-")
 
 
 def _entropy(value: str) -> float:
@@ -964,43 +971,22 @@ class CryptoScanner:
                                   detail + " (transformation constant in a DEX string pool; call site not confirmed)",
                                   severity=severity, value=text)
 
-    def _smali_reg_state(self, lines: list[tuple[int | None, str]]
-                         ) -> tuple[dict[str, list[tuple[int | None, str]]], dict[str, list[int | None]]]:
-        """Track const-string values and register clobbers (const/*, move*, new-array, move-result*)."""
-        regs: dict[str, list[tuple[int | None, str]]] = {}
-        clobbers: dict[str, list[int | None]] = {}
-        clobber_re = re.compile(
-            r"^\s*(?:const(?:/\d+|/(?:high)?16)?|move(?:-object)?(?:/\d+)?|move-result(?:-object|-wide)?|"
-            r"new-array|new-instance|aget(?:-object|-byte)?|iget(?:-object)?)\s+([vp]\d+)\b")
-        for line, text in lines:
-            for m in _SMALI_CONST_STRING_REG.finditer(text):
-                regs.setdefault(m.group(1), []).append((line, _smali_unescape(m.group(2))))
-            # const-string also writes the register; do not treat it as a clobber of itself.
-            if text.lstrip().startswith("const-string"):
-                continue
-            m = clobber_re.match(text)
-            if m:
-                clobbers.setdefault(m.group(1), []).append(line)
-        return regs, clobbers
+    @staticmethod
+    def _smali_dest_regs(text: str) -> list[str]:
+        """Registers an instruction writes: its first operand unless the opcode only reads it.
 
-    def _smali_last(self, regs: dict[str, list[tuple[int | None, str]]],
-                    clobbers: dict[str, list[int | None]], reg: str,
-                    before: int | None) -> tuple[int | None, str] | None:
-        """Most recent const-string into ``reg`` still live at ``before`` (not clobbered since)."""
-        hist = regs.get(reg) or []
-        for line, value in reversed(hist):
-            if before is not None and line is not None and line > before:
-                continue
-            later = False
-            for c_line in clobbers.get(reg) or []:
-                if c_line is None:
-                    continue
-                if (line is None or c_line > line) and (before is None or c_line <= before):
-                    later = True
-                    break
-            if not later:
-                return line, value
-        return None
+        Wide results (``*-wide`` and ``const-wide*``) also write the next register.
+        """
+        m = _SMALI_INSN.match(text)
+        if not m:
+            return []
+        op, reg = m.group(1), m.group(2)
+        if op.startswith(_SMALI_NON_DEST):
+            return []
+        regs = [reg]
+        if "-wide" in op:
+            regs.append(f"{reg[0]}{int(reg[1:]) + 1}")
+        return regs
 
     def _smali_invoke_args(self, text: str) -> list[str]:
         m = re.search(r"\{([^}]*)\}", text)
@@ -1017,29 +1003,91 @@ class CryptoScanner:
         return [x.strip() for x in body.split(",") if x.strip()]
 
     def _smali(self, src: Source) -> None:
-        """Scan recovered smali for const-string secrets and crypto invoke call sites."""
+        """Scan recovered smali for const-string secrets and crypto invoke call sites.
+
+        A forward pass tracks, per method, what each register holds: a string literal, an int
+        constant, bytes derived from a literal (String.getBytes / Base64.decode), or a byte array
+        from new-array (its size and whether anything wrote to it). State resets at every
+        ``.method`` / ``.end method``, and any instruction whose first operand is a destination
+        clobbers that register.
+        """
         lines = src.lines
-        regs, clobbers = self._smali_reg_state(lines)
+        state: dict[str, tuple] = {}
+        pending: tuple | None = None
         for index, (line, text) in enumerate(lines):
             ref = _ref(src, line)
+            stripped = text.strip()
+            if stripped.startswith(".method") or stripped.startswith(".end method"):
+                state.clear()
+                pending = None
+                continue
+            if not stripped or stripped[0] in ".:#":
+                continue
             # Secrets in const-string operands (same rules as Java / resource literals).
-            if "const-string" in text:
-                for m in _SMALI_CONST_STRING.finditer(text):
-                    self._secrets(_smali_unescape(m.group(2)), ref, "smali", src.ref)
-            inv = _SMALI_INVOKE.search(text)
+            cs = _SMALI_CONST_STRING_REG.match(stripped)
+            if cs:
+                value = _smali_unescape(cs.group(2))
+                self._secrets(value, ref, "smali", src.ref)
+                state[cs.group(1)] = ("str", value)
+                pending = None
+                continue
+            ci = _SMALI_CONST_INT_REG.match(stripped)
+            if ci:
+                raw = ci.group(2)
+                state[ci.group(1)] = ("int", int(raw, 16) if "0x" in raw.lower() else int(raw))
+                pending = None
+                continue
+            na = _SMALI_NEW_ARRAY.match(stripped)
+            if na:
+                size = state.get(na.group(2))
+                state[na.group(1)] = ("array", size[1] if size and size[0] == "int" else None, "zero")
+                pending = None
+                continue
+            fa = _SMALI_FILL_ARRAY.match(stripped)
+            if fa:
+                cur = state.get(fa.group(1))
+                if cur and cur[0] == "array":
+                    state[fa.group(1)] = ("array", cur[1], "filled")
+                continue
+            ap = _SMALI_APUT.match(stripped)
+            if ap:
+                cur = state.get(ap.group(1))
+                if cur and cur[0] == "array":
+                    state[ap.group(1)] = ("array", cur[1], "written")
+                continue
+            mr = _SMALI_MOVE_RESULT.match(stripped)
+            if mr:
+                if pending is None:
+                    state.pop(mr.group(1), None)
+                else:
+                    state[mr.group(1)] = pending
+                for extra in self._smali_dest_regs(stripped)[1:]:
+                    state.pop(extra, None)
+                pending = None
+                continue
+            inv = _SMALI_INVOKE.search(stripped)
             if not inv:
+                for reg in self._smali_dest_regs(stripped):
+                    state.pop(reg, None)
+                pending = None
                 continue
             target = inv.group(1)
-            args = self._smali_invoke_args(text)
-            if _SMALI_CIPHER_GET.match(target) and len(args) >= 1:
-                lit = self._smali_last(regs, clobbers, args[0], line)
+            args = self._smali_invoke_args(stripped)
+            pending = None
+
+            def literal(reg: str) -> str | None:
+                v = state.get(reg)
+                return v[1] if v and v[0] == "str" else None
+
+            if _SMALI_CIPHER_GET.match(target) and args:
+                lit = literal(args[0])
                 if lit is not None:
-                    for rule, severity, detail in cipher_findings(lit[1]):
-                        self._add(rule, lit[1], ref, "smali", "high", detail, severity=severity, value=lit[1])
-            elif _SMALI_DIGEST_GET.match(target) and len(args) >= 1:
-                lit = self._smali_last(regs, clobbers, args[0], line)
+                    for rule, severity, detail in cipher_findings(lit):
+                        self._add(rule, lit, ref, "smali", "high", detail, severity=severity, value=lit)
+            elif _SMALI_DIGEST_GET.match(target) and args:
+                lit = literal(args[0])
                 if lit is not None:
-                    algorithm = lit[1].upper()
+                    algorithm = lit.upper()
                     if algorithm in {"MD5", "MD2", "MD4", "SHA-1", "SHA1", "SHA"}:
                         window = " ".join(t for _, t in lines[max(0, index - _HASH_WINDOW):index + _HASH_WINDOW + 1])
                         sensitive = bool(_SENSITIVE.search(window))
@@ -1049,63 +1097,49 @@ class CryptoScanner:
                                   "unsuitable there." if sensitive else
                                   f"{algorithm} used; acceptable for checksums or cache keys, not for security.",
                                   severity="warning" if sensitive else "info", value=algorithm, context=context)
-            elif _SMALI_KEY_INIT.match(target) and args:
-                # First arg after `this` is the key-byte array; look for a nearby const-string feeding it.
-                key_reg = args[1] if len(args) > 1 else args[0]
-                lit = self._smali_last(regs, clobbers, key_reg, line)
-                # Also accept a const-string into any register that then becomes the array via getBytes.
-                if lit is None:
-                    for prev_line, prev in reversed(lines[max(0, index - 12):index]):
-                        if "getBytes" in prev and "Ljava/lang/String;->getBytes" in prev:
-                            prev_args = self._smali_invoke_args(prev)
-                            if prev_args:
-                                lit = self._smali_last(regs, clobbers, prev_args[0], prev_line)
-                                if lit is not None:
-                                    break
-                if lit is not None:
-                    self._add("static_key", lit[1][:200], ref, "smali", "high",
+            elif _SMALI_KEY_INIT.match(target) and len(args) > 1:
+                held = state.get(args[1])  # args[0] is the SecretKeySpec being constructed
+                if held and held[0] == "bytes":
+                    self._add("static_key", held[1][:200], ref, "smali", "high",
                               "Key bytes come from a string literal. Use AndroidKeyStore or a KDF "
-                              "(PBKDF2/HKDF) instead.", value=lit[1][:200])
-                else:
-                    # Inline new-array / fill-array-data without a recovered literal still counts as static.
-                    for prev_line, prev in lines[max(0, index - 12):index + 1]:
-                        if "new-array" in prev or "fill-array-data" in prev:
-                            self._add("static_key", f"{src.ref}:{line}", ref, "smali", "medium",
-                                      "SecretKeySpec is constructed from an inline byte array; the exact key "
-                                      "bytes were not recovered as a string literal.",
-                                      value=f"inline-array@{line}")
-                            break
-            elif _SMALI_IV_INIT.match(target) and args:
-                iv_reg = args[1] if len(args) > 1 else args[0]
-                lit = self._smali_last(regs, clobbers, iv_reg, line)
-                if lit is not None:
-                    self._add("static_iv", lit[1][:200], ref, "smali", "high",
-                              "IV is derived from a string literal.", value=lit[1][:200])
-                else:
-                    for prev_line, prev in lines[max(0, index - 12):index + 1]:
-                        m = _SMALI_CONST_INT.search(prev)
-                        if "new-array" in prev:
-                            # const/16 vN, 0x10 ; new-array vM, vN, [B  → zero-filled IV of that length
-                            size_lit = None
-                            for look_line, look in reversed(lines[max(0, index - 16):index]):
-                                cm = _SMALI_CONST_INT.search(look)
-                                if cm:
-                                    raw = cm.group(2)
-                                    size_lit = int(raw, 16) if raw.lower().startswith("0x") or raw.startswith("-0x") else int(raw)
-                                    break
-                            detail = (f"IV is a zero-filled byte[{size_lit}]." if size_lit is not None
-                                      else "IV is an inline byte array.")
-                            self._add("static_iv", f"{src.ref}:{line}", ref, "smali", "high", detail,
-                                      value=f"inline-array@{line}")
-                            break
+                              "(PBKDF2/HKDF) instead.", value=held[1][:200])
+                elif held and held[0] == "array" and held[2] in {"zero", "filled"}:
+                    size = f"byte[{held[1]}]" if held[1] is not None else "byte[]"
+                    detail = (f"SecretKeySpec is constructed from a zero-filled {size} that nothing writes before "
+                              "the call." if held[2] == "zero" else
+                              f"SecretKeySpec is constructed from an inline {size} filled by fill-array-data; the "
+                              "key bytes are static.")
+                    self._add("static_key", f"{src.ref}:{line}", ref, "smali", "medium", detail,
+                              value=f"inline-array@{line}")
+            elif _SMALI_IV_INIT.match(target) and len(args) > 1:
+                held = state.get(args[1])
+                if held and held[0] == "bytes":
+                    self._add("static_iv", held[1][:200], ref, "smali", "high",
+                              "IV is derived from a string literal.", value=held[1][:200])
+                elif held and held[0] == "array" and held[2] in {"zero", "filled"}:
+                    size = f"byte[{held[1]}]" if held[1] is not None else "byte[]"
+                    detail = (f"IV is a zero-filled {size}." if held[2] == "zero" else
+                              f"IV is an inline {size} filled by fill-array-data.")
+                    self._add("static_iv", f"{src.ref}:{line}", ref, "smali", "high", detail,
+                              value=f"inline-array@{line}")
             elif _SMALI_KEYSTORE_GET.match(target) and args:
-                lit = self._smali_last(regs, clobbers, args[0], line)
+                lit = literal(args[0])
                 if lit is not None:
-                    value = lit[1]
+                    value = lit
                     if value == "AndroidKeyStore":
                         self._inventory("android_keystore", ref)
                     elif value in {"BKS", "PKCS12", "JKS", "BouncyCastle", "UBER"}:
                         self._inventory("software_keystore", ref, value)
+            if _SMALI_TO_BYTES.match(target) and args:
+                lit = literal(args[0])
+                if lit is not None:
+                    pending = ("bytes", lit)
+            elif not (_SMALI_KEY_INIT.match(target) or _SMALI_IV_INIT.match(target)):
+                # Any other callee may fill an array it receives (e.g. SecureRandom.nextBytes).
+                for reg in args:
+                    cur = state.get(reg)
+                    if cur and cur[0] == "array":
+                        state[reg] = ("array", cur[1], "written")
             # Method-name inventory for KeyGen / StrongBox / auth / KDF / SecretKeySpec / Cipher.
             if "Landroid/security/keystore/KeyGenParameterSpec" in target:
                 self._inventory("keygen_parameter_spec", ref)

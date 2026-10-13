@@ -3137,7 +3137,7 @@ def test_smali_endpoint_extraction(env):
     assert out["coverage"]["sources"]["smali"] == 1
     assert any("recovered smali" in x for x in out["limitations"])
     assert not any("smali" in u.lower() for u in out["unknowns"])
-    assert out["investigation_status"] in {"investigating", "partial"}
+    assert out["investigation_status"] == "partial"
 
 
 def test_smali_crypto_call_sites(env):
@@ -3250,3 +3250,112 @@ def test_smali_unescape_and_literals():
     ])
     assert list(apk_strings._smali_literals(src)) == [
         (1, "https://a.example.com"), (2, "wss://b.example.com/s")]
+
+
+def _smali_findings(body: str) -> dict[str, list[dict]]:
+    from app.reverse_engineering import apk_strings
+    lines = [(i + 1, t) for i, t in enumerate(body.splitlines())]
+    scanner = apk_strings.CryptoScanner()
+    scanner._smali(apk_strings.Source("smali", "x.smali", lines))
+    rules: dict[str, list[dict]] = {}
+    for f in scanner.findings():
+        rules.setdefault(f["rule"], []).append(f)
+    return rules
+
+
+_SMALI_HDR = ".class public Lx/Y;\n.super Ljava/lang/Object;\n"
+_CIPHER_CALL = "    invoke-static {v0}, Ljavax/crypto/Cipher;->getInstance(Ljava/lang/String;)Ljavax/crypto/Cipher;\n"
+
+
+def test_smali_register_state_resets_per_method():
+    body = _SMALI_HDR + (
+        ".method public a()V\n    .locals 1\n    const-string v0, \"AES/ECB/PKCS5Padding\"\n    return-void\n.end method\n"
+        ".method public b()V\n    .locals 1\n" + _CIPHER_CALL + "    return-void\n.end method\n")
+    assert "ecb_mode" not in _smali_findings(body)
+
+
+@pytest.mark.parametrize("clobber", [
+    "sget-object v0, Lx/Y;->f:Ljava/lang/String;",
+    "iget-object v0, p0, Lx/Y;->f:Ljava/lang/String;",
+    "iget-wide v0, p0, Lx/Y;->w:J",
+    "check-cast v0, Ljava/lang/String;",
+    "aget-object v0, v1, v2",
+    "aget-char v0, v1, v2",
+    "add-int/lit8 v0, v1, 0x1",
+    "move-wide v0, v2",
+    "move-exception v0",
+    "instance-of v0, v1, Ljava/lang/String;",
+    "array-length v0, v1",
+    "const-wide/16 v0, 0x0",
+])
+def test_smali_destination_clobbers(clobber):
+    body = _SMALI_HDR + (
+        ".method public a()V\n    .locals 3\n    const-string v0, \"AES/ECB/PKCS5Padding\"\n"
+        f"    {clobber}\n" + _CIPHER_CALL + "    return-void\n.end method\n")
+    assert "ecb_mode" not in _smali_findings(body)
+
+
+def test_smali_wide_clobbers_next_register():
+    body = _SMALI_HDR + (
+        ".method public a()V\n    .locals 3\n    const-string v1, \"AES/ECB/PKCS5Padding\"\n"
+        "    move-wide v0, v2\n"
+        "    invoke-static {v1}, Ljavax/crypto/Cipher;->getInstance(Ljava/lang/String;)Ljavax/crypto/Cipher;\n"
+        "    return-void\n.end method\n")
+    assert "ecb_mode" not in _smali_findings(body)
+
+
+def test_smali_read_only_operands_do_not_clobber():
+    body = _SMALI_HDR + (
+        ".method public a()V\n    .locals 3\n    const-string v0, \"AES/ECB/PKCS5Padding\"\n"
+        "    if-eqz v0, :cond_0\n    iput-object v0, p0, Lx/Y;->f:Ljava/lang/String;\n"
+        "    :cond_0\n" + _CIPHER_CALL + "    return-void\n.end method\n")
+    assert "ecb_mode" in _smali_findings(body)
+
+
+def _iv_body(middle: str, call_reg: str = "v0") -> str:
+    return _SMALI_HDR + (
+        ".method public a()V\n    .locals 4\n" + middle +
+        "    new-instance v2, Ljavax/crypto/spec/IvParameterSpec;\n"
+        f"    invoke-direct {{v2, {call_reg}}}, Ljavax/crypto/spec/IvParameterSpec;-><init>([B)V\n"
+        "    return-void\n.end method\n")
+
+
+def test_smali_iv_size_comes_from_new_array_size_register():
+    body = _iv_body("    const/16 v1, 0xc\n    const/4 v3, 0x5\n    new-array v0, v1, [B\n")
+    assert _smali_findings(body)["static_iv"][0]["detail"].startswith("IV is a zero-filled byte[12]")
+
+
+def test_smali_iv_register_mismatch_is_not_flagged():
+    body = _iv_body("    const/16 v1, 0x10\n    new-array v3, v1, [B\n    invoke-static {}, Lx/Y;->iv()[B\n"
+                    "    move-result-object v0\n")
+    assert "static_iv" not in _smali_findings(body)
+
+
+@pytest.mark.parametrize("write", [
+    "    const/4 v3, 0x1\n    aput-byte v3, v0, v3\n",
+    "    new-instance v3, Ljava/security/SecureRandom;\n"
+    "    invoke-virtual {v3, v0}, Ljava/security/SecureRandom;->nextBytes([B)V\n",
+])
+def test_smali_iv_written_before_call_is_not_zero_filled(write):
+    body = _iv_body("    const/16 v1, 0x10\n    new-array v0, v1, [B\n" + write)
+    assert "static_iv" not in _smali_findings(body)
+
+
+def test_smali_iv_fill_array_data_is_inline_not_zero():
+    body = _iv_body("    const/16 v1, 0x10\n    new-array v0, v1, [B\n    fill-array-data v0, :array_0\n")
+    detail = _smali_findings(body)["static_iv"][0]["detail"]
+    assert "zero-filled" not in detail and "fill-array-data" in detail
+
+
+def test_smali_inline_key_requires_key_register():
+    def body(key_reg: str, extra: str = "") -> str:
+        return _SMALI_HDR + (
+            ".method public a()V\n    .locals 4\n    const/16 v1, 0x10\n    new-array v0, v1, [B\n" + extra +
+            "    invoke-static {}, Lx/Y;->k()[B\n    move-result-object v3\n"
+            "    const-string v1, \"AES\"\n    new-instance v2, Ljavax/crypto/spec/SecretKeySpec;\n"
+            f"    invoke-direct {{v2, {key_reg}, v1}}, Ljavax/crypto/spec/SecretKeySpec;-><init>([BLjava/lang/String;)V\n"
+            "    return-void\n.end method\n")
+    assert "static_key" not in _smali_findings(body("v3"))
+    assert "static_key" not in _smali_findings(body("v0", "    aput-byte v1, v0, v1\n"))
+    found = _smali_findings(body("v0"))["static_key"][0]
+    assert "zero-filled byte[16]" in found["detail"] and found["confidence"] == "medium"
