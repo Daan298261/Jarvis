@@ -18,6 +18,7 @@ import {
   requestManagerRestart,
   type ManagerView,
 } from "../companionPairingRecovery"
+import { CompanionRemoteAccess } from "./CompanionRemoteAccess"
 import { speakChatReply } from "../tts/chatTtsPlayer"
 import { useSpeakChatReplies } from "../tts/chatTtsSettings"
 
@@ -410,7 +411,9 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
             <li>Open ANZU on the same Wi‑Fi. Tap Scan desktop QR or Scan this Wi‑Fi again.</li>
             <li>Or scan the QR code / enter the 6-digit code.</li>
             <li>Approve the phone fingerprint below. Pairing stays pending until you confirm.</li>
+            <li>Phone not on this Wi‑Fi? Turn on remote access below, then generate a new code.</li>
           </ol>
+          <CompanionRemoteAccess onChanged={() => void regenerate()} />
           {devices
             .filter((device) => device.status === "pending")
             .map((device) => (

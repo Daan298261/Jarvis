@@ -31,3 +31,15 @@ class CompanionPairingQrTest {
         }
     }
 }
+
+class CompanionPairingQrRemoteTest {
+    @org.junit.Test
+    fun tailscaleEndpointsDialFirst() {
+        val pin = "a".repeat(64)
+        val raw = """{"endpoint":"https://192.168.1.4:4781","server_pin":"$pin","code":"482913",
+            "endpoints":["https://192.168.1.4:4781","https://vrpc.tail1.ts.net:4781"]}"""
+        val qr = CompanionPairingQrParser.parse(raw)
+        org.junit.Assert.assertEquals("https://vrpc.tail1.ts.net:4781", qr.endpoints.first())
+        org.junit.Assert.assertEquals(2, qr.endpoints.size)
+    }
+}
