@@ -363,6 +363,8 @@ fn hide_main(app: &AppHandle) {
 }
 
 const MANAGER_BASE: &str = "http://127.0.0.1:4782";
+/// Must exceed the manager's worst-case restart (150 + 10 + 90 = 250 s).
+const MANAGER_CONTROL_TIMEOUT_SECS: u64 = 300;
 
 /// Tray start/stop/restart via ANZU Manager. Runs off the UI thread (restart can take
 /// a minute) and logs any failure instead of dropping it.
@@ -390,7 +392,8 @@ fn manager_control_at(client: &reqwest::blocking::Client, base: &str, action: &s
     let header = session["header"].as_str().unwrap_or("X-Anzu-Manager-Token");
     let response = client
         .post(format!("{base}/api/manager/v1/control/{action}"))
-        .timeout(Duration::from_secs(150))
+        // Worst case restart: stop script cap 150 s + stop wait 10 s + start health wait 90 s.
+        .timeout(Duration::from_secs(MANAGER_CONTROL_TIMEOUT_SECS))
         .header("content-type", "application/json")
         .header(header, token)
         .body("{\"confirm\":true}")

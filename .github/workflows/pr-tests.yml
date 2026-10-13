@@ -68,9 +68,8 @@ jobs:
             tests/test_nkeep_context.py \
             tests/test_tool_exposure.py
 
-      - name: Run full backend suite (baseline report)
-        continue-on-error: true
-        run: python -m pytest -q
+      - name: Run full backend suite
+        run: python -m pytest -q -rs
 
   frontend-build:
     runs-on: ubuntu-latest

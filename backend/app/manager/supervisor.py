@@ -171,9 +171,9 @@ class CoreSupervisor:
         try:
             yield
         finally:
+            # Launch grace is set by the caller only once a start was actually launched,
+            # so a failed stop leaves the watchdog free to act.
             self.state.control_in_flight = None
-            if action != "stop":
-                self.note_launch()
 
     def note_launch(self) -> None:
         self.state.launch_pending_until = self._clock() + LAUNCH_PENDING_GRACE_SECONDS
