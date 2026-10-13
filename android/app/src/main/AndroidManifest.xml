@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <queries>
         <package android:name="com.tailscale.ipn" />
@@ -30,7 +31,7 @@
     </queries>
     <application android:name=".JarvisApp" android:label="@string/app_name" android:icon="@drawable/ic_jarvis"
         android:allowBackup="false" android:usesCleartextTraffic="false" android:theme="@style/AppTheme"
-        android:supportsRtl="true">
+        android:supportsRtl="true" tools:replace="android:allowBackup,android:supportsRtl">
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop"
             android:theme="@style/Theme.Anzu.Splash">
             <intent-filter>
