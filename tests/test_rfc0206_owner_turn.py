@@ -24,11 +24,8 @@ from app.persona.owner_chat import stream_owner_chat
 
 # Wall-clock bounds flake on loaded CI runners (134 ms seen against 120 ms) because
 # they also measure thread and event-loop scheduling. The deadline is proven
-# structurally instead: the stubbed decision blocks until the test releases it, so
-# the turn can only return through the 50 ms deadline. The cold-Laya test has no
-# stub to block on; HANG_GUARD_MS there still fails a turn that waited on a model
-# load, which takes seconds.
-HANG_GUARD_MS = 1000.0
+# structurally instead: the stubbed decision (or cold Laya load) blocks until the
+# test releases it, so the turn can only return without waiting for it.
 
 
 class _Blocker:
@@ -429,18 +426,30 @@ async def test_stub_jev_on_connected_optional_is_source_jev(jarvis_env, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_cold_laya_does_not_stall_the_turn(jarvis_env):
+async def test_cold_laya_does_not_stall_the_turn(jarvis_env, monkeypatch):
     from app.decision.laya import runtime as laya_runtime
 
     laya_runtime.reset_runtime()
-    started = time.perf_counter()
-    turn = await decide_owner_turn(
-        "Hello there",
-        baseline=route_request("Hello there"),
-        decision_tier="local",
-    )
-    elapsed_ms = (time.perf_counter() - started) * 1000.0
-    assert elapsed_ms < HANG_GUARD_MS
+    loader = _Blocker()
+    monkeypatch.setattr(laya_runtime, "_load_agent", loader.block)
+    with laya_runtime._LOCK:
+        laya_runtime._STATE.enabled = True
+    laya_runtime._start_load()
+    try:
+        assert loader.started.wait(5), "cold Laya load never started"
+        turn = await decide_owner_turn(
+            "Hello there",
+            baseline=route_request("Hello there"),
+            decision_tier="local",
+        )
+        assert not loader.finished.is_set(), "turn waited for the cold Laya load"
+        assert laya_runtime.is_ready() is False
+    finally:
+        loader.release.set()
+        thread = laya_runtime._LOAD_THREAD
+        if thread is not None:
+            thread.join(timeout=5)
+        laya_runtime.reset_runtime()
     assert turn.reflex is not None
     assert turn.reflex.source != "laya"
     assert turn.route.kind == DIRECT_REPLY
@@ -475,6 +484,7 @@ async def test_slow_laya_fixture_falls_back_inside_deadline(jarvis_env, monkeypa
             baseline=route_request("Hello there"),
             decision_tier="local",
         )
+        assert blocker.started.is_set(), "slow Laya fixture was never called"
         assert not blocker.finished.is_set(), "turn waited for the slow Laya fixture"
         assert turn.reflex is not None
         assert turn.reflex.source != "laya" or turn.reflex.fallback_used is True

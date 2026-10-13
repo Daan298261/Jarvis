@@ -76,8 +76,7 @@ async def test_deadline_does_not_block_event_loop(monkeypatch):
     tick_task = asyncio.create_task(ticker())
     try:
         task = asyncio.create_task(request_routing.evaluate_request_route("hello", baseline))
-        while not started.is_set():
-            await asyncio.sleep(0.001)
+        assert await asyncio.to_thread(started.wait, 5), "encoder was never called"
         ticks_at_block = ticks
         await asyncio.sleep(0)
         assert not task.done()

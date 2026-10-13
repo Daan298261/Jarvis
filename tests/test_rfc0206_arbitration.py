@@ -199,10 +199,12 @@ def test_consecutive_assistant_turns_do_not_call_provider(monkeypatch):
 async def test_bounded_arbitration_does_not_stall_event_loop(monkeypatch):
     # The stub blocks until released, so returning before release proves the bound
     # held without a wall-clock check (loaded CI runners add scheduling noise).
+    started = threading.Event()
     release = threading.Event()
     finished = threading.Event()
 
     def blocking(**_kwargs):
+        started.set()
         release.wait(10)
         finished.set()
         return DecisionResult(
@@ -221,6 +223,7 @@ async def test_bounded_arbitration_does_not_stall_event_loop(monkeypatch):
             user_message="what is the weather",
             reply_shape="ack",
         )
+        assert started.is_set(), "arbitration never called the decision"
         assert not finished.is_set(), "arbitration waited for the slow decision"
     finally:
         release.set()
