@@ -174,12 +174,56 @@ def test_final_failure_removes_partial_and_reports_every_attempt(serve, tmp_path
     assert not (tmp_path / "model.gguf.part").exists()
 
 
-def test_stage_script_keeps_partials_and_writes_no_temp_logs():
-    stage = STAGE.read_text(encoding="utf-8-sig")
-    helper = HELPER.read_text(encoding="utf-8-sig")
-    assert "front-model-download.ps1" in stage
-    assert "Invoke-FrontResumableDownload" in stage
-    assert "Clear-FrontDownloadPartials" not in stage
-    assert "jarvis-front-model-hf" not in stage
-    assert "$env:TEMP" not in stage and "$env:TEMP" not in helper
-    assert "RangeHeaderValue" in helper
+def _stage_copy(tmp_path: Path) -> Path:
+    """Copy stage-front-model.ps1 + helper into a fake repo, pinned to PAYLOAD.
+
+    Only the two expected-identity constants are rewritten, so the real script
+    logic (reuse checks, resume, hash verification, marker) runs unchanged.
+    """
+    win = tmp_path / "repo" / "installer" / "windows"
+    win.mkdir(parents=True)
+    shutil.copy(HELPER, win / HELPER.name)
+    src = STAGE.read_text(encoding="utf-8-sig")
+    import re
+
+    src, n1 = re.subn(r"\$ExpectedBytes = \d+", f"$ExpectedBytes = {len(PAYLOAD)}", src)
+    src, n2 = re.subn(r'\$ExpectedSha = "[0-9a-f]{64}"', f'$ExpectedSha = "{SHA}"', src)
+    assert n1 == 1 and n2 == 1
+    src = src.replace("-BackoffSeconds 5", "-BackoffSeconds 0")
+    (win / STAGE.name).write_text(src, encoding="utf-8")
+    return win
+
+
+def test_stage_script_resumes_interrupted_download_and_leaves_no_temp_logs(serve, tmp_path):
+    win = _stage_copy(tmp_path)
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    server = serve(["drop", "ok"])
+    env = {k: v for k, v in os.environ.items() if k != "JARVIS_FRONT_2B_GGUF"}
+    env.update({"JARVIS_FRONT_2B_URL": server.url, "TEMP": str(temp), "TMP": str(temp), "TMPDIR": str(temp)})
+    res = subprocess.run(
+        [_shell(), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(win / STAGE.name)],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        env=env,
+    )
+    out = res.stdout + res.stderr
+    assert res.returncode == 0, out
+    assert "Resuming front-model download" in out
+    assert server.requests[0] is None and server.requests[1].startswith("bytes=")
+    assert server.bytes_sent == len(PAYLOAD)
+    payload = win / "payload" / "models" / "Qwen3.5-2B-GGUF"
+    model = payload / "Qwen3.5-2B-Q4_K_M.gguf"
+    assert hashlib.sha256(model.read_bytes()).hexdigest() == SHA
+    assert (payload / ".jarvis_front_2b_verified").read_text().strip() == SHA
+    assert sorted(p.name for p in payload.iterdir()) == [".jarvis_front_2b_verified", model.name]
+    assert list(temp.iterdir()) == []
+
+    # Second run takes the cached fast path: no network request at all.
+    res2 = subprocess.run(
+        [_shell(), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(win / STAGE.name)],
+        capture_output=True, text=True, timeout=120, env=env,
+    )
+    assert res2.returncode == 0, res2.stdout + res2.stderr
+    assert len(server.requests) == 2
