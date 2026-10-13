@@ -115,7 +115,7 @@ Ship **one RFC with five implement slices**. Each slice is a single CoS-assignab
 
 | Path | Why |
 | --- | --- |
-| Platform STT path (`PlatformVoice.kt` and/or whatever wraps `SpeechRecognizer`) | Binding, locale, error callbacks, retry. |
+| Platform STT path (`PlatformVoice.kt` and/or whatever wraps `SpeechRecognizer`) | Binding, error callbacks, retry. **Language:** until S4 lands, use the product-English default recognizer tag `en-US` (a single named constant). Do **not** invent a second STT-language preference. S4 owns the shared voice-language setting and removes this constant when it lands. |
 | Runtime mic permission UX in the listen path | `RECORD_AUDIO` is in the manifest; ensure request/rationale/denied paths are honest. |
 | `AndroidManifest.xml` `<queries>` only if diagnosis requires extra packages | Manifest already queries `RecognitionService` and `TTS_SERVICE`. Add Samsung/Google package queries **only** if confirmed necessary (e.g. `com.google.android.googlequicksearchbox`, Samsung speech package). Do not shotgun-query the world. |
 | On-device Whisper path touch-ups if that is the working S23 path | `OnDeviceVoiceEngines.kt` / `CompanionVoicePackManager` / native bridge error surfacing — fail closed, install affordance when pack/`.so` missing. |
@@ -146,11 +146,13 @@ Ship **one RFC with five implement slices**. Each slice is a single CoS-assignab
 
 **Depends on.** Nothing. Highest user-blocking slice — assign first.
 
+**Language handoff to S4.** S3 may hardcode product-English `en-US` for `RecognizerIntent.EXTRA_LANGUAGE` / equivalent. When S4 lands, that constant is deleted; the recognizer reads the S4 voice-language preference (see S4).
+
 ---
 
-### S4 — TTS voice language + high-quality offline TTS ≤ 150 MB
+### S4 — Voice language (TTS + STT) + high-quality offline TTS ≤ 150 MB
 
-**Goal.** Settings **Voice language** (and optional voice) independent of system locale. English ANZU UI defaults to an **English** neural/offline voice so a Dutch system locale cannot force a Dutch-accented English system voice. Offer / ensure a high-quality offline TTS pack **≤ 150 MB** (Pocket TTS class already in RFC-0140, or Piper/Kokoro-ONNX class pin).
+**Goal.** Settings **Voice language** (and optional voice) independent of system locale — the **single source** for both TTS language and the STT recognizer language (`RecognizerIntent.EXTRA_LANGUAGE` / equivalent). English ANZU UI defaults to an **English** neural/offline voice so a Dutch system locale cannot force a Dutch-accented English system voice or a Dutch STT recognizer. Offer / ensure a high-quality offline TTS pack **≤ 150 MB** (Pocket TTS class already in RFC-0140, or Piper/Kokoro-ONNX class pin).
 
 **Model:** Grok 4.5 · **fast off**
 
@@ -158,21 +160,25 @@ Ship **one RFC with five implement slices**. Each slice is a single CoS-assignab
 
 | Path | Why |
 | --- | --- |
-| Voice language preference + Settings UI | Default `en` for product English. Store BCP-47 tag + optional engine voice name. |
-| `PlatformVoice.kt` (locale/voice selection only) | Apply setting to `TextToSpeech` language / voice; do not use raw `Locale.getDefault()` when an explicit ANZU voice language is set. |
+| Voice language preference + Settings UI | **Single source** for spoken language across TTS and STT. Default product English stored as BCP-47 (prefer `en` in UI; see resolution below) + optional engine voice name. Optional separate STT override may exist later; if blank/absent, STT uses this spoken language. Do not add a second independent “STT language” default that diverges from Voice language. |
+| Shared language resolver helper (new small helper; S4 owns) | Resolve the preference to tags engines need: TTS may accept `en`; Android `SpeechRecognizer` / `EXTRA_LANGUAGE` needs a **regioned** tag. Rule: bare language subtag such as `en` → canonical regioned default `en-US` (document the map; same for other bare tags the UI offers). Prefer-region tags like `en-GB` pass through. |
+| `PlatformVoice.kt` (locale/voice selection for TTS **and** recognizer language wiring) | Apply setting to `TextToSpeech` language / voice; do not use raw `Locale.getDefault()` when an explicit ANZU voice language is set. Apply the **same** resolved tag to recognizer intents (`EXTRA_LANGUAGE`). **Remove S3’s temporary `en-US` constant** once this preference exists. File-lock with S3: if S3 still open, land resolver + preference first and leave a one-line call site S3 can already use; do not leave two sources. |
 | `CompanionVoicePackCatalog` / manager updates if a new ≤150 MB pack is required | Prefer existing `pocket-tts-en` if it meets quality and size. If Pocket cannot honor language cleanly, pin one additional English pack ≤ 150 MB with URL/hash/size (Piper medium or Kokoro-ONNX phone build). Empty URL = fail. |
-| Routing | When on-device TTS is selected (RFC-0140 Mode A/B), speak with the pack matching the voice-language setting. When platform TTS is used, same language setting applies. |
-| Tests | Preference applied; missing pack → download affordance; success path does not claim ready on silence (keep `isNearSilentPcmWav` reject). |
+| Routing | When on-device TTS is selected (RFC-0140 Mode A/B), speak with the pack matching the voice-language setting. When platform TTS is used, same language setting applies. Platform and on-device STT both read the same resolved language unless an optional STT override is set. |
+| Tests | Preference applied to TTS **and** recognizer extra; bare `en` → `en-US` for recognizer; missing pack → download affordance; success path does not claim ready on silence (keep `isNearSilentPcmWav` reject). |
 
 **Acceptance.**
 
 - [ ] Device locale `nl-NL` + Voice language `English` → spoken English uses English voice/pack, not Dutch system voice.
+- [ ] **nl-NL device, Voice language English → recognizer intent `EXTRA_LANGUAGE` is English, from the setting** (not the Dutch system locale). Same Voice language preference as TTS.
+- [ ] Bare preference `en` resolves to a regioned recognizer tag such as `en-US` (unit-tested).
+- [ ] S3’s temporary product-English `en-US` constant is removed; only the Voice language preference (plus optional blank STT override) remains.
 - [ ] Offline TTS option ≤ 150 MB is installable from allowlist with hash verification.
 - [ ] Missing pack: visible Download, not a “success” Dutch accent fallback.
 - [ ] RFC-0092 PC path untouched.
-- [ ] Unit tests for preference routing pass; audible quality is device sign-off.
+- [ ] Unit tests for preference routing (TTS + STT) pass; audible quality is device sign-off.
 
-**Depends on.** Soft-depends on S3 only for shared listen/speak UX polish — file lock: S3 owns recognizer/mic; S4 owns TTS locale and TTS packs. Do not both edit the same method bodies; split helpers if needed.
+**Depends on.** Soft-depends on S3 only for shared listen/speak UX polish — file lock: S3 owns recognizer binding/mic/error paths; S4 owns the voice-language preference, resolver (including bare→regioned), TTS packs, and recognizer **language** wiring. Do not both edit the same method bodies; split helpers if needed.
 
 ---
 
@@ -205,7 +211,7 @@ Ship **one RFC with five implement slices**. Each slice is a single CoS-assignab
 ## Recommended assign order (for CoS)
 
 1. **S3** (S23 STT — user blocking) ∥ **S1** (FLAG_SECURE toggle)  
-2. **S4** (TTS language / offline voice)  
+2. **S4** (Voice language for TTS+STT / offline voice)  
 3. **S2** (off-grid picker + maps/ZIM)  
 4. **S5** (content manager — after S2 for full inventory; partial OK earlier)
 
@@ -216,7 +222,7 @@ Ship **one RFC with five implement slices**. Each slice is a single CoS-assignab
 - [ ] Screenshot default is blocked; owner can allow.
 - [ ] Off-grid picker shows sizes and downloads only the selection; maps + Wikipedia/medical/survival ZIM classes are specified with allowlist rules.
 - [ ] STT slice requires root-cause + S23 device sign-off; no fake transcripts.
-- [ ] TTS language is independent of system locale; offline TTS ≤ 150 MB offered/pinned.
+- [ ] Voice language is independent of system locale and is the single source for TTS and STT recognizer language (bare `en` → regioned tag for recognizer); offline TTS ≤ 150 MB offered/pinned.
 - [ ] Content manager lists sizes and supports update/delete without parallel inventories drifting.
 - [ ] No stubs, soft-fails, empty catalog URLs, persona/WebGL edits, or weights in git.
 
@@ -227,7 +233,7 @@ Ship **one RFC with five implement slices**. Each slice is a single CoS-assignab
 | S1 | Secure screen prefs, MainActivity window flags, More toggle, tests |
 | S2 | Off-grid catalog/manager, picker UI, maps + Kiwix integration, optional Leader cache |
 | S3 | PlatformVoice / SpeechRecognizer path, permission UX, manifest queries (if proven), Whisper error surfacing, tests |
-| S4 | Voice language prefs/UI, PlatformVoice locale, voice pack catalog pin if needed, tests |
+| S4 | Voice language prefs/UI, shared language resolver (bare→regioned), PlatformVoice TTS + recognizer language, remove S3 `en-US` constant, voice pack catalog pin if needed, tests |
 | S5 | Aggregator manager, Downloaded content Settings screen, More entry |
 | Docs | this RFC; `docs/rfcs/README.md` index line |
 
@@ -245,7 +251,7 @@ Ship **one RFC with five implement slices**. Each slice is a single CoS-assignab
 1. **S23 STT is device-bound.** Cloud CI cannot green-check it; implement PR must record the confirmed cause and the device pass.
 2. **Kiwix / maps native size.** Reader and map engine ABIs grow the APK; prefer official libraries and document ABI filters. A WebView pretending to be Kiwix without a ZIM backend is a fail.
 3. **Storage pressure.** Multi-GB ZIMs need free-space checks and S5 delete.
-4. **File locks across S3/S4.** Mic/STT vs TTS/locale — split helpers; no drive-by edits on the other slice’s methods.
+4. **File locks across S3/S4.** Mic/STT binding vs voice-language + TTS — split helpers; no drive-by edits on the other slice’s methods. S3’s temporary `en-US` constant must die in S4 so language never has two sources.
 5. **README numbering.** As of 2026-10-13, `docs/rfcs/README.md` still says next free is 0215; **0215 already exists**. This RFC takes **0216**. Update the README “next free” note in this PR.
 
 ## Implement ticket cards (copy for CoS)
@@ -255,5 +261,5 @@ Ship **one RFC with five implement slices**. Each slice is a single CoS-assignab
 | S1 | Android: Allow-screenshots toggle (`FLAG_SECURE`, default blocked) | Composer 2.5 · fast off |
 | S2 | Android: Off-grid content picker (maps + Kiwix ZIMs, sizes, selected-only download) | Grok 4.6 · fast off |
 | S3 | Android: Fix STT on Samsung S23 (diagnose RecognitionService / permission / queries / Whisper path) | Grok 4.6 · fast off |
-| S4 | Android: Voice language setting + offline TTS ≤ 150 MB | Grok 4.5 · fast off |
+| S4 | Android: Voice language setting (TTS + STT single source) + offline TTS ≤ 150 MB | Grok 4.5 · fast off |
 | S5 | Android: Downloaded content manager (list / size / update / delete) | Composer 2.5 · fast off |
