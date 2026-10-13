@@ -117,9 +117,10 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private var playerFile: File? = null
     private val outbox = Outbox(app)
     private val uploadOutbox = UploadOutbox(app)
-    private val offlineQueue = OutboxQueue(app, onRecovered = { reportStoreRecovery("offline messages waiting for the desktop") })
-    private val localConversations = LocalConversationStore(app, onRecovered = { reportStoreRecovery("conversations") })
-    private val localNotes = LocalNotesStore(app, onRecovered = { reportStoreRecovery("notes") })
+    private val offlineQueue = OutboxQueue(app, onRecovered = { reportStoreRecovery("offline messages waiting for the desktop", it.kept) })
+    private val localConversations = LocalConversationStore(app, onRecovered = { reportStoreRecovery("conversations", it.kept) })
+    private val localNotes = LocalNotesStore(app, onRecovered = { reportStoreRecovery("notes", it.kept) })
+    private val desktopThreadIds by lazy { PhoneDesktopThreadIds(companionPrefs, localConversations) }
     private val platformVoice = PlatformVoice(app)
     val packManager = CompanionPackManager(app)
     val voicePackManager = CompanionVoicePackManager(app)
@@ -271,8 +272,8 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         finally { mutable.value = mutable.value.copy(busy = false) }
     }
     /** A phone store was unreadable and was moved aside; tell the owner instead of failing every send. */
-    private fun reportStoreRecovery(what: String) {
-        mutable.value = mutable.value.copy(error = EncryptedJsonFile.recoveryCopy(what))
+    private fun reportStoreRecovery(what: String, kept: Boolean) {
+        mutable.value = mutable.value.copy(error = EncryptedJsonFile.recoveryCopy(what, kept))
     }
 
     fun offlineStatusJson(): JSONObject = CompanionOfflineHooks.statusSnapshot(this)
@@ -782,20 +783,16 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private suspend fun syncOfflineTurns() {
         val pending = offlineQueue.readAll().filter { StandaloneMode.shouldAutoReplay(it) }
         if (pending.isEmpty()) return
-        // One request per conversation, so each offline chat lands in its own desktop thread.
-        val joined = HashMap<String, String>()
-        for (batch in OfflineSyncPlanner.plan(pending) { localConversations.linkedDesktopId(it) }) {
-            val target = batch.desktopConversationId ?: joined[batch.conversationKey]
-            val body = JSONObject().put("turns", JSONArray().also { arr -> batch.turns.forEach { arr.put(OfflineSyncPlanner.wireTurn(it)) } })
-            target?.let { body.put("conversation_id", it) }
-            val result = api.json("/sync/offline-turns", "POST", body)
-            offlineQueue.markSynced(batch.turns.map(OfflineSyncPlanner::turnId))
-            val synced = result.optString("conversation_id").takeIf { it.isNotBlank() }
-            if (synced != null && LocalConversationStore.isLocal(batch.conversationKey)) {
-                joined[batch.conversationKey] = synced
-                if (target == null) localConversations.linkDesktop(batch.conversationKey, synced)
-            }
-        }
+        // One request per conversation, so each offline chat lands in its own desktop thread. The thread id
+        // is minted and saved on the phone before the first request, so a lost reply retries into the same thread.
+        OfflineSyncPlanner.syncAll(
+            pending,
+            desktopThreadIds,
+            post = { conversationId, turns ->
+                api.json("/sync/offline-turns", "POST", JSONObject().put("conversation_id", conversationId).put("turns", turns))
+            },
+            synced = { offlineQueue.markSynced(it) },
+        )
         offlineQueue.pruneSynced()
         mutable.value = mutable.value.copy(
             offlineQueueDepth = offlineQueue.pendingCount(),

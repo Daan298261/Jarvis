@@ -11,7 +11,7 @@ class LocalNotesStore(
     context: Context,
     crypto: OutboxQueueCrypto = AndroidKeystoreOutboxQueueCrypto("anzu-local-notes-v1"),
     private val clock: () -> Long = System::currentTimeMillis,
-    onRecovered: (File) -> Unit = {},
+    onRecovered: (StoreRecovery) -> Unit = {},
 ) {
     private val file = EncryptedJsonFile(File(context.noBackupFilesDir, "local-notes"), crypto, clock, onRecovered)
 

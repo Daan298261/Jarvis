@@ -15,7 +15,7 @@ class LocalConversationStore(
     context: Context,
     crypto: OutboxQueueCrypto = AndroidKeystoreOutboxQueueCrypto("anzu-local-conversations-v1"),
     private val clock: () -> Long = System::currentTimeMillis,
-    onRecovered: (File) -> Unit = {},
+    onRecovered: (StoreRecovery) -> Unit = {},
 ) {
     private val file = EncryptedJsonFile(File(context.noBackupFilesDir, "local-conversations"), crypto, clock, onRecovered)
 
@@ -74,8 +74,11 @@ class LocalConversationStore(
     fun linkedDesktopId(id: String): String? =
         find(file.read(), id)?.optString("desktop_conversation_id")?.takeIf { it.isNotBlank() }
 
-    fun linkDesktop(id: String, desktopConversationId: String) {
-        file.update { root -> find(root, id)?.put("desktop_conversation_id", desktopConversationId) }
+    /** Returns false when [id] is not (or no longer) on this phone. */
+    fun linkDesktop(id: String, desktopConversationId: String): Boolean {
+        var linked = false
+        file.update { root -> find(root, id)?.let { it.put("desktop_conversation_id", desktopConversationId); linked = true } }
+        return linked
     }
 
     fun delete(id: String) {

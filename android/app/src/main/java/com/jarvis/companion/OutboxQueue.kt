@@ -12,7 +12,7 @@ import java.io.File
 class OutboxQueue(
     context: Context,
     crypto: OutboxQueueCrypto = AndroidKeystoreOutboxQueueCrypto("jarvis-offline-queue-v1"),
-    onRecovered: (File) -> Unit = {},
+    onRecovered: (StoreRecovery) -> Unit = {},
 ) {
     private val file = EncryptedJsonFile(File(context.noBackupFilesDir, "offline-turn-queue"), crypto, onRecovered = onRecovered)
 

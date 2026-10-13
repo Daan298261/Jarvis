@@ -1,6 +1,7 @@
 package com.jarvis.companion
 
 import androidx.test.core.app.ApplicationProvider
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -47,7 +48,7 @@ class StoreRecoveryAndSyncTest {
         val good = LocalConversationStore(context, JvmAesOutboxQueueCrypto()) { 1L }
         good.append(good.create("old case chat"), JSONObject().put("role", "user").put("text", "old"))
         val recovered = mutableListOf<File>()
-        val broken = LocalConversationStore(context, LostKeyCrypto(), { 42L }) { recovered += it }
+        val broken = LocalConversationStore(context, LostKeyCrypto(), { 42L }) { recovered += it.copy; assertTrue(it.kept) }
 
         assertTrue(broken.conversations().isEmpty())
         assertEquals(listOf("local-conversations.42.corrupt"), recovered.map { it.name })
@@ -64,8 +65,8 @@ class StoreRecoveryAndSyncTest {
         LocalNotesStore(context, JvmAesOutboxQueueCrypto()).add("gate code")
         OutboxQueue(context, JvmAesOutboxQueueCrypto()).append(JSONObject().put("request_id", "a"))
         val recovered = mutableListOf<String>()
-        val notes = LocalNotesStore(context, LostKeyCrypto(), { 7L }) { recovered += it.name }
-        val queue = OutboxQueue(context, LostKeyCrypto()) { recovered += it.name }
+        val notes = LocalNotesStore(context, LostKeyCrypto(), { 7L }) { recovered += it.copy.name }
+        val queue = OutboxQueue(context, LostKeyCrypto()) { recovered += it.copy.name }
         assertTrue(notes.notes().isEmpty())
         assertEquals(0, queue.pendingCount())
         assertTrue(recovered.contains("local-notes.7.corrupt"))
@@ -92,9 +93,13 @@ class StoreRecoveryAndSyncTest {
 
     @Test
     fun recoveryCopyIsPlain() {
-        val copy = EncryptedJsonFile.recoveryCopy("conversations")
+        val copy = EncryptedJsonFile.recoveryCopy("conversations", kept = true)
         assertTrue(copy.contains("started fresh"))
+        assertTrue(copy.contains("was kept"))
         assertFalse(copy.contains("Keystore"))
+        val lost = EncryptedJsonFile.recoveryCopy("conversations", kept = false)
+        assertTrue(lost.contains("could not be kept"))
+        assertFalse(lost.contains("was kept"))
     }
 
     private fun turn(id: String, key: String?) =
@@ -124,5 +129,94 @@ class StoreRecoveryAndSyncTest {
         assertEquals(listOf(50, 50, 20), batches.map { it.turns.size })
         assertTrue(batches.all { it.conversationKey == "local-a" })
         assertNull(batches[0].desktopConversationId)
+    }
+
+    @Test
+    fun failedMoveAsideReportsTheCopyWasNotKept() {
+        val target = File(dir, "probe")
+        EncryptedJsonFile(target, JvmAesOutboxQueueCrypto()).update { it.put("x", 1) }
+        val outcomes = mutableListOf<StoreRecovery>()
+        val broken = EncryptedJsonFile(target, LostKeyCrypto(), { 9L }, { outcomes += it }, moveAside = { _, _ -> false })
+        assertEquals(0, broken.read().length())
+        assertEquals(1, outcomes.size)
+        assertFalse(outcomes[0].kept)
+        assertFalse(File(dir, "probe.9.corrupt").exists())
+        assertFalse(target.exists())
+        // Store still works after the failed move.
+        broken.update { it.put("y", 2) }
+        assertEquals(2, broken.read().getInt("y"))
+    }
+
+    /** Mirrors backend sync_offline_turns: creates a thread for a client-supplied id, dedupes per thread by turn id. */
+    private class FakeDesktop {
+        val threads = LinkedHashMap<String, MutableList<String>>()
+        var loseNextReply = false
+        fun post(conversationId: String, turns: JSONArray) {
+            val stored = threads.getOrPut(conversationId) { mutableListOf() }
+            for (i in 0 until turns.length()) {
+                val id = OfflineSyncPlanner.turnId(turns.getJSONObject(i))
+                if (id !in stored) stored += id
+            }
+            if (loseNextReply) { loseNextReply = false; throw java.io.IOException("reply lost") }
+        }
+    }
+
+    private fun prefs() = context.getSharedPreferences("sync-test", android.content.Context.MODE_PRIVATE).also { it.edit().clear().commit() }
+
+    @Test
+    fun lostReplyThenNewTurnRetriesIntoTheSameThread() {
+        val prefs = prefs()
+        val conversations = LocalConversationStore(context, JvmAesOutboxQueueCrypto())
+        val chat = conversations.create("offline chat")
+        val desktop = FakeDesktop()
+        val queue = mutableListOf(turn("1", chat), turn("2", chat))
+        val delivered = mutableSetOf<String>()
+        fun runSync(ids: DesktopThreadIds) = OfflineSyncPlanner.syncAll(
+            queue.filter { OfflineSyncPlanner.turnId(it) !in delivered }, ids,
+            post = desktop::post, synced = { delivered += it },
+        )
+
+        desktop.loseNextReply = true
+        runCatching { runSync(PhoneDesktopThreadIds(prefs, conversations)) }
+        assertTrue(delivered.isEmpty())
+        val linked = LocalConversationStore(context, JvmAesOutboxQueueCrypto()).linkedDesktopId(chat)
+        assertEquals(listOf(linked), desktop.threads.keys.toList())
+
+        queue += turn("3", chat)
+        // Fresh instances: the thread id must come from storage, not memory.
+        runSync(PhoneDesktopThreadIds(prefs, LocalConversationStore(context, JvmAesOutboxQueueCrypto())))
+        assertEquals(1, desktop.threads.size)
+        assertEquals(listOf("1", "2", "3"), desktop.threads.getValue(linked!!))
+        assertEquals(setOf("1", "2", "3"), delivered)
+    }
+
+    @Test
+    fun turnsWithoutAConversationStayInOneThreadAcrossAFailedBatch() {
+        val prefs = prefs()
+        val conversations = LocalConversationStore(context, JvmAesOutboxQueueCrypto())
+        val queue = (1..60).map { turn(it.toString(), null) }
+        val delivered = mutableSetOf<String>()
+        val desktop = FakeDesktop()
+        var calls = 0
+        fun runSync() = OfflineSyncPlanner.syncAll(
+            queue.filter { OfflineSyncPlanner.turnId(it) !in delivered }, PhoneDesktopThreadIds(prefs, conversations),
+            post = { id, turns -> calls++; if (calls == 2) throw java.io.IOException("offline again"); desktop.post(id, turns) },
+            synced = { delivered += it },
+        )
+        runCatching { runSync() }
+        assertEquals(50, delivered.size)
+        runSync()
+        assertEquals(1, desktop.threads.size)
+        assertEquals((1..60).map { it.toString() }, desktop.threads.values.single())
+    }
+
+    @Test
+    fun deletedPhoneConversationStillGetsAStableThread() {
+        val prefs = prefs()
+        val conversations = LocalConversationStore(context, JvmAesOutboxQueueCrypto())
+        val ids = PhoneDesktopThreadIds(prefs, conversations)
+        val batch = OfflineSyncBatch("local-gone", null, listOf(turn("1", "local-gone")))
+        val first = OfflineSyncPlanner.threadFor(batch, ids)
+        assertEquals(first, OfflineSyncPlanner.threadFor(batch, PhoneDesktopThreadIds(prefs, conversations)))
     }
 }
