@@ -21,7 +21,7 @@
 
 **Slice 5 (implemented):** smali fallback when jadx fails catastrophically (failed / timeout / OOM / no useful Java) or when `skip_jadx` is set with `decompile_smali_fallback` (default true). Phase A still uses `--no-src`; the fallback re-runs apktool with `--no-res` (no `--no-src`) into `apk/smali/`, counts `.smali` files/classes, writes `apk/metadata/smali.json`, records `smali_fallback` on the `apk_decompile` evidence, a `smali_fallback_completed` custody event, and `smali_fallback` on `GET /apk/summary`. Catalog/REST accept `decompile_smali_fallback`. Manifest/resources from Phase A remain valid when jadx fails. jadx diagnostics are parsed for failed class names when present.
 
-**Later slices:** report synthesis citing E00001–E00006; remaining fixtures.
+**Later slices:** endpoint and crypto scanning of slice-5 recovered smali (`apk/smali/`); report synthesis citing E00001–E00006; remaining fixtures.
 ---
 
 ## Problem
@@ -332,7 +332,7 @@ Each extracted endpoint record includes:
 
 Static heuristic detection flags potential cryptographic vulnerabilities and embedded credentials across DEX string pools, recovered Java sources, the decoded manifest and decoded resources, saved into `<investigation>/apk/metadata/crypto_hints.json`.
 
-> **Smali scope (slice 3):** Phase A runs apktool with `--no-src`, so no smali exists when slice 3 scans and smali is **not** scanned here. Scanning smali recovered by the slice 5 fallback (`apk/smali/`) is deferred to slice 5. Until then a jadx failure leaves DEX string pools as the only bytecode-level layer, and the call-site rules (static IV/key, weak hashes, `Cipher.getInstance`) are reported as limitations rather than evaluated.
+> **Smali scope:** Phase A runs apktool with `--no-src`, so slice 3 has no smali to scan. Slice 5 recovers smali into `apk/smali/` when jadx fails, for analyst inspection and as citable decompile evidence; the endpoint and crypto scanners do **not** yet read that tree. Until they do, a jadx failure leaves DEX string pools as the only bytecode-level layer, and the call-site rules (static IV/key, weak hashes, `Cipher.getInstance`) are reported as limitations rather than evaluated. Scanning recovered smali is listed under Later slices.
 
 #### 8.1 Hardcoded Secrets & Credentials
 - **Google API Keys:** `AIza[0-9A-Za-z\-_]{35}`
