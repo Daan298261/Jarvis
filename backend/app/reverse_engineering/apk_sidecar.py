@@ -10,8 +10,9 @@ Slice 3: string and network endpoint extraction and cryptographic key-material h
 (``apk_strings``), including network security config evaluation.
 Slice 4: device (ADB) and FFS investigation origins for ``prepare_apk`` — ``adb shell pm
 path`` + ``adb pull`` into ``apk/staged/``, and FFS ``index/files.ndjson`` reference with
-SHA-256 verification. Unknowns are recorded when ADB/FFS are unavailable; device data is
-never invented.
+SHA-256 verification. Both origins fail closed: missing ADB, an uninstalled package, a failed
+or oversized pull, a missing/corrupt/oversized FFS index, a hash mismatch, or a linked path inside
+the dump abort the prepare with an error, and device or dump data is never invented.
 Every step is written to the RFC-0201 investigation store as citable evidence plus a
 chain-of-custody record. No target code is executed.
 """
@@ -358,6 +359,10 @@ def _record(row: dict, operation: str, arguments: dict, result: dict, success: b
     return evidence_id
 
 
+MAX_DEVICE_APK_BYTES = 4 * 1024 * 1024 * 1024  # per pulled part; APKs are ZIP32-bounded
+MAX_FFS_INDEX_BYTES = 4 * 1024 * 1024 * 1024
+MAX_FFS_INDEX_LINE = 64 * 1024
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 _PACKAGE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$")
 _ADB_RUN = None  # tests may replace; production uses _default_adb_run
 
@@ -418,6 +423,20 @@ def _parse_pm_path(output: str) -> list[str]:
     return paths
 
 
+def _remote_size(remote: str, serial: str | None) -> int:
+    """Ask the device for a part's size before pulling it (`stat -c %s`); fail closed on any doubt."""
+    import shlex
+    try:
+        res = _adb(["shell", "stat", "-c", "%s", shlex.quote(remote)], serial=serial, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ValueError(f"ADB stat failed for {remote}: {exc}") from exc
+    text = (res.stdout or "").strip()
+    if res.returncode != 0 or not text.isdigit():
+        err = (res.stderr or res.stdout or "").strip() or f"exit {res.returncode}"
+        raise ValueError(f"Could not read the size of device APK {remote} ({err[:200]}); nothing was pulled.")
+    return int(text)
+
+
 def _pull_device_apks(package_name: str, staged: Path, *, serial: str | None) -> tuple[list[Path], list[str]]:
     """Pull base+split APKs for an installed package into staged/. Returns (local paths, unknowns)."""
     unknowns: list[str] = []
@@ -440,6 +459,7 @@ def _pull_device_apks(package_name: str, staged: Path, *, serial: str | None) ->
         )
     staged.mkdir(parents=True, mode=0o700, exist_ok=True)
     locals_: list[Path] = []
+    total = 0
     for remote in remotes:
         name = PurePosixPath(remote).name
         if not name.lower().endswith(".apk"):
@@ -448,6 +468,14 @@ def _pull_device_apks(package_name: str, staged: Path, *, serial: str | None) ->
         dest = staged / name
         if dest.exists():
             raise ValueError(f"Duplicate APK name from device pull: {name}")
+        size = _remote_size(remote, serial)
+        if size > MAX_DEVICE_APK_BYTES:
+            raise ValueError(f"Device APK {remote} is {size} bytes, over the {MAX_DEVICE_APK_BYTES}-byte "
+                             "per-file cap; nothing was pulled.")
+        if total + size > MAX_BYTES:
+            raise ValueError(f"Device APK parts for {package_name!r} exceed the {MAX_BYTES}-byte total cap "
+                             f"at {remote}; the pull was refused.")
+        total += size
         try:
             pulled = _adb(["pull", remote, str(dest)], serial=serial, timeout=600)
         except (OSError, subprocess.TimeoutExpired) as exc:
@@ -455,32 +483,80 @@ def _pull_device_apks(package_name: str, staged: Path, *, serial: str | None) ->
         if pulled.returncode != 0 or not dest.is_file():
             err = (pulled.stderr or pulled.stdout or "").strip() or f"exit {pulled.returncode}"
             raise ValueError(f"ADB pull failed for {remote}: {err}")
+        actual = dest.stat().st_size
+        if actual != size:
+            raise ValueError(f"ADB pull of {remote} produced {actual} bytes but the device reported {size}; "
+                             "the part changed or the pull was incomplete.")
         locals_.append(dest)
     if not locals_:
         raise ValueError(f"No APK files were pulled for package {package_name!r}")
     return locals_, unknowns
 
 
-def _read_ffs_ndjson(index_path: Path) -> list[dict]:
+def _norm_ffs_path(path: str) -> str:
+    return path.replace("\\", "/").lstrip("/")
+
+
+def _scan_ffs_ndjson(index_path: Path, needle: str) -> tuple[list[dict], list[dict]]:
+    """Stream index/files.ndjson once and return (exact path matches, unique-basename .apk matches).
+
+    Only matching entries are kept in memory. The file is capped at MAX_FFS_INDEX_BYTES and each
+    line at MAX_FFS_INDEX_LINE; exceeding either, or any corrupt line, fails closed.
+    """
     if not index_path.is_file():
         raise ValueError(
             f"FFS investigation has no index at {index_path.as_posix()}; "
             "expected index/files.ndjson (RFC-0208)."
         )
-    entries: list[dict] = []
-    with index_path.open("r", encoding="utf-8") as fh:
-        for lineno, line in enumerate(fh, 1):
-            line = line.strip()
+    size = index_path.stat().st_size
+    if size > MAX_FFS_INDEX_BYTES:
+        raise ValueError(f"FFS index is {size} bytes, over the {MAX_FFS_INDEX_BYTES}-byte cap; refused.")
+    name = PurePosixPath(needle).name
+    exact: list[dict] = []
+    by_name: list[dict] = []
+    read = 0
+    with index_path.open("rb") as fh:
+        lineno = 0
+        while True:
+            raw = fh.readline(MAX_FFS_INDEX_LINE + 1)
+            if not raw:
+                break
+            lineno += 1
+            read += len(raw)
+            if read > MAX_FFS_INDEX_BYTES:
+                raise ValueError(f"FFS index grew past the {MAX_FFS_INDEX_BYTES}-byte cap while reading; refused.")
+            if len(raw) > MAX_FFS_INDEX_LINE:
+                raise ValueError(f"FFS NDJSON line {lineno} exceeds the {MAX_FFS_INDEX_LINE}-byte line cap; refused.")
+            line = raw.strip()
             if not line:
                 continue
             try:
-                obj = json.loads(line)
-            except json.JSONDecodeError as exc:
+                obj = json.loads(line.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise ValueError(f"Corrupt FFS NDJSON at line {lineno}: {exc}") from exc
             if not isinstance(obj, dict) or not isinstance(obj.get("path"), str):
                 raise ValueError(f"FFS NDJSON line {lineno} is not a file entry with path")
-            entries.append(obj)
-    return entries
+            path = _norm_ffs_path(obj["path"])
+            if path == needle:
+                exact.append(obj)
+            elif PurePosixPath(path).name == name and path.lower().endswith(".apk"):
+                by_name.append(obj)
+    return exact, by_name
+
+
+def _reject_links_under(root: Path, rel: str) -> Path:
+    """Walk rel component by component from root without resolving; refuse any symlink or reparse point."""
+    current = root
+    for part in PurePosixPath(rel).parts:
+        current = current / part
+        try:
+            st = os.lstat(current)
+        except FileNotFoundError as exc:
+            raise ValueError(f"FFS entry {rel!r} does not exist under the dump root") from exc
+        if stat.S_ISLNK(st.st_mode) or getattr(st, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT:
+            raise PermissionError(f"Linked/reparse path component {current.relative_to(root).as_posix()!r} "
+                                  "inside the FFS dump is not admitted")
+    return current
 
 
 def _resolve_under(root: Path, rel: str) -> Path:
@@ -512,13 +588,11 @@ def _ffs_lookup(ffs_investigation_id: str, apk_relpath: str) -> tuple[dict, dict
         raise ValueError(
             f"FFS dump path {dump} is unavailable; cannot extract APK without inventing bytes."
         )
-    entries = _read_ffs_ndjson(store.directory(ffs_investigation_id) / "index" / "files.ndjson")
-    needle = apk_relpath.replace("\\", "/").lstrip("/")
-    matches = [e for e in entries if e["path"].replace("\\", "/").lstrip("/") == needle]
+    needle = _norm_ffs_path(apk_relpath)
+    matches, base_matches = _scan_ffs_ndjson(store.directory(ffs_investigation_id) / "index" / "files.ndjson",
+                                             needle)
     if not matches:
         # Also accept basename-only match when unique.
-        base_matches = [e for e in entries if PurePosixPath(e["path"]).name == PurePosixPath(needle).name
-                        and str(e["path"]).lower().endswith(".apk")]
         if len(base_matches) == 1 and "/" not in needle.rstrip("/"):
             matches = base_matches
         else:
@@ -529,14 +603,14 @@ def _ffs_lookup(ffs_investigation_id: str, apk_relpath: str) -> tuple[dict, dict
     expected = entry.get("sha256")
     if not isinstance(expected, str) or len(expected) != 64:
         raise ValueError(f"FFS index entry for {apk_relpath!r} lacks a SHA-256 digest")
-    source = _resolve_under(dump, entry["path"])
-    if not source.is_file():
+    _resolve_under(dump, entry["path"])  # rejects absolute, '..' and escaping paths
+    # Walk from the dump root without resolving: a resolved path has already followed any link.
+    source = _reject_links_under(dump, _norm_ffs_path(entry["path"]))
+    if not stat.S_ISREG(os.lstat(source).st_mode):
         raise ValueError(
             f"FFS entry {entry['path']!r} is not a regular file under the dump root; "
             "archive-only dumps need the APK extracted to the dump tree first."
         )
-    if source.is_symlink() or (getattr(source.lstat(), "st_file_attributes", 0) & 0x400):
-        raise PermissionError("Linked/reparse FFS APK targets are not admitted")
     return ffs, entry, source
 
 

@@ -153,7 +153,7 @@ async def apk_prepare(body: ApkPrepareBody):
             ffs_investigation_id=body.ffs_investigation_id,
         )
         return public_row(row)
-    except (ValueError, OSError, PermissionError, FileNotFoundError) as exc:
+    except (ValueError, OSError) as exc:  # PermissionError/FileNotFoundError are OSError
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 

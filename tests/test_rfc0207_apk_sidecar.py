@@ -2129,6 +2129,7 @@ class FakeADB:
         self.pm_path_stdout = ""
         self.pull_rc = 0
         self.missing = False
+        self.sizes: dict[str, int] = {}  # remote -> size reported by `stat -c %s` (defaults to real length)
 
     def __call__(self, argv: list[str], timeout: int = 120):
         self.calls.append(list(argv))
@@ -2151,6 +2152,14 @@ class FakeADB:
                 lines = [f"package:{remote}" for remote in self.mapping]
                 out = "\n".join(lines) + ("\n" if lines else "")
             return subprocess.CompletedProcess(argv, self.pm_path_rc, out, "")
+        if args[:4] == ["shell", "stat", "-c", "%s"]:
+            import shlex
+            remote = shlex.split(args[4])[0]
+            if remote in self.sizes:
+                return subprocess.CompletedProcess(argv, 0, f"{self.sizes[remote]}\n", "")
+            if remote not in self.mapping:
+                return subprocess.CompletedProcess(argv, 1, "", f"stat: {remote}: No such file or directory")
+            return subprocess.CompletedProcess(argv, 0, f"{len(self.mapping[remote])}\n", "")
         if args[:1] == ["pull"]:
             remote, dest = args[1], Path(args[2])
             if self.pull_rc != 0:
@@ -2376,3 +2385,182 @@ def test_apk_api_device_and_ffs_prepare(env, monkeypatch):
     assert res3.status_code == 200, res3.text
     assert res3.json()["source_kind"] == "local_path"
     assert res3.json()["status"] == "prepared"
+
+
+# --- RFC-0207 slice 4 (review fixes): link walk, streamed index caps, pull size caps, end-to-end --
+
+def _pulls(fake: FakeADB) -> list[list[str]]:
+    return [c for c in fake.calls if "pull" in c]
+
+
+def test_ffs_rejects_symlinked_apk_inside_dump(env):
+    src, _ = env
+    dump = src / "ffs_link"
+    apk_bytes = make_apk(src / "link_seed.apk").read_bytes()
+    ffs_id = _make_ffs_investigation(dump, "apps/real.apk", apk_bytes)
+    (dump / "apps" / "linked.apk").symlink_to(dump / "apps" / "real.apk")
+    index = store.directory(ffs_id) / "index" / "files.ndjson"
+    index.write_text(json.dumps({"path": "apps/linked.apk", "bytes": len(apk_bytes),
+                                 "sha256": hashlib.sha256(apk_bytes).hexdigest()}) + "\n", encoding="utf-8")
+    with pytest.raises(PermissionError, match="apps/linked.apk"):
+        apk_sidecar.prepare_apk("apps/linked.apk", "q", [], None, source_type="ffs", ffs_investigation_id=ffs_id)
+
+
+def test_ffs_rejects_symlinked_directory_inside_dump(env):
+    src, _ = env
+    dump = src / "ffs_dirlink"
+    outside = src / "outside_apps"
+    outside.mkdir()
+    apk_bytes = make_apk(outside / "x.apk").read_bytes()
+    ffs_id = _make_ffs_investigation(dump, "keep/x.apk", apk_bytes)
+    (dump / "apps").symlink_to(outside, target_is_directory=True)
+    index = store.directory(ffs_id) / "index" / "files.ndjson"
+    index.write_text(json.dumps({"path": "apps/x.apk", "bytes": len(apk_bytes),
+                                 "sha256": hashlib.sha256(apk_bytes).hexdigest()}) + "\n", encoding="utf-8")
+    with pytest.raises((PermissionError, ValueError)):
+        apk_sidecar.prepare_apk("apps/x.apk", "q", [], None, source_type="ffs", ffs_investigation_id=ffs_id)
+
+
+def test_reject_links_walks_without_resolving(tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "f.apk").write_bytes(b"x")
+    (tmp_path / "l").symlink_to(tmp_path / "a", target_is_directory=True)
+    assert apk_sidecar._reject_links_under(tmp_path, "a/f.apk") == tmp_path / "a" / "f.apk"
+    with pytest.raises(PermissionError, match="'l'"):
+        apk_sidecar._reject_links_under(tmp_path, "l/f.apk")
+
+
+def test_ffs_index_streams_and_matches_in_one_pass(env, monkeypatch):
+    src, _ = env
+    dump = src / "ffs_stream"
+    apk_bytes = make_apk(src / "stream_seed.apk").read_bytes()
+    ffs_id = _make_ffs_investigation(dump, "apps/target.apk", apk_bytes)
+    index = store.directory(ffs_id) / "index" / "files.ndjson"
+    target_line = index.read_text(encoding="utf-8")
+    filler = "".join(json.dumps({"path": f"data/f{i}.bin", "sha256": "0" * 64}) + "\n" for i in range(2000))
+    index.write_text(filler + target_line + "\n", encoding="utf-8")
+    exact, by_name = apk_sidecar._scan_ffs_ndjson(index, "apps/target.apk")
+    assert [e["path"] for e in exact] == ["apps/target.apk"] and by_name == []
+    row = apk_sidecar.prepare_apk("apps/target.apk", "q", [], None, source_type="ffs", ffs_investigation_id=ffs_id)
+    assert row["sha256"] == hashlib.sha256(apk_bytes).hexdigest()
+
+
+def test_ffs_index_line_cap_fails_closed(env, monkeypatch):
+    src, _ = env
+    dump = src / "ffs_line"
+    apk_bytes = make_apk(src / "line_seed.apk").read_bytes()
+    ffs_id = _make_ffs_investigation(dump, "a.apk", apk_bytes)
+    index = store.directory(ffs_id) / "index" / "files.ndjson"
+    index.write_text(json.dumps({"path": "x" * 500, "sha256": "0" * 64}) + "\n" + index.read_text(), encoding="utf-8")
+    monkeypatch.setattr(apk_sidecar, "MAX_FFS_INDEX_LINE", 256)
+    with pytest.raises(ValueError, match="line 1 exceeds"):
+        apk_sidecar.prepare_apk("a.apk", "q", [], None, source_type="ffs", ffs_investigation_id=ffs_id)
+
+
+def test_ffs_index_size_cap_fails_closed(env, monkeypatch):
+    src, _ = env
+    dump = src / "ffs_size"
+    apk_bytes = make_apk(src / "size_seed.apk").read_bytes()
+    ffs_id = _make_ffs_investigation(dump, "a.apk", apk_bytes)
+    monkeypatch.setattr(apk_sidecar, "MAX_FFS_INDEX_BYTES", 16)
+    with pytest.raises(ValueError, match="over the 16-byte cap"):
+        apk_sidecar.prepare_apk("a.apk", "q", [], None, source_type="ffs", ffs_investigation_id=ffs_id)
+
+
+def test_ffs_index_corrupt_line_fails_closed(env):
+    src, _ = env
+    dump = src / "ffs_corrupt"
+    apk_bytes = make_apk(src / "corrupt_seed.apk").read_bytes()
+    ffs_id = _make_ffs_investigation(dump, "a.apk", apk_bytes)
+    index = store.directory(ffs_id) / "index" / "files.ndjson"
+    index.write_text(index.read_text() + "{not json\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Corrupt FFS NDJSON at line 2"):
+        apk_sidecar.prepare_apk("a.apk", "q", [], None, source_type="ffs", ffs_investigation_id=ffs_id)
+
+
+def test_device_pull_refuses_part_over_per_file_cap(env, monkeypatch):
+    src, _ = env
+    base = make_apk(src / "cap_base.apk")
+    fake = FakeADB({"/data/app/base.apk": base.read_bytes()})
+    fake.pm_path_stdout = "package:/data/app/base.apk\n"
+    fake.sizes["/data/app/base.apk"] = apk_sidecar.MAX_DEVICE_APK_BYTES + 1
+    _install_fake_adb(monkeypatch, fake, src)
+    with pytest.raises(ValueError, match="per-file cap"):
+        apk_sidecar.prepare_apk(None, "q", [], None, source_type="device", package_name="org.anzu.test")
+    assert _pulls(fake) == []  # refused before any bytes left the device
+    assert any(c[-4:-1] == ["stat", "-c", "%s"] for c in fake.calls)
+
+
+def test_device_pull_enforces_cumulative_cap(env, monkeypatch):
+    src, _ = env
+    base = make_apk(src / "cum_base.apk")
+    split = make_apk(src / "cum_split.apk", dex=False)
+    remotes = {"/data/app/base.apk": base.read_bytes(), "/data/app/split_a.apk": split.read_bytes()}
+    fake = FakeADB(remotes)
+    fake.pm_path_stdout = "".join(f"package:{r}\n" for r in remotes)
+    _install_fake_adb(monkeypatch, fake, src)
+    monkeypatch.setattr(apk_sidecar, "MAX_BYTES", len(remotes["/data/app/base.apk"]) + 1)
+    with pytest.raises(ValueError, match="total cap"):
+        apk_sidecar.prepare_apk(None, "q", [], None, source_type="device", package_name="org.anzu.test")
+    assert [c[c.index("pull") + 1] for c in _pulls(fake)] == ["/data/app/base.apk"]
+
+
+def test_device_pull_fails_closed_when_size_unreadable(env, monkeypatch):
+    src, _ = env
+    fake = FakeADB({})
+    fake.pm_path_stdout = "package:/data/app/gone.apk\n"
+    _install_fake_adb(monkeypatch, fake, src)
+    with pytest.raises(ValueError, match="Could not read the size"):
+        apk_sidecar.prepare_apk(None, "q", [], None, source_type="device", package_name="org.anzu.test")
+    assert _pulls(fake) == []
+
+
+def test_device_pull_rejects_size_mismatch(env, monkeypatch):
+    src, _ = env
+    base = make_apk(src / "mm_base.apk")
+    fake = FakeADB({"/data/app/base.apk": base.read_bytes()})
+    fake.pm_path_stdout = "package:/data/app/base.apk\n"
+    fake.sizes["/data/app/base.apk"] = 10
+    _install_fake_adb(monkeypatch, fake, src)
+    with pytest.raises(ValueError, match="device reported 10"):
+        apk_sidecar.prepare_apk(None, "q", [], None, source_type="device", package_name="org.anzu.test")
+
+
+def _decompile_uses_staged(row: dict, fake) -> dict:
+    claimed = apk_sidecar.preflight(row["id"])
+    out = apk_sidecar.decompile(row["id"], claimed=claimed)
+    staged = Path(row["apk"]["staged"]).resolve()
+    tool_inputs = [a for argv, _ in fake.calls if argv and argv[0] == "timeout" for a in argv]
+    assert any(str(staged) in a or staged.as_posix() in a for a in tool_inputs), "decompile did not read apk/staged"
+    for part in out["apk"]["parts"]:
+        assert Path(part["path"]).resolve().is_relative_to(staged)
+    assert evidence(out, "E00003")["result"]["apktool"]["state"] == "ok"
+    assert out["status"] == "investigating"
+    return out
+
+
+def test_device_origin_end_to_end_decompile(env, monkeypatch):
+    src, fake_wsl = env
+    base = make_apk(src / "e2e_base.apk")
+    split = make_apk(src / "e2e_split.apk", dex=False, libs=("arm64-v8a/libsplit.so",))
+    remotes = {"/data/app/~~e/base.apk": base.read_bytes(),
+               "/data/app/~~e/split_config.arm64_v8a.apk": split.read_bytes()}
+    fake = FakeADB(remotes)
+    fake.pm_path_stdout = "".join(f"package:{r}\n" for r in remotes)
+    _install_fake_adb(monkeypatch, fake, src)
+    row = apk_sidecar.prepare_apk(None, "Device e2e", [], "t", source_type="device", package_name="org.anzu.test")
+    assert row["source_kind"] == "device_pull"
+    out = _decompile_uses_staged(row, fake_wsl)
+    assert evidence(out, "E00002")["operation"] == "apk_manifest"
+
+
+def test_ffs_origin_end_to_end_decompile(env):
+    src, fake_wsl = env
+    dump = src / "ffs_e2e"
+    apk_bytes = make_apk(src / "ffs_e2e_seed.apk").read_bytes()
+    ffs_id = _make_ffs_investigation(dump, "apps/org.anzu.test/base.apk", apk_bytes)
+    row = apk_sidecar.prepare_apk("apps/org.anzu.test/base.apk", "FFS e2e", [], "t",
+                                  source_type="ffs", ffs_investigation_id=ffs_id)
+    assert row["source_kind"] == "ffs_reference"
+    out = _decompile_uses_staged(row, fake_wsl)
+    assert (dump / "apps" / "org.anzu.test" / "base.apk").read_bytes() == apk_bytes  # dump untouched
