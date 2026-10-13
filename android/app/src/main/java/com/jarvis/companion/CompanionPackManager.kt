@@ -138,10 +138,57 @@ class CompanionPackManager(
     }
 
     fun updateCatalog(leader: JSONObject?) {
-        catalog = CompanionPackCatalog.merge(leader)
+        catalog = CompanionPackCatalog.merge(leader) + importedPacks()
     }
 
     fun catalogJson(): List<JSONObject> = catalog.map { it.toJson() }
+
+    private fun importedPacks(): List<CompanionPack> = runCatching {
+        org.json.JSONArray(prefs.getString("imports", "[]")).objects().map {
+            CompanionPack(it.getString("id"), it.getString("label"), it.getString("filename"),
+                it.getLong("size_bytes"), it.getInt("min_ram_mb"), it.getString("sha256"), "", false)
+        }
+    }.getOrDefault(emptyList())
+
+    init { catalog = catalog + importedPacks() }
+
+    suspend fun importGguf(uri: android.net.Uri) = withContext(Dispatchers.IO) {
+        val id = "import-" + java.util.UUID.randomUUID().toString()
+        val target = File(packDir, "$id.gguf")
+        try {
+            app.contentResolver.openInputStream(uri)?.use { input ->
+                val header = ByteArray(4)
+                require(input.read(header) == 4 && header.contentEquals(byteArrayOf(71, 71, 85, 70))) { "Choose a GGUF model file" }
+                target.outputStream().use { output ->
+                    output.write(header)
+                    val buffer = ByteArray(65536)
+                    var size = 4L
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        size += count
+                        require(size <= 4L * 1024 * 1024 * 1024) { "Choose a phone-sized GGUF (up to 4 GiB)" }
+                        output.write(buffer, 0, count)
+                    }
+                }
+            } ?: error("Cannot read selected file")
+            val digest = defaultFileSha256(target)
+            val ram = ((target.length() / (1024 * 1024)) + 768).toInt().coerceAtLeast(1024)
+            val pack = CompanionPack(id, "Imported GGUF (${target.length() / (1024 * 1024)} MiB)", target.name,
+                target.length(), ram, digest, "", false)
+            val imports = importedPacks() + pack
+            val array = org.json.JSONArray()
+            imports.forEach { array.put(it.toJson()) }
+            check(prefs.edit().putString("imports", array.toString()).commit()) { "Could not save imported model" }
+            catalog = catalog.filterNot { it.id.startsWith("import-") } + imports
+            digestCache.remember(target, digest)
+            selectPack(id)
+            refreshStatus()
+        } catch (error: Exception) {
+            target.delete()
+            throw error
+        }
+    }
 
     fun status(): String = statusRef.get()
 
@@ -255,7 +302,7 @@ class CompanionPackManager(
                 error("Download checksum mismatch")
             }
         }
-        partial.renameTo(target)
+        check(partial.renameTo(target)) { "Could not save the downloaded model" }
         digestCache.invalidate(partial)
         if (pack.sha256.isNotBlank()) digestCache.remember(target, pack.sha256)
         statusRef.set(CompanionPackStatus.READY)

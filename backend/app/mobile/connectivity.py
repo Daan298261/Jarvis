@@ -215,6 +215,10 @@ class Connectivity:
         cfg = self.config()
         payload["wan"] = redact_wan_config(cfg)
         payload["remote"] = bool(cfg.get("remote"))
+        payload["connection_mode"] = cfg.get("connection_mode", "public_forward" if cfg.get("remote") else "lan")
+        evidence = self.state.get("phone_verification")
+        payload["phone_verified"] = bool(evidence and evidence.get("endpoint") in payload.get("endpoints", [])
+                                        and time.time() - evidence.get("verified_at", 0) < 86400)
         return payload
 
     def config(self):
@@ -494,6 +498,22 @@ class Connectivity:
                 self.report(endpoints=self._lan_endpoints(hosts))
             return
         self.report(activity="Finding phone-reachable addresses", router="disabled", limitation="", remote_verified=False)
+        if config.get("connection_mode") == "tailscale" and config.get("remote"):
+            from .phone_setup import tailscale_status
+            try:
+                await self.ensure_gateway_listening()
+                overlay = await asyncio.to_thread(tailscale_status)
+                hosts = await asyncio.to_thread(lan_hosts)
+                endpoints = [*overlay["endpoints"], *self._lan_endpoints(hosts)]
+                await self.cover_phone_dial_hosts(*endpoints)
+                self.remote_prepared = True
+                self.report(state="ready", activity=overlay["message"], endpoints=endpoints,
+                            server_pin=self.identity["server_pin"], local_verified=True,
+                            wan_path="tailscale" if overlay["available"] else "", router="disabled",
+                            limitation="" if overlay["available"] else overlay["message"])
+            except Exception as exc:
+                self.report(state="failed", activity=str(exc)[:240])
+            return
         router, public_ip = None, None
         hosts = await asyncio.to_thread(lan_hosts)
         relay = os.environ.get("JARVIS_RELAY_ENDPOINT", "") if config["remote"] else ""
@@ -1019,6 +1039,8 @@ class Connectivity:
                             if self.state.get("state") == "cooldown":
                                 pass
                             elif self.state.get("state") != "ready" or not self.remote_prepared:
+                                await self.apply_remote(config)
+                            elif config.get("connection_mode") == "tailscale" and config.get("remote"):
                                 await self.apply_remote(config)
                             elif tunnel_dead:
                                 try:

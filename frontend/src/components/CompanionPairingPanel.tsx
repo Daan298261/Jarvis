@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { QRCodeSVG } from "qrcode.react"
+import { PhoneConnectionSetup } from "./PhoneConnectionSetup"
 import {
   api,
   createCompanionPairingCode,
@@ -321,6 +322,7 @@ export function CompanionPairingPanel({ compact = false }: { compact?: boolean }
 
   return (
     <div className={compact ? "companion-pairing companion-pairing--compact" : "companion-pairing"}>
+      {!compact && <PhoneConnectionSetup onChanged={() => ensureCode(true)} />}
       {!compact && onboarding && onboarding.offers.length > 0 && (
         <div className="companion-pairing-offers" aria-label="Companion onboarding choices">
           <p className="companion-pairing-offers-lede">What would you like to do?</p>

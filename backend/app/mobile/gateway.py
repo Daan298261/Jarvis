@@ -102,7 +102,8 @@ def _private_client(host: str) -> bool:
         return False
     # Relay tunnels terminate on this process over loopback, so loopback is
     # deliberately not proof that the phone is on the desktop's LAN.
-    return bool(address.is_private and not address.is_loopback)
+    return bool(address.is_private and not address.is_loopback
+                and not (address.version == 6 and address in ipaddress.ip_network("fd7a:115c:a1e0::/48")))
 
 
 def gateway_app(upstream: str = "http://127.0.0.1:4780"):

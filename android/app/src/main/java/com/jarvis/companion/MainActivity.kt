@@ -84,6 +84,7 @@ class MainActivity : FragmentActivity() {
             }
             val model: CompanionModel = viewModel()
             val state by model.state.collectAsStateWithLifecycle()
+            LaunchedEffect(state.recording, state.speaking) { WakeAudioState.busy = state.recording || state.speaking }
             val app = application as JarvisApp
             val deviceChrome = app.deviceModelChrome
             val devicePack by deviceChrome.state.collectAsStateWithLifecycle()
@@ -164,6 +165,14 @@ class MainActivity : FragmentActivity() {
             LaunchedEffect(latestIntent) {
                 val delivered = latestIntent ?: return@LaunchedEffect
                 delivered.getStringExtra("incoming_call")?.let { incomingCall = it }
+                if (delivered.action == Intent.ACTION_ASSIST || delivered.getBooleanExtra("anzu_assist", false)) {
+                    tab = "Chat"
+                    if (delivered.getBooleanExtra("anzu_voice", false) &&
+                        ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED &&
+                        !state.recording) model.toggleRecord()
+                    delivered.removeExtra("anzu_assist"); delivered.removeExtra("anzu_voice")
+                    delivered.action = null
+                }
                 delivered.getStringExtra(Intent.EXTRA_TEXT)?.let { draft = it; tab = "Chat" }
                 val shared = mutableListOf<android.net.Uri>()
                 @Suppress("DEPRECATION")
@@ -189,6 +198,7 @@ class MainActivity : FragmentActivity() {
                 delivered.clipData = null
             }
             MaterialTheme(colorScheme = darkColorScheme(primary = Gold, background = Ink, surface = Panel, onSurface = Color(0xFFE7EDF5), secondary = Color(0xFF74DCCD))) {
+                PhoneActionApprovalDialog()
                 PostPairOfflinePackOfferDialog(
                     visible = showPostPairPackOffer && postPairPackOffer != null,
                     packLabel = postPairPackOffer?.label ?: "",
@@ -993,6 +1003,7 @@ private fun formatStorageBytes(bytes: Long): String {
             if (state.capabilities.optJSONObject("calls")?.optBoolean("push_configured") != true) Text(stringResource(R.string.push_needs_anzu_service), color = Muted, fontSize = 12.sp)
         }
         item { CompanionModelsSection(deviceChrome, devicePack, state.busy) }
+        item { AssistantSettings(model) }
         item { CompanionVoicePacksSection(model, state) }
         item {
             Text("Voice & presence", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))

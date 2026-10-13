@@ -37,6 +37,14 @@ set(ORT_AAR_DIR "${CMAKE_CURRENT_BINARY_DIR}/ort-aar")
 set(ORT_AAR_FILE "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime-android-${ORT_VERSION}.aar")
 set(ORT_AAR_URL "https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/${ORT_VERSION}/onnxruntime-android-${ORT_VERSION}.aar")
 
+set(ORT_CACHED FALSE)
+if(EXISTS "${ORT_AAR_FILE}")
+    file(SHA256 "${ORT_AAR_FILE}" ORT_EXISTING_HASH)
+    if(ORT_EXISTING_HASH STREQUAL ORT_AAR_SHA256)
+        set(ORT_CACHED TRUE)
+    endif()
+endif()
+if(NOT ORT_CACHED)
 message(STATUS "Fetching ONNX Runtime Android ${ORT_VERSION} (hashed)")
 file(DOWNLOAD "${ORT_AAR_URL}" "${ORT_AAR_FILE}"
      EXPECTED_HASH SHA256=${ORT_AAR_SHA256}
@@ -45,6 +53,7 @@ file(DOWNLOAD "${ORT_AAR_URL}" "${ORT_AAR_FILE}"
 list(GET ORT_DL_STATUS 0 ORT_DL_CODE)
 if(NOT ORT_DL_CODE EQUAL 0)
     message(FATAL_ERROR "Failed to download ONNX Runtime Android AAR: ${ORT_DL_STATUS}")
+endif()
 endif()
 
 if(NOT EXISTS "${ORT_AAR_DIR}/jni" OR NOT EXISTS "${ORT_AAR_DIR}/headers/onnxruntime_cxx_api.h")
