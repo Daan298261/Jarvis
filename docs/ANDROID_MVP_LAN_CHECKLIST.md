@@ -151,7 +151,7 @@ Keep the gateway terminal open; if it stops, the phone loses TLS ingress immedia
 | **Battery** / Doze / OEM kill | N/A | Long-run stability |
 | **WebRTC** over LAN without TURN | May work on same subnet | NAT edge cases; TURN optional for WAN |
 
-This MVP explicitly does **not** provision Firebase, `JARVIS_TURN_*`, or `services/mobile-relay/` — see [`docs/android-companion.md`](android-companion.md) for remote/voice production checklist.
+This MVP explicitly does **not** provision Firebase, `JARVIS_TURN_*`, or Tailscale remote pairing ([RFC-0215](rfcs/0215-remote-companion-pairing.md)) — see [`docs/android-companion.md`](android-companion.md) for remote/voice production checklist.
 
 ---
 

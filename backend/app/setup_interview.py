@@ -327,11 +327,10 @@ def _mobile_plan() -> dict[str, Any]:
         "same_lan": "pair from Phone after this PC allows LAN access",
         "remote_access": "companion TLS 4781",
         "router_forwarding_required": False,
-        "router_forwarding": "opt-in TCP 4781 via UPnP, NAT-PMP, PCP, OpenWrt SSH, or reverse tunnel",
+        "router_forwarding": "never; off-LAN companion TLS 4781 is Tailscale only",
         "reason": (
-            "Pair on the same LAN first. Off-LAN uses Jarvis > Phone > Prepare connection, which maps "
-            "companion TLS 4781 only (UPnP, NAT-PMP, PCP, gateway SSH, or SSH reverse tunnel). "
-            "Portal 4780, SSH, and router admin are never forwarded."
+            "Pair on the same LAN first. Off-LAN access is Tailscale only: install Tailscale on this PC and "
+            "the phone, then turn on remote access in Jarvis > Phone. No router port is ever opened."
         ),
     }
 
@@ -465,7 +464,7 @@ def plan_interview(answers: dict[str, Any] | None = None, hw: HardwareInfo | Non
         ),
         disk["message"],
         "LM Studio is optional; Jarvis uses its bundled llama.cpp runtime by default.",
-        "Phone access defaults to LAN pairing; off-LAN uses Phone > Prepare connection for TCP 4781 only.",
+        "Phone access defaults to LAN pairing; off-LAN access is Tailscale only (no router port is opened).",
     ]
     if install_expert:
         reasoning.append("A 27B local expert is selected for harder work and may use RAM offload when it does not fully fit VRAM.")
@@ -597,7 +596,6 @@ def render_mobile_script(plan: dict[str, Any]) -> str:
     return "\r\n".join(
         [
             "#Requires -Version 5.1",
-            "param([switch]$UseRouterPortForward)",
             "$ErrorActionPreference = 'Stop'",
             "$Port = 4781",
             "$BeaconPort = 4782",
@@ -609,10 +607,8 @@ def render_mobile_script(plan: dict[str, Any]) -> str:
             "  netsh advfirewall firewall add rule name='Jarvis companion TLS 4781' dir=in action=allow protocol=TCP localport=$Port profile=any | Out-Null",
             "  netsh advfirewall firewall add rule name='Jarvis companion LAN beacon 4782' dir=in action=allow protocol=UDP localport=$BeaconPort profile=any | Out-Null",
             "}",
-            "Write-Host 'LAN pairing is ready. Off-LAN: open Jarvis > Phone > Prepare connection to map companion TLS 4781 (UPnP, NAT-PMP, PCP, gateway SSH, or reverse tunnel).' -ForegroundColor Green",
-            "if ($UseRouterPortForward) {",
-            "  Write-Warning 'Do not forward portal TCP 4780. Prepare connection maps companion TLS 4781 only.'",
-            "}",
+            "Write-Host 'LAN pairing is ready. Off-LAN access is Tailscale only: install Tailscale on this PC and the phone, then turn on remote access in Jarvis > Phone.' -ForegroundColor Green",
+            "Write-Host 'Do not forward any router port; Jarvis never exposes 4780 or 4781 to the internet.' -ForegroundColor Yellow",
             "Write-Host 'Phone access preparation complete. Open Jarvis > Phone for companion pairing.' -ForegroundColor Green",
             "",
         ]

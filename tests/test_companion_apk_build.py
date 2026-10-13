@@ -155,7 +155,7 @@ def test_personalized_build_auto_prepares_connection(owner_client, monkeypatch):
 
         async def configure(self, enabled, remote):
             assert enabled is True
-            assert remote is True
+            assert remote is None  # RFC-0215: a build never changes remote exposure
             return {
                 "state": "ready",
                 "endpoints": ["https://192.168.1.10:4781"],
@@ -188,7 +188,7 @@ def test_personalized_build_auto_prepares_connection(owner_client, monkeypatch):
     assert started["endpoint"] == "https://192.168.1.10:4781"
 
 
-def test_personalized_build_prefers_wan_endpoint(owner_client, monkeypatch):
+def test_personalized_build_drops_public_endpoints(owner_client, monkeypatch):
     client, headers = owner_client
     started = {}
 
@@ -220,9 +220,9 @@ def test_personalized_build_prefers_wan_endpoint(owner_client, monkeypatch):
         json={"mode": "personalized", "prepare_connection": False, "endpoint": ""},
     )
     assert response.status_code == 200, response.text
-    assert started["endpoint"] == "https://8.8.4.4:4781"
-    assert started["endpoints"][0] == "https://8.8.4.4:4781"
-    assert "https://192.168.1.10:4781" in started["endpoints"]
+    # RFC-0215: public addresses are never baked in; off-LAN access is Tailscale only.
+    assert started["endpoint"] == "https://192.168.1.10:4781"
+    assert started["endpoints"] == ["https://192.168.1.10:4781"]
 
 
 def test_personalized_build_requires_endpoint_without_prepare(owner_client, monkeypatch):
