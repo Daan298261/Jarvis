@@ -773,6 +773,9 @@ private fun formatStorageBytes(bytes: Long): String {
                     }
                 }
             }
+            ttsPacks.firstOrNull { it.optString("id") == model.voicePackManager.selectedTtsPackId() }?.let { pack ->
+                VoicePackCreditText(pack.optString("id"), pack.optString("attribution"))
+            }
             Text(formatStorageBytes(model.voicePackManager.storageBytes()), color = Muted, fontSize = 12.sp)
             state.voicePackError.takeIf { it.isNotBlank() }?.let {
                 Text(it, color = Color(0xFFE8A87C), fontSize = 12.sp)
