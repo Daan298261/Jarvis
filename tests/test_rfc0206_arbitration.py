@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import time
+import threading
 
 import pytest
 
@@ -196,8 +196,16 @@ def test_consecutive_assistant_turns_do_not_call_provider(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_bounded_arbitration_does_not_stall_event_loop(monkeypatch):
+    # The stub blocks until released, so returning before release proves the bound
+    # held without a wall-clock check (loaded CI runners add scheduling noise).
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+
     def blocking(**_kwargs):
-        time.sleep(0.25)
+        started.set()
+        release.wait(10)
+        finished.set()
         return DecisionResult(
             answers={"disposition": Answer("disposition", "choice", "keep_front", 0.99)},
             source="laya",
@@ -206,15 +214,17 @@ async def test_bounded_arbitration_does_not_stall_event_loop(monkeypatch):
         )
 
     monkeypatch.setattr("app.decision.surfaces.arbitrate_front_and_worker", blocking)
-    started = time.perf_counter()
-    merged = await merge_front_and_worker_async(
-        "On it. I'll check the details.",
-        "Mild rain later, sir.",
-        "ack_continue",
-        user_message="what is the weather",
-        reply_shape="ack",
-    )
-    elapsed_ms = (time.perf_counter() - started) * 1000.0
-    assert elapsed_ms < 120.0
+    try:
+        merged = await merge_front_and_worker_async(
+            "On it. I'll check the details.",
+            "Mild rain later, sir.",
+            "ack_continue",
+            user_message="what is the weather",
+            reply_shape="ack",
+        )
+        assert started.is_set(), "arbitration never called the decision"
+        assert not finished.is_set(), "arbitration waited for the slow decision"
+    finally:
+        release.set()
     assert "On it." in merged
     assert "Deeper result" not in merged
