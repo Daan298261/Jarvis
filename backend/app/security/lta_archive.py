@@ -299,6 +299,20 @@ def decrypt_pkcs7_password(ciphertext_b64: str, key: ResolvedKey) -> str:
     return _decrypt_openssl_cms(blob, key.private_key_pem)
 
 
+def _decode_cms_password(raw: bytes) -> str:
+    """CMS plaintext → password. Undecodable bytes mean the key or ciphertext is wrong."""
+    for encoding_name in ("utf-8", "utf-16-le"):
+        try:
+            password = raw.decode(encoding_name, errors="strict").strip("\x00").strip()
+        except UnicodeError:
+            continue
+        if password:
+            return password
+    if raw.strip(b"\x00").strip():
+        raise DecryptFailed("CMS plaintext is not a usable password string", detail="password_encoding")
+    return ""
+
+
 def _decrypt_openssl_cms(blob: bytes, private_key_pem: bytes) -> str:
     openssl = shutil.which("openssl")
     if not openssl:
@@ -317,7 +331,12 @@ def _decrypt_openssl_cms(blob: bytes, private_key_pem: bytes) -> str:
             except OSError:
                 pass
         proc = subprocess.run(
-            [openssl, "cms", "-decrypt", "-inform", "DER", "-in", tmp, "-inkey", key_path],
+            # -debug_decrypt: fail on a wrong key instead of OpenSSL's MMA countermeasure,
+            # which decrypts with a random content key. AES-CBC padding then passes for
+            # ~1 in 256 wrong keys and yields garbage "plaintext" that broke later as
+            # archive_failed. Wrong key must always be decrypt_failed. The countermeasure
+            # protects network-facing padding oracles; this is a local, owner-run open.
+            [openssl, "cms", "-decrypt", "-debug_decrypt", "-inform", "DER", "-in", tmp, "-inkey", key_path],
             capture_output=True,
             check=False,
         )
@@ -330,13 +349,7 @@ def _decrypt_openssl_cms(blob: bytes, private_key_pem: bytes) -> str:
             elif "padding" in stderr:
                 err_class = "cms_padding_error"
             raise DecryptFailed("PKCS#7/CMS decrypt failed", detail=err_class)
-        password = proc.stdout.decode("utf-8", errors="strict").strip("\x00").strip()
-        if not password:
-            # Some LTA packs use UTF-16LE password bytes
-            try:
-                password = proc.stdout.decode("utf-16-le", errors="strict").strip("\x00").strip()
-            except UnicodeError as exc:
-                raise DecryptFailed("CMS plaintext is not a usable password string", detail="password_encoding") from exc
+        password = _decode_cms_password(proc.stdout)
         if not password:
             raise DecryptFailed("CMS plaintext empty", detail="empty_password")
         return password
@@ -423,13 +436,9 @@ def _decrypt_windows_cms(blob: bytes) -> str:
         if not CryptDecryptMessage(ctypes.byref(para), blob_buf, len(blob), out_buf, ctypes.byref(size), None):
             raise DecryptFailed("CryptDecryptMessage failed", detail="cms_decrypt_failed")
         raw = bytes(out_buf[: size.value])
-        for encoding_name in ("utf-8", "utf-16-le"):
-            try:
-                password = raw.decode(encoding_name).strip("\x00").strip()
-            except UnicodeError:
-                continue
-            if password:
-                return password
+        password = _decode_cms_password(raw)
+        if password:
+            return password
         raise DecryptFailed("CMS plaintext is not a usable password string", detail="password_encoding")
     finally:
         for handle in stores:

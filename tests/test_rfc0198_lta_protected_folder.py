@@ -338,6 +338,54 @@ def test_wrong_key_decrypt_failed(lta_env):
     assert job["error"] == "decrypt_failed"
 
 
+
+def test_wrong_key_garbage_plaintext_is_decrypt_failed(lta_env, monkeypatch):
+    """Regression: a wrong RSA key can "decrypt" CMS to random bytes (~1 in 256 CBC
+    paddings pass). Those bytes must classify as decrypt_failed, never archive_failed."""
+    import app.security.lta_archive as lta_archive
+
+    bundle = _build_bundle(lta_env["tmp"] / "case-garbage")
+    other = _make_synthetic_identity(lta_env["tmp"] / "other-key-garbage")
+    set_test_key_resolver(lambda _t, _s: other["key_pem"])  # type: ignore[arg-type,return-value]
+    real_run = subprocess.run
+    seen: list[list[str]] = []
+
+    def fake_run(argv, *args, **kwargs):
+        if len(argv) > 2 and argv[1:3] == ["cms", "-decrypt"]:
+            seen.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0, stdout=b"\x9c\xff\x10\xd8\x00\xfe\x81", stderr=b"")
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(lta_archive.subprocess, "run", fake_run)
+    job = run_protected_folder_open(
+        manifest_path=str(bundle["manifest_path"]),
+        archive_path=str(bundle["archive_path"]),
+    )
+    assert seen, "CMS decrypt was not invoked"
+    assert job["status"] == "failed"
+    assert job["error"] == "decrypt_failed"
+
+
+def test_openssl_cms_decrypt_rejects_wrong_key_instead_of_random_key():
+    """-debug_decrypt makes OpenSSL fail on a wrong key rather than decrypt with a
+    random content key (the source of the archive_failed flake)."""
+    import inspect
+
+    import app.security.lta_archive as lta_archive
+
+    assert '"-debug_decrypt"' in inspect.getsource(lta_archive._decrypt_openssl_cms)
+
+
+def test_decode_cms_password_mapping():
+    from app.security.lta_archive import _decode_cms_password
+    from app.security.lta_errors import DecryptFailed
+
+    assert _decode_cms_password(b"S3cret-pass") == "S3cret-pass"
+    assert _decode_cms_password("pässwörd".encode("utf-16-le")) == "pässwörd"
+    assert _decode_cms_password(b"\x00\x00") == ""
+    with pytest.raises(DecryptFailed):
+        _decode_cms_password(b"\xd8\x00\xd8")
+
 def test_xml_invalid(lta_env):
     bad = lta_env["tmp"] / "bad.xml"
     bad.write_text("<not-closed", encoding="utf-8")
