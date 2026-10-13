@@ -7,7 +7,7 @@ export function PhonePairingSettingsPane() {
     <CollapsibleSection className="card grid settings-pane-card" storageKey="PhonePairingSettingsPane-Companion-pairing" title={<span>Companion pairing</span>}>
 
       <p className="lede" style={{ margin: "0 0 12px" }}>
-        Prepare companion TLS 4781 (LAN, then UPnP / NAT-PMP / PCP / gateway SSH / reverse tunnel), then
+        Prepare companion TLS 4781 on your LAN (off-LAN access is Tailscale only; no router port is opened), then
         pair with a 6-digit code. Regenerating invalidates any previous unclaimed code.{" "}
         <Link to="/phone">Phone</Link> is the same Prepare connection flow plus the LAN PWA.
       </p>

@@ -360,7 +360,7 @@ def test_companion_enroll_legacy_invitation_without_owner_key(companion_env):
 def test_localhost_connection_setup_without_browser_key(companion_env_no_owner_key, monkeypatch):
     from app.mobile import connectivity
 
-    async def fake_configure(enabled, remote):
+    async def fake_configure(enabled, remote, tailscale=None):
         return {
             "state": "ready",
             "enabled": enabled,

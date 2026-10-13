@@ -11,61 +11,10 @@ from app.mobile import connectivity, store
 def network_env(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "data_dir", lambda: tmp_path)
     monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
-    monkeypatch.delenv("JARVIS_RELAY_ENDPOINT", raising=False)
     monkeypatch.setattr(
-        "app.mobile.wan_forward.lookup_egress_ipv4",
-        lambda: (_ for _ in ()).throw(ValueError("offline")),
+        "app.mobile.remote_access.tailscale_status",
+        lambda: {"running": True, "endpoints": ["https://vrpc.tail1.ts.net:4781", "https://100.90.1.2:4781"], "hint": ""},
     )
-
-
-class Router:
-    lanaddr = "192.168.1.12"
-    wan_ip = "8.8.8.8"
-    def __init__(self, mapping=None):
-        self.mapping = mapping
-        self.added = []
-        self.deleted = []
-    def getspecificportmapping(self, port, protocol):
-        return self.mapping
-    def addportmapping(self, *args):
-        self.added.append(args)
-        self.mapping = (args[2], args[3], args[4], "1", "", args[6])
-        return True
-    def deleteportmapping(self, *args):
-        self.deleted.append(args)
-        self.mapping = None
-    def externalipaddress(self):
-        return self.wan_ip
-
-
-def test_router_mapping_never_overwrites_or_removes_foreign_entry(monkeypatch):
-    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
-    router = Router(("192.168.1.99", 4781, "Other app"))
-    with pytest.raises(ValueError):
-        connectivity.map_router(router, "Jarvis-owned")
-    connectivity.unmap_router(router, "Jarvis-owned")
-    assert router.added == router.deleted == []
-
-
-def test_router_mapping_uses_only_tls_port_and_finite_lease(monkeypatch):
-    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
-    router = Router()
-    connectivity.map_router(router, "Jarvis-owned")
-    assert router.added == [(4781, "TCP", router.lanaddr, 4781, "Jarvis-owned", "", 3600)]
-    connectivity.map_router(router, "Jarvis-owned")
-    connectivity.unmap_router(router, "Jarvis-owned")
-    assert router.deleted == [(4781, "TCP")]
-
-
-def test_map_router_replaces_cgnat_internal_client(monkeypatch):
-    monkeypatch.setattr(connectivity, "lan_hosts", lambda: ["192.168.1.12"])
-    monkeypatch.setattr(connectivity, "preferred_lan_ipv4", lambda gateway="": "192.168.1.12")
-    router = Router(("100.64.1.8", 4781, "Jarvis-owned"))
-    router.lanaddr = "100.64.1.8"
-    connectivity.map_router(router, "Jarvis-owned")
-    assert router.added == [(4781, "TCP", "192.168.1.12", 4781, "Jarvis-owned", "", 3600)]
-    connectivity.unmap_router(router, "Jarvis-owned")
-    assert router.deleted == [(4781, "TCP")]
 
 
 @pytest.mark.parametrize("value", ["http://host", "https://key@host", "https://host/api", "https://host?key=secret", "https://host#token", "https://host:0"])
@@ -92,78 +41,49 @@ class FakeConnection(connectivity.Connectivity):
     async def probe(self, endpoint, identity):
         if getattr(self, "probe_fails", False):
             raise RuntimeError("Device authentication unavailable")
+    async def probe_health(self, endpoint, identity):
+        return None
 
 
 @pytest.mark.asyncio
-async def test_router_is_mapped_only_after_gateway_auth_check(network_env, monkeypatch):
-    router = Router()
-    monkeypatch.setattr(connectivity, "router_candidate", lambda: (router, "8.8.8.8"))
+async def test_tailscale_is_advertised_only_after_gateway_auth_check_and_remote_on(network_env):
     connection = FakeConnection()
     connection.probe_fails = True
     result = await connection.configure(True, True)
     assert result["state"] == "failed"
-    assert not router.added
     connection.probe_fails = False
     result = await connection.configure(True, True)
-    assert result["state"] == "ready"
-    assert result["local_verified"]
-    assert not result["remote_verified"]  # A lease does not prove WAN connectivity.
-    assert result["endpoints"] == ["https://192.168.1.12:4781", "https://8.8.8.8:4781"]
+    assert result["state"] == "ready" and result["local_verified"]
+    assert result["endpoints"] == [
+        "https://192.168.1.12:4781", "https://vrpc.tail1.ts.net:4781", "https://100.90.1.2:4781",
+    ]
     from app.mobile.gateway import identity_covers
-    assert identity_covers(connection.identity, ["192.168.1.12", "8.8.8.8"])
-    result = await connection.configure(False, False)
+    assert identity_covers(connection.identity, ["192.168.1.12", "vrpc.tail1.ts.net", "100.90.1.2"])
+    assert [r["status"] for r in result["reachability"]] == ["ok", "ok", "ok"]
+    result = await connection.configure(True, False)
     assert result["endpoints"] == ["https://192.168.1.12:4781"]
-    assert router.deleted == [(4781, "TCP")]
+    assert result["remote"] is False
 
 
 @pytest.mark.asyncio
-async def test_lan_mode_does_not_discover_router(network_env, monkeypatch):
+async def test_lan_mode_does_not_query_tailscale(network_env, monkeypatch):
     def forbidden():
-        pytest.fail("LAN-only setup must not contact the router")
-    monkeypatch.setattr(connectivity, "router_candidate", forbidden)
+        pytest.fail("LAN-only setup must not advertise or query Tailscale")
+    monkeypatch.setattr("app.mobile.remote_access.tailscale_status", forbidden)
     result = await FakeConnection().configure(True, False)
     assert result["state"] == "ready"
-    assert result["router"] == "disabled"
-
-
-@pytest.mark.asyncio
-async def test_router_failure_keeps_lan_available(network_env, monkeypatch):
-    def unavailable():
-        raise ValueError("No public IPv4; carrier NAT")
-    monkeypatch.setattr(connectivity, "router_candidate", unavailable)
-    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no NAT-PMP")))
-    monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
-    result = await FakeConnection().configure(True, True)
-    assert result["state"] == "ready" and result["local_verified"]
-    assert "carrier NAT" in result["limitation"]
     assert result["endpoints"] == ["https://192.168.1.12:4781"]
 
 
 @pytest.mark.asyncio
-async def test_upnp_lease_advertises_owner_public_hostname(network_env, monkeypatch):
-    router = Router()
-    monkeypatch.setattr(connectivity, "router_candidate", lambda: (router, "8.8.8.8"))
-    connection = FakeConnection()
-    result = await connection.configure(True, True, {"wan_public_host": "home.example.test"})
-    assert result["state"] == "ready"
-    assert "https://8.8.8.8:4781" in result["endpoints"]
-    assert any(endpoint == "https://home.example.test:4781" for endpoint in result["endpoints"])
-    from app.mobile.gateway import identity_covers
-    assert identity_covers(connection.identity, ["8.8.8.8", "home.example.test", "192.168.1.12"])
-
-
-@pytest.mark.asyncio
-async def test_public_hostname_is_advertised_without_automatic_mapping(network_env, monkeypatch):
-    monkeypatch.setattr(connectivity, "router_candidate", lambda *a, **k: (_ for _ in ()).throw(ValueError("No IGD")))
-    monkeypatch.setattr("app.mobile.natpmp.apply_natpmp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no NAT-PMP")))
-    monkeypatch.setattr("app.mobile.pcp.apply_pcp", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no PCP")))
-    connection = FakeConnection()
-    result = await connection.configure(True, True, {"wan_public_host": "home.example.test"})
-    assert result["state"] == "ready"
-    assert any(endpoint == "https://home.example.test:4781" for endpoint in result["endpoints"])
-    assert "public hostname" in (result.get("limitation") or "").lower()
-    from app.mobile.gateway import identity_covers
-    assert identity_covers(connection.identity, ["home.example.test", "192.168.1.12"])
+async def test_tailscale_down_keeps_lan_and_explains(network_env, monkeypatch):
+    monkeypatch.setattr(
+        "app.mobile.remote_access.tailscale_status",
+        lambda: {"running": False, "endpoints": [], "hint": "Tailscale is installed but not connected."},
+    )
+    result = await FakeConnection().configure(True, True)
+    assert result["state"] == "ready" and result["endpoints"] == ["https://192.168.1.12:4781"]
+    assert "not connected" in result["limitation"]
 
 
 @pytest.mark.asyncio
@@ -219,8 +139,13 @@ async def test_managed_gateway_serves_real_tls_and_shuts_down(network_env, monke
         context = ssl.create_default_context(cafile=connection.identity["certificate"])
         async with httpx.AsyncClient(verify=context, trust_env=False) as client:
             base = f"https://127.0.0.1:{connectivity.PORT}"
-            assert (await client.get(base + "/api/companion/models")).status_code == 401
-            assert (await client.get(base + "/api/mobile/manage/devices")).status_code == 404
+            from app.mobile.gateway import SELF_TEST_HEADER, SELF_TEST_SECRET
+
+            # RFC-0215: remote is off, so plain loopback is refused; only the desktop's own probe gets in.
+            assert (await client.get(base + "/api/companion/models")).status_code == 403
+            probe = {SELF_TEST_HEADER: SELF_TEST_SECRET}
+            assert (await client.get(base + "/api/companion/models", headers=probe)).status_code == 401
+            assert (await client.get(base + "/api/mobile/manage/devices", headers=probe)).status_code == 404
         await connection.configure(False, False)
         assert connection.server_task is not None
         await connection.stop_gateway()
