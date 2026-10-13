@@ -172,10 +172,10 @@ class VoicePackSource(private val m: CompanionVoicePackManager) : DownloadedCont
             val bytes = DownloadedContentManager.sizeOf(dir)
             if (bytes == 0L) return@mapNotNull null // packDir() creates empty dirs on lookup
             val pack = m.catalog().firstOrNull { it.id == dir.name }
-            if (pack != null && pack.id in active) {
+                ?: return@mapNotNull DownloadedEntry(ContentKind.VOICE, dir.name, dir.name, bytes, ContentState.RETIRED, "No longer in the voice catalogue")
+            if (pack.id in active) {
                 return@mapNotNull DownloadedEntry(ContentKind.VOICE, dir.name, pack.label, bytes, ContentState.PARTIAL, "Download in progress", downloading = true)
             }
-                ?: return@mapNotNull DownloadedEntry(ContentKind.VOICE, dir.name, dir.name, bytes, ContentState.RETIRED, "No longer in the voice catalogue")
             val role = if (pack.role == "stt") "Speech recognition" else "Speech synthesis"
             val inUse = pack.id == m.selectedSttPackId() || pack.id == m.selectedTtsPackId()
             when (val verify = m.verifyInstalled(pack)) {
