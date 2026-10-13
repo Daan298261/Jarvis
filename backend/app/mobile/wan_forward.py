@@ -178,10 +178,10 @@ def is_rfc1918_ipv4(value: str) -> bool:
 
 
 def mapping_lan_ipv4(hosts, gateway: str = "") -> str:
-    """Dest IP for NAT-PMP / PCP / gateway SSH: RFC1918 on the gateway subnet, never CGNAT.
+    """This PC's RFC1918 LAN address on the default gateway's subnet, never CGNAT.
 
     ``lan_hosts()`` is lexicographically sorted, so a cellular 100.64 address would
-    otherwise beat 192.168 and the inner router would map the wrong interface.
+    otherwise beat 192.168 and the phone would be given the wrong interface.
     """
     candidates = [str(host).strip() for host in (hosts or []) if is_rfc1918_ipv4(str(host))]
     if not candidates:
@@ -204,7 +204,7 @@ def interface_ipv4_addresses() -> list[str]:
 
     Hostname lookup plus a UDP connect to 1.1.1.1 only see the default-route
     address. A WireGuard default route would otherwise hide the home LAN IP
-    the phone and the IGD both need.
+    the phone needs.
     """
     found: list[str] = []
     seen: set[str] = set()
@@ -411,8 +411,8 @@ def rfc1918_mapping_gateways() -> list[str]:
     """RFC1918 default-route gateways with ``default_gateway_ipv4()`` first.
 
     Tests that only patch the single-gateway helper still get a candidate, and
-    a VPN that stole 0.0.0.0 cannot hide the home LAN router from NAT-PMP or
-    OpenWrt SSH.
+    a VPN that stole 0.0.0.0 cannot hide the home LAN router from LAN endpoint
+    selection.
     """
     gateways: list[str] = []
     try:

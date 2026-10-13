@@ -36,9 +36,9 @@ def test_pair_intent_prepares_qr_without_detected_device(companion_env, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_prepare_pairing_preserves_wan_config_and_does_not_discover_devices(monkeypatch):
+async def test_prepare_pairing_preserves_remote_config_and_does_not_discover_devices(monkeypatch):
     manager = connectivity.Connectivity()
-    config = {"enabled": True, "remote": True, "wan_method": "ssh_reverse"}
+    config = {"enabled": True, "remote": True, "remote_explicit": True, "tailscale": True, "rfc0215_migrated": True}
     monkeypatch.setattr(manager, "config", lambda: config)
     monkeypatch.setattr(connectivity.GUARD, "cooldown_active", lambda: False)
 

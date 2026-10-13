@@ -2,11 +2,11 @@
 
 Concise answers for the most common Jarvis install and runtime questions. See `docs/INSTALL.md` and `TROUBLESHOOTING.md` for full detail.
 
-## Port-forward / off-LAN access
+## Off-LAN access (Tailscale only)
 
 - Default API bind is **`127.0.0.1:4780`** (portal) and **`127.0.0.1:8088`** (llama-server). Nothing is exposed to the internet by default.
 - **LAN access** — enable in Settings or `.\start-jarvis.ps1 -LanAccess`. Binds `0.0.0.0`; requires the **private key** on `/api` requests (`X-Jarvis-Key`, `Authorization: Bearer`, or `?key=`).
-- **Do not** use installer or wizard shortcuts to port-forward WAN exposure. Off-LAN phone use follows **Link-device** / Android client flows (`ANDROID_CLIENT.md`, `/api/mobile` for LAN URLs only — never returns the key).
+- **Never** port-forward the router. Off-LAN phone use is **Tailscale only** (RFC-0215): install Tailscale on the PC and phone, then turn on remote access in the pairing panel. See the Link-device / Android client flows (`ANDROID_CLIENT.md`, `/api/mobile` for LAN URLs only — never returns the key).
 - Copy the private key only at the PC; never email, chat, or screenshot it by default.
 
 ## LAN bind / listen address

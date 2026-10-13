@@ -38,8 +38,8 @@ preview, not a production remote-access release.
   incoming intent handling, call mute/audio-route controls and queued voice follow-ups.
 - Desktop owner pairing/build controls and a personalized release APK builder with a
   persistent signing identity, live heartbeats and interrupted-build recovery.
-- Owner-started TLS gateway lifecycle with verified local authentication, one-hour
-  UPnP leases that preserve foreign mappings, and multi-endpoint Android fallback.
+- Owner-started TLS gateway lifecycle with verified local authentication and
+  multi-endpoint (LAN + Tailscale) Android fallback.
 - Regenerable six-digit pairing codes are HMAC-protected at rest, expire after ten
   minutes, are rate limited, and still require exact fingerprint confirmation.
 

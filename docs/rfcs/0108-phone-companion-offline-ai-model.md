@@ -111,7 +111,7 @@ Pairing, Keystore identity, TLS pins, and revocation (RFC-0059 / 0074) stay requ
 - Companion **More / Models**: status (`missing` / `downloading` / `ready` / `running` / `error`), selected pack, storage used, **Download**, delete pack. (#309 chrome contract — keep.)
 - Chat: offline banner + local stream; when Leader returns, banner clears and sync runs.
 - **Post-pair popup** on the phone (§2.4) with pack size in MB.
-- Desktop pairing / Phone page: Leader cache progress (first-up background download) plus the existing pack hint. Pairing does not block on GGUF. WAN / port-forward / relay stay RFC-0123.
+- Desktop pairing / Phone page: Leader cache progress (first-up background download) plus the existing pack hint. Pairing does not block on GGUF. Off-LAN reachability is Tailscale only (RFC-0215; supersedes the RFC-0123 WAN / port-forward / relay paths).
 
 **Architect’s initial recommendation:** `partial` — on-device runtime inside the existing companion, Leader orchestrator online. Taco can override pack size / engine, not the online-orchestrator rule.
 
