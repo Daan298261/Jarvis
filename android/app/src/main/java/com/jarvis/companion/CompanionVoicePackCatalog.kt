@@ -56,7 +56,10 @@ object CompanionVoicePackCatalog {
     const val POCKET_TTS_ENGINE = "pocket-tts-onnx"
     val RETIRED_PACK_IDS = setOf("piper-en-lessac-medium")
     const val POCKET_VOICE_ATTRIBUTION =
-        "Voice: Alba MacKenna (CC BY 4.0). https://huggingface.co/kyutai/tts-voices#alba-mackenna — Kyutai Pocket TTS checkpoint (CC BY 4.0)."
+        "Voice: Alba MacKenna (https://huggingface.co/kyutai/tts-voices#alba-mackenna), " +
+            "licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). " +
+            "Model: Kyutai Pocket TTS (https://huggingface.co/kyutai/pocket-tts), CC BY 4.0. " +
+            "Modified: converted to ONNX INT8 by soniqo (https://huggingface.co/soniqo/Pocket-TTS-100M-ONNX-INT8)."
 
     fun canSynthesize(pack: CompanionVoicePack): Boolean =
         pack.role != "tts" || pack.engine == POCKET_TTS_ENGINE

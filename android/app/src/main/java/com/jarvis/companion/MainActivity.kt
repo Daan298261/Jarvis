@@ -775,7 +775,10 @@ private fun formatStorageBytes(bytes: Long): String {
                     }
                 }
             }
-            ttsPacks.firstOrNull { it.optString("id") == model.voicePackManager.selectedTtsPackId() }?.let { pack ->
+            val selectedTtsId = model.voicePackManager.selectedTtsPackId()
+            ttsPacks.filter {
+                VoicePackCredit.shouldShow(it.optString("id"), selectedTtsId, model.voicePackManager.isPackInstalled(it.optString("id")))
+            }.forEach { pack ->
                 VoicePackCreditText(pack.optString("id"), pack.optString("attribution"), color = Muted, errorColor = ErrorText)
             }
             Text(formatStorageBytes(model.voicePackManager.storageBytes()), color = Muted, fontSize = 12.sp)
