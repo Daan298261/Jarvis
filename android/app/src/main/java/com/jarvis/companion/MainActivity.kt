@@ -1135,6 +1135,7 @@ private fun formatStorageBytes(bytes: Long): String {
         item { PhoneNotesSection(model, state) }
         item { VoiceLanguageSettings(model, state) }
         item { CompanionVoicePacksSection(model, state) }
+        item { OffGridContentSection() }
         item {
             Text("Voice & presence", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
             Text("Presence", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
