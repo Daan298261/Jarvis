@@ -23,7 +23,9 @@
 
 **Slice 6 (implemented):** report synthesis citing E00001–E00006 via `apk_synthesize_report` (catalog + `POST /{id}/apk/report`). Observation findings are grounded only in recorded evidence/metadata; every finding cites real evidence IDs; investigation unknowns are carried into `report.json` / `report.md` through `store.write_report`; status is `partial` when unknowns remain. Custody event `apk_report_synthesized`. Tests cover synthesis citing E00001–E00006 on synthetic fixtures.
 
-**Later slices:** endpoint and crypto scanning of slice-5 recovered smali (`apk/smali/`); remaining fixtures (broader commercial/obfuscated APK corpus beyond synthetic, `minimal_valid.apk` and `dex_endpoints.apk`).
+**Slice 7 (implemented):** endpoint and crypto scanning of slice-5 recovered smali under `apk/smali/`. `apk_extract_endpoints` / `apk_crypto_hints` (and the existing REST `GET /{id}/apk/endpoints|crypto` + catalog ops) walk every recovered `.smali` file: `const-string` / `const-string/jumbo` operands feed the §7 endpoint taxonomy and §8 secret heuristics; smali `invoke-*` of `Cipher.getInstance`, `MessageDigest.getInstance`, `SecretKeySpec.<init>`, `IvParameterSpec.<init>` and `KeyStore.getInstance` are evaluated as call sites (register-tracked against the preceding `const-string`), with KeyGen/StrongBox/KDF inventory from method descriptors. Coverage reports `smali_sources`; gaps against `metadata/smali.json` (missing tree, incomplete markers, unreadable files, symlink escapes) are recorded as unknowns. When smali is present but Java is not, the previous "call-site rules need apk_decompile" limitation is replaced by an honest smali-evaluated note. Tests: synthetic smali fixtures (endpoints + crypto call sites), missing/partial smali unknowns, FakeWSL decompile→scan path.
+
+**Later slices:** remaining fixtures (broader commercial/obfuscated APK corpus beyond synthetic, `minimal_valid.apk` and `dex_endpoints.apk`).
 ---
 
 ## Problem
@@ -310,6 +312,7 @@ Strings and endpoints are extracted across multiple layers, indexed, and sanitiz
 1. **DEX String Pools:** Extracted directly from `classes*.dex` string ID tables.
 2. **Resource Strings:** Extracted from decoded `res/values/strings.xml` and localized variants (`values-*/strings.xml`).
 3. **Decompiled Java Literals:** String constants found in `.java` source files.
+4. **Recovered Smali Literals (slice 7):** `const-string` / `const-string/jumbo` operands under `apk/smali/` (slice-5 fallback).
 
 #### 7.2 Endpoint Taxonomy & Regex Patterns
 
@@ -334,7 +337,7 @@ Each extracted endpoint record includes:
 
 Static heuristic detection flags potential cryptographic vulnerabilities and embedded credentials across DEX string pools, recovered Java sources, the decoded manifest and decoded resources, saved into `<investigation>/apk/metadata/crypto_hints.json`.
 
-> **Smali scope:** Phase A runs apktool with `--no-src`, so slice 3 has no smali to scan. Slice 5 recovers smali into `apk/smali/` when jadx fails, for analyst inspection and as citable decompile evidence; the endpoint and crypto scanners do **not** yet read that tree. Until they do, a jadx failure leaves DEX string pools as the only bytecode-level layer, and the call-site rules (static IV/key, weak hashes, `Cipher.getInstance`) are reported as limitations rather than evaluated. Scanning recovered smali is listed under Later slices.
+> **Smali scope:** Phase A runs apktool with `--no-src`, so the resource pass alone yields no smali. Slice 5 recovers smali into `apk/smali/` when jadx fails (or is skipped). Slice 7 reads that tree: `const-string` operands are scanned for endpoints and secrets, and smali `invoke-*` call sites for `Cipher` / `MessageDigest` / `SecretKeySpec` / `IvParameterSpec` / `KeyStore` are evaluated with register tracking. When neither Java nor smali is present, call-site rules remain a declared limitation; when only smali is present, findings cite `smali/...` references at high confidence.
 
 #### 8.1 Hardcoded Secrets & Credentials
 - **Google API Keys:** `AIza[0-9A-Za-z\-_]{35}`
