@@ -104,7 +104,7 @@ class ZimWebViewClient(private val book: ZimSource, private val onError: (String
         val loaded = runCatching { book.load(path) }.getOrNull()
             ?: return WebResourceResponse("text/plain", "utf-8", 404, "Not in archive", emptyMap(), ByteArrayInputStream(ByteArray(0)))
         val mime = loaded.second.substringBefore(';').trim()
-        return WebResourceResponse(mime, if (mime.startsWith("text/")) "utf-8" else null, ByteArrayInputStream(loaded.first))
+        return WebResourceResponse(mime, if (mime.startsWith("text/")) "utf-8" else null, 200, "OK", emptyMap(), ByteArrayInputStream(loaded.first))
     }
 
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {

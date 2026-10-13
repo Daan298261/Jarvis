@@ -12,7 +12,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToKey
+import androidx.compose.ui.test.hasScrollToKeyAction
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -37,6 +38,11 @@ class OffGridPickerUiTest {
         }
     }
 
+    private fun pick(item: OffGridItem) {
+        compose.onNode(hasScrollToKeyAction()).performScrollToKey(item.id)
+        compose.onNodeWithText(item.title).performClick()
+    }
+
     @Test fun pylon_opens_picker_and_download_disabled_until_selection() {
         val started = mutableListOf<List<String>>()
         host(Long.MAX_VALUE, started)
@@ -53,8 +59,8 @@ class OffGridPickerUiTest {
         val started = mutableListOf<List<String>>()
         host(Long.MAX_VALUE, started)
         compose.onNodeWithContentDescription("Power pylon: choose off-grid content").performClick()
-        compose.onNodeWithText(water.title).performScrollTo().performClick()
-        compose.onNodeWithText(knots.title).performScrollTo().performClick()
+        pick(water)
+        pick(knots)
         compose.onNodeWithText(knots.title).performClick() // deselect
         compose.onNodeWithText("Download ${OffGridSelection.formatBytes(water.sizeBytes)}").assertIsEnabled().performClick()
         compose.onNodeWithText("• ${water.title}: ${OffGridSelection.formatBytes(water.sizeBytes)}").assertExists()
@@ -69,7 +75,7 @@ class OffGridPickerUiTest {
         val started = mutableListOf<List<String>>()
         host(1_000L, started)
         compose.onNodeWithContentDescription("Power pylon: choose off-grid content").performClick()
-        compose.onNodeWithText(water.title).performScrollTo().performClick()
+        pick(water)
         compose.onNodeWithText("Download ${OffGridSelection.formatBytes(water.sizeBytes)}").performClick()
         compose.onNodeWithText("Not enough storage", substring = true).assertExists()
         compose.onNodeWithText("Download").assertIsNotEnabled()
