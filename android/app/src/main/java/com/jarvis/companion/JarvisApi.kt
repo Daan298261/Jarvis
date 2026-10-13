@@ -118,7 +118,7 @@ class JarvisApi(context: Context) {
                 body.put("invitation", value)
             }
         }
-        val result = raw("/enroll", "POST", body.toString().toByteArray(), false)
+        val result = TransientRetry.run { raw("/enroll", "POST", body.toString().toByteArray(), false) }
         val device = JSONObject(result.toString(Charsets.UTF_8))
         deviceId = device.getString("id")
         prefs.edit().putString("device", deviceId).apply()
@@ -127,7 +127,7 @@ class JarvisApi(context: Context) {
 
     suspend fun lanEnroll(): JSONObject {
         val body = JSONObject().put("public_key", publicKey()).put("name", android.os.Build.MODEL)
-        val result = raw("/lan-enroll", "POST", body.toString().toByteArray(), false)
+        val result = TransientRetry.run { raw("/lan-enroll", "POST", body.toString().toByteArray(), false) }
         val device = JSONObject(result.toString(Charsets.UTF_8))
         deviceId = device.getString("id")
         prefs.edit().putString("device", deviceId).apply()
@@ -137,14 +137,15 @@ class JarvisApi(context: Context) {
     suspend fun session() = sessionLock.withLock {
         if (token.isNotEmpty() && System.currentTimeMillis() < expiresAt) return@withLock
         check(deviceId.isNotEmpty()) { "Pair this phone first" }
-        val challenge = JSONObject(raw("/challenge/$deviceId", authenticated = false).toString(Charsets.UTF_8))
+        val challenge = JSONObject(TransientRetry.run { raw("/challenge/$deviceId", authenticated = false) }.toString(Charsets.UTF_8))
         val proof = Signature.getInstance("SHA256withECDSA").run {
             initSign(keys.getKey(keyAlias, null) as java.security.PrivateKey)
             val nonce = challenge.getString("challenge")
             update("jarvis-mobile-v1\n$deviceId\n$nonce".toByteArray())
             Base64.encodeToString(sign(), Base64.NO_WRAP)
         }
-        val result = JSONObject(raw("/session", "POST", JSONObject().put("device_id", deviceId).put("signature", proof).toString().toByteArray(), false).toString(Charsets.UTF_8))
+        val sessionBody = JSONObject().put("device_id", deviceId).put("signature", proof).toString().toByteArray()
+        val result = JSONObject(TransientRetry.run { raw("/session", "POST", sessionBody, false) }.toString(Charsets.UTF_8))
         token = result.getString("access_token")
         expiresAt = System.currentTimeMillis() + (result.getLong("expires_in") - 30) * 1000
     }

@@ -4645,7 +4645,23 @@ export type CompanionStudioCapabilities = {
 
 export type CompanionPairingApiResult =
   | { available: true; pairing: CompanionPairingCode }
-  | { available: false; reason: "not_found" | "error"; message?: string }
+  | { available: false; reason: "not_found" | "error" | "unreachable" | "unhealthy"; message?: string }
+
+/** Core is up but not ready (critical startup step failed) or answering 5xx. */
+async function coreReportsUnhealthy(): Promise<{ unhealthy: boolean; detail: string }> {
+  try {
+    const response = await fetch(jarvisApiUrl("/api/health"), { cache: "no-store" })
+    if (!response.ok) return { unhealthy: true, detail: `health check returned HTTP ${response.status}` }
+    const body = (await response.json()) as { ok?: boolean; startup?: { failed_steps?: { step: string; critical?: boolean }[] } }
+    if (body.ok === false) {
+      const steps = (body.startup?.failed_steps || []).filter((item) => item.critical).map((item) => item.step)
+      return { unhealthy: true, detail: steps.length ? `startup failed: ${steps.join(", ")}` : "core reports not ready" }
+    }
+    return { unhealthy: false, detail: "" }
+  } catch {
+    return { unhealthy: true, detail: "health check failed" }
+  }
+}
 
 async function companionPairingRequest(
   path: string,
@@ -4658,6 +4674,12 @@ async function companionPairingRequest(
       return { available: false, reason: "not_found" }
     }
     if (!response.ok) {
+      if (response.status >= 500) {
+        const health = await coreReportsUnhealthy()
+        if (health.unhealthy) {
+          return { available: false, reason: "unhealthy", message: `ANZU backend is running but unhealthy (${health.detail}).` }
+        }
+      }
       const text = await response.text()
       let message = text || response.statusText
       try {
@@ -4666,7 +4688,7 @@ async function companionPairingRequest(
       } catch {
         // not JSON
       }
-      return { available: false, reason: "error", message }
+      return { available: false, reason: "error", message: `Pairing request failed (HTTP ${response.status}): ${message}` }
     }
     const raw = await response.json() as CompanionPairingCode
     const pairing: CompanionPairingCode = {
@@ -4680,7 +4702,8 @@ async function companionPairingRequest(
     }
     return { available: true, pairing }
   } catch (err) {
-    return { available: false, reason: "error", message: String(err) }
+    // fetch() only throws when the backend cannot be reached at all.
+    return { available: false, reason: "unreachable", message: `ANZU backend is not reachable (${String(err)}).` }
   }
 }
 

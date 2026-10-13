@@ -339,7 +339,8 @@ class StandaloneModeTest {
         val instruct15 = CompanionPackCatalog.builtIn.first { it.id == CompanionPackCatalog.INSTRUCT_15B_ID }
         val instruct3 = CompanionPackCatalog.builtIn.first { it.id == CompanionPackCatalog.INSTRUCT_3B_ID }
         assertTrue(CompanionPackCatalog.isLegalAllowlistRow(instruct15))
-        assertFalse(CompanionPackCatalog.builtIn.any { CompanionPackCatalog.isAbliteratedCandidate(it) })
+        assertFalse(CompanionPackCatalog.isAbliteratedCandidate(instruct15))
+        assertFalse(CompanionPackCatalog.isAbliteratedCandidate(instruct3))
 
         val unnamedIllegal = instruct15.copy(id = "pending-abliterated", url = "", sha256 = "")
         assertFalse(CompanionPackCatalog.isLegalAllowlistRow(unnamedIllegal))
@@ -354,6 +355,7 @@ class StandaloneModeTest {
             id = "future-abliterated-when-named",
             url = "https://example.invalid/legal.gguf",
             sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            recommended = true,
         )
         val loaded = CompanionPackCatalog.resolveOfflinePack(
             listOf(legalExtra, instruct15, instruct3),
@@ -372,6 +374,30 @@ class StandaloneModeTest {
             CompanionPackCatalog.INSTRUCT_3B_ID,
         ) { it.id == CompanionPackCatalog.INSTRUCT_3B_ID }
         assertEquals(CompanionPackCatalog.INSTRUCT_3B_ID, only3b?.id)
+    }
+
+    @Test
+    fun defaultHereticLoadsAndOptIn4bOnlyWhenSelected() {
+        val all = CompanionPackCatalog.builtIn
+        val canLoadAll: (CompanionPack) -> Boolean = { true }
+        assertEquals(
+            CompanionPackCatalog.HERETIC_2B_ID,
+            CompanionPackCatalog.resolveOfflinePack(all, CompanionPackCatalog.INSTRUCT_15B_ID, canLoadAll)?.id,
+        )
+        assertEquals(
+            CompanionPackCatalog.ABLITERATED_4B_ID,
+            CompanionPackCatalog.resolveOfflinePack(all, CompanionPackCatalog.ABLITERATED_4B_ID, canLoadAll)?.id,
+        )
+        // Only the opt-in 4B is on disk but not selected: never auto-load it, use the Instruct fallback.
+        val only4bAnd15 = CompanionPackCatalog.resolveOfflinePack(all, CompanionPackCatalog.HERETIC_2B_ID) {
+            it.id == CompanionPackCatalog.ABLITERATED_4B_ID || it.id == CompanionPackCatalog.INSTRUCT_15B_ID
+        }
+        assertEquals(CompanionPackCatalog.INSTRUCT_15B_ID, only4bAnd15?.id)
+        // Selected 4B too big for this phone: fall back to the default 2B.
+        val fallbackTo2b = CompanionPackCatalog.resolveOfflinePack(all, CompanionPackCatalog.ABLITERATED_4B_ID) {
+            it.id != CompanionPackCatalog.ABLITERATED_4B_ID
+        }
+        assertEquals(CompanionPackCatalog.HERETIC_2B_ID, fallbackTo2b?.id)
     }
 
     @Test
