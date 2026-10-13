@@ -92,10 +92,10 @@ class OfflineVoiceFallbackTest {
 
     @Test
     fun recognizerErrorsAreExplained() {
-        assertTrue(PlatformVoice.errorCopy(SpeechRecognizer.ERROR_NETWORK).contains("offline speech pack"))
-        assertTrue(PlatformVoice.errorCopy(SpeechRecognizer.ERROR_NO_MATCH).contains("didn't catch"))
-        assertTrue(PlatformVoice.errorCopy(SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS).contains("Microphone"))
-        assertTrue(PlatformVoice.errorCopy(999).contains("999"))
+        assertTrue(PlatformVoice.errorCopy(SpeechRecognizer.ERROR_NETWORK, "en-US").contains("offline speech pack"))
+        assertTrue(PlatformVoice.errorCopy(SpeechRecognizer.ERROR_NO_MATCH, "en-US").contains("didn't catch"))
+        assertTrue(PlatformVoice.errorCopy(SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS, "en-US").contains("Microphone"))
+        assertTrue(PlatformVoice.errorCopy(999, "en-US").contains("999"))
     }
 
     @Test

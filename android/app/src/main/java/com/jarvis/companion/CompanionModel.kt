@@ -1085,7 +1085,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     fun micPermissionDenied() {
         mutable.value = mutable.value.copy(
             recording = false,
-            error = PlatformVoice.errorCopy(android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS),
+            error = PlatformVoice.errorCopy(android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS, SttLanguageSource.ANZU_DEFAULT.languageTag()),
         )
     }
 

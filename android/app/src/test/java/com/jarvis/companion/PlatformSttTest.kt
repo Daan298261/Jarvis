@@ -8,11 +8,13 @@ import android.content.pm.ServiceInfo
 import android.os.Bundle
 import android.os.Looper
 import android.speech.RecognitionService
+import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertSame
 import org.junit.After
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -21,6 +23,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowSpeechRecognizer
+import java.util.Locale
 
 /** RFC-0216 S3: Samsung S23 platform STT must fall through to a working recognizer and fail loudly otherwise. */
 @RunWith(RobolectricTestRunner::class)
@@ -80,7 +83,7 @@ class PlatformSttTest {
         shadowOf(ShadowSpeechRecognizer.getLatestSpeechRecognizer()).triggerOnError(SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE)
         idle()
         assertEquals(0, results)
-        assertEquals(listOf(PlatformVoice.errorCopy(SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE)), errors)
+        assertEquals(listOf(PlatformVoice.errorCopy(SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE, "en-US")), errors)
         assertFalse(voice.listening)
         voice.shutdown()
     }
@@ -97,7 +100,7 @@ class PlatformSttTest {
         shadowOf(ShadowSpeechRecognizer.getLatestSpeechRecognizer()).triggerOnResults(results("   "))
         idle()
         assertEquals(0, results)
-        assertEquals(listOf(PlatformVoice.errorCopy(SpeechRecognizer.ERROR_NO_MATCH)), errors)
+        assertEquals(listOf(PlatformVoice.errorCopy(SpeechRecognizer.ERROR_NO_MATCH, "en-US")), errors)
         voice.shutdown()
     }
 
@@ -140,8 +143,72 @@ class PlatformSttTest {
     }
 
     @Test
-    fun recognizerLanguageIsEnglishNotSystemLocale() {
-        assertEquals("en-US", PlatformSttPlan.SPEECH_LANGUAGE_TAG)
+    fun dutchDeviceLocaleStillSendsTheProviderLanguageToTheRecognizer() {
+        val saved = Locale.getDefault()
+        Locale.setDefault(Locale.forLanguageTag("nl-NL"))
+        try {
+            shadowOf(app).grantPermissions(Manifest.permission.RECORD_AUDIO)
+            ShadowSpeechRecognizer.setIsOnDeviceRecognitionAvailable(true)
+            val voice = PlatformVoice(app, SttLanguageSource { "en-GB" })
+            voice.startListening(onPartial = {}, onResult = {}, onError = {})
+            idle()
+            val intent = shadowOf(ShadowSpeechRecognizer.getLatestSpeechRecognizer()).lastRecognizerIntent
+            assertEquals("en-GB", intent.getStringExtra(RecognizerIntent.EXTRA_LANGUAGE))
+            voice.shutdown()
+
+            val defaultVoice = PlatformVoice(app)
+            defaultVoice.startListening(onPartial = {}, onResult = {}, onError = {})
+            idle()
+            val defaultIntent = shadowOf(ShadowSpeechRecognizer.getLatestSpeechRecognizer()).lastRecognizerIntent
+            assertEquals("en-US", defaultIntent.getStringExtra(RecognizerIntent.EXTRA_LANGUAGE))
+            defaultVoice.shutdown()
+        } finally {
+            Locale.setDefault(saved)
+        }
+    }
+
+    @Test
+    fun languagePackCopyIsBuiltFromTheActualTag() {
+        assertTrue(PlatformVoice.errorCopy(SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE, "nl-NL").contains("Dutch (Netherlands)"))
+        assertTrue(PlatformVoice.errorCopy(SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED, "en-US").contains("English (United States)"))
+    }
+
+    @Test
+    fun restartIgnoresStaleCallbacksFromThePreviousSession() {
+        shadowOf(app).grantPermissions(Manifest.permission.RECORD_AUDIO)
+        ShadowSpeechRecognizer.setIsOnDeviceRecognitionAvailable(true)
+        installDefaultRecognizer()
+        val voice = PlatformVoice(app)
+        val errors = mutableListOf<String>()
+        val transcripts = mutableListOf<String>()
+        voice.startListening(onPartial = {}, onResult = { transcripts += "first:$it" }, onError = { errors += "first:$it" })
+        idle()
+        val first = ShadowSpeechRecognizer.getLatestSpeechRecognizer()
+        voice.startListening(onPartial = {}, onResult = { transcripts += it }, onError = { errors += it })
+        idle()
+        val second = ShadowSpeechRecognizer.getLatestSpeechRecognizer()
+        assertNotSame(first, second)
+
+        // The first recognizer delivers late: a fallback-eligible error and a result. Both must be ignored.
+        shadowOf(first).triggerOnError(SpeechRecognizer.ERROR_CLIENT)
+        shadowOf(first).triggerOnResults(results("stale words"))
+        idle()
+        assertSame("no extra fallback recognizer was created", second, ShadowSpeechRecognizer.getLatestSpeechRecognizer())
+        assertTrue(voice.listening)
+
+        // The live session still falls back exactly once and transcribes.
+        shadowOf(second).triggerOnError(SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE)
+        idle()
+        val fallback = ShadowSpeechRecognizer.getLatestSpeechRecognizer()
+        assertNotSame(second, fallback)
+        shadowOf(second).triggerOnError(SpeechRecognizer.ERROR_CLIENT)
+        idle()
+        assertSame("a stale error from the replaced recognizer must not fall back again", fallback, ShadowSpeechRecognizer.getLatestSpeechRecognizer())
+        shadowOf(fallback).triggerOnResults(results("hello anzu"))
+        idle()
+        assertEquals(emptyList<String>(), errors)
+        assertEquals(listOf("hello anzu"), transcripts)
+        voice.shutdown()
     }
 
     @Test
@@ -153,9 +220,9 @@ class PlatformSttTest {
             SpeechRecognizer.ERROR_CANNOT_CHECK_SUPPORT,
             SpeechRecognizer.ERROR_TOO_MANY_REQUESTS,
         )) {
-            assertFalse("code $code", PlatformVoice.errorCopy(code).contains("(code"))
+            assertFalse("code $code", PlatformVoice.errorCopy(code, "en-US").contains("(code"))
         }
-        assertTrue(PlatformVoice.errorCopy(SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE).contains("English"))
+        assertTrue(PlatformVoice.errorCopy(SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE, "en-US").contains("English (United States)"))
     }
 
     @Test
@@ -167,7 +234,7 @@ class PlatformSttTest {
         voice.startListening(onPartial = {}, onResult = { results++ }, onError = { errors += it })
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals(0, results)
-        assertEquals(listOf(PlatformVoice.errorCopy(SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS)), errors)
+        assertEquals(listOf(PlatformVoice.errorCopy(SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS, "en-US")), errors)
         assertTrue(errors.single().contains("Microphone"))
         assertFalse(voice.listening)
         voice.shutdown()
