@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
-import android.view.WindowManager
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
 import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
@@ -49,19 +48,12 @@ class AppAccessLock(private val activity: FragmentActivity) {
             override fun onAuthenticationFailed() { error = "Not recognized. Try again or use your phone PIN." }
         })
 
-    init { secureWindow() }
-
     private fun complete() {
         val action = pending ?: return
         pending = null
         credentialActivityOpen = false
         error = null
         action()
-    }
-
-    private fun secureWindow() {
-        if (enabled) activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        else activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
     }
 
     fun background() {
@@ -79,7 +71,6 @@ class AppAccessLock(private val activity: FragmentActivity) {
         if (prefs.edit().putBoolean("required", required).commit()) {
             enabled = required
             unlocked = true
-            secureWindow()
         } else error = "Could not save app protection. Please try again."
     }
 

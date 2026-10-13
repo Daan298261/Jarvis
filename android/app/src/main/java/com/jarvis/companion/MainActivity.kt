@@ -51,6 +51,11 @@ private val Muted = Color(0xFF8C9CAF)
 
 class MainActivity : FragmentActivity() {
     private lateinit var accessLock: AppAccessLock
+    private lateinit var secureScreen: SecureScreen
+    override fun onResume() {
+        super.onResume()
+        if (::secureScreen.isInitialized) secureScreen.apply()
+    }
     override fun onStop() {
         if (::accessLock.isInitialized) accessLock.background()
         super.onStop()
@@ -64,6 +69,7 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         setTheme(R.style.AppTheme)
         super.onCreate(savedInstanceState)
+        secureScreen = SecureScreen(this)
         accessLock = AppAccessLock(this)
         latestIntent = intent
         setContent {
@@ -485,7 +491,7 @@ class MainActivity : FragmentActivity() {
                                 }
                             }
                             "Studio" -> StudioScreen(model, state)
-                            "More" -> MoreScreen(model, state, deviceChrome, devicePack, accessLock, pickModelFile, pairingScanRequest) { pairingScanRequest = false }
+                            "More" -> MoreScreen(model, state, deviceChrome, devicePack, accessLock, secureScreen, pickModelFile, pairingScanRequest) { pairingScanRequest = false }
                         }
                     }
                 }
@@ -996,6 +1002,7 @@ private fun formatStorageBytes(bytes: Long): String {
     deviceChrome: CompanionDeviceModelChrome,
     devicePack: DevicePackChromeState,
     accessLock: AppAccessLock,
+    secureScreen: SecureScreen,
     pickModelFile: () -> Unit,
     openPairingScanner: Boolean = false,
     onPairingScannerConsumed: () -> Unit = {},
@@ -1027,6 +1034,7 @@ private fun formatStorageBytes(bytes: Long): String {
     }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { AppAccessSettings(accessLock) }
+        item { SecureScreenSettings(secureScreen) }
         item {
             Text("Connection", fontSize = 25.sp, modifier = Modifier.padding(vertical = 12.dp))
             OutlinedTextField(endpoint, { endpoint = it }, label = { Text(stringResource(R.string.anzu_https_endpoint)) }, modifier = Modifier.fillMaxWidth())
