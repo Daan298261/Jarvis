@@ -49,14 +49,17 @@ object ZimUrls {
 fun interface ZimSource { fun load(path: String): Pair<ByteArray, String>? }
 
 /**
- * Serialises reads against [close]: once closed, reads return null and never touch the native archive,
- * so a WebView request racing dialog dismissal cannot use a disposed handle.
+ * Serialises every native archive call (page reads, searches, main-entry lookup) against [close]:
+ * close waits for any call in flight, and once closed every call returns its fallback without touching
+ * the native archive, so a WebView request or search racing dialog dismissal cannot use a disposed handle.
  */
 class GuardedZimSource(private val read: (String) -> Pair<ByteArray, String>?, private val dispose: () -> Unit) : ZimSource, AutoCloseable {
     private val lock = Any()
     @Volatile var closed = false
         private set
-    override fun load(path: String): Pair<ByteArray, String>? = synchronized(lock) { if (closed) null else read(path) }
+    /** Runs [block] under the archive lock, or returns [whenClosed] after close. */
+    fun <T> withOpen(whenClosed: T, block: () -> T): T = synchronized(lock) { if (closed) whenClosed else block() }
+    override fun load(path: String): Pair<ByteArray, String>? = withOpen(null) { read(path) }
     override fun close() = synchronized(lock) { if (!closed) { closed = true; dispose() } }
 }
 
@@ -65,10 +68,16 @@ class ZimBook(file: File) : ZimSource, AutoCloseable {
     private val archive = Archive(file.absolutePath)
     private val guard = GuardedZimSource(::loadUnguarded) { archive.dispose() }
 
-    val mainPath: String? get() = if (archive.hasMainEntry()) archive.mainEntry.getItem(true).path else null
+    val mainPath: String? get() = guard.withOpen(null) {
+        if (archive.hasMainEntry()) archive.mainEntry.getItem(true).path else null
+    }
 
     fun search(text: String, limit: Int = 30): List<ZimHit> {
-        if (text.isBlank() || guard.closed) return emptyList()
+        if (text.isBlank()) return emptyList()
+        return guard.withOpen(emptyList()) { searchUnguarded(text, limit) }
+    }
+
+    private fun searchUnguarded(text: String, limit: Int): List<ZimHit> {
         val hits = LinkedHashMap<String, ZimHit>()
         if (archive.hasTitleIndex()) {
             val it = SuggestionSearcher(archive).suggest(text).getResults(0, limit)

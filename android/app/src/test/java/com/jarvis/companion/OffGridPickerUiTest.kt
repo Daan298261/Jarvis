@@ -104,6 +104,34 @@ class ZimReaderGuardTest {
         assertEquals(1, reads); assertEquals(1, disposed)
     }
 
+    @Test fun search_after_close_returns_fallback_without_native_call() {
+        var searches = 0
+        val source = GuardedZimSource({ null }) {}
+        assertEquals(listOf("hit"), source.withOpen(emptyList()) { searches++; listOf("hit") })
+        source.close()
+        assertEquals(emptyList<String>(), source.withOpen(emptyList()) { searches++; listOf("hit") })
+        assertEquals(1, searches)
+    }
+
+    @Test fun close_waits_for_in_flight_search_and_read() {
+        val events = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val inside = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val source = GuardedZimSource({ events += "read"; null }) { events += "disposed" }
+        val searcher = Thread {
+            source.withOpen(emptyList<String>()) { inside.countDown(); release.await(); events += "search-done"; emptyList() }
+        }.apply { start() }
+        assertTrue(inside.await(5, java.util.concurrent.TimeUnit.SECONDS))
+        val closer = Thread { source.close() }.apply { start() }
+        closer.join(300)
+        assertTrue("close must block while a search is in flight", closer.isAlive)
+        assertFalse(events.contains("disposed"))
+        release.countDown(); searcher.join(5000); closer.join(5000)
+        assertEquals(listOf("search-done", "disposed"), events.toList())
+        assertNull(source.load("A/x"))
+        assertFalse(events.contains("read"))
+    }
+
     @Test fun webview_client_serves_archive_404s_after_close_and_blocks_network() {
         val source = GuardedZimSource({ "<p>ok</p>".toByteArray() to "text/html; charset=utf-8" }) {}
         val client = ZimWebViewClient(source) {}

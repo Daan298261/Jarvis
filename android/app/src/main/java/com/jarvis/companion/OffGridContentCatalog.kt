@@ -124,7 +124,10 @@ object OffGridContentCatalog {
     init { validate(builtIn) }
 }
 
-/** Web-mercator tile math for the size estimate shown before a map region downloads. */
+/**
+ * Web-mercator tile math that enforces the per-region tile cap: [OffGridContentCatalog.validate] rejects
+ * catalogue regions above [MAX_REGION_TILES], and MapLibreMapStore refuses to create one before download.
+ */
 object OffGridMapMath {
     /** MapLibre's offline tile-count limit is raised to this; regions above it are refused before download. */
     const val MAX_REGION_TILES = 200_000L
