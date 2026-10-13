@@ -989,6 +989,20 @@ mod manager_control_tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// Live smoke against a running ANZU Manager (restarts the core!):
+    /// `cargo test --lib live_manager_restart -- --ignored`
+    #[test]
+    #[ignore]
+    fn live_manager_restart() {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let started = std::time::Instant::now();
+        manager_control_at(&client, super::MANAGER_BASE, "restart").unwrap();
+        println!("tray restart ok after {:.1}s", started.elapsed().as_secs_f64());
+    }
+
     #[test]
     fn reports_rejected_control_instead_of_swallowing_it() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
