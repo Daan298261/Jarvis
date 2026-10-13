@@ -302,8 +302,13 @@ def decrypt_pkcs7_password(ciphertext_b64: str, key: ResolvedKey) -> str:
 
 # Password characters must be assigned, non-control, non-private-use text in any script
 # (RFC-0198 manifests may carry non-Latin passwords). 7-Zip then decides whether the
-# password is right; a wrong one maps to decrypt_failed there.
-_REJECTED_PASSWORD_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
+# password is right; a wrong one maps to decrypt_failed there. Format characters (Cf,
+# e.g. U+200D ZWJ in emoji or Indic text) are legitimate password content and allowed.
+_REJECTED_PASSWORD_CATEGORIES = frozenset({"Cc", "Cs", "Co", "Cn", "Zl", "Zp"})
+
+
+def _strip_bom(text: str) -> str:
+    return text[1:] if text.startswith("\ufeff") else text
 
 
 def _plausible_password(text: str) -> bool:
@@ -316,14 +321,14 @@ def _decode_cms_password(raw: bytes) -> str:
     if not raw.strip(b"\x00").strip():
         return ""
     try:
-        text = raw.decode("utf-8", errors="strict").strip("\x00").strip()
+        text = _strip_bom(raw.decode("utf-8", errors="strict")).strip("\x00").strip()
     except UnicodeError:
         text = None
     if text is not None and _plausible_password(text):
         return text
     if len(raw) % 2 == 0:
         try:
-            wide = raw.decode("utf-16-le", errors="strict").strip("\x00").strip()
+            wide = _strip_bom(raw.decode("utf-16-le", errors="strict")).strip("\x00").strip()
         except UnicodeError:
             wide = ""
         if _plausible_password(wide):
@@ -476,11 +481,20 @@ def _validate_7z_password(password: str) -> str:
     return password
 
 
+def _7z_output_text(stdout: bytes | None, stderr: bytes | None) -> str:
+    return b"\n".join(part or b"" for part in (stdout, stderr)).decode("utf-8", errors="replace").lower()
+
+
 def _is_7z_wrong_password(stdout: bytes | None, stderr: bytes | None) -> bool:
-    text = b"\n".join(part or b"" for part in (stdout, stderr)).decode("utf-8", errors="replace").lower()
-    if "wrong password" in text:
-        return True
-    return "encrypted" in text and any(marker in text for marker in ("crc failed", "data error", "headers error"))
+    """Only the archive-level "Cannot open encrypted archive. Wrong password?" is a definite
+    wrong password (encrypted headers, -mhe). Per-file "CRC Failed / Data Error in encrypted
+    file. Wrong password?" is also printed for corrupt data with the right password."""
+    return "cannot open encrypted archive" in _7z_output_text(stdout, stderr)
+
+
+def _is_7z_encrypted_data_error(stdout: bytes | None, stderr: bytes | None) -> bool:
+    text = _7z_output_text(stdout, stderr)
+    return "crc failed in encrypted file" in text or "data error in encrypted file" in text
 
 
 def extract_with_7z(archive_path: Path, password: str, dest_dir: Path) -> list[str]:
@@ -511,11 +525,18 @@ def extract_with_7z(archive_path: Path, password: str, dest_dir: Path) -> list[s
     except OSError as exc:
         raise ArchiveFailed("failed to invoke 7-Zip", detail=type(exc).__name__) from exc
     if proc.returncode != 0:
-        # Classify without echoing stderr (it may mention paths). A wrong password shows up as
-        # "Wrong password?" or an encrypted-data/header/CRC failure: that is decrypt_failed.
+        # Classify without echoing stderr (it may mention paths). Only the archive-level
+        # "Cannot open encrypted archive" is decrypt_failed; per-file encrypted CRC/data errors
+        # are almost always corruption (7-Zip cannot tell them apart from a wrong password).
         detail = f"7z_exit_{proc.returncode}"
         if _is_7z_wrong_password(proc.stdout, proc.stderr):
             raise DecryptFailed("7-Zip rejected the archive password", detail="7z_wrong_password")
+        if _is_7z_encrypted_data_error(proc.stdout, proc.stderr):
+            raise ArchiveFailed(
+                "7-Zip reported a CRC/data error in encrypted content: the archive is corrupt "
+                "or, rarely, the password is wrong",
+                detail="7z_encrypted_data_error",
+            )
         raise ArchiveFailed("7-Zip extract failed", detail=detail)
     return list_extract_tree(dest)
 

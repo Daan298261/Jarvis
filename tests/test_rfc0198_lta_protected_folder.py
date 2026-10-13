@@ -424,12 +424,20 @@ def test_decode_cms_password_mapping():
     assert _decode_cms_password("证据密码".encode("utf-16-le")) == "证据密码"
     assert _decode_cms_password("пароль".encode("utf-8")) == "пароль"
     assert _decode_cms_password(b"\x00\x00") == ""
+    # Format characters (Cf) such as ZWJ are legitimate password content.
+    assert _decode_cms_password("pass\u200dword".encode("utf-16-le")) == "pass\u200dword"
+    assert _decode_cms_password("pass\u200dword".encode("utf-8")) == "pass\u200dword"
+    # A leading BOM is stripped exactly once.
+    assert _decode_cms_password(b"\xff\xfe" + "S3cret-wide".encode("utf-16-le")) == "S3cret-wide"
+    assert _decode_cms_password("\ufeffS3cret".encode("utf-8")) == "S3cret"
     bad = (
         b"\xd8\x00\xd8",  # odd length, not UTF-8
         b"\x00\xd8A\x00",  # unpaired surrogate
         b"pass\x07word",  # control character
         b"a\x00b",  # embedded NUL, odd length
         "pass\ue000".encode("utf-16-le"),  # private use
+        "pass\u2028word".encode("utf-16-le"),  # line separator (Zl)
+        "pass\u2029word".encode("utf-16-le"),  # paragraph separator (Zp)
         "pass\u0378".encode("utf-16-le"),  # unassigned
     )
     for raw in bad:
@@ -451,13 +459,39 @@ def test_cjk_utf16_password_opens_real_archive(lta_env):
 
 
 def test_7z_failure_classification():
-    from app.security.lta_archive import _is_7z_wrong_password
+    from app.security.lta_archive import _is_7z_encrypted_data_error, _is_7z_wrong_password
 
     assert _is_7z_wrong_password(b"", b"ERROR: a.7z\nCannot open encrypted archive. Wrong password?\nHeaders Error")
-    assert _is_7z_wrong_password(b"", b"ERROR: Data Error in encrypted file. Wrong password? : f.txt")
-    assert _is_7z_wrong_password(b"", b"ERROR: CRC Failed in encrypted file. Wrong password? : f.txt")
+    # Per-file encrypted errors appear for corrupt data even with the right password.
+    for msg in (
+        b"ERROR: Data Error in encrypted file. Wrong password? : f.txt",
+        b"ERROR: CRC Failed in encrypted file. Wrong password? : f.txt",
+    ):
+        assert not _is_7z_wrong_password(b"", msg)
+        assert _is_7z_encrypted_data_error(b"", msg)
     assert not _is_7z_wrong_password(b"", b"ERROR: x.7z\nCannot open the file as archive")
+    assert not _is_7z_encrypted_data_error(b"", b"ERROR: x.7z\nCannot open the file as archive")
     assert not _is_7z_wrong_password(b"", b"ERROR: Disk full")
+
+
+def test_correct_key_corrupt_7z_data_is_archive_failed(lta_env):
+    """Right key + corrupted encrypted 7z payload must be archive_failed, never decrypt_failed."""
+    bundle = _build_bundle(lta_env["tmp"] / "case-corrupt")
+    archive = Path(bundle["archive_path"])  # type: ignore[arg-type]
+    data = bytearray(archive.read_bytes())
+    # Packed (encrypted) stream starts right after the 32-byte signature header.
+    for off in range(32, min(48, len(data))):
+        data[off] ^= 0xFF
+    archive.write_bytes(bytes(data))
+    key_pem = bundle["key_pem"]
+    set_test_key_resolver(lambda _t, _s: key_pem)  # type: ignore[arg-type,return-value]
+    job = run_protected_folder_open(
+        manifest_path=str(bundle["manifest_path"]),
+        archive_path=str(archive),
+    )
+    assert job["status"] == "failed", job
+    assert job["error"] == "archive_failed", job
+    assert job["error_detail"] == "7z_encrypted_data_error", job
 
 
 def test_7z_non_archive_is_archive_failed(lta_env):
