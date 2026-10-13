@@ -1,5 +1,7 @@
 package com.jarvis.companion
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
@@ -63,6 +65,8 @@ data class CompanionState(
     val voiceSttStatus: String = "missing",
     val voiceTtsStatus: String = "missing",
     val voicePackProgress: Int = 0,
+    /** Android TextToSpeech finished starting; voice lists are only meaningful after this. */
+    val platformTtsReady: Boolean = false,
     val voicePackError: String = "",
     val onDeviceVoiceActive: Boolean = false,
     val voiceRouteBanner: String? = null,
@@ -121,7 +125,12 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private val localConversations = LocalConversationStore(app, onRecovered = { reportStoreRecovery("conversations", it.kept) })
     private val localNotes = LocalNotesStore(app, onRecovered = { reportStoreRecovery("notes", it.kept) })
     private val desktopThreadIds by lazy { PhoneDesktopThreadIds(companionPrefs, localConversations) }
-    private val platformVoice = PlatformVoice(app)
+    var voiceLanguage by androidx.compose.runtime.mutableStateOf(VoiceLanguagePrefs.load(app))
+        private set
+    private val platformVoice = PlatformVoice(app, language = { voiceLanguage }, onTtsReady = { ready ->
+        mutable.value = mutable.value.copy(platformTtsReady = ready)
+        publishVoiceRoute()
+    })
     val packManager = CompanionPackManager(app)
     val voicePackManager = CompanionVoicePackManager(app)
     private var foreground = false
@@ -441,6 +450,22 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             publishVoiceRoute()
         }
     }
+
+    /** Installed Android voices for the chosen voice language (for the Settings picker). */
+    fun platformVoicesForLanguage(): List<TtsVoiceCandidate> = platformVoice.voicesFor(voiceLanguage)
+
+    fun updateVoiceLanguage(next: VoiceLanguageSetting) {
+        if (!VoiceLanguagePrefs.save(getApplication(), next)) {
+            mutable.value = mutable.value.copy(error = "Could not save the voice language. Please try again.")
+            return
+        }
+        voiceLanguage = next
+        publishVoiceRoute()
+    }
+
+    fun setVoiceLanguage(tag: String) = updateVoiceLanguage(VoiceLanguagePrefs.withLanguage(voiceLanguage, tag))
+    fun setPlatformVoice(name: String) = updateVoiceLanguage(voiceLanguage.copy(ttsVoiceName = name))
+    fun setSttLanguage(tag: String) = updateVoiceLanguage(voiceLanguage.copy(sttLanguageOverride = tag))
 
     private fun publishVoiceRoute() {
         val decision = currentVoiceRoute()
@@ -1085,7 +1110,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     fun micPermissionDenied() {
         mutable.value = mutable.value.copy(
             recording = false,
-            error = PlatformVoice.errorCopy(android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS, SttLanguageSource.ANZU_DEFAULT.languageTag()),
+            error = PlatformVoice.errorCopy(android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS, voiceLanguage.recognizerLanguage),
         )
     }
 
@@ -1328,7 +1353,9 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             TtsVoiceRoute.ON_DEVICE -> startOnDeviceSpeak(text)
             TtsVoiceRoute.PLATFORM -> speakWithPlatform(text)
             TtsVoiceRoute.INSTALL -> mutable.value = mutable.value.copy(
-                error = route.error ?: "Install on-device TTS in More → Voice before speaking offline",
+                error = if (platformVoice.ttsReady && !platformVoice.supportsLanguage(voiceLanguage)) {
+                    VoiceLanguagePrefs.missingVoiceMessage(voiceLanguage)
+                } else route.error ?: "Install on-device TTS in More → Voice before speaking offline",
             )
             else -> action {
                 val body = JSONObject().put("text", text.take(6000))
@@ -1348,28 +1375,51 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             ttsPackStatus = voicePackManager.ttsStatus(),
             localLlmReady = packManager.isPackReady(),
             platformSttAvailable = platformVoice.sttAvailable(),
-            platformTtsAvailable = platformVoice.ttsReady,
+            // A system voice in the wrong language is not "available": the owner must install one.
+            platformTtsAvailable = platformVoice.ttsReady && platformVoice.supportsLanguage(voiceLanguage),
+            ttsPackSpeaksLanguage = VoiceLanguagePrefs.packSpeaks(voicePackManager.selectedTtsPack(), voiceLanguage.ttsLanguage),
         )
     }
+
+    /** Chunks + played count for the current on-device reply; a cancelled earlier reply cannot touch it. */
+    private class OnDeviceSpeakRun(val chunks: List<String>) { @Volatile var played = 0 }
+    @Volatile private var onDeviceRun = OnDeviceSpeakRun(emptyList())
 
     private fun onDeviceSpeakSession(): ChunkedTtsSession {
         return onDeviceSpeak ?: ChunkedTtsSession(
             scope = viewModelScope,
             synthesize = { piece -> withContext(Dispatchers.IO) { voicePackManager.synthesize(piece) } },
             play = { audio ->
+                val run = onDeviceRun
                 playAudio(audio)
                 while (mutable.value.speaking && coroutineContext.isActive) delay(40)
+                if (coroutineContext.isActive && run === onDeviceRun) run.played++
             },
             onStopPlayback = {
                 VoiceNativeBridge.requestTtsCancel()
                 releasePlayer()
             },
             onError = { error ->
-                mutable.value = mutable.value.copy(
-                    error = error.message,
-                    activity = "Ready when you are",
-                    onDeviceVoiceActive = false,
-                )
+                // RFC-0216 S4: pack synthesis failed — finish the reply with the phone's voice in the
+                // chosen language if it has one; otherwise surface the error (no wrong-accent fallback).
+                val run = onDeviceRun
+                val rest = OnDeviceTtsFallback.remainingText(run.chunks, run.played)
+                val platformOk = platformVoice.ttsReady && platformVoice.supportsLanguage(voiceLanguage)
+                if (OnDeviceTtsFallback.shouldUsePlatform(rest, platformOk)) {
+                    viewModelScope.launch(Dispatchers.Main) {
+                        speakWithPlatform(rest)
+                        mutable.value = mutable.value.copy(
+                            onDeviceVoiceActive = false,
+                            error = OnDeviceTtsFallback.fallbackNotice(error.message, VoiceLanguagePrefs.label(voiceLanguage.ttsLanguage)),
+                        )
+                    }
+                } else {
+                    mutable.value = mutable.value.copy(
+                        error = error.message,
+                        activity = "Ready when you are",
+                        onDeviceVoiceActive = false,
+                    )
+                }
             },
             onIdle = {
                 withContext(NonCancellable + Dispatchers.IO) {
@@ -1393,6 +1443,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             return
         }
         mutable.value = mutable.value.copy(onDeviceVoiceActive = true, activity = "Speaking on this phone…")
+        onDeviceRun = OnDeviceSpeakRun(chunks)
         ttsJob = onDeviceSpeakSession().start(chunks)
     }
 

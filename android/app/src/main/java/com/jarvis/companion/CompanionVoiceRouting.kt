@@ -46,9 +46,11 @@ object CompanionVoiceRouting {
         preferOnDeviceFrontend: Boolean = false,
         platformSttAvailable: Boolean = false,
         platformTtsAvailable: Boolean = false,
+        /** RFC-0216 S4: the installed TTS pack speaks the chosen voice language. */
+        ttsPackSpeaksLanguage: Boolean = true,
     ): VoiceRouteDecision {
         val sttReady = sttPackStatus in CompanionVoicePackStatus.USABLE
-        val ttsReady = ttsPackStatus in CompanionVoicePackStatus.USABLE
+        val ttsReady = ttsPackStatus in CompanionVoicePackStatus.USABLE && ttsPackSpeaksLanguage
         // ANZU's own packs (Whisper / Pocket TTS) win; Android's engines cover a phone without them.
         fun localStt() = when {
             sttReady -> SttVoiceRoute.ON_DEVICE

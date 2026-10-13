@@ -149,7 +149,7 @@ class PlatformSttTest {
         try {
             shadowOf(app).grantPermissions(Manifest.permission.RECORD_AUDIO)
             ShadowSpeechRecognizer.setIsOnDeviceRecognitionAvailable(true)
-            val voice = PlatformVoice(app, SttLanguageSource { "en-GB" })
+            val voice = PlatformVoice(app, sttLanguage = SttLanguageSource { "en-GB" })
             voice.startListening(onPartial = {}, onResult = {}, onError = {})
             idle()
             val intent = shadowOf(ShadowSpeechRecognizer.getLatestSpeechRecognizer()).lastRecognizerIntent
@@ -253,5 +253,30 @@ class PlatformSttTest {
         assertEquals(listOf(PlatformSttPlan.NO_RECOGNIZER_COPY), errors)
         assertFalse(voice.listening)
         voice.shutdown()
+    }
+
+    /** RFC-0216 S4: the voice-language setting (single source) drives EXTRA_LANGUAGE, bare tags get a region. */
+    @Test
+    fun voiceLanguageSettingDrivesRecognizerLanguage() {
+        val saved = Locale.getDefault()
+        Locale.setDefault(Locale.forLanguageTag("nl-NL"))
+        try {
+            shadowOf(app).grantPermissions(Manifest.permission.RECORD_AUDIO)
+            ShadowSpeechRecognizer.setIsOnDeviceRecognitionAvailable(true)
+            for ((setting, expected) in listOf(
+                VoiceLanguageSetting() to "en-US",
+                VoiceLanguageSetting("en-GB") to "en-GB",
+                VoiceLanguageSetting("en", sttLanguageOverride = "nl") to "nl-NL",
+            )) {
+                val voice = PlatformVoice(app, language = { setting })
+                voice.startListening(onPartial = {}, onResult = {}, onError = {})
+                idle()
+                val intent = shadowOf(ShadowSpeechRecognizer.getLatestSpeechRecognizer()).lastRecognizerIntent
+                assertEquals(expected, intent.getStringExtra(RecognizerIntent.EXTRA_LANGUAGE))
+                voice.shutdown()
+            }
+        } finally {
+            Locale.setDefault(saved)
+        }
     }
 }
