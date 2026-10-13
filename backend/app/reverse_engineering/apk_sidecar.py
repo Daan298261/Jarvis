@@ -16,6 +16,10 @@ Slice 5: smali fallback -- when jadx fails catastrophically (failed / timeout / 
 useful Java) or is skipped with the flag set, re-run apktool without `--no-src` (and with
 `--no-res`) into `apk/smali/` so bytecode remains inspectable; evidence, custody, catalog
 and REST expose the fallback state and counts.
+Slice 6: report synthesis -- `apk_synthesize_report` builds observation findings that cite
+recorded evidence IDs E00001-E00006 (as present), carries declared unknowns into
+`report.json` / `report.md` via `store.write_report`, and keeps status honest (`partial`
+when unknowns remain).
 Every step is written to the RFC-0201 investigation store as citable evidence plus a
 chain-of-custody record. No target code is executed.
 """
@@ -1968,6 +1972,283 @@ def apk_crypto_hints(ident: str, claimed: dict | None = None) -> dict:
     return {**doc, "evidence_id": recorded["eid"], "investigation_status": row["status"]}
 
 
+
+# --- Report synthesis (RFC-0207 §9.4) ---------------------------------------------------
+
+# Pipeline evidence operations in citation order (E00001..E00006 when run in order).
+_REPORT_EVIDENCE_OPS = (
+    "apk_unpack",
+    "apk_manifest",
+    "apk_decompile",
+    "apk_native_libs",
+    "apk_endpoints",
+    "apk_crypto_hints",
+)
+
+
+def _evidence_id_by_operation(row: dict) -> dict[str, str]:
+    """First successful evidence id per operation (pipeline order)."""
+    out: dict[str, str] = {}
+    for entry in row.get("evidence") or []:
+        op = entry.get("operation")
+        if op in _REPORT_EVIDENCE_OPS and entry.get("success", True) and op not in out:
+            out[op] = entry["id"]
+    return out
+
+
+def _load_evidence_entry(ident: str, eid: str) -> dict:
+    path = store.directory(ident) / "evidence" / f"{eid}.json"
+    if not path.is_file():
+        raise FileNotFoundError(f"Evidence {eid} is missing on disk")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _observation(claim: str, evidence_ids: list[str], limitations: str) -> dict:
+    return {"kind": "observation", "claim": claim, "evidence_ids": list(evidence_ids),
+            "limitations": limitations}
+
+
+def _synthesize_findings(ident: str, row: dict) -> list[dict]:
+    """Build observation findings grounded only in recorded evidence and metadata."""
+    by_op = _evidence_id_by_operation(row)
+    findings: list[dict] = []
+
+    if "apk_unpack" in by_op:
+        eid = by_op["apk_unpack"]
+        result = _load_evidence_entry(ident, eid).get("result") or {}
+        fmt = result.get("format") or (row.get("apk") or {}).get("format") or "apk"
+        parts = result.get("parts") or (row.get("apk") or {}).get("parts") or []
+        digest = (result.get("container") or {}).get("sha256") or row.get("sha256") or "unknown"
+        pkg = result.get("declared_package") or (row.get("apk") or {}).get("declared_package")
+        pkg_bit = f" declared package {pkg}" if pkg else ""
+        source_kind = result.get("source_kind") or row.get("source_kind")
+        origin = f" (origin={source_kind})" if source_kind else ""
+        findings.append(_observation(
+            f"Admitted {fmt} package with {len(parts)} APK part(s){pkg_bit}; "
+            f"container SHA-256 {digest}{origin}.",
+            [eid],
+            "Static intake only; no target code was executed. OBB files are indexed, not extracted.",
+        ))
+
+    if "apk_manifest" in by_op:
+        eid = by_op["apk_manifest"]
+        manifest = _optional_metadata(ident, "manifest")
+        if manifest is None:
+            manifest = (_load_evidence_entry(ident, eid).get("result") or {})
+        package = manifest.get("package") or "unknown"
+        surface = manifest.get("attack_surface") or {}
+        exported = surface.get("exported")
+        unprotected = surface.get("exported_unprotected_count")
+        perms = manifest.get("permissions") or {}
+        high_risk = perms.get("high_risk") or []
+        alerts = manifest.get("alerts") or []
+        alert_flags = [a.get("flag") for a in alerts if a.get("flag")]
+        bits = [f"package {package}"]
+        if manifest.get("version_name") is not None:
+            bits.append(f"version {manifest.get('version_name')} ({manifest.get('version_code')})")
+        if exported is not None:
+            bits.append(f"{exported} exported component(s)")
+        if unprotected is not None:
+            bits.append(f"{unprotected} exported without a required permission")
+        if high_risk:
+            bits.append(f"{len(high_risk)} high-risk permission(s) requested")
+        if alert_flags:
+            bits.append("manifest alerts: " + ", ".join(alert_flags))
+        findings.append(_observation(
+            "Manifest attack surface: " + "; ".join(bits) + ".",
+            [eid],
+            "Static manifest parsing only; dynamic authorization checks in code were not evaluated.",
+        ))
+
+    if "apk_decompile" in by_op:
+        eid = by_op["apk_decompile"]
+        result = _load_evidence_entry(ident, eid).get("result") or {}
+        jadx = result.get("jadx") or {}
+        apktool = result.get("apktool") or {}
+        smali = result.get("smali_fallback") or _optional_metadata(ident, "smali")
+        java_files = jadx.get("java_files")
+        state = jadx.get("state") or "unknown"
+        claim = (f"Decompile pipeline: apktool={apktool.get('state') or 'unknown'}, "
+                 f"jadx={state}")
+        if java_files is not None:
+            claim += f" ({java_files} Java source file(s))"
+        if isinstance(smali, dict) and smali.get("ran"):
+            claim += (f"; smali fallback recovered {smali.get('smali_files', 0)} .smali file(s) "
+                      f"({smali.get('state') or 'unknown'})")
+        claim += "."
+        findings.append(_observation(
+            claim,
+            [eid],
+            "Static decompilation only; recovered sources may be incomplete under obfuscation or packing.",
+        ))
+
+    if "apk_native_libs" in by_op:
+        eid = by_op["apk_native_libs"]
+        native = _optional_metadata(ident, "native")
+        if native is None:
+            native = _load_evidence_entry(ident, eid).get("result") or {}
+        count = native.get("library_count", len(native.get("libraries") or []))
+        abis = native.get("abis") or []
+        packers = native.get("packers_detected") or []
+        high = native.get("high_entropy_count", 0)
+        libs = native.get("libraries") or []
+        weak_relro = sum(1 for lib in libs
+                         if (lib.get("hardening") or {}).get("relro") in {"partial", "none"})
+        no_canary = sum(1 for lib in libs
+                        if (lib.get("hardening") or {}).get("stack_canary") is False)
+        exec_stack = sum(1 for lib in libs
+                         if (lib.get("hardening") or {}).get("executable_stack"))
+        bits = [f"{count} native librar{'y' if count == 1 else 'ies'}"]
+        if abis:
+            bits.append("ABIs " + ", ".join(abis))
+        if packers:
+            bits.append("packer hint(s): " + ", ".join(packers))
+        if high:
+            bits.append(f"{high} high-entropy library(ies)")
+        if weak_relro:
+            bits.append(f"{weak_relro} with partial/none RELRO")
+        if no_canary:
+            bits.append(f"{no_canary} without stack canary")
+        if exec_stack:
+            bits.append(f"{exec_stack} with executable stack")
+        findings.append(_observation(
+            "Native inventory: " + "; ".join(bits) + ".",
+            [eid],
+            "Static ELF inspection only; no native code was executed.",
+        ))
+
+    if "apk_endpoints" in by_op:
+        eid = by_op["apk_endpoints"]
+        endpoints = _optional_metadata(ident, "endpoints")
+        if endpoints is None:
+            endpoints = _load_evidence_entry(ident, eid).get("result") or {}
+        counts = endpoints.get("counts") or {}
+        total = endpoints.get("endpoint_count")
+        if total is None:
+            total = len(endpoints.get("endpoints") or [])
+        parts = [f"{n} {cat}" for cat, n in sorted(counts.items()) if n]
+        cloud = endpoints.get("cloud_services") or []
+        claim = f"Extracted {total} static network endpoint(s)"
+        if parts:
+            claim += " (" + ", ".join(parts) + ")"
+        if cloud:
+            claim += f"; cloud service hint(s): {', '.join(cloud[:8])}"
+            if len(cloud) > 8:
+                claim += f" (+{len(cloud) - 8} more)"
+        claim += "."
+        findings.append(_observation(
+            claim,
+            [eid],
+            "Static string/resource extraction only; reachability and authentication were not verified.",
+        ))
+
+    if "apk_crypto_hints" in by_op:
+        eid = by_op["apk_crypto_hints"]
+        crypto = _optional_metadata(ident, "crypto")
+        if crypto is None:
+            crypto = _load_evidence_entry(ident, eid).get("result") or {}
+        alerts = crypto.get("alert_count", 0)
+        by_sev = crypto.get("by_severity") or {}
+        items = crypto.get("findings") or []
+        # Prefer high/critical rule titles; never paste raw secret material into the claim.
+        notable = []
+        for item in items:
+            if item.get("severity") not in {"critical", "high"}:
+                continue
+            title = item.get("title") or item.get("rule") or "crypto finding"
+            masked = item.get("masked")
+            if masked:
+                notable.append(f"{title} ({masked})")
+            else:
+                notable.append(title)
+            if len(notable) >= 5:
+                break
+        sev_bits = [f"{n} {sev}" for sev, n in sorted(by_sev.items()) if n]
+        claim = f"Cryptographic hints: {alerts} alert(s)"
+        if sev_bits:
+            claim += " (" + ", ".join(sev_bits) + ")"
+        if notable:
+            claim += "; notable: " + "; ".join(notable)
+        claim += "."
+        cited = [eid]
+        # When endpoints evidence also exists and cleartext/NSC is implicated, cite both (RFC §9.4 example).
+        nsc = crypto.get("network_security_config") or {}
+        cleartext = False
+        if isinstance(nsc, dict):
+            base = nsc.get("base_config") or {}
+            if isinstance(base, dict) and base.get("cleartext_permitted"):
+                cleartext = True
+            for dc in nsc.get("domain_configs") or []:
+                if isinstance(dc, dict) and dc.get("cleartext_permitted"):
+                    cleartext = True
+                    break
+            cleartext = cleartext or bool(
+                nsc.get("cleartext_permitted") or nsc.get("cleartextTrafficPermitted")
+                or nsc.get("allows_cleartext"))
+        if not cleartext:
+            cleartext = any(
+                "cleartext" in (i.get("rule") or "").lower()
+                or "cleartext" in (i.get("title") or "").lower()
+                for i in items
+            )
+        if cleartext and "apk_endpoints" in by_op:
+            cited = [by_op["apk_endpoints"], eid]
+        findings.append(_observation(
+            claim,
+            cited,
+            "Static pattern matching only; key validity and remote trust were not verified. "
+            "Secret material is not copied into the report claim.",
+        ))
+
+    return findings
+
+
+def apk_synthesize_report(ident: str) -> dict:
+    """Synthesize report.json / report.md from recorded APK evidence (RFC-0207 §9.4).
+
+    Findings are observations whose claims are grounded only in saved evidence; every finding
+    cites real evidence IDs. Declared investigation unknowns are carried into the report, so
+    status stays honest (``partial`` when unknowns remain, ``reported`` otherwise).
+    Refused while analyzing, cancelled, closed, or already finally reported.
+    """
+    with _CLAIM_LOCK:
+        row = store.load(ident)
+        if not row.get("apk"):
+            raise ValueError("Investigation was not prepared as an APK target")
+        if row["status"] in {"cancelled", "closed", "reported"}:
+            raise ValueError(f"Investigation is {row['status']}; cannot synthesize report")
+        if row["status"] == "analyzing" or ident in _CLAIMS:
+            raise ValueError("Investigation is analyzing; cannot synthesize report")
+        store.validate_snapshot(row)
+
+    findings = _synthesize_findings(ident, row)
+    unknowns = list(row.get("unknowns") or [])
+    if not findings and not unknowns:
+        raise ValueError(
+            "No APK evidence recorded yet; run prepare/decompile/static steps before report synthesis"
+        )
+
+    with _CLAIM_LOCK:
+        row = store.load(ident)
+        if row["status"] in {"cancelled", "closed", "reported"}:
+            raise ValueError(f"Investigation is {row['status']}; cannot synthesize report")
+        if row["status"] == "analyzing" or ident in _CLAIMS:
+            raise ValueError("Investigation is analyzing; cannot synthesize report")
+        # Recompute against the reloaded row so citations stay aligned with current evidence.
+        findings = _synthesize_findings(ident, row)
+        unknowns = list(row.get("unknowns") or [])
+        if not findings and not unknowns:
+            raise ValueError(
+                "No APK evidence recorded yet; run prepare/decompile/static steps before report synthesis"
+            )
+        cited = sorted({eid for finding in findings for eid in finding["evidence_ids"]})
+        _coc(row, "apk_report_synthesized",
+             f"Synthesized {len(findings)} finding(s) citing {len(cited)} evidence record(s).",
+             {"finding_count": len(findings), "evidence_ids": cited, "unknown_count": len(unknowns)})
+        _custody(row, report_synthesized_at=_now())
+        return store.write_report(row, findings, unknowns)
+
+
 # --- Agent tool catalog (runtime.py) ----------------------------------------------------
 
 CATALOG = {
@@ -1998,6 +2279,10 @@ CATALOG = {
                          "description": "Flag hardcoded secrets, weak ciphers, static keys/IVs, network security "
                                         "config trust policy and AndroidKeyStore usage; records crypto evidence.",
                          "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+    "apk_synthesize_report": {"name": "apk_synthesize_report",
+                             "description": "Synthesize report.json/report.md with observation findings citing "
+                                            "recorded APK evidence (E00001-E00006 as present) and declared unknowns.",
+                             "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
 }
 
 
@@ -2031,6 +2316,11 @@ def call(ident: str, operation: str, arguments: dict, claimed: dict | None = Non
         out = apk_crypto_hints(ident, claimed)
         return {"status": "evidence", "evidence_id": out["evidence_id"],
                 "investigation_status": out["investigation_status"], "crypto": out}
+    if operation == "apk_synthesize_report":
+        row = apk_synthesize_report(ident)
+        return {"status": "reported" if row["status"] == "reported" else "partial",
+                "investigation_status": row["status"], "findings": row.get("findings", []),
+                "unknowns": row.get("unknowns", []), "evidence": row.get("evidence", [])}
     raise PermissionError("Operation is not admitted")
 
 

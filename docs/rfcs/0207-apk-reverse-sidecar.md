@@ -21,7 +21,9 @@
 
 **Slice 5 (implemented):** smali fallback when jadx fails catastrophically (failed / timeout / OOM / no useful Java) or when `skip_jadx` is set with `decompile_smali_fallback` (default true). Phase A still uses `--no-src`; the fallback re-runs apktool with `--no-res` (no `--no-src`) into `apk/smali/`, counts `.smali` files/classes, writes `apk/metadata/smali.json`, records `smali_fallback` on the `apk_decompile` evidence, a `smali_fallback_completed` custody event, and `smali_fallback` on `GET /apk/summary`. Catalog/REST accept `decompile_smali_fallback`. Manifest/resources from Phase A remain valid when jadx fails. jadx diagnostics are parsed for failed class names when present.
 
-**Later slices:** report synthesis citing E00001-E00006; remaining fixtures.
+**Slice 6 (implemented):** report synthesis citing E00001-E00006 via `apk_synthesize_report` (catalog + `POST /{id}/apk/report`). Observation findings are grounded only in recorded evidence/metadata; every finding cites real evidence IDs; investigation unknowns are carried into `report.json` / `report.md` through `store.write_report`; status is `partial` when unknowns remain. Custody event `apk_report_synthesized`. Tests cover synthesis citing E00001-E00006 on synthetic fixtures.
+
+**Later slices:** remaining fixtures (broader commercial/obfuscated APK corpus beyond synthetic + minimal_valid.apk).
 ---
 
 ## Problem
