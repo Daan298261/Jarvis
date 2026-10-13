@@ -23,29 +23,10 @@ def clean_env(monkeypatch):
 
 def test_readiness_all_false_when_unset(clean_env):
     assert infrastructure.infrastructure_readiness() == {
-        "relay_agent_configured": False,
-        "relay_endpoint_configured": False,
-        "relay_hostname_present": False,
         "push_configured": False,
         "turn_configured": False,
         "firebase_client_config_configured": False,
     }
-
-
-def test_relay_agent_requires_https_and_credential(clean_env, monkeypatch):
-    monkeypatch.setenv("JARVIS_RELAY_URL", "https://relay.example.com")
-    assert infrastructure.infrastructure_readiness()["relay_agent_configured"] is False
-    monkeypatch.setenv("JARVIS_RELAY_CREDENTIAL", "secret")
-    assert infrastructure.infrastructure_readiness()["relay_agent_configured"] is True
-    monkeypatch.setenv("JARVIS_RELAY_URL", "http://relay.example.com")
-    assert infrastructure.infrastructure_readiness()["relay_agent_configured"] is False
-
-
-def test_relay_endpoint_and_hostname(clean_env, monkeypatch):
-    monkeypatch.setenv("JARVIS_RELAY_ENDPOINT", "https://relay.example.com:15001")
-    ready = infrastructure.infrastructure_readiness()
-    assert ready["relay_endpoint_configured"] is True
-    assert ready["relay_hostname_present"] is True
 
 
 def test_push_requires_https_and_credential(clean_env, monkeypatch):
@@ -97,8 +78,9 @@ async def test_infrastructure_endpoint_requires_owner_key(clean_env, tmp_path, m
 def test_infrastructure_endpoint_returns_booleans_only(clean_env, monkeypatch):
     from app.api.companion import infrastructure_status
 
-    monkeypatch.setenv("JARVIS_RELAY_URL", "https://relay.example.com")
-    monkeypatch.setenv("JARVIS_RELAY_CREDENTIAL", "do-not-leak")
+    monkeypatch.setenv("JARVIS_PUSH_URL", "https://push.example.com/v1/push")
+    monkeypatch.setenv("JARVIS_PUSH_CREDENTIAL", "do-not-leak")
     body = infrastructure_status()
-    assert body["relay_agent_configured"] is True
+    assert body["push_configured"] is True
     assert "do-not-leak" not in str(body)
+    assert all(isinstance(value, bool) for value in body.values())

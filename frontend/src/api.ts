@@ -4608,6 +4608,8 @@ export type CompanionPairingCode = {
   endpoints?: string[]
   server_pin?: string
   qr?: CompanionPairingQr | null
+  remote?: boolean
+  lockout_remaining_seconds?: number
 }
 
 export type CompanionOnboardingOffer = {
@@ -4768,7 +4770,6 @@ export async function startCompanionBuild(options?: {
   endpoint?: string
   mode?: "personalized" | "generic"
   prepareConnection?: boolean
-  remote?: boolean
 }): Promise<CompanionBuildJob> {
   const mode = options?.mode ?? "personalized"
   return api<CompanionBuildJob>("/api/mobile/manage/builds", {
@@ -4777,7 +4778,6 @@ export async function startCompanionBuild(options?: {
       endpoint: options?.endpoint ?? "",
       mode,
       prepare_connection: options?.prepareConnection ?? mode === "personalized",
-      remote: options?.remote ?? true,
     }),
   })
 }

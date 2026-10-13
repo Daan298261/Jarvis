@@ -95,6 +95,9 @@ jobs:
       - name: Companion pairing recovery tests
         run: npm run test:companion-pairing-recovery
 
+      - name: Remote access helper tests (RFC-0215)
+        run: npm run test:companion-remote-access
+
   installer-compile:
     name: installer-compile
     runs-on: windows-latest
