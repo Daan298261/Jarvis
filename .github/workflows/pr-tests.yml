@@ -43,7 +43,7 @@ jobs:
       - name: Run RFC-0207 APK sidecar tests with the real toolchain (no skips allowed)
         shell: bash
         run: |
-          python -m pytest -q -rs tests/test_rfc0207_apk_sidecar.py tests/test_ci_re_toolchain.py | tee "$RUNNER_TEMP/apk-tests.txt"
+          python -m pytest -q -rs tests/test_rfc0207_apk_sidecar.py tests/test_rfc0207_obfuscation.py tests/test_rfc0207_obfuscation_step.py tests/test_ci_re_toolchain.py | tee "$RUNNER_TEMP/apk-tests.txt"
           if grep -q SKIPPED "$RUNNER_TEMP/apk-tests.txt"; then
             echo "::error::RFC-0207 real-toolchain tests were skipped"
             exit 1

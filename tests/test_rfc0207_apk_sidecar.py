@@ -1672,9 +1672,107 @@ def test_custody_and_evidence_e00001_to_e00006(env):
         "apk_unpack", "apk_manifest", "apk_decompile", "apk_native_libs", "apk_endpoints", "apk_crypto_hints"]
     for i in range(1, 7):
         assert (store.directory(row["id"]) / "evidence" / f"E{i:05d}.json").is_file()
-    reported = store.write_report(final, [{"kind": "observation", "evidence_ids": ["E00005", "E00006"],
-        "claim": "Hardcoded AWS key ID in Vault.java and user CAs are trusted for all domains."}], [])
-    assert reported["status"] == "reported"
+    reported = apk_sidecar.apk_synthesize_report(row["id"])
+    cited = {eid for finding in reported["findings"] for eid in finding["evidence_ids"]}
+    assert cited >= {"E00001", "E00002", "E00003", "E00004", "E00005", "E00006"}
+    assert all(f["kind"] == "observation" and f.get("claim") for f in reported["findings"])
+    # The synthetic libtestnative.so is not an ELF, which is a declared unknown -> partial.
+    assert reported["status"] == "partial"
+    assert reported["unknowns"] == ["lib/arm64-v8a/libtestnative.so is not a parseable ELF (not ELF or truncated); only size and SHA-256 were recorded."]
+    assert (store.directory(row["id"]) / "report.json").is_file()
+    assert (store.directory(row["id"]) / "report.md").is_file()
+    custody = json.loads((store.directory(row["id"]) / "custody.json").read_text(encoding="utf-8"))
+    assert any(e.get("event") == "apk_report_synthesized" for e in custody.get("events", []))
+
+
+def test_report_synthesis_cites_e00001_to_e00006(env):
+    """RFC-0207 §9.4: synthesis produces findings citing each recorded evidence ID."""
+    src, fake = env
+    row = _decompiled_fixture(src, fake)
+    apk_sidecar.apk_inventory_native(row["id"])
+    apk_sidecar.apk_extract_endpoints(row["id"])
+    apk_sidecar.apk_crypto_hints(row["id"])
+    out = apk_sidecar.call(row["id"], "apk_synthesize_report", {})
+    assert out["investigation_status"] == "partial"
+    findings = out["findings"]
+    cited = {eid for finding in findings for eid in finding["evidence_ids"]}
+    assert cited == {"E00001", "E00002", "E00003", "E00004", "E00005", "E00006"}
+    sha = store.load(row["id"])["sha256"]
+    assert [(f["evidence_ids"], f["claim"]) for f in findings] == [
+        (["E00001"], f"Admitted apk package with 1 APK part(s); container SHA-256 {sha} (origin=local_path)."),
+        (["E00002"], "Manifest attack surface: package org.anzu.test; version 1.0 (1); 4 exported component(s); "
+                     "3 exported without a required permission; 2 high-risk permission(s) requested; "
+                     "manifest alerts: debuggable, allow_backup, uses_cleartext_traffic."),
+        (["E00003"], "Decompile pipeline: apktool=ok, jadx=ok (4 Java source file(s))."),
+        (["E00004"], "Native inventory: 1 native library; ABIs arm64-v8a."),
+        (["E00005"], "Extracted 4 static network endpoint(s) (1 custom_scheme, 2 url, 1 websocket)."),
+        (["E00005", "E00006"], "Cryptographic hints: 16 alert(s) (2 critical, 8 high, 2 info, 6 warning); notable: "
+                               "AWS access key ID (AKIA…MPLE); Embedded private key (PEM block); Hardcoded API key "
+                               "or secret assignment (Qw3r…bNm1); Hardcoded API key or secret assignment (Zx8Q…g0Ae); "
+                               "Block cipher in ECB mode."),
+    ]
+    for finding in findings:
+        assert finding["kind"] == "observation"
+        assert finding["claim"]
+        assert finding["evidence_ids"]
+        assert "limitations" in finding
+    # Secrets must not be pasted into report claims (masked forms from crypto are allowed).
+    blob = " ".join(f["claim"] for f in findings)
+    assert "AKIAIOSFODNN7EXAMPLE" not in blob
+    assert "AIzaSyD-x9SampleKeyForTestingPurpose123" not in blob
+    # Refuse double-finalize when status is already reported (no unknowns).
+    assert store.load(row["id"])["status"] == "partial"
+    # REST surface
+    client = TestClient(app)
+    # Re-prepare a second investigation for the POST route (first may be reported).
+    rest_dir = src / "rest"
+    rest_dir.mkdir(exist_ok=True)
+    row2 = _decompiled_fixture(rest_dir, fake)
+    apk_sidecar.apk_inventory_native(row2["id"])
+    apk_sidecar.apk_extract_endpoints(row2["id"])
+    apk_sidecar.apk_crypto_hints(row2["id"])
+    resp = client.post(f"/api/investigations/{row2['id']}/apk/report")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    cited2 = {eid for finding in body["findings"] for eid in finding["evidence_ids"]}
+    assert cited2 == {"E00001", "E00002", "E00003", "E00004", "E00005", "E00006"}
+    assert body["status"] == "partial"
+
+
+def test_report_synthesis_partial_when_unknowns(env):
+    src, fake = env
+    row = _decompiled_fixture(src, fake)
+    # Inject a declared unknown before synthesis (honest partial status).
+    stored = store.load(row["id"])
+    stored["unknowns"] = ["Synthetic fixture: native symbols unresolved for packed payload."]
+    store.save(stored)
+    reported = apk_sidecar.apk_synthesize_report(row["id"])
+    assert reported["status"] == "partial"
+    assert "Synthetic fixture: native symbols unresolved for packed payload." in reported["unknowns"]
+    cited = {eid for finding in reported["findings"] for eid in finding["evidence_ids"]}
+    assert cited >= {"E00001", "E00002", "E00003"}
+
+
+def test_report_synthesis_refuses_while_analyzing(env):
+    src, _ = env
+    row = prepare(make_apk(src / "a.apk"))
+    claimed = apk_sidecar._claim(row["id"], "decompilation")
+    with pytest.raises(ValueError, match="analyzing"):
+        apk_sidecar.apk_synthesize_report(row["id"])
+    apk_sidecar.release(row["id"], claimed["_claim_token"])
+
+
+def test_report_synthesis_requires_evidence(env):
+    src, _ = env
+    # Minimal prepared row without going through prepare() file intake: empty evidence.
+    # prepare() always records E00001; clear evidence to force the fail-closed path.
+    row = prepare(make_apk(src / "empty_report.apk"))
+    stored = store.load(row["id"])
+    stored["evidence"] = []
+    stored["unknowns"] = []
+    store.save(stored)
+    with pytest.raises(ValueError, match="No APK evidence"):
+        apk_sidecar.apk_synthesize_report(row["id"])
 
 
 def test_static_steps_never_overlap_decompile(env):
@@ -2860,3 +2958,419 @@ def test_colliding_part_names_get_distinct_smali_dirs(env):
     for o in outs:
         assert (Path(o) / "smali" / "org" / "anzu" / "test" / "MainActivity.smali").is_file()
     assert smali["smali_files"] == 3
+
+
+# --- RFC-0207 slice 6 (review fixes): cloud hints, latest evidence, native hardening claim ------
+
+def test_report_claims_cloud_services_from_real_dex_fixture(env):
+    src, _ = env
+    row = _dex_fixture(src)
+    apk_sidecar.apk_extract_endpoints(row["id"])
+    apk_sidecar.apk_crypto_hints(row["id"])
+    out = apk_sidecar.apk_synthesize_report(row["id"])
+    assert out["status"] == "reported" and out["unknowns"] == []
+    claims = {tuple(f["evidence_ids"]): f["claim"] for f in out["findings"]}
+    assert claims[("E00002",)] == ("Extracted 5 static network endpoint(s) (1 cloud_service, 3 url, 1 websocket); "
+                                   "cloud service hint(s): aws anzu-fixture.s3.amazonaws.com.")
+    assert claims[("E00002", "E00003")] == (
+        "Cryptographic hints: 7 alert(s) (1 critical, 2 high, 1 info, 4 warning); notable: "
+        "AWS access key ID (AKIA…2345); Block cipher in ECB mode; User-installed CAs trusted.")
+    with pytest.raises(ValueError, match="reported"):
+        apk_sidecar.apk_synthesize_report(row["id"])  # a reported investigation is final
+
+
+def test_report_native_hardening_claim_from_real_ndk_library(env):
+    src, _ = env
+    apk = _apk_with_libs(src / "hardening.apk",
+                         {"lib/armeabi-v7a/libtestnative.so": (FIXTURES / "libtestnative_armv7.so").read_bytes()})
+    row = prepare(apk)
+    apk_sidecar.apk_inventory_native(row["id"])
+    out = apk_sidecar.apk_synthesize_report(row["id"])
+    assert out["status"] == "reported"
+    native = [f for f in out["findings"] if f["evidence_ids"] == ["E00002"]]
+    assert [f["claim"] for f in native] == [
+        "Native inventory: 1 native library; ABIs armeabi-v7a; 1 with partial/none RELRO; 1 without stack canary."]
+
+
+def test_report_cites_latest_successful_rerun(env):
+    src, _ = env
+    row = _dex_fixture(src)
+    first = apk_sidecar.apk_extract_endpoints(row["id"])
+    second = apk_sidecar.apk_extract_endpoints(row["id"])
+    assert (first["evidence_id"], second["evidence_id"]) == ("E00002", "E00003")
+    assert apk_sidecar._evidence_id_by_operation(store.load(row["id"]))["apk_endpoints"] == "E00003"
+    out = apk_sidecar.apk_synthesize_report(row["id"])
+    cited = [f["evidence_ids"] for f in out["findings"] if f["claim"].startswith("Extracted ")]
+    assert cited == [["E00003"]]
+
+
+def test_report_ignores_failed_later_record(env):
+    row = {"evidence": [{"id": "E00001", "operation": "apk_endpoints", "success": True},
+                        {"id": "E00002", "operation": "apk_endpoints", "success": False}]}
+    assert apk_sidecar._evidence_id_by_operation(row) == {"apk_endpoints": "E00001"}
+
+
+# --- RFC-0207 slice 7: endpoint + crypto scanning of recovered smali --------------------
+
+SMALI_NET = """\
+.class public Lorg/anzu/test/net/Client;
+.super Ljava/lang/Object;
+
+.method public endpoint()Ljava/lang/String;
+    .locals 1
+    const-string v0, "https://smali-api.anzu-test.example.com/v1/users"
+    return-object v0
+.end method
+
+.method public push()Ljava/lang/String;
+    .locals 1
+    const-string/jumbo v0, "wss://smali-push.anzu-test.example.com/socket"
+    return-object v0
+.end method
+
+.method public deep()Ljava/lang/String;
+    .locals 1
+    const-string v0, "anzu-smali://open/item"
+    return-object v0
+.end method
+"""
+
+SMALI_VAULT = """\
+.class public Lorg/anzu/test/crypto/Vault;
+.super Ljava/lang/Object;
+
+.method public enc([B)[B
+    .locals 4
+    const-string v0, "AES/ECB/PKCS5Padding"
+    invoke-static {v0}, Ljavax/crypto/Cipher;->getInstance(Ljava/lang/String;)Ljavax/crypto/Cipher;
+    move-result-object v1
+    const-string v2, "0123456789ABCDEF"
+    invoke-virtual {v2}, Ljava/lang/String;->getBytes()[B
+    move-result-object v2
+    new-instance v3, Ljavax/crypto/spec/SecretKeySpec;
+    invoke-direct {v3, v2, v0}, Ljavax/crypto/spec/SecretKeySpec;-><init>([BLjava/lang/String;)V
+    const/16 v0, 0x10
+    new-array v0, v0, [B
+    new-instance v2, Ljavax/crypto/spec/IvParameterSpec;
+    invoke-direct {v2, v0}, Ljavax/crypto/spec/IvParameterSpec;-><init>([B)V
+    return-object v1
+.end method
+
+.method public key()V
+    .locals 1
+    const-string v0, "AIzaSyD-x9SampleKeyForSmaliPurpose12345"
+    return-void
+.end method
+"""
+
+SMALI_HASH = """\
+.class public Lorg/anzu/test/crypto/Hashes;
+.super Ljava/lang/Object;
+
+.method public hashPassword(Ljava/lang/String;)Ljava/lang/String;
+    .locals 2
+    const-string v0, "MD5"
+    invoke-static {v0}, Ljava/security/MessageDigest;->getInstance(Ljava/lang/String;)Ljava/security/MessageDigest;
+    move-result-object v1
+    return-object v0
+.end method
+"""
+
+SMALI_CACHE = """\
+.class public Lorg/anzu/test/crypto/Cache;
+.super Ljava/lang/Object;
+
+.method public cacheKey([B)Ljava/lang/String;
+    .locals 1
+    const-string v0, "SHA-1"
+    invoke-static {v0}, Ljava/security/MessageDigest;->getInstance(Ljava/lang/String;)Ljava/security/MessageDigest;
+    return-object v0
+.end method
+"""
+
+SMALI_KEYSTORE = """\
+.class public Lorg/anzu/test/crypto/Keys;
+.super Ljava/lang/Object;
+
+.method public load()V
+    .locals 1
+    const-string v0, "AndroidKeyStore"
+    invoke-static {v0}, Ljava/security/KeyStore;->getInstance(Ljava/lang/String;)Ljava/security/KeyStore;
+    return-void
+.end method
+"""
+
+
+def _plant_smali(ident: str, files: dict[str, str], *, ran: bool = True, reason: str = "jadx_timeout") -> Path:
+    """Write recovered smali + matching smali.json under an investigation (no real apktool)."""
+    root = store.directory(ident) / "apk"
+    smali_root = root / "smali" / "a.apk"
+    for rel, body in files.items():
+        path = smali_root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    meta = root / "metadata"
+    meta.mkdir(parents=True, exist_ok=True)
+    store.atomic_json(meta / "smali.json", {
+        "ran": ran, "reason": reason, "state": "ok" if ran else "skipped",
+        "smali_files": len(files) if ran else 0, "smali_classes": len(files) if ran else 0,
+        "smali_roots": ["smali"], "smali_output": str(root / "smali"),
+        "parts": [{"part": "a.apk", "state": "ok", "smali_files": len(files), "smali_classes": len(files)}],
+    })
+    return smali_root
+
+
+def test_smali_endpoint_extraction(env):
+    src, _ = env
+    row = prepare(make_apk(src / "a.apk", dex=True, libs=()))
+    _plant_smali(row["id"], {
+        "smali/org/anzu/test/net/Client.smali": SMALI_NET,
+    })
+    out = apk_sidecar.apk_extract_endpoints(row["id"])
+    by = {(r["category"], r["endpoint"]): r for r in out["endpoints"]}
+    api = by[("url", "https://smali-api.anzu-test.example.com/v1/users")]
+    assert api["sources"] == ["smali"]
+    assert api["references"] == ["smali/a.apk/smali/org/anzu/test/net/Client.smali:6"]
+    assert ("websocket", "wss://smali-push.anzu-test.example.com/socket") in by
+    assert ("custom_scheme", "anzu-smali://open/item") in by
+    assert out["coverage"]["smali_sources"] is True
+    assert out["coverage"]["sources"]["smali"] == 1
+    assert any("recovered smali" in x for x in out["limitations"])
+    assert not any("smali" in u.lower() for u in out["unknowns"])
+    assert out["investigation_status"] == "partial"
+
+
+def test_smali_crypto_call_sites(env):
+    src, _ = env
+    row = prepare(make_apk(src / "a.apk", dex=True, libs=()))
+    _plant_smali(row["id"], {
+        "smali/org/anzu/test/crypto/Vault.smali": SMALI_VAULT,
+        "smali/org/anzu/test/crypto/Hashes.smali": SMALI_HASH,
+        "smali/org/anzu/test/crypto/Cache.smali": SMALI_CACHE,
+        "smali/org/anzu/test/crypto/Keys.smali": SMALI_KEYSTORE,
+    })
+    out = apk_sidecar.apk_crypto_hints(row["id"])
+    rules: dict[str, list[dict]] = {}
+    for f in out["findings"]:
+        rules.setdefault(f["rule"], []).append(f)
+    google = rules["google_api_key"][0]
+    assert google["value"] == "AIzaSyD-x9SampleKeyForSmaliPurpose12345"
+    assert google["sources"] == ["smali"]
+    assert "smali/a.apk/smali/org/anzu/test/crypto/Vault.smali:" in google["references"][0]
+    ecb = {f["value"]: f for f in rules["ecb_mode"]}
+    assert "AES/ECB/PKCS5Padding" in ecb and ecb["AES/ECB/PKCS5Padding"]["confidence"] == "high"
+    assert ecb["AES/ECB/PKCS5Padding"]["sources"] == ["smali"]
+    assert rules["static_key"][0]["value"] == "0123456789ABCDEF"
+    assert rules["static_key"][0]["sources"] == ["smali"]
+    assert rules["static_iv"][0]["detail"].startswith("IV is a zero-filled byte[16]")
+    hashes = {f["value"]: f for f in rules["weak_hash"]}
+    assert hashes["MD5"]["severity"] == "warning" and hashes["MD5"]["context"] == "password_or_signature"
+    assert hashes["SHA-1"]["severity"] == "info" and hashes["SHA-1"]["context"] == "general"
+    assert out["key_storage"]["posture"] == "android_keystore"
+    assert out["coverage"]["smali_sources"] is True
+    assert any("evaluated on recovered smali" in x for x in out["limitations"])
+    assert not any("smali" in u.lower() for u in out["unknowns"])
+
+
+def test_smali_missing_tree_is_unknown(env):
+    src, _ = env
+    row = prepare(make_apk(src / "a.apk", dex=True, libs=()))
+    meta = store.directory(row["id"]) / "apk" / "metadata"
+    meta.mkdir(parents=True, exist_ok=True)
+    store.atomic_json(meta / "smali.json", {
+        "ran": True, "reason": "jadx_timeout", "state": "ok",
+        "smali_files": 3, "smali_classes": 3, "smali_roots": ["smali"],
+        "smali_output": str(store.directory(row["id"]) / "apk" / "smali"),
+    })
+    out = apk_sidecar.apk_extract_endpoints(row["id"])
+    assert any("apk/smali/ is missing" in u for u in out["unknowns"])
+    assert out["coverage"]["smali_sources"] is False
+    crypto = apk_sidecar.apk_crypto_hints(row["id"])
+    assert any("apk/smali/ is missing" in u for u in crypto["unknowns"])
+
+
+def test_smali_partial_count_mismatch_is_unknown(env):
+    src, _ = env
+    row = prepare(make_apk(src / "a.apk", dex=True, libs=()))
+    _plant_smali(row["id"], {"smali/org/anzu/test/One.smali": SMALI_NET})
+    # Claim more files than were planted.
+    meta = store.directory(row["id"]) / "apk" / "metadata" / "smali.json"
+    doc = json.loads(meta.read_text(encoding="utf-8"))
+    doc["smali_files"] = 5
+    store.atomic_json(meta, doc)
+    out = apk_sidecar.apk_crypto_hints(row["id"])
+    assert any("only 1 were found" in u for u in out["unknowns"])
+    assert out["coverage"]["smali_sources"] is True  # the one present file was still scanned
+
+
+def test_smali_incomplete_marker_is_unknown(env):
+    src, _ = env
+    row = prepare(make_apk(src / "a.apk", dex=True, libs=()))
+    root = _plant_smali(row["id"], {"smali/org/anzu/test/net/Client.smali": SMALI_NET})
+    (root / ".incomplete").write_text("apktool-smali failed\n", encoding="utf-8")
+    out = apk_sidecar.apk_extract_endpoints(row["id"])
+    assert any("marked incomplete" in u for u in out["unknowns"])
+    by = {(r["category"], r["endpoint"]) for r in out["endpoints"]}
+    assert ("url", "https://smali-api.anzu-test.example.com/v1/users") in by
+
+
+def test_smali_scan_after_fake_fallback_decompile(env):
+    """End-to-end: FakeWSL smali fallback → endpoints + crypto see smali sources."""
+    src, fake = env
+    fake.jadx_mode = "timeout"
+    fake.smali_files = {
+        "smali/org/anzu/test/net/Client.smali": SMALI_NET,
+        "smali/org/anzu/test/crypto/Vault.smali": SMALI_VAULT,
+        "smali/org/anzu/test/crypto/Hashes.smali": SMALI_HASH,
+        "smali/org/anzu/test/crypto/Cache.smali": SMALI_CACHE,
+        "smali/org/anzu/test/crypto/Keys.smali": SMALI_KEYSTORE,
+    }
+    row = prepare(make_apk(src / "a.apk", libs=()))
+    out = apk_sidecar.decompile(row["id"])
+    assert out["status"] == "partial"
+    assert apk_sidecar.metadata(row["id"], "smali")["smali_files"] == 5
+    ends = apk_sidecar.apk_extract_endpoints(row["id"])
+    assert ends["coverage"]["smali_sources"] is True
+    assert any(r["endpoint"] == "https://smali-api.anzu-test.example.com/v1/users" for r in ends["endpoints"])
+    crypto = apk_sidecar.apk_crypto_hints(row["id"])
+    assert crypto["coverage"]["smali_sources"] is True
+    assert any(f["rule"] == "ecb_mode" and f["sources"] == ["smali"] for f in crypto["findings"])
+    assert crypto["key_storage"]["posture"] == "android_keystore"
+
+
+def test_smali_unescape_and_literals():
+    from app.reverse_engineering import apk_strings
+    assert apk_strings._smali_unescape(r"hello\nworld") == "hello\nworld"
+    assert apk_strings._smali_unescape(r"quote\"here") == 'quote"here'
+    assert apk_strings._smali_unescape(r"\u0041\u0042") == "AB"
+    src = apk_strings.Source("smali", "x.smali", [
+        (1, '    const-string v0, "https://a.example.com"'),
+        (2, '    const-string/jumbo v1, "wss://b.example.com/s"'),
+        (3, "    return-object v0"),
+    ])
+    assert list(apk_strings._smali_literals(src)) == [
+        (1, "https://a.example.com"), (2, "wss://b.example.com/s")]
+
+
+def _smali_findings(body: str) -> dict[str, list[dict]]:
+    from app.reverse_engineering import apk_strings
+    lines = [(i + 1, t) for i, t in enumerate(body.splitlines())]
+    scanner = apk_strings.CryptoScanner()
+    scanner._smali(apk_strings.Source("smali", "x.smali", lines))
+    rules: dict[str, list[dict]] = {}
+    for f in scanner.findings():
+        rules.setdefault(f["rule"], []).append(f)
+    return rules
+
+
+_SMALI_HDR = ".class public Lx/Y;\n.super Ljava/lang/Object;\n"
+_CIPHER_CALL = "    invoke-static {v0}, Ljavax/crypto/Cipher;->getInstance(Ljava/lang/String;)Ljavax/crypto/Cipher;\n"
+
+
+def test_smali_register_state_resets_per_method():
+    body = _SMALI_HDR + (
+        ".method public a()V\n    .locals 1\n    const-string v0, \"AES/ECB/PKCS5Padding\"\n    return-void\n.end method\n"
+        ".method public b()V\n    .locals 1\n" + _CIPHER_CALL + "    return-void\n.end method\n")
+    assert "ecb_mode" not in _smali_findings(body)
+
+
+@pytest.mark.parametrize("clobber", [
+    "sget-object v0, Lx/Y;->f:Ljava/lang/String;",
+    "iget-object v0, p0, Lx/Y;->f:Ljava/lang/String;",
+    "iget-wide v0, p0, Lx/Y;->w:J",
+    "check-cast v0, Ljava/lang/String;",
+    "aget-object v0, v1, v2",
+    "aget-char v0, v1, v2",
+    "add-int/lit8 v0, v1, 0x1",
+    "move-wide v0, v2",
+    "move-exception v0",
+    "instance-of v0, v1, Ljava/lang/String;",
+    "array-length v0, v1",
+    "const-wide/16 v0, 0x0",
+])
+def test_smali_destination_clobbers(clobber):
+    body = _SMALI_HDR + (
+        ".method public a()V\n    .locals 3\n    const-string v0, \"AES/ECB/PKCS5Padding\"\n"
+        f"    {clobber}\n" + _CIPHER_CALL + "    return-void\n.end method\n")
+    assert "ecb_mode" not in _smali_findings(body)
+
+
+def test_smali_wide_clobbers_next_register():
+    body = _SMALI_HDR + (
+        ".method public a()V\n    .locals 3\n    const-string v1, \"AES/ECB/PKCS5Padding\"\n"
+        "    move-wide v0, v2\n"
+        "    invoke-static {v1}, Ljavax/crypto/Cipher;->getInstance(Ljava/lang/String;)Ljavax/crypto/Cipher;\n"
+        "    return-void\n.end method\n")
+    assert "ecb_mode" not in _smali_findings(body)
+
+
+def test_smali_read_only_operands_do_not_clobber():
+    body = _SMALI_HDR + (
+        ".method public a()V\n    .locals 3\n    const-string v0, \"AES/ECB/PKCS5Padding\"\n"
+        "    if-eqz v0, :cond_0\n    iput-object v0, p0, Lx/Y;->f:Ljava/lang/String;\n"
+        "    :cond_0\n" + _CIPHER_CALL + "    return-void\n.end method\n")
+    assert "ecb_mode" in _smali_findings(body)
+
+
+def _iv_body(middle: str, call_reg: str = "v0") -> str:
+    return _SMALI_HDR + (
+        ".method public a()V\n    .locals 4\n" + middle +
+        "    new-instance v2, Ljavax/crypto/spec/IvParameterSpec;\n"
+        f"    invoke-direct {{v2, {call_reg}}}, Ljavax/crypto/spec/IvParameterSpec;-><init>([B)V\n"
+        "    return-void\n.end method\n")
+
+
+def test_smali_iv_size_comes_from_new_array_size_register():
+    body = _iv_body("    const/16 v1, 0xc\n    const/4 v3, 0x5\n    new-array v0, v1, [B\n")
+    assert _smali_findings(body)["static_iv"][0]["detail"].startswith("IV is a zero-filled byte[12]")
+
+
+def test_smali_iv_register_mismatch_is_not_flagged():
+    body = _iv_body("    const/16 v1, 0x10\n    new-array v3, v1, [B\n    invoke-static {}, Lx/Y;->iv()[B\n"
+                    "    move-result-object v0\n")
+    assert "static_iv" not in _smali_findings(body)
+
+
+@pytest.mark.parametrize("write", [
+    "    const/4 v3, 0x1\n    aput-byte v3, v0, v3\n",
+    "    new-instance v3, Ljava/security/SecureRandom;\n"
+    "    invoke-virtual {v3, v0}, Ljava/security/SecureRandom;->nextBytes([B)V\n",
+])
+def test_smali_iv_written_before_call_is_not_zero_filled(write):
+    body = _iv_body("    const/16 v1, 0x10\n    new-array v0, v1, [B\n" + write)
+    assert "static_iv" not in _smali_findings(body)
+
+
+def test_smali_iv_fill_array_data_is_inline_not_zero():
+    body = _iv_body("    const/16 v1, 0x10\n    new-array v0, v1, [B\n    fill-array-data v0, :array_0\n")
+    detail = _smali_findings(body)["static_iv"][0]["detail"]
+    assert "zero-filled" not in detail and "fill-array-data" in detail
+
+
+def test_smali_inline_key_requires_key_register():
+    def body(key_reg: str, extra: str = "") -> str:
+        return _SMALI_HDR + (
+            ".method public a()V\n    .locals 4\n    const/16 v1, 0x10\n    new-array v0, v1, [B\n" + extra +
+            "    invoke-static {}, Lx/Y;->k()[B\n    move-result-object v3\n"
+            "    const-string v1, \"AES\"\n    new-instance v2, Ljavax/crypto/spec/SecretKeySpec;\n"
+            f"    invoke-direct {{v2, {key_reg}, v1}}, Ljavax/crypto/spec/SecretKeySpec;-><init>([BLjava/lang/String;)V\n"
+            "    return-void\n.end method\n")
+    assert "static_key" not in _smali_findings(body("v3"))
+    assert "static_key" not in _smali_findings(body("v0", "    aput-byte v1, v0, v1\n"))
+    found = _smali_findings(body("v0"))["static_key"][0]
+    assert "zero-filled byte[16]" in found["detail"] and found["confidence"] == "medium"
+
+
+def test_smali_java_util_base64_decoder_feeds_secret_key():
+    body = _SMALI_HDR + (
+        ".method public a()V\n    .locals 4\n"
+        "    invoke-static {}, Ljava/util/Base64;->getDecoder()Ljava/util/Base64$Decoder;\n"
+        "    move-result-object v0\n"
+        "    const-string v1, \"c2VjcmV0LWtleS0xMjM0NQ==\"\n"
+        "    invoke-virtual {v0, v1}, Ljava/util/Base64$Decoder;->decode(Ljava/lang/String;)[B\n"
+        "    move-result-object v2\n"
+        "    const-string v1, \"AES\"\n    new-instance v3, Ljavax/crypto/spec/SecretKeySpec;\n"
+        "    invoke-direct {v3, v2, v1}, Ljavax/crypto/spec/SecretKeySpec;-><init>([BLjava/lang/String;)V\n"
+        "    return-void\n.end method\n")
+    found = _smali_findings(body)["static_key"][0]
+    assert found["value"] == "c2VjcmV0LWtleS0xMjM0NQ==" and found["confidence"] == "high"

@@ -7,7 +7,8 @@ Sources, all read without executing target code:
   text, or, for parts apktool did not decode, the ``resources.arsc`` global string pool and binary
   XML decoded by the host AXML decoder;
 * the decoded ``AndroidManifest.xml`` (meta-data values, intent-filter deep links);
-* string literals and call sites in jadx-recovered ``.java`` sources.
+* string literals and call sites in jadx-recovered ``.java`` sources;
+* ``const-string`` operands and crypto invoke call sites in slice-5 recovered smali under ``apk/smali/``.
 
 The scanner is bounded (16 MiB per text file, 256 MiB per DEX, 2 GiB in total) and records every
 gap it leaves as an explicit unknown instead of failing silently.
@@ -16,7 +17,9 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import json
 import math
+import os
 import re
 import struct
 import threading
@@ -71,13 +74,14 @@ class Source:
 
 @dataclass
 class ScanStats:
-    sources: dict[str, int] = field(default_factory=lambda: {k: 0 for k in ("dex", "resource", "manifest", "java", "asset")})
+    sources: dict[str, int] = field(default_factory=lambda: {k: 0 for k in ("dex", "resource", "manifest", "java", "smali", "asset")})
     dex_strings: int = 0
     bytes_scanned: int = 0
     truncated: bool = False
     oversized: list[str] = field(default_factory=list)
     unknowns: list[str] = field(default_factory=list)
     java_sources: bool = False
+    smali_sources: bool = False
     decoded_resources: bool = False
 
     def admit(self, size: int) -> bool:
@@ -99,7 +103,8 @@ class ScanStats:
 
     def coverage(self) -> dict:
         return {"sources": dict(self.sources), "dex_strings": self.dex_strings, "bytes_scanned": self.bytes_scanned,
-                "java_sources": self.java_sources, "decoded_resources": self.decoded_resources,
+                "java_sources": self.java_sources, "smali_sources": self.smali_sources,
+                "decoded_resources": self.decoded_resources,
                 "truncated": self.truncated, "oversized_files": len(self.oversized)}
 
 
@@ -326,10 +331,81 @@ def iter_sources(apk_root: Path, parts: list[dict], stats: ScanStats,
             if src is not None:
                 stats.java_sources = True
                 yield src
+    # RFC-0207 slice 7: smali recovered by the slice-5 fallback (apk/smali/<part>/smali*/...).
+    yield from _smali_sources(apk_root, stats, cancel)
     for part in parts:
         base = part.get("role") == "base"
         _check_cancel(cancel, "string scan")
         yield from _zip_sources(part, decoded and base, base and not manifest_done, stats, cancel)
+
+
+def _recorded_smali(apk_root: Path, stats: ScanStats) -> dict | None:
+    """The slice-5 smali.json, or None when absent. A corrupt document is an unknown, never 'absent'."""
+    path = apk_root / "metadata" / "smali.json"
+    if not path.is_file():
+        return None
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        stats.unknowns.append(f"metadata/smali.json could not be read ({exc.__class__.__name__}); whether "
+                              "recovered smali is complete could not be checked.")
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+def _smali_files(smali_dir: Path, stats: ScanStats) -> list[Path]:
+    """Every regular ``.smali`` file under apk/smali/, walked without following links; links are unknowns."""
+    files: list[Path] = []
+    for root, dirs, names in os.walk(smali_dir, followlinks=False):
+        here = Path(root)
+        for d in list(dirs):
+            if (here / d).is_symlink():
+                dirs.remove(d)
+                stats.unknowns.append(f"smali/{(here / d).relative_to(smali_dir).as_posix()} is a symbolic link "
+                                      "and was not followed.")
+        dirs.sort()
+        for name in sorted(names):
+            path = here / name
+            if not name.endswith(".smali"):
+                continue
+            if path.is_symlink():
+                stats.unknowns.append(f"smali/{path.relative_to(smali_dir).as_posix()} is a symbolic link and was "
+                                      "not scanned.")
+                continue
+            files.append(path)
+    return files
+
+
+def _smali_sources(apk_root: Path, stats: ScanStats, cancel: threading.Event | None) -> Iterator[Source]:
+    """Yield recovered .smali files and record every gap against what smali.json says was recovered."""
+    smali_dir = apk_root / "smali"
+    recorded = _recorded_smali(apk_root, stats)
+    expected = int(recorded.get("smali_files") or 0) if recorded and recorded.get("ran") else 0
+    if not smali_dir.is_dir() or smali_dir.is_symlink():
+        if expected:
+            stats.unknowns.append(f"metadata/smali.json records {expected} recovered .smali file(s) but apk/smali/ "
+                                  "is missing; bytecode was not scanned for endpoints or crypto call sites.")
+        return
+    for marker in sorted(smali_dir.rglob(".incomplete")):
+        rel = marker.parent.relative_to(smali_dir).as_posix()
+        stats.unknowns.append(f"Recovered smali under smali/{rel} is marked incomplete (the apktool pass failed, "
+                              "timed out or was cancelled); only the files it left were scanned.")
+    files = _smali_files(smali_dir, stats)
+    for path in files:
+        _check_cancel(cancel, "smali scan")
+        ref = "smali/" + path.relative_to(smali_dir).as_posix()
+        try:
+            src = _file_source(path, "smali", ref, stats)
+        except OSError as exc:
+            stats.unknowns.append(f"{ref} could not be read ({exc.strerror or exc}); its strings and call sites "
+                                  "were not scanned.")
+            continue
+        if src is not None:
+            stats.smali_sources = True
+            yield src
+    if len(files) < expected:
+        stats.unknowns.append(f"metadata/smali.json records {expected} recovered .smali file(s) but only "
+                              f"{len(files)} were found under apk/smali/; the missing files were not scanned.")
 
 
 def _ref(src: Source, line: int | None) -> str:
@@ -338,10 +414,51 @@ def _ref(src: Source, line: int | None) -> str:
 
 _JAVA_LITERAL = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
 _XML_STRING_VALUE = re.compile(r"<string\b[^>]*>([^<]+)</string>")
+# Smali (apktool disassembly) string operands: ``const-string vN, "..."`` and ``/jumbo``.
+_SMALI_CONST_STRING = re.compile(r'const-string(?:/jumbo)?\s+([vp]\d+)\s*,\s*"((?:[^"\\]|\\.)*)"')
+_SMALI_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f", '"': '"', "'": "'", "\\": "\\"}
+
+
+def _smali_unescape(value: str) -> str:
+    """Decode the escapes apktool/baksmali emits in string operands (``\\n``, ``\\"``, ``\\uXXXX``)."""
+    if "\\" not in value:
+        return value
+    out: list[str] = []
+    i = 0
+    while i < len(value):
+        ch = value[i]
+        if ch == "\\" and i + 1 < len(value):
+            nxt = value[i + 1]
+            if nxt == "u" and re.fullmatch(r"[0-9a-fA-F]{4}", value[i + 2:i + 6] or ""):
+                out.append(chr(int(value[i + 2:i + 6], 16)))
+                i += 6
+                continue
+            if nxt in _SMALI_ESCAPES:
+                out.append(_SMALI_ESCAPES[nxt])
+                i += 2
+                continue
+        out.append(ch)
+        i += 1
+    text = "".join(out)
+    try:  # \uD83D\uDE00 surrogate pairs combine into one code point
+        return text.encode("utf-16", "surrogatepass").decode("utf-16")
+    except UnicodeError:
+        return text
+
+
+def _smali_literals(src: "Source") -> Iterator[tuple[int | None, str]]:
+    """(line, value) for every const-string operand of a smali source."""
+    for line, text in src.lines:
+        if "const-string" in text:
+            for m in _SMALI_CONST_STRING.finditer(text):
+                yield line, _smali_unescape(m.group(2))
 
 
 def _fragments(src: Source) -> Iterator[tuple[int | None, str]]:
-    """Text to search for endpoints: whole lines, or only string literals for Java code."""
+    """Text to search for endpoints: whole lines, or only string literals for Java and smali code."""
+    if src.kind == "smali":
+        yield from _smali_literals(src)
+        return
     if src.kind != "java":
         yield from src.lines
         return
@@ -356,7 +473,7 @@ def _strings_of(src: Source) -> Iterator[str]:
     if src.atomic:
         for _, text in src.lines:
             yield text
-    elif src.kind == "java":
+    elif src.kind in ("java", "smali"):
         for _, text in _fragments(src):
             yield text
     elif src.kind == "resource":
@@ -585,11 +702,15 @@ def extract_endpoints(apk_root: Path, parts: list[dict], components: dict | None
             cloud.setdefault(r["provider"], []).append(r["endpoint"])
     limitations = ["Static extraction only; no endpoint was contacted or resolved.",
                    "Strings assembled at runtime (concatenation, encryption, obfuscation) are not recovered.",
-                   "Occurrences count each scanned layer separately: a literal in both a DEX pool and "
-                   "recovered Java counts twice."]
-    if not stats.java_sources:
-        limitations.append("Decompiled Java sources were not present; references point at DEX string pools. "
-                           "Run apk_decompile for line-level Java references.")
+                   "Occurrences count each scanned layer separately: a literal in a DEX pool, recovered "
+                   "Java and recovered smali can each contribute one occurrence."]
+    if not stats.java_sources and not stats.smali_sources:
+        limitations.append("Neither decompiled Java nor recovered smali was present; references point at DEX "
+                           "string pools. Run apk_decompile (with the smali fallback when jadx fails) for "
+                           "line-level references.")
+    elif not stats.java_sources and stats.smali_sources:
+        limitations.append("Decompiled Java was not present; line-level references come from recovered smali "
+                           "(apktool disassembly) under apk/smali/.")
     if not stats.decoded_resources:
         limitations.append("apktool resources were not present; resource strings come from resources.arsc and "
                            "host-decoded binary XML.")
@@ -669,6 +790,28 @@ KEY_STORAGE_DEX = {
     "secret_key_spec": lambda s: s == "Ljavax/crypto/spec/SecretKeySpec;",
     "cipher_api": lambda s: s == "Ljavax/crypto/Cipher;",
 }
+# Smali invoke of Cipher/MessageDigest/SecretKeySpec/IvParameterSpec constructors (RFC-0207 slice 7).
+_SMALI_INVOKE = re.compile(
+    r"invoke-(?:static|virtual|direct|interface|super)(?:/range)?\s+\{[^}]*\}\s*,\s*"
+    r"(L[\w/$]+;->[\w$<>]+\([^)]*\)[^;\s]*)")
+_SMALI_CIPHER_GET = re.compile(r"^Ljavax/crypto/Cipher;->getInstance\(Ljava/lang/String;\)")
+_SMALI_DIGEST_GET = re.compile(r"^Ljava/security/MessageDigest;->getInstance\(Ljava/lang/String;\)")
+_SMALI_KEY_INIT = re.compile(r"^Ljavax/crypto/spec/SecretKeySpec;-><init>\(")
+_SMALI_IV_INIT = re.compile(r"^Ljavax/crypto/spec/IvParameterSpec;-><init>\(")
+_SMALI_KEYSTORE_GET = re.compile(r"^Ljava/security/KeyStore;->getInstance\(Ljava/lang/String;\)")
+_SMALI_CONST_STRING_REG = re.compile(
+    r'const-string(?:/jumbo)?\s+([vp]\d+)\s*,\s*"((?:[^"\\]|\\.)*)"')
+_SMALI_CONST_INT_REG = re.compile(r"const(?:/4|/16|/high16)?\s+([vp]\d+)\s*,\s*(-?0x[0-9a-fA-F]+|-?\d+)\s*$")
+_SMALI_NEW_ARRAY = re.compile(r"new-array\s+([vp]\d+)\s*,\s*([vp]\d+)\s*,\s*\[B\s*$")
+_SMALI_FILL_ARRAY = re.compile(r"fill-array-data\s+([vp]\d+)\s*,")
+_SMALI_APUT = re.compile(r"aput(?:-[a-z]+)?\s+[vp]\d+\s*,\s*([vp]\d+)\s*,")
+_SMALI_MOVE_RESULT = re.compile(r"move-result(?:-object|-wide)?\s+([vp]\d+)\s*$")
+_SMALI_TO_BYTES = re.compile(r"^(?:Ljava/lang/String;->getBytes\(|Landroid/util/Base64;->decode\(Ljava/lang/String;|"
+                             r"Ljava/util/Base64\$Decoder;->decode\(Ljava/lang/String;)")
+_SMALI_INSN = re.compile(r"\s*([a-z][a-z0-9-]*(?:/[a-z0-9]+)?)\s+([vp]\d+)\b")
+# Opcodes whose first register operand is only read (everything else writes it).
+_SMALI_NON_DEST = ("if-", "return", "throw", "monitor-", "aput", "iput", "sput", "fill-array-data",
+                   "filled-new-array", "packed-switch", "sparse-switch", "goto", "nop", "invoke-")
 
 
 def _entropy(value: str) -> float:
@@ -828,9 +971,199 @@ class CryptoScanner:
                                   detail + " (transformation constant in a DEX string pool; call site not confirmed)",
                                   severity=severity, value=text)
 
+    @staticmethod
+    def _smali_dest_regs(text: str) -> list[str]:
+        """Registers an instruction writes: its first operand unless the opcode only reads it.
+
+        Wide results (``*-wide`` and ``const-wide*``) also write the next register.
+        """
+        m = _SMALI_INSN.match(text)
+        if not m:
+            return []
+        op, reg = m.group(1), m.group(2)
+        if op.startswith(_SMALI_NON_DEST):
+            return []
+        regs = [reg]
+        if "-wide" in op:
+            regs.append(f"{reg[0]}{int(reg[1:]) + 1}")
+        return regs
+
+    def _smali_invoke_args(self, text: str) -> list[str]:
+        m = re.search(r"\{([^}]*)\}", text)
+        if not m:
+            return []
+        body = m.group(1).strip()
+        if not body:
+            return []
+        if ".." in body:  # invoke-*/range {v0 .. v3}
+            a, b = [x.strip() for x in body.split("..", 1)]
+            kind, start = a[0], int(a[1:])
+            end = int(b[1:]) if b[:1] in "vp" else int(b)
+            return [f"{kind}{i}" for i in range(start, end + 1)]
+        return [x.strip() for x in body.split(",") if x.strip()]
+
+    def _smali(self, src: Source) -> None:
+        """Scan recovered smali for const-string secrets and crypto invoke call sites.
+
+        A forward pass tracks, per method, what each register holds: a string literal, an int
+        constant, bytes derived from a literal (String.getBytes / Base64.decode), or a byte array
+        from new-array (its size and whether anything wrote to it). State resets at every
+        ``.method`` / ``.end method``, and any instruction whose first operand is a destination
+        clobbers that register.
+        """
+        lines = src.lines
+        state: dict[str, tuple] = {}
+        pending: tuple | None = None
+        for index, (line, text) in enumerate(lines):
+            ref = _ref(src, line)
+            stripped = text.strip()
+            if stripped.startswith(".method") or stripped.startswith(".end method"):
+                state.clear()
+                pending = None
+                continue
+            if not stripped or stripped[0] in ".:#":
+                continue
+            # Secrets in const-string operands (same rules as Java / resource literals).
+            cs = _SMALI_CONST_STRING_REG.match(stripped)
+            if cs:
+                value = _smali_unescape(cs.group(2))
+                self._secrets(value, ref, "smali", src.ref)
+                state[cs.group(1)] = ("str", value)
+                pending = None
+                continue
+            ci = _SMALI_CONST_INT_REG.match(stripped)
+            if ci:
+                raw = ci.group(2)
+                state[ci.group(1)] = ("int", int(raw, 16) if "0x" in raw.lower() else int(raw))
+                pending = None
+                continue
+            na = _SMALI_NEW_ARRAY.match(stripped)
+            if na:
+                size = state.get(na.group(2))
+                state[na.group(1)] = ("array", size[1] if size and size[0] == "int" else None, "zero")
+                pending = None
+                continue
+            fa = _SMALI_FILL_ARRAY.match(stripped)
+            if fa:
+                cur = state.get(fa.group(1))
+                if cur and cur[0] == "array":
+                    state[fa.group(1)] = ("array", cur[1], "filled")
+                continue
+            ap = _SMALI_APUT.match(stripped)
+            if ap:
+                cur = state.get(ap.group(1))
+                if cur and cur[0] == "array":
+                    state[ap.group(1)] = ("array", cur[1], "written")
+                continue
+            mr = _SMALI_MOVE_RESULT.match(stripped)
+            if mr:
+                if pending is None:
+                    state.pop(mr.group(1), None)
+                else:
+                    state[mr.group(1)] = pending
+                for extra in self._smali_dest_regs(stripped)[1:]:
+                    state.pop(extra, None)
+                pending = None
+                continue
+            inv = _SMALI_INVOKE.search(stripped)
+            if not inv:
+                for reg in self._smali_dest_regs(stripped):
+                    state.pop(reg, None)
+                pending = None
+                continue
+            target = inv.group(1)
+            args = self._smali_invoke_args(stripped)
+            pending = None
+
+            def literal(reg: str) -> str | None:
+                v = state.get(reg)
+                return v[1] if v and v[0] == "str" else None
+
+            if _SMALI_CIPHER_GET.match(target) and args:
+                lit = literal(args[0])
+                if lit is not None:
+                    for rule, severity, detail in cipher_findings(lit):
+                        self._add(rule, lit, ref, "smali", "high", detail, severity=severity, value=lit)
+            elif _SMALI_DIGEST_GET.match(target) and args:
+                lit = literal(args[0])
+                if lit is not None:
+                    algorithm = lit.upper()
+                    if algorithm in {"MD5", "MD2", "MD4", "SHA-1", "SHA1", "SHA"}:
+                        window = " ".join(t for _, t in lines[max(0, index - _HASH_WINDOW):index + _HASH_WINDOW + 1])
+                        sensitive = bool(_SENSITIVE.search(window))
+                        context = "password_or_signature" if sensitive else "general"
+                        self._add("weak_hash", f"{algorithm}|{context}", ref, "smali", "high",
+                                  f"{algorithm} used near password/signature handling; it is collision-prone and "
+                                  "unsuitable there." if sensitive else
+                                  f"{algorithm} used; acceptable for checksums or cache keys, not for security.",
+                                  severity="warning" if sensitive else "info", value=algorithm, context=context)
+            elif _SMALI_KEY_INIT.match(target) and len(args) > 1:
+                held = state.get(args[1])  # args[0] is the SecretKeySpec being constructed
+                if held and held[0] == "bytes":
+                    self._add("static_key", held[1][:200], ref, "smali", "high",
+                              "Key bytes come from a string literal. Use AndroidKeyStore or a KDF "
+                              "(PBKDF2/HKDF) instead.", value=held[1][:200])
+                elif held and held[0] == "array" and held[2] in {"zero", "filled"}:
+                    size = f"byte[{held[1]}]" if held[1] is not None else "byte[]"
+                    detail = (f"SecretKeySpec is constructed from a zero-filled {size} that nothing writes before "
+                              "the call." if held[2] == "zero" else
+                              f"SecretKeySpec is constructed from an inline {size} filled by fill-array-data; the "
+                              "key bytes are static.")
+                    self._add("static_key", f"{src.ref}:{line}", ref, "smali", "medium", detail,
+                              value=f"inline-array@{line}")
+            elif _SMALI_IV_INIT.match(target) and len(args) > 1:
+                held = state.get(args[1])
+                if held and held[0] == "bytes":
+                    self._add("static_iv", held[1][:200], ref, "smali", "high",
+                              "IV is derived from a string literal.", value=held[1][:200])
+                elif held and held[0] == "array" and held[2] in {"zero", "filled"}:
+                    size = f"byte[{held[1]}]" if held[1] is not None else "byte[]"
+                    detail = (f"IV is a zero-filled {size}." if held[2] == "zero" else
+                              f"IV is an inline {size} filled by fill-array-data.")
+                    self._add("static_iv", f"{src.ref}:{line}", ref, "smali", "high", detail,
+                              value=f"inline-array@{line}")
+            elif _SMALI_KEYSTORE_GET.match(target) and args:
+                lit = literal(args[0])
+                if lit is not None:
+                    value = lit
+                    if value == "AndroidKeyStore":
+                        self._inventory("android_keystore", ref)
+                    elif value in {"BKS", "PKCS12", "JKS", "BouncyCastle", "UBER"}:
+                        self._inventory("software_keystore", ref, value)
+            if _SMALI_TO_BYTES.match(target) and args:
+                # String.getBytes: the literal is the receiver; android.util.Base64.decode is static (args[0]);
+                # java.util.Base64$Decoder.decode is virtual, so args[0] is the decoder and the literal is args[1].
+                if target.startswith("Ljava/util/Base64$Decoder;"):
+                    lit = literal(args[1]) if len(args) > 1 else None
+                else:
+                    lit = literal(args[0])
+                if lit is not None:
+                    pending = ("bytes", lit)
+            elif not (_SMALI_KEY_INIT.match(target) or _SMALI_IV_INIT.match(target)):
+                # Any other callee may fill an array it receives (e.g. SecureRandom.nextBytes).
+                for reg in args:
+                    cur = state.get(reg)
+                    if cur and cur[0] == "array":
+                        state[reg] = ("array", cur[1], "written")
+            # Method-name inventory for KeyGen / StrongBox / auth / KDF / SecretKeySpec / Cipher.
+            if "Landroid/security/keystore/KeyGenParameterSpec" in target:
+                self._inventory("keygen_parameter_spec", ref)
+            if "setIsStrongBoxBacked" in target:
+                self._inventory("strongbox", ref)
+            if "setUserAuthenticationRequired" in target:
+                self._inventory("user_authentication_required", ref)
+            if "Ljavax/crypto/spec/PBEKeySpec;" in target or "PBKDF2" in target or "Hkdf" in target:
+                self._inventory("kdf", ref)
+            if "Ljavax/crypto/spec/SecretKeySpec;-><init>" in target:
+                self._inventory("secret_key_spec", ref)
+            if "Ljavax/crypto/Cipher;->getInstance" in target:
+                self._inventory("cipher_api", ref)
+
     def scan(self, src: Source) -> None:
         if src.kind == "java":
             self._java(src)
+        elif src.kind == "smali":
+            self._smali(src)
         else:
             self._strings(src)
 
@@ -1109,7 +1442,7 @@ def crypto_hints(apk_root: Path, parts: list[dict], manifest: dict | None, today
     if storage["posture"] == "software_only" and ind["secret_key_spec"]["occurrences"]:
         category, severity, title = RULES["software_only_keys"]
         findings.append({"rule": "software_only_keys", "category": category, "severity": severity,
-                         "confidence": "high" if stats.java_sources else "medium", "title": title,
+                         "confidence": "high" if (stats.java_sources or stats.smali_sources) else "medium", "title": title,
                          "detail": "Symmetric keys are built with SecretKeySpec in app memory and no AndroidKeyStore "
                                    "usage was found; keys are extractable from the APK or a memory dump.",
                          "occurrences": ind["secret_key_spec"]["occurrences"],
@@ -1124,9 +1457,13 @@ def crypto_hints(apk_root: Path, parts: list[dict], manifest: dict | None, today
                    "Findings with confidence \"medium\" come from DEX string pools: the constant exists, the call "
                    "site was not confirmed.",
                    "Private-key material is referenced by location and is not copied into evidence."]
-    if not stats.java_sources:
-        limitations.append("Decompiled Java sources were not present; call-site rules (static IV/key, weak "
-                           "hashes, Cipher.getInstance) need apk_decompile.")
+    if not stats.java_sources and not stats.smali_sources:
+        limitations.append("Neither decompiled Java nor recovered smali was present; call-site rules "
+                           "(static IV/key, weak hashes, Cipher.getInstance) need apk_decompile, or the "
+                           "smali fallback when jadx fails.")
+    elif not stats.java_sources and stats.smali_sources:
+        limitations.append("Call-site rules were evaluated on recovered smali (apktool disassembly) under "
+                           "apk/smali/; recovered Java was not present.")
     if manifest is None:
         limitations.append("No decoded manifest yet; debuggable, targetSdkVersion and the networkSecurityConfig "
                            "reference were not evaluated.")
