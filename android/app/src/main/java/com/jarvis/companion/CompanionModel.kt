@@ -71,7 +71,15 @@ data class CompanionState(
     val lanStatus: String = "idle",
     val lanLabel: String = "",
     val pendingApproval: Boolean = false,
+    val localConversations: List<JSONObject> = emptyList(),
+    val notes: List<JSONObject> = emptyList(),
+    val modelImportBusy: Boolean = false,
+    val modelImportMessage: String = "",
 )
+
+/** True when the on-device model can answer right now. */
+val CompanionState.localModelReady: Boolean
+    get() = localPackStatus == CompanionPackStatus.READY || localPackStatus == CompanionPackStatus.RUNNING
 
 fun JSONArray.objects(): List<JSONObject> = (0 until length()).mapNotNull { optJSONObject(it) }
 
@@ -90,6 +98,7 @@ private data class RefreshPayload(
 )
 
 private const val TAG = "CompanionModel"
+const val LAN_NOT_FOUND_COPY = "No ANZU desktop on this Wi‑Fi. You can use ANZU on this phone, or pair a desktop any time."
 
 class CompanionModel(app: Application) : AndroidViewModel(app) {
     private val jarvisApp = app as JarvisApp
@@ -109,6 +118,9 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     private val outbox = Outbox(app)
     private val uploadOutbox = UploadOutbox(app)
     private val offlineQueue = OutboxQueue(app)
+    private val localConversations = LocalConversationStore(app)
+    private val localNotes = LocalNotesStore(app)
+    private val platformVoice = PlatformVoice(app)
     val packManager = CompanionPackManager(app)
     val voicePackManager = CompanionVoicePackManager(app)
     private var foreground = false
@@ -143,6 +155,10 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             state.collect { companionState ->
                 DevicePackChromePublisher.publish(this@CompanionModel, deviceModelChrome, companionState)
             }
+        }
+        runCatching { loadLocalLibrary() }.onFailure {
+            Log.e(TAG, "Cannot read conversations stored on this phone", it)
+            mutable.value = mutable.value.copy(error = "Cannot read conversations stored on this phone: ${it.message}")
         }
         runCatching { outbox.read() }.onSuccess { mutable.value = mutable.value.copy(pendingMessage = it != null) }
             .onFailure { mutable.value = mutable.value.copy(error = "Cannot recover pending message: ${it.message}") }
@@ -207,10 +223,10 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                 host = runCatching { LanScanner.scan(timeoutMs = 4000) }.getOrNull()
             }
             if (host == null) {
+                // Not an error: ANZU works on this phone alone; pairing stays one tap away.
                 mutable.value = mutable.value.copy(
                     lanStatus = "idle",
-                    lanLabel = "",
-                    error = "No ANZU desktop found on this Wi-Fi. On the PC open Settings → Phone Pairing to generate a QR, then scan it in this app.",
+                    lanLabel = LAN_NOT_FOUND_COPY,
                 )
                 return@launch
             }
@@ -254,6 +270,65 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         finally { mutable.value = mutable.value.copy(busy = false) }
     }
     fun offlineStatusJson(): JSONObject = CompanionOfflineHooks.statusSnapshot(this)
+
+    /** Loads phone-held conversations and notes; an unpaired phone reopens its latest conversation. */
+    private fun loadLocalLibrary() {
+        val conversations = localConversations.conversations()
+        val notes = localNotes.notes()
+        val reopen = conversations.firstOrNull()?.optString("id")?.takeIf { api.deviceId.isEmpty() }
+        mutable.value = mutable.value.copy(
+            localConversations = conversations,
+            notes = notes,
+            conversationId = reopen ?: mutable.value.conversationId,
+            messages = reopen?.let { localConversations.messages(it) } ?: mutable.value.messages,
+        )
+    }
+
+    fun deleteLocalConversation(id: String) = action {
+        localConversations.delete(id)
+        val current = mutable.value.conversationId == id
+        mutable.value = mutable.value.copy(
+            localConversations = localConversations.conversations(),
+            conversationId = if (current) null else mutable.value.conversationId,
+            messages = if (current) emptyList() else mutable.value.messages,
+        )
+    }
+
+    fun deleteNote(id: String) = action {
+        localNotes.delete(id)
+        mutable.value = mutable.value.copy(notes = localNotes.notes())
+    }
+
+    /** Sideload a GGUF picked from storage; only SHA-256-verified catalog models are accepted. */
+    fun importModel(uri: Uri) = action {
+        val resolver = getApplication<Application>().contentResolver
+        val declared = runCatching { resolver.openAssetFileDescriptor(uri, "r")?.use { it.length } }.getOrNull() ?: -1L
+        mutable.value = mutable.value.copy(modelImportBusy = true, modelImportMessage = "Verifying model file…", localPackProgress = 0)
+        try {
+            val pack = withContext(Dispatchers.IO) {
+                val input = resolver.openInputStream(uri) ?: error("Cannot open that file")
+                input.use { stream ->
+                    packManager.importSideloaded(stream, declared) { pct ->
+                        mutable.value = mutable.value.copy(localPackProgress = pct)
+                    }
+                }
+            }
+            mutable.value = mutable.value.copy(modelImportMessage = ModelSideload.importedCopy(pack))
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            mutable.value = mutable.value.copy(modelImportMessage = "")
+            throw error
+        } finally {
+            mutable.value = mutable.value.copy(
+                modelImportBusy = false,
+                localPackStatus = packManager.status(),
+                localPackProgress = packManager.downloadProgress(),
+                localPackError = packManager.lastError(),
+            )
+            publishVoiceRoute()
+        }
+    }
 
     fun refreshCompanionPackStatus() = action {
         packManager.refreshStatus()
@@ -361,16 +436,8 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun publishVoiceRoute() {
+        val decision = currentVoiceRoute()
         val state = mutable.value
-        val voiceCaps = state.capabilities.optJSONObject("voice")
-        val decision = CompanionVoiceRouting.decide(
-            leaderReachable = state.leaderReachable || state.connected,
-            realtimeVoiceHealthy = state.connected && voiceCaps?.optBoolean("realtime") == true,
-            hostTtsHealthy = state.connected && voiceCaps?.optBoolean("tts_ready") == true,
-            sttPackStatus = voicePackManager.sttStatus(),
-            ttsPackStatus = voicePackManager.ttsStatus(),
-            localLlmReady = packManager.isPackReady(),
-        )
         mutable.value = state.copy(
             onDeviceVoiceActive = decision.onDeviceIndicator,
             voiceRouteBanner = decision.banner ?: decision.error,
@@ -396,7 +463,11 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             val schedules = async { api.array("/schedules").objects() }
             val calls = async { api.array("/calls").objects() }
             val messages = async {
-                previous.conversationId?.let { api.json("/conversations/$it").getJSONArray("messages").objects() } ?: emptyList()
+                when {
+                    // A conversation held on this phone is not on the desktop; keep showing it.
+                    LocalConversationStore.isLocal(previous.conversationId) -> previous.messages
+                    else -> previous.conversationId?.let { api.json("/conversations/$it").getJSONArray("messages").objects() } ?: emptyList()
+                }
             }
             val swarm = async { runCatching { api.json("/swarm") }.getOrDefault(previous.swarm) }
             val coding = async { runCatching { api.json("/coding") }.getOrDefault(previousCoding) }
@@ -472,7 +543,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             mutable.value = mutable.value.copy(activity = CompanionOfflineStatus.desktopBackBanner())
             syncOfflineTurns()
         }
-        cacheConversationSnapshot(payload.messages)
+        if (!LocalConversationStore.isLocal(mutable.value.conversationId)) cacheConversationSnapshot(payload.messages)
     }
     fun pair(endpoint: String, pin: String, credential: String, candidates: List<String> = emptyList()) = action {
         api.configure(endpoint, pin, candidates)
@@ -524,8 +595,13 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         mutable.value = mutable.value.copy(presenceMode = value)
     }
     fun openConversation(id: String?) = action {
+        if (LocalConversationStore.isLocal(id)) {
+            mutable.value = mutable.value.copy(conversationId = id, messages = localConversations.messages(id!!))
+            return@action
+        }
         mutable.value = mutable.value.copy(conversationId = id, messages = emptyList())
-        refresh()
+        if (mutable.value.leaderReachable) refresh()
+        else if (id != null) error("That conversation lives on the ANZU desktop. It opens again when the desktop is reachable.")
     }
     fun send(text: String) = action { sendNow(text, fromVoice = false) }
     private suspend fun sendNow(text: String, fromVoice: Boolean = false) {
@@ -544,7 +620,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                 check(outbox.read() == null) { "Resolve the pending message before sending another" }
                 val content = JSONObject().put("text", text).put("profile", state.selectedModel)
                     .put("attachments", JSONArray(state.attachmentIds))
-                state.conversationId?.let { content.put("conversation_id", it) }
+                state.conversationId?.takeUnless { LocalConversationStore.isLocal(it) }?.let { content.put("conversation_id", it) }
                 content.put("request_id", UUID.randomUUID().toString())
                 outbox.save(JSONObject().put("device", api.deviceId).put("pin", api.pin).put("body", content))
                 mutable.value = mutable.value.copy(pendingMessage = true)
@@ -567,6 +643,8 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         val assistantId = UUID.randomUUID().toString()
         val userMessage = StandaloneActions.chatMessage(userId, "user", text, StandaloneActions.ORIGIN_USER)
         val prior = mutable.value.messages + userMessage
+        val conversationId = ensureLocalConversation(text)
+        localConversations.append(conversationId, userMessage)
         val outcome = withOfflineAnswerCleanup(
             packManager = packManager,
             clearPicked = { pickedTextForPrompt = null },
@@ -600,7 +678,11 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                     )
                 }
                 StandaloneIntent.REMINDER_NEEDS_TIME -> StandaloneActions.reminderNeedsTimeCopy()
-                StandaloneIntent.LOCAL_NOTE -> StandaloneActions.noteAckCopy()
+                StandaloneIntent.LOCAL_NOTE -> {
+                    localNotes.add(StandaloneMode.noteBody(text))
+                    mutable.value = mutable.value.copy(notes = localNotes.notes())
+                    StandaloneActions.noteAckCopy()
+                }
                 StandaloneIntent.QUEUE_OR_REFUSE -> StandaloneActions.queueOrRefuseCopy()
                 StandaloneIntent.MEDIA_WAIT_DESKTOP -> StandaloneActions.mediaSavedCopy()
                 StandaloneIntent.LOCAL_FILE, StandaloneIntent.CONVERSATION -> {
@@ -638,6 +720,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         )
         val neverDone = StandaloneMode.desktopOnlyNeverDone(decision)
         if (outcome.isSuccess) {
+            localConversations.append(conversationId, assistantMessage)
             offlineQueue.append(
                 StandaloneActions.userTurnJson(
                     userId,
@@ -657,24 +740,28 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         }
         mutable.value = mutable.value.copy(
             messages = prior + assistantMessage,
+            conversationId = conversationId,
+            localConversations = localConversations.conversations(),
             offlineQueueDepth = offlineQueue.pendingCount(),
             activity = if (outcome.isSuccess) "Answering on this phone." else mutable.value.activity,
             error = if (outcome.isSuccess) mutable.value.error else (mutable.value.error ?: reply),
         )
         if (fromVoice && outcome.isSuccess) {
-            val voiceCaps = mutable.value.capabilities.optJSONObject("voice")
-            val route = CompanionVoiceRouting.decide(
-                leaderReachable = mutable.value.leaderReachable || mutable.value.connected,
-                realtimeVoiceHealthy = mutable.value.connected && voiceCaps?.optBoolean("realtime") == true,
-                hostTtsHealthy = mutable.value.connected && voiceCaps?.optBoolean("tts_ready") == true,
-                sttPackStatus = voicePackManager.sttStatus(),
-                ttsPackStatus = voicePackManager.ttsStatus(),
-                localLlmReady = packManager.isPackReady(),
-            )
+            val route = currentVoiceRoute()
             if (StandaloneMode.shouldSpeakVoiceReply(fromVoice = true, ttsRoute = route.tts)) {
-                startOnDeviceSpeak(reply)
+                if (route.tts == TtsVoiceRoute.PLATFORM) speakWithPlatform(reply) else startOnDeviceSpeak(reply)
             }
         }
+    }
+
+    /**
+     * The phone-held conversation new offline turns go into: the open one when it is local, else a new one.
+     * A new conversation remembers the desktop conversation it continues so sync can rejoin it.
+     */
+    private fun ensureLocalConversation(firstText: String): String {
+        val current = mutable.value.conversationId
+        if (LocalConversationStore.isLocal(current) && localConversations.exists(current!!)) return current
+        return localConversations.create(firstText, linkedDesktopId = current)
     }
 
     private suspend fun syncOfflineTurns() {
@@ -683,14 +770,18 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         val turns = JSONArray()
         pending.forEach { turns.put(it) }
         val body = JSONObject().put("turns", turns)
-        mutable.value.conversationId?.let { body.put("conversation_id", it) }
+        val current = mutable.value.conversationId
+        val target = if (LocalConversationStore.isLocal(current)) localConversations.linkedDesktopId(current!!) else current
+        target?.let { body.put("conversation_id", it) }
         val result = api.json("/sync/offline-turns", "POST", body)
         val syncedIds = pending.map { it.optString("client_message_id").ifBlank { it.optString("request_id") } }
         offlineQueue.markSynced(syncedIds)
         offlineQueue.pruneSynced()
+        val synced = result.optString("conversation_id").takeIf { it.isNotBlank() }
+        if (synced != null && LocalConversationStore.isLocal(current)) localConversations.linkDesktop(current!!, synced)
         mutable.value = mutable.value.copy(
-            conversationId = result.optString("conversation_id").takeIf { it.isNotBlank() }
-                ?: mutable.value.conversationId,
+            // Keep showing the phone conversation; it now continues the desktop one when the owner sends next.
+            conversationId = if (LocalConversationStore.isLocal(current)) current else synced ?: current,
             offlineQueueDepth = offlineQueue.pendingCount(),
             activity = CompanionOfflineStatus.desktopBackBanner(),
         )
@@ -851,10 +942,15 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         val assistantId = UUID.randomUUID().toString()
         val userMessage = StandaloneActions.chatMessage(userId, "user", userText, StandaloneActions.ORIGIN_USER)
         val assistantMessage = StandaloneActions.chatMessage(assistantId, "assistant", assistantText, StandaloneActions.ORIGIN_ASSISTANT)
+        val conversationId = ensureLocalConversation(userText)
+        localConversations.append(conversationId, userMessage)
+        localConversations.append(conversationId, assistantMessage)
         offlineQueue.append(StandaloneActions.userTurnJson(userId, userText, consequential, autoReplay = !consequential))
         offlineQueue.append(StandaloneActions.assistantTurnJson(assistantId, assistantText, consequential, autoReplay = !consequential))
         mutable.value = mutable.value.copy(
             messages = mutable.value.messages + userMessage + assistantMessage,
+            conversationId = conversationId,
+            localConversations = localConversations.conversations(),
             offlineQueueDepth = offlineQueue.pendingCount(),
             activity = "Answering on this phone.",
         )
@@ -920,14 +1016,11 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     }
     fun toggleRecord() {
         val voiceCaps = mutable.value.capabilities.optJSONObject("voice")
-        val route = CompanionVoiceRouting.decide(
-            leaderReachable = mutable.value.leaderReachable || mutable.value.connected,
-            realtimeVoiceHealthy = mutable.value.connected && voiceCaps?.optBoolean("realtime") == true,
-            hostTtsHealthy = mutable.value.connected && voiceCaps?.optBoolean("tts_ready") == true,
-            sttPackStatus = voicePackManager.sttStatus(),
-            ttsPackStatus = voicePackManager.ttsStatus(),
-            localLlmReady = packManager.isPackReady(),
-        )
+        val route = currentVoiceRoute()
+        if (route.stt == SttVoiceRoute.PLATFORM) {
+            togglePlatformListen()
+            return
+        }
         if (route.stt == SttVoiceRoute.ON_DEVICE) {
             if (onDeviceListening) {
                 stopOnDeviceListen()
@@ -973,6 +1066,41 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                 mutable.value = mutable.value.copy(recording = false)
             }
         }
+    }
+
+    private fun togglePlatformListen() {
+        if (platformVoice.listening) {
+            platformVoice.stopListening()
+            return
+        }
+        stopSpeaking()
+        mutable.value = mutable.value.copy(
+            recording = true,
+            voiceMode = "platform",
+            liveTranscript = "",
+            activity = "Listening on this phone…",
+            onDeviceVoiceActive = true,
+            error = null,
+        )
+        platformVoice.startListening(
+            onPartial = { partial -> mutable.value = mutable.value.copy(liveTranscript = partial) },
+            onResult = { text ->
+                mutable.value = mutable.value.copy(recording = false, liveTranscript = text, activity = "Transcript ready")
+                action { sendNow(text, fromVoice = true) }
+            },
+            onError = { message ->
+                mutable.value = mutable.value.copy(recording = false, onDeviceVoiceActive = false, activity = "Ready when you are", error = message)
+            },
+        )
+    }
+
+    private fun speakWithPlatform(text: String) {
+        mutable.value = mutable.value.copy(speaking = true, onDeviceVoiceActive = true, activity = "Speaking on this phone…")
+        platformVoice.speak(
+            text,
+            onDone = { mutable.value = mutable.value.copy(speaking = false, onDeviceVoiceActive = false, activity = "Ready when you are") },
+            onError = { message -> mutable.value = mutable.value.copy(speaking = false, onDeviceVoiceActive = false, error = message) },
+        )
     }
 
     private fun startOnDeviceListen() = action {
@@ -1169,7 +1297,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun speak(text: String) {
-        if (player != null || mutable.value.speaking || onDeviceSpeak?.isRunning() == true) {
+        if (player != null || mutable.value.speaking || onDeviceSpeak?.isRunning() == true || platformVoice.speaking) {
             cancelOnDeviceSpeak()
             realtime?.interrupt()
             return
@@ -1177,6 +1305,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         val route = currentVoiceRoute()
         when (route.tts) {
             TtsVoiceRoute.ON_DEVICE -> startOnDeviceSpeak(text)
+            TtsVoiceRoute.PLATFORM -> speakWithPlatform(text)
             TtsVoiceRoute.INSTALL -> mutable.value = mutable.value.copy(
                 error = route.error ?: "Install on-device TTS in More → Voice before speaking offline",
             )
@@ -1197,6 +1326,8 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             sttPackStatus = voicePackManager.sttStatus(),
             ttsPackStatus = voicePackManager.ttsStatus(),
             localLlmReady = packManager.isPackReady(),
+            platformSttAvailable = platformVoice.sttAvailable(),
+            platformTtsAvailable = platformVoice.ttsReady,
         )
     }
 
@@ -1245,6 +1376,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun cancelOnDeviceSpeak() {
+        if (platformVoice.speaking) platformVoice.stopSpeaking()
         onDeviceSpeak?.stop()
         ttsJob = null
         releasePlayer()
@@ -1324,6 +1456,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         onDeviceListening = false
         runCatching { audioRecord?.stop() }; audioRecord?.release()
         realtime?.close()
+        platformVoice.shutdown()
         recorder?.release(); recordingFile?.delete(); releasePlayer()
         packManager.requestCancel()
         VoiceNativeBridge.requestTtsCancel()
