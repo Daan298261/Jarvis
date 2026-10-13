@@ -379,12 +379,18 @@ fn manager_control(app: &AppHandle, action: &str) {
                 eprintln!("{line} (log write failed: {io})");
             }
             use tauri_plugin_notification::NotificationExt;
-            let _ = app
+            if let Err(notify_err) = app
                 .notification()
                 .builder()
                 .title(format!("ANZU {action} failed"))
                 .body(format!("{}\nDetails: logs\\{TRAY_LOG_FILE}", err.chars().take(180).collect::<String>()))
-                .show();
+                .show()
+            {
+                let note = tray_failure_line(&action, &format!("tray notification failed: {notify_err}"), std::time::SystemTime::now());
+                if append_log_line(&logs_dir().join(TRAY_LOG_FILE), &note).is_err() {
+                    eprintln!("{note}");
+                }
+            }
         }
     });
 }
@@ -995,7 +1001,7 @@ mod manager_control_tests {
     #[ignore]
     fn live_manager_restart() {
         let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(super::MANAGER_CONTROL_TIMEOUT_SECS))
             .build()
             .unwrap();
         let started = std::time::Instant::now();
