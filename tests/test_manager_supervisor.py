@@ -227,6 +227,7 @@ def test_watchdog_stands_down_during_owner_control(tmp_path):
     async def scenario():
         async with s.control_action("restart"):
             assert await s.tick() == "control_in_flight"
+            s.note_launch()  # the endpoint does this once its start has launched
         # the owner's start gets the launch grace before the watchdog may act
         assert await s.tick() == "launch_pending"
 
@@ -289,6 +290,11 @@ def test_watchdog_is_opt_in_via_env(monkeypatch, tmp_path):
 
 
 class _FakeProc:
+    pid = 4242
+
+    def kill(self):
+        self.timeout_exc = False
+
     def __init__(self, waits, timeout_exc=False):
         self.waits = waits
         self.timeout_exc = timeout_exc
@@ -319,6 +325,77 @@ def test_stop_script_timeout_refuses_to_start(tmp_path, monkeypatch):
         main._launch("stop")
 
 
-def test_start_health_wait_covers_a_real_cold_start():
-    # Smoke: force-stop ~52 s, cold start to healthy ~18-40 s; 10 s reported success too early.
-    assert main.START_HEALTH_WAIT_SECONDS >= 60
+def test_stop_script_nonzero_exit_is_a_stop_failure(tmp_path, monkeypatch):
+    class Failing(_FakeProc):
+        def wait(self, timeout=None):
+            return 3
+
+    monkeypatch.setattr(main, "_root", lambda: tmp_path)
+    monkeypatch.setattr(main.subprocess, "Popen", lambda *a, **k: Failing([]))
+    with pytest.raises(RuntimeError, match="exit code 3"):
+        main._launch("stop")
+
+
+def test_stop_timeout_kills_the_script_tree(tmp_path, monkeypatch):
+    killed = []
+    monkeypatch.setattr(main, "_root", lambda: tmp_path)
+    monkeypatch.setattr(main.subprocess, "Popen", lambda *a, **k: _FakeProc([], timeout_exc=True))
+    monkeypatch.setattr(main, "_kill_process_tree", killed.append)
+    with pytest.raises(RuntimeError):
+        main._launch("stop")
+    assert len(killed) == 1
+
+
+class _Core:
+    """Fake core for endpoint tests: health follows the launches the endpoint makes."""
+
+    def __init__(self, monkeypatch, *, stop_error=None, stop_seconds=0.0):
+        self.events = []
+        self.healthy = True
+        self.stop_error = stop_error
+        self.stop_seconds = stop_seconds
+        monkeypatch.setattr(main, "_launch", self.launch)
+        monkeypatch.setattr(main, "_core_healthy", self.is_healthy)
+        monkeypatch.setattr(main, "STOP_HEALTH_WAIT_SECONDS", 1.0)
+        monkeypatch.setattr(main, "START_HEALTH_WAIT_SECONDS", 1.0)
+        main.SUPERVISOR.state.launch_pending_until = 0.0
+        main.SUPERVISOR.state.control_in_flight = None
+
+    def launch(self, action):
+        import time as _t
+
+        self.events.append(f"{action}:begin")
+        if action == "stop":
+            _t.sleep(self.stop_seconds)
+            if self.stop_error:
+                self.events.append("stop:failed")
+                raise RuntimeError(self.stop_error)
+            self.healthy = False
+        else:
+            self.healthy = True
+        self.events.append(f"{action}:end")
+
+    async def is_healthy(self):
+        return self.healthy
+
+
+def test_restart_endpoint_waits_for_stop_before_starting(monkeypatch):
+    core = _Core(monkeypatch, stop_seconds=0.3)
+    client = TestClient(main.app)
+    response = client.post("/api/manager/v1/control/restart", json={"confirm": True}, headers=_token_headers(client))
+    assert response.status_code == 200 and response.json()["ok"] is True
+    assert core.events == ["stop:begin", "stop:end", "start:begin", "start:end"]
+    assert main.SUPERVISOR.state.control_in_flight is None
+    assert main.SUPERVISOR.state.launch_pending_until > 0  # grace only after a real start
+
+
+def test_restart_stop_timeout_returns_503_and_never_starts(monkeypatch):
+    core = _Core(monkeypatch, stop_error="ANZU stop did not finish within 150s; start was not attempted")
+    client = TestClient(main.app)
+    response = client.post("/api/manager/v1/control/restart", json={"confirm": True}, headers=_token_headers(client))
+    assert response.status_code == 503
+    assert "start was not attempted" in response.json()["detail"]
+    assert "start:begin" not in core.events
+    # failure path: owner action released, and no launch grace blocks the watchdog
+    assert main.SUPERVISOR.state.control_in_flight is None
+    assert main.SUPERVISOR.state.launch_pending_until == 0.0

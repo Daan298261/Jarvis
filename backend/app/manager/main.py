@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import secrets
 import shutil
@@ -164,11 +165,37 @@ def _launch(action: str) -> None:
         )
     if action == "stop":
         try:
-            proc.wait(timeout=STOP_SCRIPT_TIMEOUT_SECONDS)
+            code = proc.wait(timeout=STOP_SCRIPT_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired as exc:
+            _kill_process_tree(proc)
+            log.error("ANZU stop script exceeded %ss; killed its process tree", int(STOP_SCRIPT_TIMEOUT_SECONDS))
             raise RuntimeError(
                 f"ANZU stop did not finish within {int(STOP_SCRIPT_TIMEOUT_SECONDS)}s; start was not attempted"
             ) from exc
+        if code != 0:
+            log.error("ANZU stop script failed with exit code %s", code)
+            raise RuntimeError(f"ANZU stop failed (exit code {code}); start was not attempted")
+
+
+def _kill_process_tree(proc: subprocess.Popen) -> None:
+    """Kill a timed-out stop script and its children, then reap it."""
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=30,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        else:
+            proc.kill()
+    except Exception:
+        log.warning("Could not kill stop-script tree %s", proc.pid, exc_info=True)
+    try:
+        proc.wait(timeout=30)
+    except Exception:
+        log.warning("Stop script %s still running after kill", proc.pid, exc_info=True)
 
 
 async def _wait_for(action: str) -> dict:
@@ -180,6 +207,8 @@ async def _wait_for(action: str) -> dict:
         await asyncio.sleep(0.5)
     return await status_snapshot()
 
+
+log = logging.getLogger(__name__)
 
 SUPERVISOR = CoreSupervisor(
     root=lambda: _root(),
@@ -256,8 +285,11 @@ async def manager_control(
                 if stopped["core"]["state"] != "stopped":
                     raise HTTPException(status_code=409, detail="ANZU did not stop; restart was not attempted")
                 await asyncio.to_thread(_launch, "start")
+                SUPERVISOR.note_launch()
             else:
                 await asyncio.to_thread(_launch, action)
+                if action == "start":
+                    SUPERVISOR.note_launch()
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         snapshot = await _wait_for(action)
