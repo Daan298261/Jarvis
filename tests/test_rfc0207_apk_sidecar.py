@@ -2605,7 +2605,9 @@ def test_smali_fallback_on_jadx_timeout(env):
     dec = evidence(out, "E00003")["result"]
     assert dec["smali_fallback"]["state"] == "ok"
     assert dec["smali_fallback"]["smali_files"] == 1
-    assert (store.directory(row["id"]) / "apk" / "smali" / "smali" / "org" / "anzu" / "test" / "MainActivity.smali").is_file()
+    part_dir = apk_sidecar._part_dir_name(row["apk"]["base"]["name"])
+    assert (store.directory(row["id"]) / "apk" / "smali" / part_dir / "smali" / "org" / "anzu" / "test" / "MainActivity.smali").is_file()
+    assert smali_meta["smali_classes"] == 1 and smali_meta["parts"][0]["part"] == row["apk"]["base"]["name"]
     custody = json.loads((store.directory(row["id"]) / "custody.json").read_text(encoding="utf-8"))
     assert custody.get("smali_fallback_at")
     assert any(e["event"] == "smali_fallback_completed" for e in custody["events"])
@@ -2639,7 +2641,9 @@ def test_smali_fallback_on_no_useful_java(env):
     row = prepare(make_apk(src / "empty.apk"))
     fake.jadx_mode = "empty"
     out = apk_sidecar.decompile(row["id"])
-    assert out["status"] == "investigating" or out["status"] == "partial"
+    assert out["status"] == "partial"
+    assert "jadx produced no Java; smali only." in out["unknowns"]
+    assert evidence(out, "E00003")["result"]["jadx"]["state"] == "ok"
     smali = apk_sidecar.metadata(row["id"], "smali")
     assert smali["ran"] is True and smali["reason"] == "no_useful_java" and smali["smali_files"] == 1
     assert evidence(out, "E00003")["result"]["jadx"]["java_files"] == 0
@@ -2713,3 +2717,74 @@ def test_smali_fallback_api_and_catalog(env):
     summary = client.get(f"/api/investigations/{ident}/apk/summary").json()
     assert summary["smali_fallback"]["ran"] is True and summary["smali_fallback"]["smali_files"] == 1
     assert "decompile_smali_fallback" in apk_sidecar.CATALOG["apk_decompile"]["inputSchema"]["properties"]
+
+
+# --- RFC-0207 slice 5 (review fixes): per-part smali, descriptor parsing, class counts --------
+
+def test_smali_fallback_runs_for_every_dex_part_of_a_split_set(env):
+    src, fake = env
+    split_dir = src / "split_set"
+    split_dir.mkdir()
+    make_apk(split_dir / "base.apk")
+    make_apk(split_dir / "split_feature.apk", libs=())               # carries its own classes.dex
+    make_apk(split_dir / "split_config.arm64_v8a.apk", dex=False)    # native only, no bytecode
+    row = prepare(split_dir)
+    assert len(row["apk"]["parts"]) == 3
+    fake.jadx_mode = "timeout"
+    out = apk_sidecar.decompile(row["id"])
+    smali_calls = [c for c in _apktool_calls(fake) if "--no-res" in c]
+    assert len(smali_calls) == 2  # one apktool pass per DEX-bearing part
+    smali = apk_sidecar.metadata(row["id"], "smali")
+    by_part = {p["part"]: p for p in smali["parts"]}
+    dex_parts = [p["name"] for p in row["apk"]["parts"] if p["dex"]]
+    assert set(dex_parts) == {n for n, p in by_part.items() if p["state"] == "ok"}
+    no_dex = [n for n, p in by_part.items() if p["state"] == "skipped"]
+    assert len(no_dex) == 1 and by_part[no_dex[0]]["reason"] == "no_dex"
+    root = store.directory(row["id"]) / "apk" / "smali"
+    for name in dex_parts:
+        assert (root / apk_sidecar._part_dir_name(name) / "smali" / "org" / "anzu" / "test" / "MainActivity.smali").is_file()
+    assert smali["smali_files"] == 2 and smali["smali_classes"] == 2
+    assert out["status"] == "partial"
+
+
+def test_smali_fallback_part_failure_is_an_unknown_per_part(env, monkeypatch):
+    src, fake = env
+    split_dir = src / "split_fail"
+    split_dir.mkdir()
+    make_apk(split_dir / "base.apk")
+    make_apk(split_dir / "split_feature.apk", libs=())
+    row = prepare(split_dir)
+    fake.jadx_mode = "timeout"
+    real = apk_sidecar._run_smali_fallback
+
+    def flaky(ident, apk, out):
+        result = real(ident, apk, out)
+        if apk.name == "split_feature.apk":
+            result.update(state="failed", exit_code=1, smali_files=0, smali_classes=0, smali_roots=[])
+        return result
+    monkeypatch.setattr(apk_sidecar, "_run_smali_fallback", flaky)
+    out = apk_sidecar.decompile(row["id"])
+    assert any("smali fallback failed for split_feature.apk" in u for u in out["unknowns"])
+    smali = apk_sidecar.metadata(row["id"], "smali")
+    assert smali["state"] == "failed" and smali["smali_files"] == 1
+
+
+def test_jadx_failed_class_names_keep_leading_L():
+    diag = ("ERROR - Failed to process class LoginActivity\n"
+            "ERROR - Failed to decompile class Lcom/anzu/LegacyLoader;\n"
+            "ERROR - Can't load class com.anzu.LocalStore\n")
+    assert apk_sidecar._jadx_failed_classes(diag) == ["LoginActivity", "com.anzu.LegacyLoader", "com.anzu.LocalStore"]
+
+
+def test_smali_classes_counts_class_directives(tmp_path):
+    (tmp_path / "smali" / "a").mkdir(parents=True)
+    (tmp_path / "smali" / "a" / "One.smali").write_text(".class public La/One;\n.super Ljava/lang/Object;\n")
+    (tmp_path / "smali" / "a" / "Empty.smali").write_text("# no class directive\n")
+    counts = apk_sidecar._count_smali(tmp_path)
+    assert counts == {"smali_files": 2, "smali_classes": 1, "smali_roots": ["smali"]}
+
+
+def test_part_dir_name_is_a_single_safe_component():
+    assert apk_sidecar._part_dir_name("split_config.arm64_v8a.apk") == "split_config.arm64_v8a.apk"
+    assert "/" not in apk_sidecar._part_dir_name("../evil/x.apk")
+    assert apk_sidecar._part_dir_name("..") == "_part"

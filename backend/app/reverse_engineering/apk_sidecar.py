@@ -15,7 +15,7 @@ or oversized pull, a missing/corrupt/oversized FFS index, a hash mismatch, or a 
 the dump abort the prepare with an error, and device or dump data is never invented.
 Slice 5: smali fallback -- when jadx fails catastrophically (failed / timeout / OOM / no
 useful Java) or is skipped with the flag set, re-run apktool without `--no-src` (and with
-`--no-res`) into `apk/smali/` so bytecode remains inspectable; evidence, custody, catalog
+`--no-res`) for every DEX-bearing part into `apk/smali/<part>/` so bytecode remains inspectable; evidence, custody, catalog
 and REST expose the fallback state and counts.
 Every step is written to the RFC-0201 investigation store as citable evidence plus a
 chain-of-custody record. No target code is executed.
@@ -964,9 +964,10 @@ def _finish_failed(ident: str, token: str, step: str, status: str, error: str) -
 
 _JADX_FAILED_CLASS = re.compile(
     r"(?:Failed to (?:process|decompile) class |Can't load class |Error (?:processing|decompiled) class )"
-    r"([A-Za-z0-9_$/\.]+)",
+    r"([A-Za-z0-9_$/\.]+;?)",
     re.I,
 )
+_DEX_DESCRIPTOR = re.compile(r"L[A-Za-z0-9_$/]+;")
 
 
 def _jadx_failed_classes(diagnostics: str, limit: int = 50) -> list[str]:
@@ -974,7 +975,10 @@ def _jadx_failed_classes(diagnostics: str, limit: int = 50) -> list[str]:
     found: list[str] = []
     seen: set[str] = set()
     for match in _JADX_FAILED_CLASS.finditer(diagnostics or ""):
-        name = match.group(1).replace("/", ".").lstrip("L").rstrip(";")
+        name = match.group(1)
+        if _DEX_DESCRIPTOR.fullmatch(name):
+            name = name[1:-1]  # Lcom/x/Y; -> com/x/Y (only the descriptor form)
+        name = name.replace("/", ".")
         if name and name not in seen:
             seen.add(name)
             found.append(name)
@@ -1008,13 +1012,28 @@ def _should_run_smali_fallback(*, enabled: bool, has_dex: bool, skip_jadx: bool,
     return False, "jadx_ok"
 
 
+_SMALI_CLASS = re.compile(rb"^[ \t]*\.class\b", re.M)
+
+
 def _count_smali(smali_out: Path) -> dict:
-    """Count recovered .smali files/classes under the fallback tree."""
+    """Count recovered .smali files and the ``.class`` directives they contain."""
     if not smali_out.exists():
         return {"smali_files": 0, "smali_classes": 0, "smali_roots": []}
     files = [p for p in smali_out.rglob("*.smali") if p.is_file()]
+    classes = 0
+    for f in files:
+        try:
+            classes += len(_SMALI_CLASS.findall(f.read_bytes()))
+        except OSError:
+            continue
     roots = sorted({p.relative_to(smali_out).parts[0] for p in files if p.relative_to(smali_out).parts})
-    return {"smali_files": len(files), "smali_classes": len(files), "smali_roots": roots}
+    return {"smali_files": len(files), "smali_classes": classes, "smali_roots": roots}
+
+
+def _part_dir_name(name: str) -> str:
+    """Directory name for one APK part under apk/smali/ (no separators, never '.' or '..')."""
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", name)
+    return safe if safe not in {"", ".", ".."} else "_part"
 
 
 def _run_smali_fallback(ident: str, base: Path, smali_out: Path) -> dict:
@@ -1112,27 +1131,54 @@ def _decompile_owned(ident: str, skip_jadx: bool, decompile_smali_fallback: bool
             smali: dict | None = None
             run_smali, smali_reason = _should_run_smali_fallback(
                 enabled=decompile_smali_fallback, has_dex=bool(inputs), skip_jadx=skip_jadx, jadx=jadx)
+            if jadx and jadx.get("state") == "ok" and not jadx.get("java_files"):
+                unknowns.append("jadx produced no Java; smali only.")
             if run_smali:
-                smali = _run_smali_fallback(ident, base, smali_out)
-                smali["reason"] = smali_reason
+                smali_out.mkdir(parents=True, mode=0o700, exist_ok=True)
+                parts_out: list[dict] = []
+                used: set[str] = set()
+                for part in row["apk"]["parts"]:
+                    if not part.get("dex"):
+                        # No DEX means no bytecode to disassemble; listed, not an unknown.
+                        parts_out.append({"part": part["name"], "state": "skipped", "reason": "no_dex",
+                                          "smali_files": 0, "smali_classes": 0})
+                        continue
+                    sub = _part_dir_name(part["name"])
+                    if sub in used:
+                        sub = f"{sub}_{len(used)}"
+                    used.add(sub)
+                    run = _run_smali_fallback(ident, Path(part["path"]), smali_out / sub)
+                    entry = {"part": part["name"], "state": run["state"], "exit_code": run.get("exit_code"),
+                             "smali_output": run["smali_output"], "smali_files": run["smali_files"],
+                             "smali_classes": run["smali_classes"], "smali_roots": run["smali_roots"]}
+                    parts_out.append(entry)
+                    if run["state"] != "ok":
+                        unknowns.append(
+                            f"smali fallback {run['state']} for {part['name']} (exit {run['exit_code']}; "
+                            f"reason: {smali_reason}); bytecode disassembly of that part is unavailable.")
+                    elif not run["smali_files"]:
+                        unknowns.append(f"smali fallback ran for {part['name']} ({smali_reason}) but produced "
+                                        "no .smali files.")
+                ran = [e for e in parts_out if e["state"] != "skipped"]
+                states = {e["state"] for e in ran}
+                smali = {"tool": "apktool-smali", "ran": True, "reason": smali_reason,
+                         "state": "ok" if states == {"ok"} else next(
+                             s for s in ("failed", "timeout", "out_of_memory", "ok") if s in states),
+                         "exit_code": next((e["exit_code"] for e in ran if e["state"] != "ok"), 0),
+                         "smali_output": str(smali_out), "parts": parts_out,
+                         "smali_files": sum(e["smali_files"] for e in ran),
+                         "smali_classes": sum(e["smali_classes"] for e in ran),
+                         "smali_roots": sorted(f"{PurePosixPath(e['smali_output']).name}/{r}"
+                                               for e in ran for r in e.get("smali_roots") or [])}
                 if failed_classes:
                     smali["failed_java_classes"] = failed_classes
-                if smali["state"] == "ok" and smali["smali_files"]:
-                    # Success is recorded in evidence/custody/metadata; do not force partial.
-                    pass
-                elif smali["state"] == "ok":
-                    unknowns.append(
-                        f"smali fallback ran ({smali_reason}) but produced no .smali files.")
-                else:
-                    unknowns.append(
-                        f"smali fallback {smali['state']} (exit {smali['exit_code']}; reason: {smali_reason}); "
-                        "bytecode disassembly is unavailable.")
                 store.atomic_json(meta / "smali.json", {
                     "ran": True, "reason": smali_reason, "state": smali["state"],
                     "exit_code": smali.get("exit_code"), "smali_output": smali.get("smali_output"),
                     "smali_files": smali.get("smali_files", 0),
                     "smali_classes": smali.get("smali_classes", 0),
                     "smali_roots": smali.get("smali_roots") or [],
+                    "parts": parts_out,
                     "failed_java_classes": failed_classes,
                     "limitations": [
                         "Smali is apktool disassembly, not original source.",
