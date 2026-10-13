@@ -44,6 +44,11 @@ class CompanionVoicePackManager(
     private val sttMutex = Mutex()
     private val ttsMutex = Mutex()
 
+    private val activeDownloads: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /** Voice pack ids with a download running (from any screen). */
+    fun downloadingPackIds(): Set<String> = activeDownloads.toSet()
+
     private fun mutexFor(role: String) = if (role == "stt") sttMutex else ttsMutex
 
     init {
@@ -103,6 +108,7 @@ class CompanionVoicePackManager(
     suspend fun deleteInstalledDir(name: String) {
         val dir = File(packRoot, name)
         require(PackDownloadPlan.isDirectChild(packRoot, name)) { "Not a voice pack directory: $name" }
+        check(name !in activeDownloads) { "$name is downloading; wait for it to finish first" }
         if (catalog.any { it.id == name }) deletePackAwait(name) else withContext(Dispatchers.IO) {
             dir.walkTopDown().filter { it.isFile }.forEach { digestCache.invalidate(it) }
             if (dir.exists() && !dir.deleteRecursively()) error("Could not delete $name")
@@ -174,6 +180,8 @@ class CompanionVoicePackManager(
     }
 
     private fun refreshOne(pack: CompanionVoicePack?, statusRef: AtomicReference<String>) {
+        // A running download owns this role's status; a refresh must not overwrite it.
+        if (pack != null && pack.id in activeDownloads) return
         if (pack == null) {
             statusRef.set(CompanionVoicePackStatus.ERROR)
             errorRef.set("No voice pack selected")
@@ -200,7 +208,8 @@ class CompanionVoicePackManager(
 
     suspend fun downloadPack(packId: String, onProgress: (Int) -> Unit = {}) {
         val pack = catalog.firstOrNull { it.id == packId } ?: error("Unknown voice pack: $packId")
-        mutexFor(pack.role).withLock {
+        check(activeDownloads.add(pack.id)) { "${pack.label} is already downloading" }
+        try { mutexFor(pack.role).withLock {
         withContext(Dispatchers.IO) {
         require(pack.url.isNotBlank()) { "Leader has not published a download URL for voice pack ${pack.id}" }
         DeviceVoiceGuard.blockReason(app, pack)?.let { error(it) }
@@ -252,6 +261,9 @@ class CompanionVoicePackManager(
         statusRef.set(CompanionVoicePackStatus.READY)
         progressRef.set(100)
         }
+        }
+        } finally {
+            activeDownloads.remove(pack.id)
         }
     }
 

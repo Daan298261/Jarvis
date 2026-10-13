@@ -2,6 +2,7 @@ package com.jarvis.companion
 
 import android.content.Context
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
@@ -10,6 +11,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -179,6 +181,54 @@ class DownloadedContentManagerTest {
         assertNotNull(runCatching { og.verifiedZim("zim-water") }.exceptionOrNull())
     }
 
+    @Test fun running_download_locks_rows_and_refreshes_cannot_wipe_its_state() = runBlocking {
+        org.robolectric.shadows.ShadowStatFs.registerStats(models.packRoot(), 1_000_000, 1_000_000, 1_000_000)
+        models.updateCatalog(JSONObject().put("packs", JSONArray()
+            .put(JSONObject().put("id", CompanionPackCatalog.INSTRUCT_15B_ID).put("filename", "tiny.gguf")
+                .put("size_bytes", modelBytes.size.toLong()).put("sha256", sha256(modelBytes)).put("url", server.url("/tiny.gguf").toString()))
+            .put(JSONObject().put("id", CompanionPackCatalog.INSTRUCT_3B_ID).put("filename", "other.gguf")
+                .put("size_bytes", 10L).put("sha256", "00").put("url", server.url("/missing.gguf").toString()))))
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse =
+                if (request.path == "/tiny.gguf") MockResponse().setBody(Buffer().write(modelBytes))
+                    .throttleBody(512, 250, java.util.concurrent.TimeUnit.MILLISECONDS) // ~2 s
+                else MockResponse().setResponseCode(404)
+        }
+        File(models.packRoot(), "old-model.gguf").writeBytes(ByteArray(100))
+        val download = kotlinx.coroutines.GlobalScope.async(kotlinx.coroutines.Dispatchers.IO) { models.downloadSelected() }
+        val partial = File(models.packRoot(), "tiny.gguf.partial")
+        val deadline = System.currentTimeMillis() + 5_000
+        while (!(partial.length() > 0 && models.downloadingPackIds().isNotEmpty()) && System.currentTimeMillis() < deadline) Thread.sleep(20)
+        assertTrue("download should be running", partial.length() > 0)
+
+        val mgr = DownloadedContentManager.forManagers(models, voice, null)
+        val rows = mgr.inventory().entries.associateBy { it.name }
+        assertTrue(rows.getValue("tiny.gguf.partial").downloading)
+        assertTrue("other model rows are locked too", rows.getValue("old-model.gguf").downloading)
+        assertFalse(rows.getValue("tiny.gguf.partial").canUpdate)
+        assertNotNull(runCatching { mgr.delete(rows.getValue("old-model.gguf")) }.exceptionOrNull())
+        assertNotNull(runCatching { mgr.update(rows.getValue("tiny.gguf.partial").copy(updateBytes = 1)) }.exceptionOrNull())
+        assertNotNull(runCatching { models.deleteInstalledFile("old-model.gguf") }.exceptionOrNull())
+        assertTrue(File(models.packRoot(), "old-model.gguf").exists())
+
+        // Neither an explicit refresh nor a second (failing) pack download's cleanup may wipe DOWNLOADING.
+        models.refreshStatus()
+        assertEquals(CompanionPackStatus.DOWNLOADING, models.status())
+        val other = models.catalog().first { it.id == CompanionPackCatalog.INSTRUCT_3B_ID }
+        assertNotNull(runCatching { models.downloadPack(other) }.exceptionOrNull())
+        assertTrue(download.isActive)
+        assertEquals(CompanionPackStatus.DOWNLOADING, models.status())
+        assertNotNull("same pack cannot start twice", runCatching { models.downloadSelected() }.exceptionOrNull())
+
+        download.await()
+        assertEquals(CompanionPackStatus.READY, models.status())
+        val after = mgr.inventory().entries.associateBy { it.name }
+        assertEquals(ContentState.CURRENT, after.getValue("tiny.gguf").state)
+        assertFalse(after.getValue("old-model.gguf").downloading)
+        mgr.delete(after.getValue("old-model.gguf"))
+        assertFalse(File(models.packRoot(), "old-model.gguf").exists())
+    }
+
     @Test fun page_works_without_offgrid_and_reports_a_broken_source() = runBlocking {
         installModel()
         val inv = DownloadedContentManager.forManagers(models, voice, null).inventory()
@@ -239,6 +289,16 @@ class DownloadedContentPageTest {
         compose.onNode(hasText("Delete") and hasAnyAncestor(isDialog())).performClick()
         assertEquals(listOf("a.gguf"), deleted)
         assertTrue(updated.isEmpty())
+    }
+
+    @Test fun downloading_row_shows_progress_and_disables_both_actions() {
+        val busy = stale.copy(downloading = true, detail = "Download in progress")
+        compose.setContent {
+            DownloadedContentPage(DownloadedInventory(listOf(busy), emptyList()), null, null, onUpdate = {}, onDelete = {}, onClose = {})
+        }
+        compose.onNodeWithText("Downloading…").assertExists()
+        compose.onNodeWithText("Update").assertIsNotEnabled()
+        compose.onNodeWithText("Delete").assertIsNotEnabled()
     }
 
     @Test fun update_needs_confirmation() {

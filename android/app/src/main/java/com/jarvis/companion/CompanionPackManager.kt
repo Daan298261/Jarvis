@@ -130,6 +130,10 @@ class CompanionPackManager(
     private val errorRef = AtomicReference("")
     private var catalog: List<CompanionPack> = CompanionPackCatalog.builtIn
     private val llamaDispatcher = Dispatchers.IO.limitedParallelism(1)
+    private val activeDownloads: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /** Pack ids with a download running (from any screen). */
+    fun downloadingPackIds(): Set<String> = activeDownloads.toSet()
 
     fun selectedPackId(): String = prefs.getString("selected_pack_id", CompanionPackCatalog.builtIn.first().id) ?: CompanionPackCatalog.builtIn.first().id
 
@@ -167,6 +171,7 @@ class CompanionPackManager(
     suspend fun deleteInstalledFile(name: String) = withContext(llamaDispatcher) {
         val file = File(packDir, name)
         require(PackDownloadPlan.isDirectChild(packDir, name)) { "Not a model pack file: $name" }
+        check(activeDownloads.isEmpty()) { "A model download is running; wait for it to finish or cancel it first" }
         engine.unload()
         digestCache.invalidate(file)
         if (file.exists() && !file.delete()) error("Could not delete $name")
@@ -194,6 +199,8 @@ class CompanionPackManager(
     }
 
     suspend fun refreshStatus() = withContext(Dispatchers.IO) {
+        // A running download of the selected pack owns the status; a refresh must not overwrite it.
+        if (selectedPackId() in activeDownloads) return@withContext
         val fallback = resolveOfflinePack()
         if (fallback != null) {
             statusRef.set(CompanionPackStatus.READY)
@@ -239,9 +246,12 @@ class CompanionPackManager(
      * again afterwards when [pack] is not the selected one.
      */
     suspend fun downloadPack(pack: CompanionPack, onProgress: (Int) -> Unit = {}) {
+        check(activeDownloads.add(pack.id)) { "${pack.label} is already downloading" }
         try {
             downloadPackInternal(pack, onProgress)
         } finally {
+            activeDownloads.remove(pack.id)
+            // refreshStatus skips while the selected pack is still downloading elsewhere.
             if (pack.id != selectedPackId()) withContext(kotlinx.coroutines.NonCancellable) { refreshStatus() }
         }
     }

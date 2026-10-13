@@ -38,9 +38,11 @@ data class DownloadedEntry(
     val state: ContentState,
     val detail: String,
     val updateBytes: Long = 0L,
+    /** A download for this item is running (possibly started from another screen); no actions allowed. */
+    val downloading: Boolean = false,
 ) {
     val key: String get() = "${kind.name}:$name"
-    val canUpdate: Boolean get() = updateBytes > 0L
+    val canUpdate: Boolean get() = updateBytes > 0L && !downloading
 }
 
 data class DownloadedInventory(val entries: List<DownloadedEntry>, val errors: List<String>) {
@@ -54,6 +56,8 @@ interface DownloadedContentSource {
     suspend fun entries(): List<DownloadedEntry>
     suspend fun update(entry: DownloadedEntry)
     suspend fun delete(entry: DownloadedEntry)
+    /** Non-null when an in-flight download makes [entry] untouchable right now (checked live, not from the row). */
+    fun busyReason(entry: DownloadedEntry): String?
 }
 
 /**
@@ -79,11 +83,17 @@ class DownloadedContentManager(private val sources: List<DownloadedContentSource
     }
 
     suspend fun update(entry: DownloadedEntry) {
-        require(entry.canUpdate) { "${entry.title} has no update in the catalogue" }
-        sourceFor(entry).update(entry)
+        val source = sourceFor(entry)
+        source.busyReason(entry)?.let { error(it) }
+        require(entry.updateBytes > 0L) { "${entry.title} has no update in the catalogue" }
+        source.update(entry)
     }
 
-    suspend fun delete(entry: DownloadedEntry) = sourceFor(entry).delete(entry)
+    suspend fun delete(entry: DownloadedEntry) {
+        val source = sourceFor(entry)
+        source.busyReason(entry)?.let { error(it) }
+        source.delete(entry)
+    }
 
     private fun sourceFor(entry: DownloadedEntry) =
         sources.firstOrNull { entry.kind in it.kinds } ?: error("No manager for ${entry.kind.label}")
@@ -100,9 +110,19 @@ class DownloadedContentManager(private val sources: List<DownloadedContentSource
 class ModelPackSource(private val m: CompanionPackManager) : DownloadedContentSource {
     override val kinds = setOf(ContentKind.MODEL)
 
+    // Any model download shares the engine and status, so every model row waits for it.
+    override fun busyReason(entry: DownloadedEntry): String? =
+        if (m.downloadingPackIds().isNotEmpty()) "A model download is running; wait for it to finish" else null
+
     override suspend fun entries(): List<DownloadedEntry> = withContext(Dispatchers.IO) {
         val catalog = m.catalog()
+        val active = m.downloadingPackIds()
+        val activeFiles = catalog.filter { it.id in active }.flatMap { listOf(it.filename, "${it.filename}.partial") }.toSet()
         m.packRoot().listFiles().orEmpty().filter { it.isFile }.map { f ->
+            if (f.name in activeFiles) {
+                val pack = catalog.first { f.name.removeSuffix(".partial") == it.filename }
+                return@map DownloadedEntry(ContentKind.MODEL, f.name, pack.label, f.length(), ContentState.PARTIAL, "Download in progress", downloading = true)
+            }
             val name = f.name
             when {
                 name.endsWith(".partial") -> {
@@ -127,7 +147,7 @@ class ModelPackSource(private val m: CompanionPackManager) : DownloadedContentSo
                     }
                 }
             }
-        }
+        }.map { if (active.isNotEmpty() && !it.downloading) it.copy(downloading = true, detail = "${it.detail} · locked while a model downloads") else it }
     }
 
     override suspend fun update(entry: DownloadedEntry) {
@@ -143,11 +163,18 @@ class ModelPackSource(private val m: CompanionPackManager) : DownloadedContentSo
 class VoicePackSource(private val m: CompanionVoicePackManager) : DownloadedContentSource {
     override val kinds = setOf(ContentKind.VOICE)
 
+    override fun busyReason(entry: DownloadedEntry): String? =
+        if (entry.name in m.downloadingPackIds()) "${entry.title} is downloading; wait for it to finish" else null
+
     override suspend fun entries(): List<DownloadedEntry> = withContext(Dispatchers.IO) {
+        val active = m.downloadingPackIds()
         m.packRoot().listFiles().orEmpty().filter { it.isDirectory }.mapNotNull { dir ->
             val bytes = DownloadedContentManager.sizeOf(dir)
             if (bytes == 0L) return@mapNotNull null // packDir() creates empty dirs on lookup
             val pack = m.catalog().firstOrNull { it.id == dir.name }
+            if (pack != null && pack.id in active) {
+                return@mapNotNull DownloadedEntry(ContentKind.VOICE, dir.name, pack.label, bytes, ContentState.PARTIAL, "Download in progress", downloading = true)
+            }
                 ?: return@mapNotNull DownloadedEntry(ContentKind.VOICE, dir.name, dir.name, bytes, ContentState.RETIRED, "No longer in the voice catalogue")
             val role = if (pack.role == "stt") "Speech recognition" else "Speech synthesis"
             val inUse = pack.id == m.selectedSttPackId() || pack.id == m.selectedTtsPackId()
@@ -165,7 +192,8 @@ class VoicePackSource(private val m: CompanionVoicePackManager) : DownloadedCont
         try {
             m.downloadPack(entry.name)
         } finally {
-            // A failed artifact leaves the manager in DOWNLOADING; re-read disk so status is honest.
+            // A failed artifact leaves this pack's role in DOWNLOADING; re-read disk. refreshStatus skips any
+            // pack still downloading elsewhere, so it cannot wipe another download's state.
             withContext(kotlinx.coroutines.NonCancellable) { m.refreshStatus() }
         }
     }
@@ -177,6 +205,11 @@ class VoicePackSource(private val m: CompanionVoicePackManager) : DownloadedCont
 class OffGridSource(private val m: OffGridContentManager) : DownloadedContentSource {
     override val kinds = setOf(ContentKind.MAP, ContentKind.KNOWLEDGE)
 
+    override fun busyReason(entry: DownloadedEntry): String? {
+        val id = m.catalog.firstOrNull { it.id == entry.name }?.id ?: supersededBy(entry.name)?.id ?: return null
+        return if (m.stateOf(id).status == OffGridStatus.DOWNLOADING) "${entry.title} is downloading; wait for it to finish" else null
+    }
+
     override suspend fun entries(): List<DownloadedEntry> = withContext(Dispatchers.IO) {
         m.refresh()
         val out = ArrayList<DownloadedEntry>()
@@ -185,6 +218,8 @@ class OffGridSource(private val m: OffGridContentManager) : DownloadedContentSou
             val kind = if (item.isMap) ContentKind.MAP else ContentKind.KNOWLEDGE
             val file = m.file(item)
             when {
+                s.status == OffGridStatus.DOWNLOADING -> out += DownloadedEntry(kind, item.id, item.title, s.partialBytes,
+                    ContentState.PARTIAL, "Download in progress (${s.progress}%)", downloading = true)
                 s.status == OffGridStatus.READY -> out += DownloadedEntry(kind, item.id, item.title, s.diskBytes, ContentState.CURRENT,
                     if (item.isMap) "Offline map region" else "Verified · ${item.version}")
                 !item.isMap && s.status == OffGridStatus.ERROR && file.isFile -> out += DownloadedEntry(kind, item.id, item.title,

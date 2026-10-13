@@ -108,6 +108,13 @@ fun DownloadedContentSection(model: CompanionModel, offGrid: OffGridViewModel = 
         }
     }
     if (open) {
+        // Downloads started from the model / voice / off-grid sections keep moving; re-read while any runs.
+        LaunchedEffect(controller.inventory) {
+            if (controller.inventory?.entries?.any { it.downloading } == true) {
+                kotlinx.coroutines.delay(2_000)
+                controller.reload()
+            }
+        }
         Dialog(onDismissRequest = { open = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
             Surface(Modifier.fillMaxSize()) {
                 DownloadedContentPage(controller.inventory, controller.busyKey, controller.message,
@@ -155,10 +162,12 @@ fun DownloadedContentPage(
                         Text("${e.title} · ${OffGridSelection.formatBytes(e.bytes)}")
                         Text(stateLabel(e.state) + " · " + e.detail, fontSize = 12.sp,
                             color = if (e.state == ContentState.CURRENT) Muted else MaterialTheme.colorScheme.error)
-                        if (busyKey == e.key) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 4.dp))
+                        if (busyKey == e.key || e.downloading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 4.dp))
+                        if (e.downloading) Text("Downloading…", fontSize = 12.sp, color = Muted)
+                        val actionable = busyKey == null && !e.downloading
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if (e.canUpdate) TextButton(onClick = { confirmUpdate = e }, enabled = busyKey == null) { Text("Update") }
-                            TextButton(onClick = { confirmDelete = e }, enabled = busyKey == null) { Text("Delete") }
+                            if (e.updateBytes > 0L) TextButton(onClick = { confirmUpdate = e }, enabled = actionable) { Text("Update") }
+                            TextButton(onClick = { confirmDelete = e }, enabled = actionable) { Text("Delete") }
                         }
                     }
                 }
