@@ -102,7 +102,7 @@ class CompanionVoicePackManager(
      */
     suspend fun deleteInstalledDir(name: String) {
         val dir = File(packRoot, name)
-        require(dir.parentFile?.canonicalPath == packRoot.canonicalPath && dir.name == name) { "Not a voice pack directory: $name" }
+        require(PackDownloadPlan.isDirectChild(packRoot, name)) { "Not a voice pack directory: $name" }
         if (catalog.any { it.id == name }) deletePackAwait(name) else withContext(Dispatchers.IO) {
             dir.walkTopDown().filter { it.isFile }.forEach { digestCache.invalidate(it) }
             if (dir.exists() && !dir.deleteRecursively()) error("Could not delete $name")

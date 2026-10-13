@@ -2,6 +2,9 @@ package com.jarvis.companion
 
 import android.content.Context
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -127,10 +130,13 @@ class DownloadedContentManagerTest {
         mgr.delete(mgr.inventory().entries.single { it.name == stt.id })
         assertFalse(voice.isPackInstalled(stt.id))
         assertEquals(CompanionVoicePackStatus.MISSING, voice.sttStatus())
-        assertFalse(File(voice.packRoot(), stt.id).exists())
+        assertEquals(0L, DownloadedContentManager.sizeOf(File(voice.packRoot(), stt.id)))
+        assertTrue(mgr.inventory().entries.none { it.kind == ContentKind.VOICE })
     }
 
     @Test fun model_update_failure_keeps_last_copy_and_success_reverifies() = runBlocking {
+        // Robolectric reports 0 free bytes unless the volume is registered.
+        org.robolectric.shadows.ShadowStatFs.registerStats(models.packRoot(), 1_000_000, 1_000_000, 1_000_000)
         val old = ByteArray(modelBytes.size) { 7 }
         installModel(old)
         val mgr = DownloadedContentManager.forManagers(models, voice, null)
@@ -191,12 +197,14 @@ class DownloadedContentManagerTest {
     @Test fun paths_outside_storage_are_refused() = runBlocking {
         assertNotNull(runCatching { models.deleteInstalledFile("../shared_prefs/x.xml") }.exceptionOrNull())
         assertNotNull(runCatching { voice.deleteInstalledDir("..") }.exceptionOrNull())
+        assertNotNull(runCatching { voice.deleteInstalledDir(".") }.exceptionOrNull())
+        assertTrue(voice.packRoot().exists())
         assertNotNull(runCatching { offGrid().deleteStrayFile("water_en_2026-08.zim") }.exceptionOrNull())
     }
 }
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+@Config(sdk = [34], qualifiers = "w411dp-h2000dp")
 class DownloadedContentPageTest {
     @get:Rule val compose = createComposeRule()
 
@@ -228,7 +236,7 @@ class DownloadedContentPageTest {
         compose.onNodeWithText("Cancel").performClick()
         assertTrue(deleted.isEmpty())
         compose.onAllNodesWithText("Delete")[0].performClick()
-        compose.onAllNodesWithText("Delete")[2].performClick() // confirm button in the dialog
+        compose.onNode(hasText("Delete") and hasAnyAncestor(isDialog())).performClick()
         assertEquals(listOf("a.gguf"), deleted)
         assertTrue(updated.isEmpty())
     }
@@ -236,10 +244,10 @@ class DownloadedContentPageTest {
     @Test fun update_needs_confirmation() {
         val deleted = mutableListOf<String>(); val updated = mutableListOf<String>()
         show(deleted, updated)
-        compose.onNodeWithText("Update").performClick()
+        compose.onNode(hasText("Update") and !hasAnyAncestor(isDialog())).performClick()
         compose.onNodeWithText("Update Water?").assertExists()
         compose.onNodeWithText("The current copy stays", substring = true).assertExists()
-        compose.onAllNodesWithText("Update")[1].performClick()
+        compose.onNode(hasText("Update") and hasAnyAncestor(isDialog())).performClick()
         assertEquals(listOf("w_2025-01.zim"), updated)
         assertTrue(deleted.isEmpty())
     }

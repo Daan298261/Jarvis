@@ -212,7 +212,7 @@ class OffGridContentManager(
      */
     suspend fun deleteStrayFile(name: String) = withContext(Dispatchers.IO) {
         val f = File(root, name)
-        require(f.parentFile?.canonicalPath == root.canonicalPath && f.name == name) { "Not an off-grid file: $name" }
+        require(PackDownloadPlan.isDirectChild(root, name)) { "Not an off-grid file: $name" }
         require(catalog.none { it.fileName == name }) { "$name is a catalogue item; delete it by id" }
         digestCache.invalidate(f)
         if (f.exists() && !f.delete()) error("Could not delete $name")

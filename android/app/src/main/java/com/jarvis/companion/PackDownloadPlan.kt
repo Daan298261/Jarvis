@@ -6,6 +6,12 @@ package com.jarvis.companion
  * and continued with an HTTP Range request instead of starting over.
  */
 object PackDownloadPlan {
+    /** True when [name] is a plain entry directly inside [dir] (no separators, `.`/`..`, or escapes). */
+    fun isDirectChild(dir: java.io.File, name: String): Boolean {
+        if (name.isEmpty() || name == "." || name == ".." || '/' in name || '\\' in name) return false
+        return java.io.File(dir, name).canonicalFile.parentFile == dir.canonicalFile
+    }
+
     /** Head-room kept free beyond the pack so Android and the app keep working. */
     const val STORAGE_MARGIN_BYTES = 256L * 1024 * 1024
 

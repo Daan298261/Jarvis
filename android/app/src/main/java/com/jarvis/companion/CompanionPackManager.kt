@@ -166,7 +166,7 @@ class CompanionPackManager(
      */
     suspend fun deleteInstalledFile(name: String) = withContext(llamaDispatcher) {
         val file = File(packDir, name)
-        require(file.parentFile?.canonicalPath == packDir.canonicalPath && file.name == name) { "Not a model pack file: $name" }
+        require(PackDownloadPlan.isDirectChild(packDir, name)) { "Not a model pack file: $name" }
         engine.unload()
         digestCache.invalidate(file)
         if (file.exists() && !file.delete()) error("Could not delete $name")
