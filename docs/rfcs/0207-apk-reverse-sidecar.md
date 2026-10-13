@@ -19,7 +19,9 @@
 
 **Slice 4 (implemented):** device (ADB) and FFS origins for prepare_apk / POST /apk/prepare. source_type is file | device | ffs. Device: adb shell pm path <package> then adb pull of base+splits into <investigation>/apk/staged/ with per-part SHA-256, custody source_kind=device_pull and source_uri=device://<serial>/<package>; missing ADB, empty pm-path, or pull failure fail closed without inventing device data (unknowns recorded only for skipped non-APK pm-path lines). FFS: reference an existing investigation with kind == "ffs", read index/files.ndjson, stream-copy the named APK under the dump root into target/ + apk/staged/, verify SHA-256 (and size when declared) against the NDJSON entry, custody source_kind=ffs_reference. Zip-slip / size / file-count caps and the existing file-path prepare path remain unchanged. Tests: mocked ADB (pm path + pull) and synthetic FFS index+dump.
 
-**Later slices:** smali fallback; report synthesis citing E00001-E00006; remaining fixtures.
+**Slice 5 (implemented):** smali fallback when jadx fails catastrophically (failed / timeout / OOM / no useful Java) or when `skip_jadx` is set with `decompile_smali_fallback` (default true). Phase A still uses `--no-src`; the fallback re-runs apktool with `--no-res` (no `--no-src`) into `apk/smali/`, counts `.smali` files/classes, writes `apk/metadata/smali.json`, records `smali_fallback` on the `apk_decompile` evidence, a `smali_fallback_completed` custody event, and `smali_fallback` on `GET /apk/summary`. Catalog/REST accept `decompile_smali_fallback`. Manifest/resources from Phase A remain valid when jadx fails. jadx diagnostics are parsed for failed class names when present.
+
+**Later slices:** report synthesis citing E00001-E00006; remaining fixtures.
 ---
 
 ## Problem
@@ -514,7 +516,7 @@ Registered under `STATIC_OPERATIONS` so agents can call them during investigatio
 
 | Tool Operation | Description | Arguments Schema |
 | --- | --- | --- |
-| `apk_decompile` | Runs full apktool and jadx pipeline on the prepared APK target. | `{ "skip_jadx": boolean }` |
+| `apk_decompile` | Runs full apktool and jadx pipeline; recovers smali when jadx fails. | `{ "skip_jadx": boolean, "decompile_smali_fallback": boolean }` |
 | `apk_extract_manifest` | Returns parsed manifest, permissions, and exported attack surface. | `{}` |
 | `apk_inventory_native` | Returns native `.so` libraries, ABIs, ELF headers, and JNI symbols. | `{ "abi": string }` (optional filter) |
 | `apk_extract_endpoints` | Returns extracted URLs, IPs, schemes, and backend endpoints. | `{ "category": string, "limit": integer }` |
