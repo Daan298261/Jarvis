@@ -877,9 +877,14 @@ def _static_op(ident: str, step: str, claimed: dict | None = None):
                 _CANCEL.pop(ident, None)
 
 
-def _commit_step(ident: str, token: str, unknowns: list[str], write) -> dict:
+def _commit_step(ident: str, token: str, unknowns: list[str], write,
+                 files: dict[str, dict] | None = None) -> dict:
     """Reload the row under the claim lock, verify the claim, let ``write`` add evidence and custody,
-    set status from the merged unknowns, save and finish the claim. Returns the saved row."""
+    set status from the merged unknowns, save and finish the claim. Returns the saved row.
+
+    ``files`` (name -> document under apk/metadata/) are written only after the claim is verified
+    and the evidence recorded, and restored to their previous contents if the row cannot be saved,
+    so metadata never describes unrecorded results (same contract as native.json)."""
     with _CLAIM_LOCK:
         row = store.load(ident)
         if _CLAIMS.get(ident) != token:
@@ -887,7 +892,12 @@ def _commit_step(ident: str, token: str, unknowns: list[str], write) -> dict:
         write(row)
         _settle(row, unknowns)
         row.pop("last_error", None)
-        store.save(row)
+        previous = _write_step_metadata(store.directory(ident) / "apk" / "metadata", files or {})
+        try:
+            store.save(row)
+        except BaseException:
+            _rollback_metadata(previous)
+            raise
         _CLAIMS.pop(ident, None)
         return row
 
@@ -898,11 +908,48 @@ def _settle(row: dict, unknowns: list[str]) -> None:
     row["status"] = "partial" if row["unknowns"] else "investigating"
 
 
-def _optional_metadata(ident: str, name: str) -> dict | None:
+def _optional_metadata(ident: str, name: str, unknowns: list[str] | None = None) -> dict | None:
+    """Load a metadata document that may not exist yet.
+
+    A missing document is a normal ``None``. A document that exists but is corrupt is never
+    silently treated as missing: with ``unknowns`` the problem is recorded there (and ``None``
+    returned so the step can continue with explicit coverage loss); without it, ValueError is raised.
+    """
     try:
         return metadata(ident, name)
-    except (FileNotFoundError, json.JSONDecodeError):
+    except FileNotFoundError:
         return None
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        problem = (f"APK metadata {METADATA_DOCUMENTS[name]}.json is corrupt ({exc.__class__.__name__}: "
+                   f"{str(exc)[:200]}); results that depend on it are unknown.")
+        if unknowns is None:
+            raise ValueError(problem) from exc
+        log.warning("Investigation %s: %s", ident, problem)
+        unknowns.append(problem)
+        return None
+
+
+def _write_step_metadata(meta: Path, docs: dict[str, dict]) -> list[tuple[Path, bytes | None]]:
+    """Write step metadata files and return what they replaced, for rollback if the save fails."""
+    meta.mkdir(parents=True, mode=0o700, exist_ok=True)
+    previous: list[tuple[Path, bytes | None]] = []
+    try:
+        for name, doc in docs.items():
+            path = meta / name
+            previous.append((path, path.read_bytes() if path.is_file() else None))
+            store.atomic_json(path, doc)
+    except BaseException:
+        _rollback_metadata(previous)
+        raise
+    return previous
+
+
+def _rollback_metadata(previous: list[tuple[Path, bytes | None]]) -> None:
+    for path, data in reversed(previous):
+        if data is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_bytes(data)
 
 
 # --- Native .so inventory (RFC-0207 §6) -------------------------------------------------
@@ -1390,15 +1437,16 @@ def apk_extract_endpoints(ident: str, category: str | None = None, limit: int | 
                               or not 1 <= limit <= ENDPOINT_LIMIT_MAX):
         raise ValueError(f"limit must be an integer between 1 and {ENDPOINT_LIMIT_MAX}")
     with _static_op(ident, "endpoint_extraction", claimed) as (claim, token):
+        meta_unknowns: list[str] = []
+        components = _optional_metadata(ident, "components", meta_unknowns)
         result = apk_strings.extract_endpoints(store.directory(ident) / "apk", claim["apk"]["parts"],
-                                               _optional_metadata(ident, "components"))
+                                               components, _CANCEL.get(ident))
+        if meta_unknowns:
+            result["unknowns"] = list(dict.fromkeys(meta_unknowns + result["unknowns"]
+                                                    + ["Deep links from components.json were not extracted."]))
         strings = result.pop("strings")
         records = result["endpoints"]
         doc = {"investigation_id": ident, **result}
-        meta = store.directory(ident) / "apk" / "metadata"
-        meta.mkdir(parents=True, mode=0o700, exist_ok=True)
-        store.atomic_json(meta / "endpoints.json", doc)
-        store.atomic_json(meta / "strings.json", {"investigation_id": ident, "coverage": result["coverage"], **strings})
         recorded: dict = {}
 
         def write(row: dict) -> None:
@@ -1412,7 +1460,9 @@ def apk_extract_endpoints(ident: str, category: str | None = None, limit: int | 
             _coc(row, "apk_endpoints_extracted", f"Extracted {len(records)} endpoint(s) from static strings.",
                  {"evidence": eid, "counts": result["counts"]})
             _custody(row, endpoints_extracted_at=_now())
-        row = _commit_step(ident, token, result["unknowns"], write)
+        row = _commit_step(ident, token, result["unknowns"], write, {
+            "endpoints.json": doc,
+            "strings.json": {"investigation_id": ident, "coverage": result["coverage"], **strings}})
     view = [r for r in records if category is None or r["category"] == category]
     if limit is not None:
         view = view[:limit]
@@ -1424,12 +1474,14 @@ def apk_crypto_hints(ident: str, claimed: dict | None = None) -> dict:
     """Flag hardcoded secrets, weak crypto, NSC trust policy and key-storage posture (RFC-0207 §8)."""
     from . import apk_strings
     with _static_op(ident, "crypto_hints", claimed) as (claim, token):
-        result = apk_strings.crypto_hints(store.directory(ident) / "apk", claim["apk"]["parts"],
-                                          _optional_metadata(ident, "manifest"))
+        meta_unknowns: list[str] = []
+        manifest = _optional_metadata(ident, "manifest", meta_unknowns)
+        result = apk_strings.crypto_hints(store.directory(ident) / "apk", claim["apk"]["parts"], manifest,
+                                          cancel=_CANCEL.get(ident))
+        if meta_unknowns:
+            result["unknowns"] = list(dict.fromkeys(meta_unknowns + result["unknowns"] + [
+                "debuggable, targetSdkVersion and the network security config reference could not be evaluated."]))
         doc = {"investigation_id": ident, **result}
-        meta = store.directory(ident) / "apk" / "metadata"
-        meta.mkdir(parents=True, mode=0o700, exist_ok=True)
-        store.atomic_json(meta / "crypto_hints.json", doc)
         findings = result["findings"]
         recorded: dict = {}
 
@@ -1446,7 +1498,7 @@ def apk_crypto_hints(ident: str, claimed: dict | None = None) -> dict:
                  f"Recorded {len(findings)} cryptographic hint(s), {result['alert_count']} alert(s).",
                  {"evidence": eid, "by_severity": result["by_severity"]})
             _custody(row, crypto_hints_extracted_at=_now())
-        row = _commit_step(ident, token, result["unknowns"], write)
+        row = _commit_step(ident, token, result["unknowns"], write, {"crypto_hints.json": doc})
     return {**doc, "evidence_id": recorded["eid"], "investigation_status": row["status"]}
 
 
@@ -1550,8 +1602,9 @@ def summary(ident: str) -> dict:
         "no_stack_canary": sum(1 for lib in native["libraries"] if lib["hardening"]["stack_canary"] is False),
         "executable_stack": sum(1 for lib in native["libraries"] if lib["hardening"]["executable_stack"]),
         "unknowns": len(native["unknowns"])}
-    endpoints = _optional_metadata(ident, "endpoints")
-    crypto = _optional_metadata(ident, "crypto")
+    summary_unknowns: list[str] = []
+    endpoints = _optional_metadata(ident, "endpoints", summary_unknowns)
+    crypto = _optional_metadata(ident, "crypto", summary_unknowns)
     return {"id": ident, "status": row["status"], "format": apk["format"], "sha256": row.get("sha256"),
             "parts": len(apk["parts"]), "obb": len(apk["obb"]), "native_abis": abis,
             "native_libs": sum(len(p["native_libs"]) for p in apk["parts"]),
@@ -1567,4 +1620,4 @@ def summary(ident: str) -> dict:
             "urls": endpoints["counts"]["url"] if endpoints else None,
             "crypto_alerts": crypto["alert_count"] if crypto else None,
             "decompiled": manifest is not None, "native_inventory": native_counts,
-            "unknowns": row.get("unknowns", [])}
+            "unknowns": list(dict.fromkeys([*row.get("unknowns", []), *summary_unknowns]))}
