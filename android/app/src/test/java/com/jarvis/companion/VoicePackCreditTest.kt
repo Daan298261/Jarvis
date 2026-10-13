@@ -33,10 +33,13 @@ class VoicePackCreditTest {
     @Test fun pocketCreditLinkOpensHuggingFaceInBrowser() {
         val url = VoicePackCredit.firstUrl(CompanionVoicePackCatalog.POCKET_VOICE_ATTRIBUTION)
         assertEquals("https://huggingface.co/kyutai/tts-voices#alba-mackenna", url)
-        val intent = VoicePackCredit.browserIntent(url!!)
+        val intent = SponsorCredit.browserIntent(url!!)
         assertEquals(Intent.ACTION_VIEW, intent.action)
         assertEquals(url, intent.dataString)
     }
+
+    @Test fun sponsorBrowserIntentDefaultStillOpensSponsorSite() =
+        assertEquals(AnzuBranding.SPONSOR_URL, SponsorCredit.browserIntent().dataString)
 
     @Test fun creditWithoutUrlIsNotALink() = assertNull(VoicePackCredit.firstUrl("Voice: Example (CC BY 4.0)."))
 }

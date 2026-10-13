@@ -33,14 +33,15 @@ private val SponsorError = Color(0xFFE8A87C)
 
 object SponsorCredit {
     /** Default-browser intent for the Black Grid Publishing site (no WebView). */
-    fun browserIntent(): Intent =
-        Intent(Intent.ACTION_VIEW, Uri.parse(AnzuBranding.SPONSOR_URL))
+    fun browserIntent(url: String = AnzuBranding.SPONSOR_URL): Intent =
+        Intent(Intent.ACTION_VIEW, Uri.parse(url))
 
-    fun openInBrowser(context: Context): Boolean {
+    /** Opens [url] (default: the sponsor site) in the default browser; also used for voice-pack licence links. */
+    fun openInBrowser(context: Context, url: String = AnzuBranding.SPONSOR_URL): Boolean {
         // Do not pre-check with resolveActivity: on API 30+ (package visibility) it
         // returns null for browsers unless <queries> is declared. Manifest edits for
         // this slice stay at label/theme only, so startActivity and catch instead.
-        val intent = browserIntent()
+        val intent = browserIntent(url)
         if (context !is Activity) {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
