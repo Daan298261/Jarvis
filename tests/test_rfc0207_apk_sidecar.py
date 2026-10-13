@@ -3359,3 +3359,18 @@ def test_smali_inline_key_requires_key_register():
     assert "static_key" not in _smali_findings(body("v0", "    aput-byte v1, v0, v1\n"))
     found = _smali_findings(body("v0"))["static_key"][0]
     assert "zero-filled byte[16]" in found["detail"] and found["confidence"] == "medium"
+
+
+def test_smali_java_util_base64_decoder_feeds_secret_key():
+    body = _SMALI_HDR + (
+        ".method public a()V\n    .locals 4\n"
+        "    invoke-static {}, Ljava/util/Base64;->getDecoder()Ljava/util/Base64$Decoder;\n"
+        "    move-result-object v0\n"
+        "    const-string v1, \"c2VjcmV0LWtleS0xMjM0NQ==\"\n"
+        "    invoke-virtual {v0, v1}, Ljava/util/Base64$Decoder;->decode(Ljava/lang/String;)[B\n"
+        "    move-result-object v2\n"
+        "    const-string v1, \"AES\"\n    new-instance v3, Ljavax/crypto/spec/SecretKeySpec;\n"
+        "    invoke-direct {v3, v2, v1}, Ljavax/crypto/spec/SecretKeySpec;-><init>([BLjava/lang/String;)V\n"
+        "    return-void\n.end method\n")
+    found = _smali_findings(body)["static_key"][0]
+    assert found["value"] == "c2VjcmV0LWtleS0xMjM0NQ==" and found["confidence"] == "high"

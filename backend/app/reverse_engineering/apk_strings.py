@@ -1131,7 +1131,12 @@ class CryptoScanner:
                     elif value in {"BKS", "PKCS12", "JKS", "BouncyCastle", "UBER"}:
                         self._inventory("software_keystore", ref, value)
             if _SMALI_TO_BYTES.match(target) and args:
-                lit = literal(args[0])
+                # String.getBytes: the literal is the receiver; android.util.Base64.decode is static (args[0]);
+                # java.util.Base64$Decoder.decode is virtual, so args[0] is the decoder and the literal is args[1].
+                if target.startswith("Ljava/util/Base64$Decoder;"):
+                    lit = literal(args[1]) if len(args) > 1 else None
+                else:
+                    lit = literal(args[0])
                 if lit is not None:
                     pending = ("bytes", lit)
             elif not (_SMALI_KEY_INIT.match(target) or _SMALI_IV_INIT.match(target)):
