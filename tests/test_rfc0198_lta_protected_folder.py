@@ -338,9 +338,17 @@ def test_wrong_key_decrypt_failed(lta_env):
     assert job["error"] == "decrypt_failed"
 
 
+_GARBAGE_PLAINTEXTS = (
+    bytes.fromhex("9cff10d800fe81a7c4e2593b0d6f11e8"),
+    bytes.fromhex("d800dc41c0afe3b1009f7a5512ee86fd"),
+    bytes.fromhex("4e8a61e7f3d2a1009b7c0e1f88deadbe"),
+    bytes.fromhex("e4b8ade696870000d83dde00ffeeddcc"),
+)
 
-def test_wrong_key_garbage_plaintext_is_decrypt_failed(lta_env, monkeypatch):
-    """Regression: a wrong RSA key can "decrypt" CMS to random bytes (~1 in 256 CBC
+
+@pytest.mark.parametrize("garbage", _GARBAGE_PLAINTEXTS, ids=lambda g: g.hex()[:8])
+def test_wrong_key_garbage_plaintext_is_decrypt_failed(lta_env, monkeypatch, garbage):
+    """Regression: a wrong RSA key could "decrypt" CMS to random bytes (~1 in 256 CBC
     paddings pass). Those bytes must classify as decrypt_failed, never archive_failed."""
     import app.security.lta_archive as lta_archive
 
@@ -353,7 +361,7 @@ def test_wrong_key_garbage_plaintext_is_decrypt_failed(lta_env, monkeypatch):
     def fake_run(argv, *args, **kwargs):
         if len(argv) > 2 and argv[1:3] == ["cms", "-decrypt"]:
             seen.append(list(argv))
-            return subprocess.CompletedProcess(argv, 0, stdout=b"\x9c\xff\x10\xd8\x00\xfe\x81", stderr=b"")
+            return subprocess.CompletedProcess(argv, 0, stdout=garbage, stderr=b"")
         return real_run(argv, *args, **kwargs)
 
     monkeypatch.setattr(lta_archive.subprocess, "run", fake_run)
@@ -366,14 +374,21 @@ def test_wrong_key_garbage_plaintext_is_decrypt_failed(lta_env, monkeypatch):
     assert job["error"] == "decrypt_failed"
 
 
-def test_openssl_cms_decrypt_rejects_wrong_key_instead_of_random_key():
-    """-debug_decrypt makes OpenSSL fail on a wrong key rather than decrypt with a
-    random content key (the source of the archive_failed flake)."""
-    import inspect
+def test_real_wrong_key_cms_decrypt_always_fails(tmp_path):
+    """Real OpenSSL: without -debug_decrypt about 1 in 256 wrong keys 'succeeded' with
+    garbage. Every wrong-key decrypt must now raise DecryptFailed."""
+    from app.security.lta_archive import _decrypt_openssl_cms
+    from app.security.lta_errors import DecryptFailed
 
-    import app.security.lta_archive as lta_archive
-
-    assert '"-debug_decrypt"' in inspect.getsource(lta_archive._decrypt_openssl_cms)
+    right = _make_synthetic_identity(tmp_path / "right")
+    wrong = _make_synthetic_identity(tmp_path / "wrong")
+    for index in range(300):
+        work = tmp_path / f"w{index}"
+        work.mkdir()
+        blob = base64.b64decode(_cms_encrypt_password("S3cret-pass_123", right["cert_path"], work))  # type: ignore[arg-type]
+        with pytest.raises(DecryptFailed):
+            _decrypt_openssl_cms(blob, wrong["key_pem"])  # type: ignore[arg-type]
+        shutil.rmtree(work)
 
 
 def test_decode_cms_password_mapping():
@@ -381,10 +396,38 @@ def test_decode_cms_password_mapping():
     from app.security.lta_errors import DecryptFailed
 
     assert _decode_cms_password(b"S3cret-pass") == "S3cret-pass"
-    assert _decode_cms_password("pässwörd".encode("utf-16-le")) == "pässwörd"
+    assert _decode_cms_password("S3cret-pässwörd".encode("utf-16-le")) == "S3cret-pässwörd"
+    assert _decode_cms_password("S3cret".encode("utf-16-le") + b"\x00\x00") == "S3cret"
     assert _decode_cms_password(b"\x00\x00") == ""
-    with pytest.raises(DecryptFailed):
-        _decode_cms_password(b"\xd8\x00\xd8")
+    for bad in (b"\xd8\x00\xd8", "中文密码".encode("utf-16-le"), b"pass\x07word", b"a\x00b"):
+        with pytest.raises(DecryptFailed):
+            _decode_cms_password(bad)
+
+
+def test_decode_cms_password_rejects_random_non_utf8_buffers():
+    """Property: random 16-byte wrong-key plaintexts are (almost) never a password."""
+    import random
+
+    from app.security.lta_archive import _decode_cms_password
+    from app.security.lta_errors import DecryptFailed
+
+    rng = random.Random(0x0198)
+    tried = accepted = 0
+    while tried < 10_000:
+        raw = bytes(rng.getrandbits(8) for _ in range(16))
+        try:
+            raw.decode("utf-8")
+            continue
+        except UnicodeDecodeError:
+            pass
+        tried += 1
+        try:
+            _decode_cms_password(raw)
+            accepted += 1
+        except DecryptFailed:
+            pass
+    assert accepted <= 1, f"{accepted} of {tried} random buffers accepted as a password"
+
 
 def test_xml_invalid(lta_env):
     bad = lta_env["tmp"] / "bad.xml"

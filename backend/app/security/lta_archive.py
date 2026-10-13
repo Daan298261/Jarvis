@@ -299,18 +299,35 @@ def decrypt_pkcs7_password(ciphertext_b64: str, key: ResolvedKey) -> str:
     return _decrypt_openssl_cms(blob, key.private_key_pem)
 
 
+# UTF-16-LE fallback is accepted only for plausible password text: Latin script up to
+# U+024F. Without this bound, random wrong-key bytes decode as "valid" UTF-16 (CJK and
+# other BMP code points) about 3 times in 4.
+_UTF16_PASSWORD_MAX_CODEPOINT = 0x024F
+
+
+def _plausible_password(text: str) -> bool:
+    return bool(text) and text.isprintable()
+
+
 def _decode_cms_password(raw: bytes) -> str:
-    """CMS plaintext → password. Undecodable bytes mean the key or ciphertext is wrong."""
-    for encoding_name in ("utf-8", "utf-16-le"):
+    """CMS plaintext → password. Returns "" for empty plaintext; raises DecryptFailed for
+    bytes that are not a plausible password (a wrong key or corrupt ciphertext)."""
+    if not raw.strip(b"\x00").strip():
+        return ""
+    try:
+        text = raw.decode("utf-8", errors="strict").strip("\x00").strip()
+    except UnicodeError:
+        text = None
+    if text is not None and _plausible_password(text):
+        return text
+    if len(raw) % 2 == 0:
         try:
-            password = raw.decode(encoding_name, errors="strict").strip("\x00").strip()
+            wide = raw.decode("utf-16-le", errors="strict").strip("\x00").strip()
         except UnicodeError:
-            continue
-        if password:
-            return password
-    if raw.strip(b"\x00").strip():
-        raise DecryptFailed("CMS plaintext is not a usable password string", detail="password_encoding")
-    return ""
+            wide = ""
+        if _plausible_password(wide) and all(ord(ch) <= _UTF16_PASSWORD_MAX_CODEPOINT for ch in wide):
+            return wide
+    raise DecryptFailed("CMS plaintext is not a usable password string", detail="password_encoding")
 
 
 def _decrypt_openssl_cms(blob: bytes, private_key_pem: bytes) -> str:
@@ -437,9 +454,9 @@ def _decrypt_windows_cms(blob: bytes) -> str:
             raise DecryptFailed("CryptDecryptMessage failed", detail="cms_decrypt_failed")
         raw = bytes(out_buf[: size.value])
         password = _decode_cms_password(raw)
-        if password:
-            return password
-        raise DecryptFailed("CMS plaintext is not a usable password string", detail="password_encoding")
+        if not password:
+            raise DecryptFailed("CMS plaintext empty", detail="empty_password")
+        return password
     finally:
         for handle in stores:
             CertCloseStore(handle, 0)
