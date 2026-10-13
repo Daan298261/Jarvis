@@ -101,6 +101,9 @@ class CompanionVoicePackManager(
     fun isTtsReady(): Boolean =
         selectedTtsPack()?.let { packReady(it) && ttsStatusRef.get() in CompanionVoicePackStatus.USABLE } == true
 
+    /** True when every artifact of [packId] is on disk (installed), whether or not it is the selected pack. */
+    fun isPackInstalled(packId: String): Boolean = catalog.firstOrNull { it.id == packId }?.let { packReady(it) } == true
+
     private fun packReady(pack: CompanionVoicePack): Boolean {
         if (pack.url.isBlank()) return false
         return pack.artifacts.all { art ->

@@ -47,7 +47,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 private val Gold = Color(0xFFF5A623)
 private val Ink = Color(0xFF070B12)
 private val Panel = Color(0xFF111B28)
-private val Muted = Color(0xFF8C9CAF)
+internal val Muted = Color(0xFF8C9CAF)
+/** Shared error text colour for settings rows (voice packs, sponsor credit). */
+internal val ErrorText = Color(0xFFE8A87C)
 
 class MainActivity : FragmentActivity() {
     private lateinit var accessLock: AppAccessLock
@@ -773,9 +775,15 @@ private fun formatStorageBytes(bytes: Long): String {
                     }
                 }
             }
+            val selectedTtsId = model.voicePackManager.selectedTtsPackId()
+            ttsPacks.filter {
+                VoicePackCredit.shouldShow(it.optString("id"), selectedTtsId, model.voicePackManager.isPackInstalled(it.optString("id")))
+            }.forEach { pack ->
+                VoicePackCreditText(pack.optString("id"), pack.optString("attribution"), color = Muted, errorColor = ErrorText)
+            }
             Text(formatStorageBytes(model.voicePackManager.storageBytes()), color = Muted, fontSize = 12.sp)
             state.voicePackError.takeIf { it.isNotBlank() }?.let {
-                Text(it, color = Color(0xFFE8A87C), fontSize = 12.sp)
+                Text(it, color = ErrorText, fontSize = 12.sp)
             }
             if (state.voiceSttStatus == CompanionVoicePackStatus.DOWNLOADING ||
                 state.voiceTtsStatus == CompanionVoicePackStatus.DOWNLOADING ||
