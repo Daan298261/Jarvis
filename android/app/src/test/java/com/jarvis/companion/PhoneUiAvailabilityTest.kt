@@ -21,5 +21,7 @@ class PhoneUiAvailabilityTest {
         assertFalse(PhoneUiAvailability.manualPairingReady("http://192.168.1.2:4781", pin, "123456"))
         assertFalse(PhoneUiAvailability.manualPairingReady("https://192.168.1.2:4781", "", "123456"))
         assertFalse(PhoneUiAvailability.manualPairingReady("https://192.168.1.2:4781", pin, "123"))
+        assertTrue(PhoneUiAvailability.manualPairingReady("https://192.168.1.2:4781", pin, "", paired = true))
+        assertFalse(PhoneUiAvailability.manualPairingReady("http://192.168.1.2:4781", pin, "", paired = true))
     }
 }

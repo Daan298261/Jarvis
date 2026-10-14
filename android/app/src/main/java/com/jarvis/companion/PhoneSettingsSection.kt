@@ -11,6 +11,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun PhoneSettingsSection(title: String, summary: String, initiallyOpen: Boolean = false, content: @Composable () -> Unit) {
     var open by rememberSaveable(title) { mutableStateOf(initiallyOpen) }
+    LaunchedEffect(initiallyOpen) { if (initiallyOpen) open = true }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             TextButton(onClick = { open = !open }, modifier = Modifier.fillMaxWidth()) {

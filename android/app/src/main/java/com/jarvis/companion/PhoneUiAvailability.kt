@@ -10,7 +10,7 @@ object PhoneUiAvailability {
     }
 
     fun desktopActionsEnabled(connected: Boolean, busy: Boolean) = connected && !busy
-    fun manualPairingReady(endpoint: String, pin: String, code: String): Boolean =
+    fun manualPairingReady(endpoint: String, pin: String, code: String, paired: Boolean = false): Boolean =
         runCatching { TransportPolicy.origin(endpoint) }.isSuccess &&
-            pin.trim().matches(Regex("[a-fA-F0-9]{64}")) && CompanionCodeValidator.isComplete(code)
+            pin.trim().matches(Regex("[a-fA-F0-9]{64}")) && (paired || CompanionCodeValidator.isComplete(code))
 }

@@ -1109,7 +1109,7 @@ private fun formatStorageBytes(bytes: Long): String {
                 scanError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
             }
             Button(onClick = { model.pair(endpoint, pin, pairingCode) },
-                enabled = !state.busy && ((model.api.deviceId.isNotEmpty() && !manualPairing) || PhoneUiAvailability.manualPairingReady(endpoint, pin, pairingCode))) {
+                enabled = !state.busy && ((model.api.deviceId.isNotEmpty() && !manualPairing) || PhoneUiAvailability.manualPairingReady(endpoint, pin, pairingCode, paired = model.api.deviceId.isNotEmpty()))) {
                 Text(if (model.api.deviceId.isEmpty()) stringResource(R.string.pair_with_anzu) else "Connect / check approval")
             }
             Text("Phone fingerprint: ${model.api.fingerprint().chunked(8).joinToString(" ")}", color = Muted, fontSize = 11.sp)
@@ -1234,7 +1234,7 @@ private fun formatStorageBytes(bytes: Long): String {
             }
         }
         item {
-            PhoneSettingsSection("Desktop schedules", if (state.connected) "Create a desktop schedule" else "Connect your desktop to create a schedule", initiallyOpen = false) {
+            PhoneSettingsSection("Desktop schedules", if (state.connected) "Create a desktop schedule" else "Connect your desktop to create a schedule", initiallyOpen = editingSchedule != null) {
             Text("Schedules", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
             OutlinedTextField(schedulePrompt, { schedulePrompt = it }, label = { Text(stringResource(R.string.what_should_anzu_do)) }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(whenText, { whenText = it }, label = { Text("Local date/time · YYYY-MM-DDTHH:MM") }, modifier = Modifier.fillMaxWidth())
