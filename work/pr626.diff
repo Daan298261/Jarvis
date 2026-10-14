@@ -1,0 +1,837 @@
+diff --git a/android/app/src/main/java/com/jarvis/companion/CompanionModel.kt b/android/app/src/main/java/com/jarvis/companion/CompanionModel.kt
+index 245968ea..6c722d13 100644
+--- a/android/app/src/main/java/com/jarvis/companion/CompanionModel.kt
++++ b/android/app/src/main/java/com/jarvis/companion/CompanionModel.kt
+@@ -167,6 +167,19 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
+                 DevicePackChromePublisher.publish(this@CompanionModel, deviceModelChrome, companionState)
+             }
+         }
++        // The single route from app state into the Notifications tab: live conditions are re-derived on every
++        // change (and clear themselves), and each newly reported error is logged once as a dated event.
++        viewModelScope.launch {
++            var lastError: String? = null
++            state.collect { s ->
++                jarvisApp.notices.syncLive(NoticeRules.conditions(s, api.deviceId.isNotEmpty()))
++                val error = s.error?.takeIf { it.isNotBlank() }
++                if (error != null && error != lastError) {
++                    jarvisApp.notices.postEvent(NoticeKind.ERROR, NoticeSeverity.ERROR, error, NoticeRules.errorActions(error))
++                }
++                lastError = error
++            }
++        }
+         runCatching { loadLocalLibrary() }.onFailure {
+             Log.e(TAG, "Cannot read conversations stored on this phone", it)
+             mutable.value = mutable.value.copy(error = "Cannot read conversations stored on this phone: ${it.message}")
+diff --git a/android/app/src/main/java/com/jarvis/companion/JarvisApp.kt b/android/app/src/main/java/com/jarvis/companion/JarvisApp.kt
+index 38777927..e04949dc 100644
+--- a/android/app/src/main/java/com/jarvis/companion/JarvisApp.kt
++++ b/android/app/src/main/java/com/jarvis/companion/JarvisApp.kt
+@@ -8,6 +8,8 @@ import kotlinx.coroutines.launch
+ class JarvisApp : Application() {
+     lateinit var api: JarvisApi
+     val deviceModelChrome = CompanionDeviceModelChrome()
++    /** Every in-app notice (connection, downloads, errors) for the Notifications tab. */
++    val notices: NoticeStore by lazy { NoticeStore(getSharedPreferences(NoticeStore.PREFS, MODE_PRIVATE)) }
+     override fun onCreate() {
+         super.onCreate()
+         api = JarvisApi(this)
+diff --git a/android/app/src/main/java/com/jarvis/companion/MainActivity.kt b/android/app/src/main/java/com/jarvis/companion/MainActivity.kt
+index ee7bae9f..a853d76e 100644
+--- a/android/app/src/main/java/com/jarvis/companion/MainActivity.kt
++++ b/android/app/src/main/java/com/jarvis/companion/MainActivity.kt
+@@ -50,6 +50,8 @@ private val Panel = Color(0xFF111B28)
+ internal val Muted = Color(0xFF8C9CAF)
+ /** Shared error text colour for settings rows (voice packs, sponsor credit). */
+ internal val ErrorText = Color(0xFFE8A87C)
++/** Key of the Notifications tab; the visible label is localized. */
++private const val NOTIFICATIONS_TAB = "Notifications"
+ 
+ class MainActivity : FragmentActivity() {
+     private lateinit var accessLock: AppAccessLock
+@@ -102,6 +104,11 @@ class MainActivity : FragmentActivity() {
+             var showPostPairVoiceOffer by remember { mutableStateOf(false) }
+             val callState by CurrentCall.state.collectAsStateWithLifecycle()
+             var tab by remember { mutableStateOf("Home") }
++            val noticeStore = app.notices
++            val notices by noticeStore.notices.collectAsStateWithLifecycle()
++            val unreadNotices = notices.count { !it.read }
++            // Viewing the tab reads everything in it, including notices that arrive while it is open.
++            LaunchedEffect(tab, notices) { if (tab == NOTIFICATIONS_TAB) noticeStore.markAllRead() }
+             var pairingScanRequest by remember { mutableStateOf(false) }
+             var draft by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+             var incomingCall by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+@@ -257,6 +264,17 @@ class MainActivity : FragmentActivity() {
+                             "Tasks" to Icons.Outlined.Checklist, "Studio" to Icons.Outlined.AutoAwesome, "More" to Icons.Outlined.Tune).forEach { (label, icon) ->
+                             NavigationBarItem(selected = tab == label, onClick = { tab = label }, icon = { Icon(icon, label) }, label = { Text(label) })
+                         }
++                        val noticesLabel = stringResource(R.string.notices_tab)
++                        NavigationBarItem(
++                            selected = tab == NOTIFICATIONS_TAB,
++                            onClick = { tab = NOTIFICATIONS_TAB },
++                            icon = {
++                                BadgedBox(badge = { if (unreadNotices > 0) Badge { Text(if (unreadNotices > 99) "99+" else unreadNotices.toString()) } }) {
++                                    Icon(Icons.Outlined.Notifications, noticesLabel)
++                                }
++                            },
++                            label = { Text(noticesLabel, maxLines = 1) },
++                        )
+                     }
+                 }) { padding ->
+                     Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp)) {
+@@ -273,32 +291,10 @@ class MainActivity : FragmentActivity() {
+                                     else -> Muted
+                                 },
+                             )
++                            HomeNoticeIndicator(unreadNotices) { tab = NOTIFICATIONS_TAB }
+                         }
+-                        val offlineBanner = when {
+-                            tab == "Chat" -> "" // Chat shows its own offline card.
+-                            tab == "Home" && CompanionMode.needsPhoneSetup(state.connected, state.localModelReady) -> "" // the setup card explains it
+-                            else -> CompanionOfflineStatus.offlineBannerText(state)
+-                        }
+-                        if (offlineBanner.isNotEmpty()) Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF1D2A34)), modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+-                            Text(offlineBanner, Modifier.padding(12.dp), fontSize = 12.sp)
+-                        }
+-                        if (state.error != null) Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF34251D)), modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+-                            Text(state.error.orEmpty(), Modifier.padding(12.dp), fontSize = 12.sp)
+-                        }
+-                        if (state.pendingMessage) Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+-                            var dismiss by remember { mutableStateOf(false) }
+-                            Column(Modifier.padding(12.dp)) {
+-                                Text("A message is waiting for confirmation", fontSize = 13.sp)
+-                                Row {
+-                                    TextButton(onClick = { model.retryPending() }, enabled = !state.busy) { Text("Retry safely") }
+-                                    TextButton(onClick = { dismiss = true }, enabled = !state.busy) { Text("Dismiss") }
+-                                }
+-                            }
+-                            if (dismiss) AlertDialog(onDismissRequest = { dismiss = false }, title = { Text("Dismiss pending message?") },
+-                                text = { Text(stringResource(R.string.pending_may_be_working)) },
+-                                confirmButton = { TextButton(onClick = { dismiss = false; model.dismissPending() }) { Text("Dismiss") } },
+-                                dismissButton = { TextButton(onClick = { dismiss = false }) { Text("Keep") } })
+-                        }
++                        // Status banners (desktop offline, errors, pending message, download failures) live in the
++                        // Notifications tab now; Home only shows the unread marker in the header above.
+                         if (callState.active) Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                             var routes by remember { mutableStateOf(false) }
+                             Column(Modifier.padding(12.dp)) {
+@@ -319,6 +315,26 @@ class MainActivity : FragmentActivity() {
+                             }
+                         }
+                         when (tab) {
++                            NOTIFICATIONS_TAB -> NotificationsScreen(
++                                notices = notices,
++                                actionsEnabled = !state.busy,
++                                onAction = { action ->
++                                    when (action) {
++                                        NoticeAction.RETRY_PENDING -> model.retryPending()
++                                        NoticeAction.DISCARD_PENDING -> model.dismissPending()
++                                        NoticeAction.PAIR -> { pairingScanRequest = true; tab = "More" }
++                                        NoticeAction.SCAN_WIFI -> model.startLanScan()
++                                        NoticeAction.RETRY_MODEL_DOWNLOAD -> model.downloadCompanionPack()
++                                        NoticeAction.RETRY_VOICE_DOWNLOAD -> model.downloadRecommendedVoicePacks()
++                                        NoticeAction.OPEN_APP_SETTINGS -> startActivity(
++                                            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
++                                                android.net.Uri.fromParts("package", packageName, null)),
++                                        )
++                                    }
++                                },
++                                onDismiss = noticeStore::dismiss,
++                                onClearAll = noticeStore::clearAll,
++                            )
+                             "Home" -> {
+                                 Spacer(Modifier.height(12.dp))
+                                 Text("YOUR INTELLIGENCE, EVERYWHERE", fontSize = 10.sp, color = Muted, letterSpacing = 2.sp)
+diff --git a/android/app/src/main/java/com/jarvis/companion/NoticeStore.kt b/android/app/src/main/java/com/jarvis/companion/NoticeStore.kt
+new file mode 100644
+index 00000000..215f4d74
+--- /dev/null
++++ b/android/app/src/main/java/com/jarvis/companion/NoticeStore.kt
+@@ -0,0 +1,219 @@
++package com.jarvis.companion
++
++import android.content.SharedPreferences
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.StateFlow
++import kotlinx.coroutines.flow.asStateFlow
++import org.json.JSONArray
++import org.json.JSONObject
++
++/** What a notice is about; maps to its localized title. Persisted by name, so never rename entries. */
++enum class NoticeKind { DESKTOP_OFFLINE, PENDING_MESSAGE, MODEL_DOWNLOAD, VOICE_DOWNLOAD, ERROR }
++
++enum class NoticeSeverity { INFO, WARNING, ERROR }
++
++/** Buttons a notice can offer; the screen that hosts the list decides how to run each. */
++enum class NoticeAction { RETRY_PENDING, DISCARD_PENDING, PAIR, SCAN_WIFI, RETRY_MODEL_DOWNLOAD, RETRY_VOICE_DOWNLOAD, OPEN_APP_SETTINGS }
++
++/** A condition that holds right now (desktop unreachable, a download failed). It clears itself once resolved. */
++data class LiveCondition(
++    val kind: NoticeKind,
++    val severity: NoticeSeverity,
++    /** Dynamic detail text; null means the kind's standard body. */
++    val body: String?,
++    val actions: List<NoticeAction> = emptyList(),
++) {
++    val signature: String get() = "${severity.name}|${body.orEmpty()}"
++}
++
++data class Notice(
++    val id: String,
++    val kind: NoticeKind,
++    val severity: NoticeSeverity,
++    val body: String?,
++    val timeMillis: Long,
++    val live: Boolean,
++    val read: Boolean,
++    val actions: List<NoticeAction>,
++)
++
++/**
++ * The one place every ANZU in-app notice goes through (status banners used to sit on top of Home).
++ *
++ * - Live conditions are re-derived from app state by [syncLive]; they update when their text changes and vanish
++ *   when the condition resolves. Their first-seen time, read and dismissed state persist, so a restart does not
++ *   re-raise something the user already read or dismissed.
++ * - Events (errors) are dated, persisted, capped at [maxEvents] and dropped after [maxAgeMs].
++ */
++class NoticeStore(
++    private val prefs: SharedPreferences,
++    private val clock: () -> Long = System::currentTimeMillis,
++    private val maxEvents: Int = 50,
++    private val maxAgeMs: Long = 7L * 24 * 60 * 60 * 1000,
++) {
++    private class LiveEntry(val signature: String, val since: Long, var read: Boolean, var dismissed: Boolean)
++
++    private val lock = Any()
++    private val live = LinkedHashMap<NoticeKind, LiveEntry>()
++    private var conditions: Map<NoticeKind, LiveCondition> = emptyMap()
++    private val events = ArrayList<Notice>()
++    private var seq = 0L
++    private val flow = MutableStateFlow<List<Notice>>(emptyList())
++
++    /** Visible notices, newest first. */
++    val notices: StateFlow<List<Notice>> = flow.asStateFlow()
++
++    init {
++        synchronized(lock) {
++            load()
++            prune()
++            publish()
++        }
++    }
++
++    fun unreadCount(): Int = notices.value.count { !it.read }
++
++    /** Replace the set of live conditions; anything not in [current] is resolved and removed. */
++    fun syncLive(current: List<LiveCondition>) = synchronized(lock) {
++        val next = current.associateBy { it.kind }
++        if (next == conditions && live.keys == next.keys) return@synchronized
++        live.keys.retainAll(next.keys)
++        for ((kind, c) in next) {
++            val entry = live[kind]
++            if (entry == null || entry.signature != c.signature) {
++                live[kind] = LiveEntry(c.signature, clock(), read = false, dismissed = false)
++            }
++        }
++        conditions = next
++        save()
++        publish()
++    }
++
++    /** Record a dated event, e.g. an error the app reported. Identical repeats within 2 s are folded. */
++    fun postEvent(kind: NoticeKind, severity: NoticeSeverity, body: String, actions: List<NoticeAction> = emptyList()) = synchronized(lock) {
++        val now = clock()
++        val last = events.firstOrNull()
++        if (last != null && last.kind == kind && last.body == body && now - last.timeMillis < 2_000) return@synchronized
++        events.add(0, Notice("evt-$now-${seq++}", kind, severity, body, now, live = false, read = false, actions = actions))
++        prune()
++        save()
++        publish()
++    }
++
++    fun dismiss(id: String) = synchronized(lock) {
++        if (!events.removeAll { it.id == id }) {
++            liveKind(id)?.let { live[it]?.dismissed = true }
++        }
++        save()
++        publish()
++    }
++
++    /** Remove every event and hide every live notice until its condition changes or recurs. */
++    fun clearAll() = synchronized(lock) {
++        events.clear()
++        live.values.forEach { it.dismissed = true }
++        save()
++        publish()
++    }
++
++    fun markAllRead() = synchronized(lock) {
++        if (flow.value.none { !it.read }) return@synchronized
++        for (i in events.indices) events[i] = events[i].copy(read = true)
++        live.values.forEach { it.read = true }
++        save()
++        publish()
++    }
++
++    private fun liveKind(id: String): NoticeKind? =
++        id.removePrefix("live-").takeIf { id.startsWith("live-") }?.let { name -> NoticeKind.entries.firstOrNull { it.name == name } }
++
++    private fun prune() {
++        val cutoff = clock() - maxAgeMs
++        events.removeAll { it.timeMillis < cutoff }
++        while (events.size > maxEvents) events.removeAt(events.size - 1)
++    }
++
++    private fun publish() {
++        val liveNotices = conditions.values.mapNotNull { c ->
++            val e = live[c.kind] ?: return@mapNotNull null
++            if (e.dismissed) null
++            else Notice("live-${c.kind.name}", c.kind, c.severity, c.body, e.since, live = true, read = e.read, actions = c.actions)
++        }
++        flow.value = (liveNotices + events).sortedByDescending { it.timeMillis }
++    }
++
++    private fun save() {
++        val liveJson = JSONObject()
++        live.forEach { (kind, e) ->
++            liveJson.put(kind.name, JSONObject().put("sig", e.signature).put("since", e.since).put("read", e.read).put("dismissed", e.dismissed))
++        }
++        val eventsJson = JSONArray()
++        events.forEach { n ->
++            eventsJson.put(JSONObject().put("id", n.id).put("kind", n.kind.name).put("severity", n.severity.name)
++                .put("body", n.body.orEmpty()).put("time", n.timeMillis).put("read", n.read)
++                .put("actions", JSONArray(n.actions.map { it.name })))
++        }
++        prefs.edit().putString(KEY_LIVE, liveJson.toString()).putString(KEY_EVENTS, eventsJson.toString()).apply()
++    }
++
++    private fun load() {
++        runCatching {
++            val liveJson = JSONObject(prefs.getString(KEY_LIVE, null) ?: "{}")
++            for (name in liveJson.keys()) {
++                val kind = NoticeKind.entries.firstOrNull { it.name == name } ?: continue
++                val o = liveJson.getJSONObject(name)
++                live[kind] = LiveEntry(o.getString("sig"), o.getLong("since"), o.optBoolean("read"), o.optBoolean("dismissed"))
++            }
++        }
++        runCatching {
++            val arr = JSONArray(prefs.getString(KEY_EVENTS, null) ?: "[]")
++            for (i in 0 until arr.length()) {
++                val o = arr.optJSONObject(i) ?: continue
++                val kind = NoticeKind.entries.firstOrNull { it.name == o.optString("kind") } ?: continue
++                val severity = NoticeSeverity.entries.firstOrNull { it.name == o.optString("severity") } ?: NoticeSeverity.ERROR
++                val actionsJson = o.optJSONArray("actions") ?: JSONArray()
++                val actions = (0 until actionsJson.length()).mapNotNull { j -> NoticeAction.entries.firstOrNull { it.name == actionsJson.optString(j) } }
++                events += Notice(o.getString("id"), kind, severity, o.optString("body"), o.getLong("time"), live = false, read = o.optBoolean("read"), actions = actions)
++            }
++            events.sortByDescending { it.timeMillis }
++        }
++    }
++
++    companion object {
++        const val PREFS = "anzu_notices"
++        private const val KEY_LIVE = "live"
++        private const val KEY_EVENTS = "events"
++    }
++}
++
++/** Derives notices from [CompanionState]. Pure, so the rules are unit-tested without a ViewModel. */
++object NoticeRules {
++    fun conditions(state: CompanionState, paired: Boolean): List<LiveCondition> {
++        val out = ArrayList<LiveCondition>()
++        val offline = CompanionOfflineStatus.offlineBannerText(state)
++        if (offline.isNotEmpty()) {
++            val severity = if (state.localModelReady) NoticeSeverity.INFO else NoticeSeverity.WARNING
++            out += LiveCondition(NoticeKind.DESKTOP_OFFLINE, severity, offline,
++                listOf(if (paired) NoticeAction.SCAN_WIFI else NoticeAction.PAIR))
++        }
++        if (state.pendingMessage) {
++            out += LiveCondition(NoticeKind.PENDING_MESSAGE, NoticeSeverity.WARNING, null,
++                listOf(NoticeAction.RETRY_PENDING, NoticeAction.DISCARD_PENDING))
++        }
++        if (state.localPackError.isNotBlank() && state.localPackStatus != CompanionPackStatus.DOWNLOADING) {
++            out += LiveCondition(NoticeKind.MODEL_DOWNLOAD, NoticeSeverity.ERROR, state.localPackError,
++                listOf(NoticeAction.RETRY_MODEL_DOWNLOAD))
++        }
++        val voiceDownloading = state.voiceSttStatus == CompanionVoicePackStatus.DOWNLOADING ||
++            state.voiceTtsStatus == CompanionVoicePackStatus.DOWNLOADING
++        if (state.voicePackError.isNotBlank() && !voiceDownloading) {
++            out += LiveCondition(NoticeKind.VOICE_DOWNLOAD, NoticeSeverity.ERROR, state.voicePackError,
++                listOf(NoticeAction.RETRY_VOICE_DOWNLOAD))
++        }
++        return out
++    }
++
++    /** Actions offered with a reported error: a permission problem can only be fixed in system settings. */
++    fun errorActions(message: String): List<NoticeAction> =
++        if (message.contains("permission", ignoreCase = true)) listOf(NoticeAction.OPEN_APP_SETTINGS) else emptyList()
++}
+diff --git a/android/app/src/main/java/com/jarvis/companion/NotificationsUi.kt b/android/app/src/main/java/com/jarvis/companion/NotificationsUi.kt
+new file mode 100644
+index 00000000..6d48d170
+--- /dev/null
++++ b/android/app/src/main/java/com/jarvis/companion/NotificationsUi.kt
+@@ -0,0 +1,157 @@
++package com.jarvis.companion
++
++import android.text.format.DateUtils
++import androidx.compose.foundation.background
++import androidx.compose.foundation.clickable
++import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.foundation.layout.Box
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.PaddingValues
++import androidx.compose.foundation.layout.Row
++import androidx.compose.foundation.layout.Spacer
++import androidx.compose.foundation.layout.fillMaxSize
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.layout.size
++import androidx.compose.foundation.layout.width
++import androidx.compose.foundation.lazy.LazyColumn
++import androidx.compose.foundation.lazy.items
++import androidx.compose.foundation.shape.CircleShape
++import androidx.compose.material3.AlertDialog
++import androidx.compose.material3.Card
++import androidx.compose.material3.CardDefaults
++import androidx.compose.material3.Text
++import androidx.compose.material3.TextButton
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.remember
++import androidx.compose.runtime.setValue
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.platform.LocalContext
++import androidx.compose.ui.platform.testTag
++import androidx.compose.ui.res.pluralStringResource
++import androidx.compose.ui.res.stringResource
++import androidx.compose.ui.semantics.contentDescription
++import androidx.compose.ui.semantics.semantics
++import androidx.compose.ui.text.font.FontWeight
++import androidx.compose.ui.unit.dp
++import androidx.compose.ui.unit.sp
++
++private val InfoColor = Color(0xFF74DCCD)
++private val WarningColor = Color(0xFFF5A623)
++private val ErrorColor = Color(0xFFE8A87C)
++
++internal fun severityColor(severity: NoticeSeverity): Color = when (severity) {
++    NoticeSeverity.INFO -> InfoColor
++    NoticeSeverity.WARNING -> WarningColor
++    NoticeSeverity.ERROR -> ErrorColor
++}
++
++internal fun noticeTitleRes(kind: NoticeKind): Int = when (kind) {
++    NoticeKind.DESKTOP_OFFLINE -> R.string.notice_title_desktop_offline
++    NoticeKind.PENDING_MESSAGE -> R.string.notice_title_pending
++    NoticeKind.MODEL_DOWNLOAD -> R.string.notice_title_model_download
++    NoticeKind.VOICE_DOWNLOAD -> R.string.notice_title_voice_download
++    NoticeKind.ERROR -> R.string.notice_title_error
++}
++
++private fun severityRes(severity: NoticeSeverity): Int = when (severity) {
++    NoticeSeverity.INFO -> R.string.notice_severity_info
++    NoticeSeverity.WARNING -> R.string.notice_severity_warning
++    NoticeSeverity.ERROR -> R.string.notice_severity_error
++}
++
++private fun actionRes(action: NoticeAction): Int = when (action) {
++    NoticeAction.RETRY_PENDING -> R.string.notice_action_retry_pending
++    NoticeAction.DISCARD_PENDING -> R.string.notice_action_discard_pending
++    NoticeAction.PAIR -> R.string.notice_action_pair
++    NoticeAction.SCAN_WIFI -> R.string.notice_action_scan_wifi
++    NoticeAction.RETRY_MODEL_DOWNLOAD, NoticeAction.RETRY_VOICE_DOWNLOAD -> R.string.notice_action_retry
++    NoticeAction.OPEN_APP_SETTINGS -> R.string.notice_action_open_settings
++}
++
++/** Small unread marker for the Home header: a dot plus count, nothing when everything is read. */
++@Composable
++fun HomeNoticeIndicator(unread: Int, onClick: () -> Unit) {
++    if (unread <= 0) return
++    val description = pluralStringResource(R.plurals.notices_unread, unread, unread)
++    Row(
++        Modifier.testTag("home_notice_indicator").clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 4.dp)
++            .semantics { contentDescription = description },
++        verticalAlignment = Alignment.CenterVertically,
++    ) {
++        Box(Modifier.size(8.dp).background(WarningColor, CircleShape))
++        Spacer(Modifier.width(4.dp))
++        Text(if (unread > 99) "99+" else unread.toString(), fontSize = 11.sp, color = WarningColor)
++    }
++}
++
++/** The Notifications tab: every notice with its time, severity, actions, and dismiss / clear all. */
++@Composable
++fun NotificationsScreen(
++    notices: List<Notice>,
++    actionsEnabled: Boolean,
++    onAction: (NoticeAction) -> Unit,
++    onDismiss: (String) -> Unit,
++    onClearAll: () -> Unit,
++) {
++    var confirmDiscard by remember { mutableStateOf(false) }
++    Column(Modifier.fillMaxSize()) {
++        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
++            Text(stringResource(R.string.notices_tab), fontSize = 25.sp, modifier = Modifier.weight(1f).padding(vertical = 12.dp))
++            if (notices.isNotEmpty()) TextButton(onClick = onClearAll) { Text(stringResource(R.string.notices_clear_all)) }
++        }
++        if (notices.isEmpty()) {
++            Text(stringResource(R.string.notices_empty), color = Muted, modifier = Modifier.padding(top = 24.dp))
++        }
++        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
++            items(notices, key = { it.id }) { notice ->
++                NoticeCard(notice, actionsEnabled, onAction = { action ->
++                    if (action == NoticeAction.DISCARD_PENDING) confirmDiscard = true else onAction(action)
++                }, onDismiss = { onDismiss(notice.id) })
++            }
++        }
++    }
++    if (confirmDiscard) AlertDialog(
++        onDismissRequest = { confirmDiscard = false },
++        title = { Text(stringResource(R.string.notice_discard_title)) },
++        text = { Text(stringResource(R.string.notice_discard_body)) },
++        confirmButton = { TextButton(onClick = { confirmDiscard = false; onAction(NoticeAction.DISCARD_PENDING) }) {
++            Text(stringResource(R.string.notice_action_discard_pending)) } },
++        dismissButton = { TextButton(onClick = { confirmDiscard = false }) { Text(stringResource(R.string.notice_discard_keep)) } },
++    )
++}
++
++@Composable
++private fun NoticeCard(notice: Notice, actionsEnabled: Boolean, onAction: (NoticeAction) -> Unit, onDismiss: () -> Unit) {
++    val context = LocalContext.current
++    val color = severityColor(notice.severity)
++    val time = DateUtils.formatDateTime(context, notice.timeMillis,
++        DateUtils.FORMAT_SHOW_TIME or DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_ABBREV_MONTH)
++    Card(Modifier.fillMaxWidth().testTag("notice_${notice.id}"), colors = CardDefaults.cardColors(containerColor = Color(0xFF111B28))) {
++        Column(Modifier.padding(12.dp)) {
++            Row(verticalAlignment = Alignment.CenterVertically) {
++                if (!notice.read) Box(Modifier.size(8.dp).background(color, CircleShape).testTag("unread_${notice.id}"))
++                if (!notice.read) Spacer(Modifier.width(6.dp))
++                Text(stringResource(severityRes(notice.severity)).uppercase(), color = color, fontSize = 10.sp, letterSpacing = 1.sp)
++                if (notice.live) Text(" · " + stringResource(R.string.notice_ongoing), color = Muted, fontSize = 10.sp)
++                Spacer(Modifier.weight(1f))
++                Text(time, color = Muted, fontSize = 11.sp)
++            }
++            Text(stringResource(noticeTitleRes(notice.kind)), fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
++            val body = notice.body?.takeIf { it.isNotBlank() }
++                ?: if (notice.kind == NoticeKind.PENDING_MESSAGE) stringResource(R.string.notice_body_pending) else null
++            if (body != null) Text(body, fontSize = 12.sp, color = Color(0xFFC9D3DE), modifier = Modifier.padding(top = 4.dp))
++            Row {
++                notice.actions.forEach { action ->
++                    TextButton(onClick = { onAction(action) }, enabled = actionsEnabled) { Text(stringResource(actionRes(action))) }
++                }
++                Spacer(Modifier.weight(1f))
++                TextButton(onClick = onDismiss) { Text(stringResource(R.string.notices_dismiss)) }
++            }
++        }
++    }
++}
+diff --git a/android/app/src/main/res/values-nl/strings_notifications.xml b/android/app/src/main/res/values-nl/strings_notifications.xml
+new file mode 100644
+index 00000000..34515c91
+--- /dev/null
++++ b/android/app/src/main/res/values-nl/strings_notifications.xml
+@@ -0,0 +1,30 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="notices_tab">Meldingen</string>
++    <string name="notices_empty">Geen meldingen. Verbindingsproblemen, mislukte downloads en fouten verschijnen hier.</string>
++    <string name="notices_clear_all">Alles wissen</string>
++    <string name="notices_dismiss">Sluiten</string>
++    <plurals name="notices_unread">
++        <item quantity="one">%1$d ongelezen melding</item>
++        <item quantity="other">%1$d ongelezen meldingen</item>
++    </plurals>
++    <string name="notice_severity_info">Info</string>
++    <string name="notice_severity_warning">Waarschuwing</string>
++    <string name="notice_severity_error">Fout</string>
++    <string name="notice_ongoing">Actueel</string>
++    <string name="notice_title_desktop_offline">Desktopverbinding</string>
++    <string name="notice_title_pending">Bericht wacht op bevestiging</string>
++    <string name="notice_title_model_download">Probleem met modeldownload</string>
++    <string name="notice_title_voice_download">Probleem met spraakpakket</string>
++    <string name="notice_title_error">Er ging iets mis</string>
++    <string name="notice_body_pending">Een bericht is mogelijk niet bij ANZU aangekomen. Veilig opnieuw proberen verstuurt het één keer, zonder dubbel werk.</string>
++    <string name="notice_action_retry_pending">Veilig opnieuw proberen</string>
++    <string name="notice_action_discard_pending">Verwijderen</string>
++    <string name="notice_action_pair">Desktop koppelen</string>
++    <string name="notice_action_scan_wifi">Wifi scannen</string>
++    <string name="notice_action_retry">Opnieuw proberen</string>
++    <string name="notice_action_open_settings">Instellingen openen</string>
++    <string name="notice_discard_title">Wachtend bericht verwijderen?</string>
++    <string name="notice_discard_body">ANZU is er mogelijk al mee bezig. Kijk bij Taken voordat je het opnieuw verstuurt. Verwijderen annuleert geen taak.</string>
++    <string name="notice_discard_keep">Bewaren</string>
++</resources>
+diff --git a/android/app/src/main/res/values/strings.xml b/android/app/src/main/res/values/strings.xml
+index 155cdfef..965d5fc0 100644
+--- a/android/app/src/main/res/values/strings.xml
++++ b/android/app/src/main/res/values/strings.xml
+@@ -1,5 +1,6 @@
+ <?xml version="1.0" encoding="utf-8"?>
+-<resources>
++<!-- Existing English-only strings; new UI strings go in their own translated files (see strings_notifications.xml). -->
++<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+     <string name="app_name">ANZU</string>
+     <string name="anzu_is_calling">ANZU is calling</string>
+     <string name="anzu_has_update">ANZU has an update</string>
+diff --git a/android/app/src/main/res/values/strings_notifications.xml b/android/app/src/main/res/values/strings_notifications.xml
+new file mode 100644
+index 00000000..ac5100ef
+--- /dev/null
++++ b/android/app/src/main/res/values/strings_notifications.xml
+@@ -0,0 +1,31 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- Notifications tab. Translated in values-nl; keep both files in sync (MissingTranslation is checked here). -->
++<resources>
++    <string name="notices_tab">Notifications</string>
++    <string name="notices_empty">No notifications. Connection problems, failed downloads and errors show up here.</string>
++    <string name="notices_clear_all">Clear all</string>
++    <string name="notices_dismiss">Dismiss</string>
++    <plurals name="notices_unread">
++        <item quantity="one">%1$d unread notification</item>
++        <item quantity="other">%1$d unread notifications</item>
++    </plurals>
++    <string name="notice_severity_info">Info</string>
++    <string name="notice_severity_warning">Warning</string>
++    <string name="notice_severity_error">Error</string>
++    <string name="notice_ongoing">Ongoing</string>
++    <string name="notice_title_desktop_offline">Desktop connection</string>
++    <string name="notice_title_pending">Message waiting for confirmation</string>
++    <string name="notice_title_model_download">Model download problem</string>
++    <string name="notice_title_voice_download">Voice pack problem</string>
++    <string name="notice_title_error">Something went wrong</string>
++    <string name="notice_body_pending">A message may not have reached ANZU. Retry safely sends it once, without duplicating work.</string>
++    <string name="notice_action_retry_pending">Retry safely</string>
++    <string name="notice_action_discard_pending">Discard</string>
++    <string name="notice_action_pair">Pair desktop</string>
++    <string name="notice_action_scan_wifi">Scan Wi-Fi</string>
++    <string name="notice_action_retry">Retry</string>
++    <string name="notice_action_open_settings">Open settings</string>
++    <string name="notice_discard_title">Discard pending message?</string>
++    <string name="notice_discard_body">ANZU may already be working on it. Check Tasks before sending it again. Discarding does not cancel a task.</string>
++    <string name="notice_discard_keep">Keep</string>
++</resources>
+diff --git a/android/app/src/test/java/com/jarvis/companion/NoticeStoreTest.kt b/android/app/src/test/java/com/jarvis/companion/NoticeStoreTest.kt
+new file mode 100644
+index 00000000..d68be77a
+--- /dev/null
++++ b/android/app/src/test/java/com/jarvis/companion/NoticeStoreTest.kt
+@@ -0,0 +1,215 @@
++package com.jarvis.companion
++
++import android.content.Context
++import androidx.compose.ui.test.assertIsNotEnabled
++import androidx.compose.ui.test.junit4.createComposeRule
++import androidx.compose.ui.test.onNodeWithTag
++import androidx.compose.ui.test.onNodeWithText
++import androidx.compose.ui.test.performClick
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.setValue
++import androidx.test.core.app.ApplicationProvider
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertTrue
++import org.junit.Before
++import org.junit.Rule
++import org.junit.Test
++import org.junit.runner.RunWith
++import org.robolectric.RobolectricTestRunner
++import org.robolectric.annotation.Config
++
++@RunWith(RobolectricTestRunner::class)
++@Config(sdk = [34])
++class NoticeStoreTest {
++    private lateinit var context: Context
++    private var now = 1_000_000L
++    private fun prefs() = context.getSharedPreferences(NoticeStore.PREFS, Context.MODE_PRIVATE)
++    private fun store(maxEvents: Int = 50, maxAgeMs: Long = 7L * 24 * 3600 * 1000) = NoticeStore(prefs(), { now }, maxEvents, maxAgeMs)
++    private val offline = LiveCondition(NoticeKind.DESKTOP_OFFLINE, NoticeSeverity.WARNING, "ANZU desktop unreachable", listOf(NoticeAction.SCAN_WIFI))
++
++    @Before fun setUp() {
++        context = ApplicationProvider.getApplicationContext()
++        prefs().edit().clear().commit()
++    }
++
++    @Test fun live_condition_appears_unread_and_clears_when_resolved() {
++        val s = store()
++        s.syncLive(listOf(offline))
++        val n = s.notices.value.single()
++        assertTrue(n.live); assertFalse(n.read); assertEquals(1, s.unreadCount())
++        assertEquals(listOf(NoticeAction.SCAN_WIFI), n.actions)
++        s.syncLive(emptyList())
++        assertTrue(s.notices.value.isEmpty())
++        assertEquals(0, s.unreadCount())
++    }
++
++    @Test fun live_condition_with_new_text_updates_and_is_unread_again() {
++        val s = store()
++        s.syncLive(listOf(offline))
++        s.markAllRead()
++        now += 1000
++        s.syncLive(listOf(offline)) // unchanged: stays read, keeps its time
++        assertTrue(s.notices.value.single().read)
++        assertEquals(1_000_000L, s.notices.value.single().timeMillis)
++        s.syncLive(listOf(offline.copy(body = "downloading companion model (40%)")))
++        val n = s.notices.value.single()
++        assertFalse(n.read); assertEquals(now, n.timeMillis); assertEquals("downloading companion model (40%)", n.body)
++    }
++
++    @Test fun dismissed_live_stays_hidden_across_restart_until_it_changes_or_recurs() {
++        store().apply { syncLive(listOf(offline)); dismiss(notices.value.single().id) }
++        val restarted = store()
++        restarted.syncLive(listOf(offline))
++        assertTrue(restarted.notices.value.isEmpty())
++        restarted.syncLive(emptyList())
++        restarted.syncLive(listOf(offline))
++        assertEquals(1, restarted.notices.value.size)
++    }
++
++    @Test fun read_state_of_live_notice_survives_restart() {
++        store().apply { syncLive(listOf(offline)); markAllRead() }
++        val restarted = store()
++        restarted.syncLive(listOf(offline))
++        assertTrue(restarted.notices.value.single().read)
++        assertEquals(0, restarted.unreadCount())
++    }
++
++    @Test fun events_are_dated_persisted_capped_and_aged_out() {
++        val s = store(maxEvents = 3, maxAgeMs = 10_000)
++        repeat(5) { i -> now += 3_000; s.postEvent(NoticeKind.ERROR, NoticeSeverity.ERROR, "error $i") }
++        assertEquals(listOf("error 4", "error 3", "error 2"), s.notices.value.map { it.body })
++        val restarted = store(maxEvents = 3, maxAgeMs = 10_000)
++        assertEquals(listOf("error 4", "error 3", "error 2"), restarted.notices.value.map { it.body })
++        now += 7_000 // error 2 is now 13 s old (> 10 s), error 3 exactly 10 s
++        val later = store(maxEvents = 3, maxAgeMs = 10_000)
++        assertEquals(listOf("error 4", "error 3"), later.notices.value.map { it.body })
++    }
++
++    @Test fun identical_event_within_two_seconds_is_folded() {
++        val s = store()
++        s.postEvent(NoticeKind.ERROR, NoticeSeverity.ERROR, "Microphone is unavailable")
++        now += 500
++        s.postEvent(NoticeKind.ERROR, NoticeSeverity.ERROR, "Microphone is unavailable")
++        assertEquals(1, s.notices.value.size)
++        now += 5_000
++        s.postEvent(NoticeKind.ERROR, NoticeSeverity.ERROR, "Microphone is unavailable")
++        assertEquals(2, s.notices.value.size)
++    }
++
++    @Test fun dismiss_and_clear_all_persist() {
++        val s = store()
++        s.postEvent(NoticeKind.ERROR, NoticeSeverity.ERROR, "a"); now += 3000
++        s.postEvent(NoticeKind.ERROR, NoticeSeverity.ERROR, "b")
++        s.syncLive(listOf(offline))
++        s.dismiss(s.notices.value.first { it.body == "a" }.id)
++        assertEquals(setOf("b", offline.body), store().also { it.syncLive(listOf(offline)) }.notices.value.map { it.body }.toSet())
++        s.clearAll()
++        assertTrue(s.notices.value.isEmpty())
++        val restarted = store()
++        restarted.syncLive(listOf(offline))
++        assertTrue(restarted.notices.value.isEmpty())
++    }
++
++    @Test fun mark_all_read_persists_for_events() {
++        store().apply { postEvent(NoticeKind.ERROR, NoticeSeverity.ERROR, "x"); markAllRead() }
++        assertEquals(0, store().unreadCount())
++    }
++
++    @Test fun rules_map_state_to_conditions() {
++        val unpairedOffline = NoticeRules.conditions(CompanionState(), paired = false)
++        assertEquals(listOf(NoticeKind.DESKTOP_OFFLINE), unpairedOffline.map { it.kind })
++        assertEquals(listOf(NoticeAction.PAIR), unpairedOffline.single().actions)
++        assertEquals(NoticeSeverity.WARNING, unpairedOffline.single().severity)
++
++        val phone = NoticeRules.conditions(CompanionState(localPackStatus = CompanionPackStatus.READY), paired = true).single()
++        assertEquals(NoticeSeverity.INFO, phone.severity)
++        assertEquals(listOf(NoticeAction.SCAN_WIFI), phone.actions)
++
++        val online = CompanionState(leaderReachable = true, connected = true)
++        assertTrue(NoticeRules.conditions(online, true).isEmpty())
++
++        val busy = NoticeRules.conditions(online.copy(pendingMessage = true, localPackError = "Download failed (503)",
++            voicePackError = "Download checksum mismatch"), true)
++        assertEquals(listOf(NoticeKind.PENDING_MESSAGE, NoticeKind.MODEL_DOWNLOAD, NoticeKind.VOICE_DOWNLOAD), busy.map { it.kind })
++        assertEquals(listOf(NoticeAction.RETRY_PENDING, NoticeAction.DISCARD_PENDING), busy[0].actions)
++        assertEquals(listOf(NoticeAction.RETRY_MODEL_DOWNLOAD), busy[1].actions)
++        assertEquals(listOf(NoticeAction.RETRY_VOICE_DOWNLOAD), busy[2].actions)
++
++        // A retry in flight hides the stale failure until it finishes.
++        val retrying = NoticeRules.conditions(online.copy(localPackError = "x", localPackStatus = CompanionPackStatus.DOWNLOADING,
++            voicePackError = "y", voiceSttStatus = CompanionVoicePackStatus.DOWNLOADING), true)
++        assertTrue(retrying.isEmpty())
++
++        assertEquals(listOf(NoticeAction.OPEN_APP_SETTINGS), NoticeRules.errorActions("Microphone permission is required for on-device voice"))
++        assertTrue(NoticeRules.errorActions("Upload failed").isEmpty())
++    }
++}
++
++@RunWith(RobolectricTestRunner::class)
++@Config(sdk = [34])
++class NotificationsScreenTest {
++    @get:Rule val compose = createComposeRule()
++
++    private val pending = Notice("live-PENDING_MESSAGE", NoticeKind.PENDING_MESSAGE, NoticeSeverity.WARNING, null, 1_700_000_000_000L,
++        live = true, read = false, actions = listOf(NoticeAction.RETRY_PENDING, NoticeAction.DISCARD_PENDING))
++    private val error = Notice("evt-1", NoticeKind.ERROR, NoticeSeverity.ERROR, "Upload failed", 1_700_000_100_000L,
++        live = false, read = true, actions = emptyList())
++
++    @Test fun shows_title_severity_body_and_runs_actions() {
++        val actions = mutableListOf<NoticeAction>(); val dismissed = mutableListOf<String>(); var cleared = 0
++        compose.setContent { NotificationsScreen(listOf(error, pending), true, { actions += it }, { dismissed += it }, { cleared++ }) }
++        compose.onNodeWithText("Message waiting for confirmation").assertExists()
++        compose.onNodeWithText("WARNING").assertExists()
++        compose.onNodeWithText("ERROR").assertExists()
++        compose.onNodeWithText("Upload failed").assertExists()
++        compose.onNodeWithTag("unread_${pending.id}").assertExists()
++        compose.onNodeWithTag("unread_${error.id}").assertDoesNotExist()
++        compose.onNodeWithText("Retry safely").performClick()
++        assertEquals(listOf(NoticeAction.RETRY_PENDING), actions)
++        // Discard needs a confirmation first.
++        compose.onNodeWithText("Discard").performClick()
++        assertEquals(1, actions.size)
++        compose.onNodeWithText("Discard pending message?").assertExists()
++        compose.onNodeWithText("Keep").performClick()
++        assertEquals(1, actions.size)
++        compose.onNodeWithText("Discard").performClick()
++        compose.onAllNodes(androidx.compose.ui.test.hasText("Discard") and androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.isDialog()))[0].performClick()
++        assertEquals(listOf(NoticeAction.RETRY_PENDING, NoticeAction.DISCARD_PENDING), actions)
++        compose.onAllNodes(androidx.compose.ui.test.hasText("Dismiss"))[0].performClick()
++        assertEquals(1, dismissed.size)
++        compose.onNodeWithText("Clear all").performClick()
++        assertEquals(1, cleared)
++    }
++
++    @Test fun actions_disabled_while_busy() {
++        compose.setContent { NotificationsScreen(listOf(pending), false, {}, {}, {}) }
++        compose.onNodeWithText("Retry safely").assertIsNotEnabled()
++    }
++
++    @Test fun empty_state() {
++        compose.setContent { NotificationsScreen(emptyList(), true, {}, {}, {}) }
++        compose.onNodeWithText("No notifications", substring = true).assertExists()
++        compose.onNodeWithText("Clear all").assertDoesNotExist()
++    }
++
++    @Test fun home_indicator_shows_count_and_hides_when_all_read() {
++        var unread by androidx.compose.runtime.mutableStateOf(3)
++        var clicks = 0
++        compose.setContent { HomeNoticeIndicator(unread) { clicks++ } }
++        compose.onNodeWithText("3").assertExists()
++        compose.onNodeWithTag("home_notice_indicator").performClick()
++        assertEquals(1, clicks)
++        unread = 0
++        compose.onNodeWithTag("home_notice_indicator").assertDoesNotExist()
++    }
++
++    @Config(qualifiers = "nl")
++    @Test fun dutch_strings() {
++        compose.setContent { NotificationsScreen(listOf(pending), true, {}, {}, {}) }
++        compose.onNodeWithText("Meldingen").assertExists()
++        compose.onNodeWithText("Bericht wacht op bevestiging").assertExists()
++        compose.onNodeWithText("Veilig opnieuw proberen").assertExists()
++        compose.onNodeWithText("WAARSCHUWING").assertExists()
++    }
++}

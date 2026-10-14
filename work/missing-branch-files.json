@@ -1,0 +1,58 @@
+[
+  {
+    "Branch": "agent-platform-watch",
+    "Missing": ""
+  },
+  {
+    "Branch": "codex/ui",
+    "Missing": "tools/verify_command_intake.py"
+  },
+  {
+    "Branch": "cursor/android-connected-local-99ea",
+    "Missing": "android/app/src/androidTest/java/com/jarvis/companion/LocalAssistantRuntimeTest.kt, android/app/src/main/java/com/jarvis/companion/AnzuAccessibilityService.kt, android/app/src/main/java/com/jarvis/companion/AnzuVoiceInteraction.kt, android/app/src/main/java/com/jarvis/companion/AnzuWakeService.kt, android/app/src/main/java/com/jarvis/companion/AssistantSettings.kt, android/app/src/main/java/com/jarvis/companion/PhoneTools.kt, android/app/src/main/res/xml/anzu_accessibility.xml, android/app/src/main/res/xml/anzu_voice_interaction.xml, android/app/src/test/java/com/jarvis/companion/PhoneToolsTest.kt, android/build-0215.log, backend/app/mobile/phone_setup.py, backend/app/mobile/phone_tools.py, backend/app/tools/mobile_apps.py, docs/rfcs/0215-android-connected-local-assistant.md, frontend/src/components/PhoneConnectionSetup.tsx, pytest-0215.log, tests/test_rfc0215_phone_assistant.py"
+  },
+  {
+    "Branch": "cursor/installer-default-models-647b",
+    "Missing": "backend/app/inference/model_discovery.py, backend/app/tts/voicestudio_supervisor.py, docs/rfcs/0194-installer-model-selection-lukey-voicestudio.md, docs/rfcs/0195-integrations-expansion.md, frontend/src/presence/ShipnotesSignalOrb.tsx, tests/test_model_discovery.py, tests/test_voicestudio_supervisor.py, tools/discover_local_models.py"
+  },
+  {
+    "Branch": "cursor/qwen-local-worker-99ea",
+    "Missing": ".cursor/rules/qwen-local-worker.mdc, tools/qwen-worker/Invoke-QwenWorker.ps1, tools/qwen-worker/QwenWorker.Modelfile, tools/qwen-worker/README.md"
+  },
+  {
+    "Branch": "cursor/shipnotes-blackgrid-a25b",
+    "Missing": "backend/app/api/blackgrid.py, backend/app/studio/__init__.py, backend/app/studio/blackgrid_runtime.py, backend/app/studio/comfy_client.py, backend/app/studio/workflow.py, backend/app/studio/workflows/hr_endless_template.json, backend/app/tools/blackgrid_studio.py, frontend/public/vendor/shipnotes/project-stack.js, frontend/public/vendor/shipnotes/pull-lamp.js, frontend/public/vendor/shipnotes/signal-orb.js, frontend/public/vendor/shipnotes/voice-orb.js, frontend/src/pages/BlackGridStudio.tsx, frontend/src/vendor/shipnotes/BlackGridProjectStack.tsx, frontend/src/vendor/shipnotes/PullLampThemeToggle.tsx, frontend/src/vendor/shipnotes/ShipNotesSignalOrb.tsx, frontend/src/vendor/shipnotes/ShipNotesVoiceOrb.tsx, frontend/src/vendor/shipnotes/loadShipNotesScripts.ts, tests/test_blackgrid_studio.py"
+  },
+  {
+    "Branch": "feature/anzu-competitive-parity-rfcs",
+    "Missing": ""
+  },
+  {
+    "Branch": "re/apk-sidecar-s3-rescue-20261013-0137",
+    "Missing": ""
+  },
+  {
+    "Branch": "re/apk-sidecar-s4-rescue-20261013-0137",
+    "Missing": ""
+  },
+  {
+    "Branch": "re/apk-sidecar-s5-rescue-20261013-1337",
+    "Missing": ""
+  },
+  {
+    "Branch": "re/apk-sidecar-s6-rescue-20261013-1637",
+    "Missing": ""
+  },
+  {
+    "Branch": "re/apk-sidecar-s8-rescue-20261013-1937",
+    "Missing": ""
+  },
+  {
+    "Branch": "re/tab-analyzer-wire",
+    "Missing": ""
+  },
+  {
+    "Branch": "rescue/Jarvis-20261011-0217",
+    "Missing": ".cursor/rules/qwen-local-worker.mdc, .cursorignore, Desktop/_check_companion_cfg.py, Desktop/_diag_stuck.py, Desktop/_enqueue_coding_live.py, Desktop/_enqueue_ufo_solo.py, Desktop/_goal_live_round.py, Desktop/_poll_coding_ufo.py, Desktop/_probe_llama_tools.py, Desktop/_task_snap.py, Desktop/_ufo_marker.txt, Desktop/coding-live-poll.py, Desktop/goal-live-probe.py, Desktop/harm-veto-poll-run.py, Desktop/harm-veto-poll.txt, Desktop/jarvis-coding-live.py, Desktop/jarvis-progress-check.txt, Desktop/leftover-live-probe.py, frontend/public/presence/apex-reference/SOURCE.md, frontend/public/presence/apex-reference/backdrop.webp, frontend/public/presence/apex-reference/idle.webp, tools/ANZU-LocalWorker.ps1, voice_packs/synthetic_command_original_v1/pack.json, voice_packs/tactical_aide_original_v1/pack.json"
+  }
+]
