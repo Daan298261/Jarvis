@@ -46,9 +46,10 @@ def dial_host(value: str) -> str:
 
 def lan_hosts():
     from ..api.mobile import _lan_hosts
-    from .wan_forward import is_rfc1918_ipv4
+    from .wan_forward import is_rfc1918_ipv4, order_lan_hosts
 
-    return [host for host in _lan_hosts() if is_rfc1918_ipv4(host)]
+    hosts = [host for host in _lan_hosts() if is_rfc1918_ipv4(host)]
+    return order_lan_hosts(hosts)
 
 
 def preferred_lan_ipv4(gateway: str = "") -> str:
