@@ -1,0 +1,30 @@
+[cursor/recover-studio-99ea f9f2c3ff] Integrate Ship Notes orbs and BlackGrid HR Endless Sampler studio
+ Author: Cursor Agent <cursoragent@cursor.com>
+ Date: Tue Sep 29 13:49:04 2026 +0000
+ 33 files changed, 2041 insertions(+), 12 deletions(-)
+ create mode 100644 backend/app/api/blackgrid.py
+ create mode 100644 backend/app/studio/__init__.py
+ create mode 100644 backend/app/studio/blackgrid_runtime.py
+ create mode 100644 backend/app/studio/comfy_client.py
+ create mode 100644 backend/app/studio/workflow.py
+ create mode 100644 backend/app/studio/workflows/hr_endless_template.json
+ create mode 100644 backend/app/tools/blackgrid_studio.py
+ create mode 100644 frontend/public/vendor/shipnotes/project-stack.js
+ create mode 100644 frontend/public/vendor/shipnotes/pull-lamp.js
+ create mode 100644 frontend/public/vendor/shipnotes/signal-orb.js
+ create mode 100644 frontend/public/vendor/shipnotes/voice-orb.js
+ create mode 100644 frontend/src/pages/BlackGridStudio.tsx
+ create mode 100644 frontend/src/vendor/shipnotes/ShipNotesSignalOrb.tsx
+ create mode 100644 frontend/src/vendor/shipnotes/ShipNotesVoiceOrb.tsx
+ create mode 100644 frontend/src/vendor/shipnotes/loadShipNotesScripts.ts
+ create mode 100644 tests/test_blackgrid_studio.py
+Auto-merging frontend/src/settings/AppearanceSettingsPane.tsx
+CONFLICT (content): Merge conflict in frontend/src/settings/AppearanceSettingsPane.tsx
+error: could not apply 2f14ecf0... Add Ship Notes project stack and pull-lamp theme toggle to studio UI
+hint: After resolving the conflicts, mark them with
+hint: "git add/rm <pathspec>", then run
+hint: "git cherry-pick --continue".
+hint: You can instead skip this commit with "git cherry-pick --skip".
+hint: To abort and get back to the state before "git cherry-pick",
+hint: run "git cherry-pick --abort".
+hint: Disable this message with "git config set advice.mergeConflict false"

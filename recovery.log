@@ -1,0 +1,27 @@
+Auto-merging backend/app/api/modules.py
+Auto-merging backend/app/api/settings.py
+Auto-merging backend/app/config.py
+Auto-merging backend/app/main.py
+CONFLICT (content): Merge conflict in backend/app/main.py
+Auto-merging backend/app/setup_interview.py
+CONFLICT (content): Merge conflict in backend/app/setup_interview.py
+Auto-merging backend/app/tools/exposure.py
+Auto-merging backend/app/tools/registry.py
+Auto-merging frontend/src/App.tsx
+Auto-merging frontend/src/api.ts
+Auto-merging frontend/src/pages/Setup.tsx
+CONFLICT (content): Merge conflict in frontend/src/pages/Setup.tsx
+Auto-merging frontend/src/presence/presenceTypes.ts
+Auto-merging frontend/src/presence/presentationSettings.ts
+CONFLICT (content): Merge conflict in frontend/src/presence/presentationSettings.ts
+Auto-merging frontend/src/presence/renderers/NeuralPresence.tsx
+CONFLICT (content): Merge conflict in frontend/src/presence/renderers/NeuralPresence.tsx
+Auto-merging frontend/src/settings/AppearanceSettingsPane.tsx
+error: could not apply a393eeb7... Integrate Ship Notes orbs and BlackGrid HR Endless Sampler studio
+hint: After resolving the conflicts, mark them with
+hint: "git add/rm <pathspec>", then run
+hint: "git cherry-pick --continue".
+hint: You can instead skip this commit with "git cherry-pick --skip".
+hint: To abort and get back to the state before "git cherry-pick",
+hint: run "git cherry-pick --abort".
+hint: Disable this message with "git config set advice.mergeConflict false"

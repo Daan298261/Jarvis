@@ -1,0 +1,255 @@
+pytest	Run full backend suite	﻿2026-10-14T11:25:09.2496670Z ##[group]Run python -m pytest -q -rs
+pytest	Run full backend suite	2026-10-14T11:25:09.2497059Z ^[[36;1mpython -m pytest -q -rs^[[0m
+pytest	Run full backend suite	2026-10-14T11:25:09.2558873Z shell: /usr/bin/bash -e {0}
+pytest	Run full backend suite	2026-10-14T11:25:09.2559136Z env:
+pytest	Run full backend suite	2026-10-14T11:25:09.2559330Z   JARVIS_SKIP_MODEL: 1
+pytest	Run full backend suite	2026-10-14T11:25:09.2559572Z   PYTHONPATH: backend
+pytest	Run full backend suite	2026-10-14T11:25:09.2559872Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Run full backend suite	2026-10-14T11:25:09.2560324Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib/pkgconfig
+pytest	Run full backend suite	2026-10-14T11:25:09.2560793Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Run full backend suite	2026-10-14T11:25:09.2561215Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Run full backend suite	2026-10-14T11:25:09.2561625Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.15/x64
+pytest	Run full backend suite	2026-10-14T11:25:09.2562037Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.15/x64/lib
+pytest	Run full backend suite	2026-10-14T11:25:09.2562514Z   ANZU_TEST_JAVA: /home/runner/work/_temp/re-tools/jdk/jdk-21.0.12.1+1/bin/java
+pytest	Run full backend suite	2026-10-14T11:25:09.2563071Z   ANZU_TEST_APKTOOL_JAR: /home/runner/work/_temp/re-tools/downloads/apktool_2.10.0.jar
+pytest	Run full backend suite	2026-10-14T11:25:09.2563620Z   ANZU_TEST_JADX: /home/runner/work/_temp/re-tools/jadx/bin/jadx
+pytest	Run full backend suite	2026-10-14T11:25:09.2563987Z   ANZU_TEST_READELF: /usr/bin/readelf
+pytest	Run full backend suite	2026-10-14T11:25:09.2564327Z   JAVA_HOME: /home/runner/work/_temp/re-tools/jdk/jdk-21.0.12.1+1
+pytest	Run full backend suite	2026-10-14T11:25:09.2564678Z ##[endgroup]
+pytest	Run full backend suite	2026-10-14T11:25:30.9583648Z ........................................................................ [  2%]
+pytest	Run full backend suite	2026-10-14T11:25:37.7080945Z ........................................................................ [  4%]
+pytest	Run full backend suite	2026-10-14T11:25:43.3310619Z ........................................................................ [  6%]
+pytest	Run full backend suite	2026-10-14T11:25:46.0366259Z ........................................................................ [  9%]
+pytest	Run full backend suite	2026-10-14T11:25:49.6007393Z ........................................................................ [ 11%]
+pytest	Run full backend suite	2026-10-14T11:25:53.4943054Z ........................................................................ [ 13%]
+pytest	Run full backend suite	2026-10-14T11:25:57.0948470Z ........................................................................ [ 16%]
+pytest	Run full backend suite	2026-10-14T11:26:01.0166032Z ........................................................................ [ 18%]
+pytest	Run full backend suite	2026-10-14T11:26:18.3493480Z ........................................................................ [ 20%]
+pytest	Run full backend suite	2026-10-14T11:26:22.5789688Z ........................................................................ [ 23%]
+pytest	Run full backend suite	2026-10-14T11:26:23.1155339Z ........................................................................ [ 25%]
+pytest	Run full backend suite	2026-10-14T11:26:31.7595044Z ........................................................................ [ 27%]
+pytest	Run full backend suite	2026-10-14T11:26:34.8878469Z ........................................................................ [ 30%]
+pytest	Run full backend suite	2026-10-14T11:26:41.2061110Z ........................................................................ [ 32%]
+pytest	Run full backend suite	2026-10-14T11:26:45.1322419Z ........................................................................ [ 34%]
+pytest	Run full backend suite	2026-10-14T11:26:52.9406391Z ........................................................................ [ 37%]
+pytest	Run full backend suite	2026-10-14T11:26:56.4901977Z ........................................................................ [ 39%]
+pytest	Run full backend suite	2026-10-14T11:27:04.4110220Z ........................................................................ [ 41%]
+pytest	Run full backend suite	2026-10-14T11:27:13.8464401Z ........................................................................ [ 44%]
+pytest	Run full backend suite	2026-10-14T11:27:48.3412639Z ...............FF....................................................... [ 46%]
+pytest	Run full backend suite	2026-10-14T11:27:52.9994075Z ........................................................................ [ 48%]
+pytest	Run full backend suite	2026-10-14T11:27:57.9198016Z ........................................................................ [ 51%]
+pytest	Run full backend suite	2026-10-14T11:28:00.3754374Z ........................................................................ [ 53%]
+pytest	Run full backend suite	2026-10-14T11:28:04.5767438Z ........................................................................ [ 55%]
+pytest	Run full backend suite	2026-10-14T11:28:12.3990089Z ........................................................................ [ 58%]
+pytest	Run full backend suite	2026-10-14T11:28:20.4643621Z ........................................................................ [ 60%]
+pytest	Run full backend suite	2026-10-14T11:28:45.1252872Z ........................................................................ [ 62%]
+pytest	Run full backend suite	2026-10-14T11:28:46.5579523Z ........................................................................ [ 65%]
+pytest	Run full backend suite	2026-10-14T11:28:54.5167704Z ........................................................................ [ 67%]
+pytest	Run full backend suite	2026-10-14T11:29:21.0392106Z ........................................................................ [ 69%]
+pytest	Run full backend suite	2026-10-14T11:29:24.5475005Z ........................................................................ [ 72%]
+pytest	Run full backend suite	2026-10-14T11:29:26.9301539Z ........................................................................ [ 74%]
+pytest	Run full backend suite	2026-10-14T11:29:29.4400294Z ........................................................................ [ 76%]
+pytest	Run full backend suite	2026-10-14T11:29:33.1045772Z ........................................................................ [ 79%]
+pytest	Run full backend suite	2026-10-14T11:29:36.3213634Z ........................................................................ [ 81%]
+pytest	Run full backend suite	2026-10-14T11:29:45.3353903Z ........................................................................ [ 83%]
+pytest	Run full backend suite	2026-10-14T11:29:49.9383440Z ........................................................................ [ 86%]
+pytest	Run full backend suite	2026-10-14T11:29:54.9610554Z ........................................................................ [ 88%]
+pytest	Run full backend suite	2026-10-14T11:30:00.2233261Z ...............................s........................................ [ 90%]
+pytest	Run full backend suite	2026-10-14T11:30:03.1360803Z ........................................................................ [ 93%]
+pytest	Run full backend suite	2026-10-14T11:30:15.9469551Z ........................................................................ [ 95%]
+pytest	Run full backend suite	2026-10-14T11:30:19.5524393Z ........................................................................ [ 97%]
+pytest	Run full backend suite	2026-10-14T11:30:29.1743265Z .................................................................        [100%]
+pytest	Run full backend suite	2026-10-14T11:30:29.1744692Z =================================== FAILURES ===================================
+pytest	Run full backend suite	2026-10-14T11:30:29.1750358Z __________ test_edge_overlay_does_not_band_or_scrim_the_figure[False] __________
+pytest	Run full backend suite	2026-10-14T11:30:29.1751414Z 
+pytest	Run full backend suite	2026-10-14T11:30:29.1751614Z galaxy = False
+pytest	Run full backend suite	2026-10-14T11:30:29.1752527Z tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-3/test_edge_overlay_does_not_ban0')
+pytest	Run full backend suite	2026-10-14T11:30:29.1753011Z 
+pytest	Run full backend suite	2026-10-14T11:30:29.1753231Z     @pytest.mark.parametrize("galaxy", [False, True])
+pytest	Run full backend suite	2026-10-14T11:30:29.1753952Z     def test_edge_overlay_does_not_band_or_scrim_the_figure(galaxy: bool, tmp_path: Path):
+pytest	Run full backend suite	2026-10-14T11:30:29.1754529Z         suffix = "galaxy" if galaxy else "helmet"
+pytest	Run full backend suite	2026-10-14T11:30:29.1755252Z         html = tmp_path / f"{suffix}.html"
+pytest	Run full backend suite	2026-10-14T11:30:29.1755595Z         png = tmp_path / f"{suffix}.png"
+pytest	Run full backend suite	2026-10-14T11:30:29.1756008Z         galaxy_attr = ' data-galaxy="true"' if galaxy else ""
+pytest	Run full backend suite	2026-10-14T11:30:29.1756493Z         css = (RENDERERS / "humanoid-presence.css").resolve().as_uri()
+pytest	Run full backend suite	2026-10-14T11:30:29.1756879Z         html.write_text(
+pytest	Run full backend suite	2026-10-14T11:30:29.1757172Z             f"""<!DOCTYPE html>
+pytest	Run full backend suite	2026-10-14T11:30:29.1757447Z     <html>
+pytest	Run full backend suite	2026-10-14T11:30:29.1757745Z     <head>
+pytest	Run full backend suite	2026-10-14T11:30:29.1757978Z       <link rel="stylesheet" href="{css}">
+pytest	Run full backend suite	2026-10-14T11:30:29.1758285Z       <style>
+pytest	Run full backend suite	2026-10-14T11:30:29.1758570Z         html, body {{ margin: 0; background: #010308; }}
+pytest	Run full backend suite	2026-10-14T11:30:29.1758912Z         .proof {{
+pytest	Run full backend suite	2026-10-14T11:30:29.1759149Z           width: 1400px;
+pytest	Run full backend suite	2026-10-14T11:30:29.1759387Z           height: 900px;
+pytest	Run full backend suite	2026-10-14T11:30:29.1759623Z         }}
+pytest	Run full backend suite	2026-10-14T11:30:29.1759810Z         .figure {{
+pytest	Run full backend suite	2026-10-14T11:30:29.1760055Z           position: absolute;
+pytest	Run full backend suite	2026-10-14T11:30:29.1760313Z           inset: 0;
+pytest	Run full backend suite	2026-10-14T11:30:29.1760585Z           background: #3ec8ff;
+pytest	Run full backend suite	2026-10-14T11:30:29.1760876Z         }}
+pytest	Run full backend suite	2026-10-14T11:30:29.1761058Z       </style>
+pytest	Run full backend suite	2026-10-14T11:30:29.1761253Z     </head>
+pytest	Run full backend suite	2026-10-14T11:30:29.1761449Z     <body>
+pytest	Run full backend suite	2026-10-14T11:30:29.1761769Z       <div class="proof jarvis-presence-humanoid"{galaxy_attr}>
+pytest	Run full backend suite	2026-10-14T11:30:29.1762437Z         <div class="figure"></div>
+pytest	Run full backend suite	2026-10-14T11:30:29.1762693Z       </div>
+pytest	Run full backend suite	2026-10-14T11:30:29.1762902Z     </body>
+pytest	Run full backend suite	2026-10-14T11:30:29.1763115Z     </html>
+pytest	Run full backend suite	2026-10-14T11:30:29.1763301Z     """,
+pytest	Run full backend suite	2026-10-14T11:30:29.1763521Z             encoding="utf-8",
+pytest	Run full backend suite	2026-10-14T11:30:29.1763751Z         )
+pytest	Run full backend suite	2026-10-14T11:30:29.1763987Z >       _capture(html, png)
+pytest	Run full backend suite	2026-10-14T11:30:29.1764139Z 
+pytest	Run full backend suite	2026-10-14T11:30:29.1764332Z tests/test_presence_black_bands.py:177: 
+pytest	Run full backend suite	2026-10-14T11:30:29.1765029Z _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+pytest	Run full backend suite	2026-10-14T11:30:29.1765331Z 
+pytest	Run full backend suite	2026-10-14T11:30:29.1765775Z html = PosixPath('/tmp/pytest-of-runner/pytest-3/test_edge_overlay_does_not_ban0/helmet.html')
+pytest	Run full backend suite	2026-10-14T11:30:29.1766603Z png = PosixPath('/tmp/pytest-of-runner/pytest-3/test_edge_overlay_does_not_ban0/helmet.png')
+pytest	Run full backend suite	2026-10-14T11:30:29.1766977Z 
+pytest	Run full backend suite	2026-10-14T11:30:29.1767181Z     def _capture(html: Path, png: Path) -> None:
+pytest	Run full backend suite	2026-10-14T11:30:29.1767525Z         chrome = _chrome()
+pytest	Run full backend suite	2026-10-14T11:30:29.1767798Z         if chrome is None:
+pytest	Run full backend suite	2026-10-14T11:30:29.1768147Z             pytest.skip("headless chrome is not installed")
+pytest	Run full backend suite	2026-10-14T11:30:29.1768593Z         png.parent.mkdir(parents=True, exist_ok=True)
+pytest	Run full backend suite	2026-10-14T11:30:29.1768968Z         profile = png.parent / "profile"
+pytest	Run full backend suite	2026-10-14T11:30:29.1769275Z         if profile.exists():
+pytest	Run full backend suite	2026-10-14T11:30:29.1769573Z             shutil.rmtree(profile)
+pytest	Run full backend suite	2026-10-14T11:30:29.1769842Z         cmd = [
+pytest	Run full backend suite	2026-10-14T11:30:29.1770077Z             chrome,
+pytest	Run full backend suite	2026-10-14T11:30:29.1770318Z             "--headless=new",
+pytest	Run full backend suite	2026-10-14T11:30:29.1770582Z             "--no-sandbox",
+pytest	Run full backend suite	2026-10-14T11:30:29.1770872Z             "--disable-dev-shm-usage",
+pytest	Run full backend suite	2026-10-14T11:30:29.1771175Z             "--disable-gpu",
+pytest	Run full backend suite	2026-10-14T11:30:29.1771456Z             "--hide-scrollbars",
+pytest	Run full backend suite	2026-10-14T11:30:29.1771778Z             f"--user-data-dir={profile}",
+pytest	Run full backend suite	2026-10-14T11:30:29.1772130Z             "--window-size=1400,900",
+pytest	Run full backend suite	2026-10-14T11:30:29.1772456Z             f"--screenshot={png}",
+pytest	Run full backend suite	2026-10-14T11:30:29.1772769Z             "--virtual-time-budget=2000",
+pytest	Run full backend suite	2026-10-14T11:30:29.1773224Z             html.as_uri(),
+pytest	Run full backend suite	2026-10-14T11:30:29.1773472Z         ]
+pytest	Run full backend suite	2026-10-14T11:30:29.1773789Z         proc = subprocess.Popen(
+pytest	Run full backend suite	2026-10-14T11:30:29.1774094Z             cmd,
+pytest	Run full backend suite	2026-10-14T11:30:29.1774338Z             stdout=subprocess.DEVNULL,
+pytest	Run full backend suite	2026-10-14T11:30:29.1774639Z             stderr=subprocess.DEVNULL,
+pytest	Run full backend suite	2026-10-14T11:30:29.1795476Z             start_new_session=True,
+pytest	Run full backend suite	2026-10-14T11:30:29.1795823Z         )
+pytest	Run full backend suite	2026-10-14T11:30:29.1796118Z         deadline = time.time() + 15
+pytest	Run full backend suite	2026-10-14T11:30:29.1796411Z         try:
+pytest	Run full backend suite	2026-10-14T11:30:29.1796688Z             while time.time() < deadline:
+pytest	Run full backend suite	2026-10-14T11:30:29.1797107Z                 if png.exists() and png.stat().st_size > 1000:
+pytest	Run full backend suite	2026-10-14T11:30:29.1797475Z                     break
+pytest	Run full backend suite	2026-10-14T11:30:29.1797763Z                 if proc.poll() is not None:
+pytest	Run full backend suite	2026-10-14T11:30:29.1798068Z                     break
+pytest	Run full backend suite	2026-10-14T11:30:29.1798355Z                 time.sleep(0.2)
+pytest	Run full backend suite	2026-10-14T11:30:29.1798630Z         finally:
+pytest	Run full backend suite	2026-10-14T11:30:29.1798927Z             if proc.poll() is None:
+pytest	Run full backend suite	2026-10-14T11:30:29.1799307Z                 os.killpg(proc.pid, signal.SIGKILL)
+pytest	Run full backend suite	2026-10-14T11:30:29.1799658Z                 proc.wait(timeout=5)
+pytest	Run full backend suite	2026-10-14T11:30:29.1800019Z         if not png.exists() or png.stat().st_size < 1000:
+pytest	Run full backend suite	2026-10-14T11:30:29.1800525Z >           raise AssertionError(f"headless chrome did not write {png}")
+pytest	Run full backend suite	2026-10-14T11:30:29.1801395Z E           AssertionError: headless chrome did not write /tmp/pytest-of-runner/pytest-3/test_edge_overlay_does_not_ban0/helmet.png
+pytest	Run full backend suite	2026-10-14T11:30:29.1801925Z 
+pytest	Run full backend suite	2026-10-14T11:30:29.1802300Z tests/test_presence_black_bands.py:113: AssertionError
+pytest	Run full backend suite	2026-10-14T11:30:29.1803376Z __________ test_edge_overlay_does_not_band_or_scrim_the_figure[True] ___________
+pytest	Run full backend suite	2026-10-14T11:30:29.1803909Z 
+pytest	Run full backend suite	2026-10-14T11:30:29.1804011Z galaxy = True
+pytest	Run full backend suite	2026-10-14T11:30:29.1804518Z tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-3/test_edge_overlay_does_not_ban1')
+pytest	Run full backend suite	2026-10-14T11:30:29.1805485Z 
+pytest	Run full backend suite	2026-10-14T11:30:29.1805714Z     @pytest.mark.parametrize("galaxy", [False, True])
+pytest	Run full backend suite	2026-10-14T11:30:29.1806324Z     def test_edge_overlay_does_not_band_or_scrim_the_figure(galaxy: bool, tmp_path: Path):
+pytest	Run full backend suite	2026-10-14T11:30:29.1806893Z         suffix = "galaxy" if galaxy else "helmet"
+pytest	Run full backend suite	2026-10-14T11:30:29.1807287Z         html = tmp_path / f"{suffix}.html"
+pytest	Run full backend suite	2026-10-14T11:30:29.1807769Z         png = tmp_path / f"{suffix}.png"
+pytest	Run full backend suite	2026-10-14T11:30:29.1808190Z         galaxy_attr = ' data-galaxy="true"' if galaxy else ""
+pytest	Run full backend suite	2026-10-14T11:30:29.1808680Z         css = (RENDERERS / "humanoid-presence.css").resolve().as_uri()
+pytest	Run full backend suite	2026-10-14T11:30:29.1809081Z         html.write_text(
+pytest	Run full backend suite	2026-10-14T11:30:29.1809365Z             f"""<!DOCTYPE html>
+pytest	Run full backend suite	2026-10-14T11:30:29.1809622Z     <html>
+pytest	Run full backend suite	2026-10-14T11:30:29.1809820Z     <head>
+pytest	Run full backend suite	2026-10-14T11:30:29.1810091Z       <link rel="stylesheet" href="{css}">
+pytest	Run full backend suite	2026-10-14T11:30:29.1810393Z       <style>
+pytest	Run full backend suite	2026-10-14T11:30:29.1810686Z         html, body {{ margin: 0; background: #010308; }}
+pytest	Run full backend suite	2026-10-14T11:30:29.1811218Z         .proof {{
+pytest	Run full backend suite	2026-10-14T11:30:29.1824330Z           width: 1400px;
+pytest	Run full backend suite	2026-10-14T11:30:29.1825371Z           height: 900px;
+pytest	Run full backend suite	2026-10-14T11:30:29.1825861Z         }}
+pytest	Run full backend suite	2026-10-14T11:30:29.1826211Z         .figure {{
+pytest	Run full backend suite	2026-10-14T11:30:29.1826669Z           position: absolute;
+pytest	Run full backend suite	2026-10-14T11:30:29.1827052Z           inset: 0;
+pytest	Run full backend suite	2026-10-14T11:30:29.1827332Z           background: #3ec8ff;
+pytest	Run full backend suite	2026-10-14T11:30:29.1827588Z         }}
+pytest	Run full backend suite	2026-10-14T11:30:29.1827797Z       </style>
+pytest	Run full backend suite	2026-10-14T11:30:29.1827995Z     </head>
+pytest	Run full backend suite	2026-10-14T11:30:29.1828208Z     <body>
+pytest	Run full backend suite	2026-10-14T11:30:29.1828548Z       <div class="proof jarvis-presence-humanoid"{galaxy_attr}>
+pytest	Run full backend suite	2026-10-14T11:30:29.1828980Z         <div class="figure"></div>
+pytest	Run full backend suite	2026-10-14T11:30:29.1829260Z       </div>
+pytest	Run full backend suite	2026-10-14T11:30:29.1829453Z     </body>
+pytest	Run full backend suite	2026-10-14T11:30:29.1829652Z     </html>
+pytest	Run full backend suite	2026-10-14T11:30:29.1829851Z     """,
+pytest	Run full backend suite	2026-10-14T11:30:29.1830054Z             encoding="utf-8",
+pytest	Run full backend suite	2026-10-14T11:30:29.1830321Z         )
+pytest	Run full backend suite	2026-10-14T11:30:29.1830555Z >       _capture(html, png)
+pytest	Run full backend suite	2026-10-14T11:30:29.1830741Z 
+pytest	Run full backend suite	2026-10-14T11:30:29.1831162Z tests/test_presence_black_bands.py:177: 
+pytest	Run full backend suite	2026-10-14T11:30:29.1831600Z _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+pytest	Run full backend suite	2026-10-14T11:30:29.1831876Z 
+pytest	Run full backend suite	2026-10-14T11:30:29.1832322Z html = PosixPath('/tmp/pytest-of-runner/pytest-3/test_edge_overlay_does_not_ban1/galaxy.html')
+pytest	Run full backend suite	2026-10-14T11:30:29.1833143Z png = PosixPath('/tmp/pytest-of-runner/pytest-3/test_edge_overlay_does_not_ban1/galaxy.png')
+pytest	Run full backend suite	2026-10-14T11:30:29.1833581Z 
+pytest	Run full backend suite	2026-10-14T11:30:29.1833755Z     def _capture(html: Path, png: Path) -> None:
+pytest	Run full backend suite	2026-10-14T11:30:29.1834116Z         chrome = _chrome()
+pytest	Run full backend suite	2026-10-14T11:30:29.1834358Z         if chrome is None:
+pytest	Run full backend suite	2026-10-14T11:30:29.1834714Z             pytest.skip("headless chrome is not installed")
+pytest	Run full backend suite	2026-10-14T11:30:29.1835460Z         png.parent.mkdir(parents=True, exist_ok=True)
+pytest	Run full backend suite	2026-10-14T11:30:29.1835836Z         profile = png.parent / "profile"
+pytest	Run full backend suite	2026-10-14T11:30:29.1836160Z         if profile.exists():
+pytest	Run full backend suite	2026-10-14T11:30:29.1836450Z             shutil.rmtree(profile)
+pytest	Run full backend suite	2026-10-14T11:30:29.1836721Z         cmd = [
+pytest	Run full backend suite	2026-10-14T11:30:29.1836939Z             chrome,
+pytest	Run full backend suite	2026-10-14T11:30:29.1837167Z             "--headless=new",
+pytest	Run full backend suite	2026-10-14T11:30:29.1837430Z             "--no-sandbox",
+pytest	Run full backend suite	2026-10-14T11:30:29.1837713Z             "--disable-dev-shm-usage",
+pytest	Run full backend suite	2026-10-14T11:30:29.1838012Z             "--disable-gpu",
+pytest	Run full backend suite	2026-10-14T11:30:29.1838296Z             "--hide-scrollbars",
+pytest	Run full backend suite	2026-10-14T11:30:29.1838605Z             f"--user-data-dir={profile}",
+pytest	Run full backend suite	2026-10-14T11:30:29.1838915Z             "--window-size=1400,900",
+pytest	Run full backend suite	2026-10-14T11:30:29.1839245Z             f"--screenshot={png}",
+pytest	Run full backend suite	2026-10-14T11:30:29.1839570Z             "--virtual-time-budget=2000",
+pytest	Run full backend suite	2026-10-14T11:30:29.1839867Z             html.as_uri(),
+pytest	Run full backend suite	2026-10-14T11:30:29.1840112Z         ]
+pytest	Run full backend suite	2026-10-14T11:30:29.1840368Z         proc = subprocess.Popen(
+pytest	Run full backend suite	2026-10-14T11:30:29.1840629Z             cmd,
+pytest	Run full backend suite	2026-10-14T11:30:29.1840869Z             stdout=subprocess.DEVNULL,
+pytest	Run full backend suite	2026-10-14T11:30:29.1841353Z             stderr=subprocess.DEVNULL,
+pytest	Run full backend suite	2026-10-14T11:30:29.1841663Z             start_new_session=True,
+pytest	Run full backend suite	2026-10-14T11:30:29.1841910Z         )
+pytest	Run full backend suite	2026-10-14T11:30:29.1842125Z         deadline = time.time() + 15
+pytest	Run full backend suite	2026-10-14T11:30:29.1842410Z         try:
+pytest	Run full backend suite	2026-10-14T11:30:29.1842639Z             while time.time() < deadline:
+pytest	Run full backend suite	2026-10-14T11:30:29.1843030Z                 if png.exists() and png.stat().st_size > 1000:
+pytest	Run full backend suite	2026-10-14T11:30:29.1843375Z                     break
+pytest	Run full backend suite	2026-10-14T11:30:29.1843696Z                 if proc.poll() is not None:
+pytest	Run full backend suite	2026-10-14T11:30:29.1843968Z                     break
+pytest	Run full backend suite	2026-10-14T11:30:29.1844252Z                 time.sleep(0.2)
+pytest	Run full backend suite	2026-10-14T11:30:29.1844505Z         finally:
+pytest	Run full backend suite	2026-10-14T11:30:29.1844950Z             if proc.poll() is None:
+pytest	Run full backend suite	2026-10-14T11:30:29.1845325Z                 os.killpg(proc.pid, signal.SIGKILL)
+pytest	Run full backend suite	2026-10-14T11:30:29.1845674Z                 proc.wait(timeout=5)
+pytest	Run full backend suite	2026-10-14T11:30:29.1846014Z         if not png.exists() or png.stat().st_size < 1000:
+pytest	Run full backend suite	2026-10-14T11:30:29.1846540Z >           raise AssertionError(f"headless chrome did not write {png}")
+pytest	Run full backend suite	2026-10-14T11:30:29.1847413Z E           AssertionError: headless chrome did not write /tmp/pytest-of-runner/pytest-3/test_edge_overlay_does_not_ban1/galaxy.png
+pytest	Run full backend suite	2026-10-14T11:30:29.1847928Z 
+pytest	Run full backend suite	2026-10-14T11:30:29.1848158Z tests/test_presence_black_bands.py:113: AssertionError
+pytest	Run full backend suite	2026-10-14T11:30:29.1848655Z =============================== warnings summary ===============================
+pytest	Run full backend suite	2026-10-14T11:30:29.1849291Z tests/test_rfc0137_named_persona.py::test_named_persona_route_is_registered
+pytest	Run full backend suite	2026-10-14T11:30:29.1850785Z   /opt/hostedtoolcache/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/openapi/utils.py:303: UserWarning: Duplicate Operation ID hexstrike_upstream_api_hexstrike_upstream__path__get for function hexstrike_upstream at /home/runner/work/Jarvis/Jarvis/backend/app/api/hexstrike.py
+pytest	Run full backend suite	2026-10-14T11:30:29.1852037Z     warnings.warn(message, stacklevel=1)
+pytest	Run full backend suite	2026-10-14T11:30:29.1852272Z 
+pytest	Run full backend suite	2026-10-14T11:30:29.1852584Z -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+pytest	Run full backend suite	2026-10-14T11:30:29.1853398Z =========================== short test summary info ============================
+pytest	Run full backend suite	2026-10-14T11:30:29.1854057Z SKIPPED [1] tests/test_mobile_media.py:5: could not import 'aiortc': No module named 'aiortc'
+pytest	Run full backend suite	2026-10-14T11:30:29.1855043Z SKIPPED [1] tests/test_task_execution_reliability.py:254: Windows Start Menu resolution
+pytest	Run full backend suite	2026-10-14T11:30:29.1855781Z 2 failed, 3086 passed, 2 skipped, 1 warning in 318.85s (0:05:18)
+pytest	Run full backend suite	2026-10-14T11:30:30.7339433Z ##[error]Process completed with exit code 1.

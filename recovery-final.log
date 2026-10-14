@@ -1,0 +1,10 @@
+[cursor/recover-studio-99ea 79b610b8] Add Ship Notes project stack and pull-lamp theme toggle to studio UI
+ Author: Cursor Agent <cursoragent@cursor.com>
+ Date: Tue Sep 29 13:49:31 2026 +0000
+ 4 files changed, 89 insertions(+)
+ create mode 100644 frontend/src/vendor/shipnotes/BlackGridProjectStack.tsx
+ create mode 100644 frontend/src/vendor/shipnotes/PullLampThemeToggle.tsx
+[cursor/recover-studio-99ea 0688f1b2] Fix unused React imports in Ship Notes helpers
+ Author: Cursor Agent <cursoragent@cursor.com>
+ Date: Tue Sep 29 13:49:46 2026 +0000
+ 2 files changed, 2 insertions(+), 2 deletions(-)
