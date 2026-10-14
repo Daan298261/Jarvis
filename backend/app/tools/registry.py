@@ -30,6 +30,7 @@ from .external_ingest import ExternalIngestTool
 from .internal_references import InternalReferencesTool
 from .web_fetch import WebFetchTool
 from .mobile_call import MobileCallTool
+from .mobile_apps import MobileAppsTool
 from .hexstrike_defensive import HexStrikeDefensiveTool
 from .hexstrike_operator import HexStrikeOperatorTool
 from .lta_folder import LtaProtectedFolderTool
@@ -84,6 +85,7 @@ class ToolRegistry:
             CuaTool(),
             ReflexComputerUseTool(),
             MobileCallTool(),
+            MobileAppsTool(),
             HexStrikeDefensiveTool(getter),
             HexStrikeOperatorTool(getter),
             LtaProtectedFolderTool(getter),

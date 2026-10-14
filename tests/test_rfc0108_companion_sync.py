@@ -65,7 +65,7 @@ async def test_model_pack_catalog_metadata_only(mobile_env):
         assert pack["size_bytes"] > 0
         assert "leader_cache" in pack
     recommended = next(p for p in body["packs"] if p["recommended"])
-    assert recommended["id"] == "qwen3.5-2b-heretic-q4"
+    assert recommended["id"] == "qwen3-1.7b-abliterated-q4"
     assert sum(1 for p in body["packs"] if p["recommended"]) == 1
     opt_in = next(p for p in body["packs"] if p["id"] == "qwen3.5-4b-abliterated-q4")
     assert opt_in["recommended"] is False and opt_in["min_ram_mb"] > recommended["min_ram_mb"]

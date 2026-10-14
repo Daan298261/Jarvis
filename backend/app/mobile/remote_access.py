@@ -21,11 +21,11 @@ from urllib.parse import urlsplit
 log = logging.getLogger(__name__)
 
 PORT = 4781
-EndpointKind = Literal["tailscale", "lan"]
+EndpointKind = Literal["tailscale", "lan", "public_forward"]
 
 # QR order: Tailscale first (the owner's chosen off-LAN path; it also works at
 # home), then LAN. The phone still prefers an origin on its attached LAN itself.
-KIND_RANK: dict[str, int] = {"tailscale": 0, "lan": 1}
+KIND_RANK: dict[str, int] = {"public_forward": 0, "tailscale": 0, "lan": 1}
 
 TAILSCALE_CGNAT = ipaddress.ip_network("100.64.0.0/10")
 TAILSCALE_V6 = ipaddress.ip_network("fd7a:115c:a1e0::/48")
@@ -70,7 +70,7 @@ def classify_endpoint(origin: str) -> EndpointKind | None:
     return "lan" if _is_lan_ip(address) else None
 
 
-def ordered_entries(endpoints: list[str]) -> list[dict[str, str]]:
+def ordered_entries(endpoints: list[str], *, allow_public: bool = False) -> list[dict[str, str]]:
     """Dedupe and order origins as Tailscale then LAN; public or unknown hosts are refused."""
     seen: set[str] = set()
     entries: list[tuple[int, int, dict[str, str]]] = []
@@ -80,6 +80,10 @@ def ordered_entries(endpoints: list[str]) -> list[dict[str, str]]:
             continue
         seen.add(origin)
         kind = classify_endpoint(origin)
+        if kind is None and allow_public:
+            from .wan_forward import is_public_dial_host
+            if is_public_dial_host(_host(origin)):
+                kind = "public_forward"
         if kind is None:
             continue
         entries.append((KIND_RANK[kind], index, {"url": origin, "kind": kind}))
@@ -182,5 +186,6 @@ def exposure_summary(remote: bool, entries: list[dict[str, str]]) -> str:
     exposed = [f"{e['kind']}={e['url']}" for e in entries if e["kind"] != "lan"]
     if not remote or not exposed:
         return "Companion gateway: LAN only (remote access off)"
-    return ("Companion gateway reachable over Tailscale on " + ", ".join(exposed)
+    transport = "owner-enabled forwarding" if any(e["kind"] == "public_forward" for e in entries) else "Tailscale"
+    return ("Companion gateway reachable over " + transport + " on " + ", ".join(exposed)
             + "; unauthenticated routes: pairing (enroll/challenge/session) and health only")
