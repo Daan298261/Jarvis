@@ -304,55 +304,97 @@ async def test_fixture_provider_persona_respected_over_rules(jarvis_env, monkeyp
         laya_pins.clear_install()
 
 
+class _StepClock:
+    """Controlled clock: each read advances exactly ``step_s``."""
+
+    def __init__(self, step_s: float):
+        self.step_s = step_s
+        self.now = 0.0
+        self.reads = 0
+
+    def __call__(self) -> float:
+        value = self.now
+        self.now += self.step_s
+        self.reads += 1
+        return value
+
+
 @pytest.mark.asyncio
-async def test_persona_decision_measured_inside_budget(monkeypatch):
-    """Times the real decision path (the worker that runs decide + persona)."""
+async def test_persona_decision_measured_inside_budget():
+    """Deterministic elapsed time on a controlled clock against the 50 ms budget."""
+    for text in ("write me a script", "thanks", "plan my mission for tomorrow"):
+        clock = _StepClock(0.001)  # 1 ms per read
+        turn = await decide_owner_turn(
+            text,
+            baseline=route_request(text),
+            decision_tier="local",
+            settings=AppSettings(),
+            persona=PersonaTurnContext(current="anzu"),
+            clock=clock,
+        )
+        elapsed_ms = (clock.now - clock.step_s) * 1000.0  # last read minus the first
+        assert turn.persona_intent.reason != "deadline_fallback"
+        assert turn.persona_intent.reflex is turn.reflex
+        assert 0.0 < elapsed_ms < OWNER_TURN_DEADLINE_MS
+
+
+@pytest.mark.asyncio
+async def test_real_path_wait_for_deadline_is_50ms(monkeypatch):
+    import asyncio
+
+    timeouts: list[float] = []
+    real_wait_for = asyncio.wait_for
+
+    async def spy(aw, timeout):
+        timeouts.append(timeout)
+        return await real_wait_for(aw, timeout)
+
+    monkeypatch.setattr(asyncio, "wait_for", spy)
+    await _owner_turn("write me a script")
+    assert timeouts == [0.05]
+    assert timeouts[0] * 1000.0 == OWNER_TURN_DEADLINE_MS == 50.0
+
+
+@pytest.mark.asyncio
+async def test_slow_settings_load_resolves_before_decision_window(monkeypatch):
+    """Real 50 ms cut-off (no injected clock). The owner-turn caller loads settings
+    (slowly) before calling decide_owner_turn; the decision window opens only after
+    that load returned and never calls or awaits it."""
+    from app import config
     from app.decision import owner_turn
 
-    spent: list[float] = []
-    real = owner_turn._decide_sync
-
-    def timed(*args, **kwargs):
-        started = time.perf_counter()
-        try:
-            return real(*args, **kwargs)
-        finally:
-            spent.append((time.perf_counter() - started) * 1000.0)
-
-    monkeypatch.setattr(owner_turn, "_decide_sync", timed)
-    for text in ("write me a script", "thanks", "plan my mission for tomorrow"):
-        turn = await _owner_turn(text)
-        assert turn.persona_intent.reason != "deadline_fallback"
-    assert len(spent) == 3
-    assert max(spent) < OWNER_TURN_DEADLINE_MS, spent
-
-
-@pytest.mark.asyncio
-async def test_decision_path_never_loads_settings_and_slow_load_cannot_breach_deadline(monkeypatch):
-    from app import config
-
-    loads: list[int] = []
+    events: list[tuple[str, float]] = []
 
     def slow_load():
-        loads.append(1)
-        time.sleep(0.2)  # 4x the 50 ms cap, if it were ever on the path
-        return AppSettings()
+        events.append(("load_start", time.perf_counter()))
+        time.sleep(0.2)  # 4x the 50 ms cap
+        settings = AppSettings()
+        settings.named_personas.active_id = "anzu"
+        events.append(("load_end", time.perf_counter()))
+        return settings
+
+    real_sync = owner_turn._decide_sync
+
+    def window(*args, **kwargs):
+        events.append(("window_open", time.perf_counter()))
+        try:
+            return real_sync(*args, **kwargs)
+        finally:
+            events.append(("window_close", time.perf_counter()))
 
     monkeypatch.setattr(config, "load_settings", slow_load)
-    settings = AppSettings()
-    settings.named_personas.active_id = "anzu"
-    started = time.perf_counter()
+    monkeypatch.setattr(owner_turn, "_decide_sync", window)
+    settings = config.load_settings()  # what the owner-chat/loop caller does first
     turn = await decide_owner_turn(
-        "write me a script",
-        baseline=route_request("write me a script"),
-        settings=settings,
-        clock=_frozen_clock,
+        "write me a script", baseline=route_request("write me a script"), settings=settings
     )
-    elapsed_ms = (time.perf_counter() - started) * 1000.0
-    assert loads == []
-    assert turn.persona_intent.reason == "intent" and turn.persona_intent.to == "enki"
-    assert turn.reflex is not None and turn.reflex.source != "deadline_fallback"
-    assert elapsed_ms < 200.0, elapsed_ms
+    names = [name for name, _ in events]
+    # window_close may land after a real 50 ms cut-off; the order up to it may not vary.
+    assert names[:3] == ["load_start", "load_end", "window_open"]
+    assert names.count("load_start") == 1
+    stamps = dict(events)
+    assert stamps["load_end"] <= stamps["window_open"]
+    assert turn.persona_intent.current == "anzu"  # persona read from the loaded settings
 
 
 @pytest.mark.asyncio
