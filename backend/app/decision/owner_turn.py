@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from dataclasses import dataclass, field, replace
 from typing import Any
 from uuid import uuid4
@@ -26,9 +27,10 @@ from ..agent.planning import (
 from .reflex import decide
 from .surfaces import (
     PersonaIntentDecision,
+    persona_intent_from_result,
+    persona_intent_precheck,
     persona_intent_stay,
     privacy_for_tier,
-    route_persona_intent,
 )
 from .types import Answer, DecisionResult, LatencyBreakdown, Question
 
@@ -401,8 +403,10 @@ def _decide_sync(
     settings: Any | None,
     inference_state: Any | None,
     request_id: str,
-    persona: "PersonaTurnContext | None" = None,
+    persona: "PersonaTurnContext",
 ) -> OwnerTurnDecision:
+    """One ``decide()`` per turn. ``persona`` is already resolved by
+    :func:`resolve_persona_context`; nothing here reads config or disk."""
     literal = extract_literal_candidate(user_message)
     tier = _resolved_tier(decision_tier, settings)
     state = {
@@ -412,12 +416,22 @@ def _decide_sync(
         "literal_candidate": literal,
         "decision_tier": tier,
     }
-    import time
-
-    started = time.perf_counter()
+    questions = list(OWNER_TURN_QUESTIONS)
+    precheck = None
+    if persona.unavailable_reason:
+        intent: PersonaIntentDecision | None = PersonaIntentDecision(
+            "", "", persona.unavailable_reason, "rules", 1.0
+        )
+    else:
+        intent = None
+        precheck = persona_intent_precheck(user_message, current_persona=persona.current or "", locked=bool(persona.locked))
+        if precheck.question is not None:
+            questions.append(precheck.question)
+            state["current_persona"] = precheck.current
+            state["pinned"] = bool(persona.pinned)
     result = decide(
         state,
-        OWNER_TURN_QUESTIONS,
+        questions,
         "request_routing",
         OWNER_TURN_DEADLINE_MS,
         privacy_for_tier(tier),
@@ -428,71 +442,58 @@ def _decide_sync(
         literal=literal,
         result=result,
     )
-    current, locked, pinned = _persona_context(persona, settings, load=True)
-    remaining = OWNER_TURN_DEADLINE_MS - (time.perf_counter() - started) * 1000.0
-    if remaining <= 1.0:
-        intent = persona_intent_stay(current, reason="deadline_fallback", source="deadline_fallback", confidence=0.0)
-    else:
-        intent = route_persona_intent(
-            user_message,
-            current_persona=current,
-            pinned=pinned,
-            locked=locked,
-            settings=settings,
-            deadline_ms=remaining,
-            privacy=privacy_for_tier(tier),
-            request_id=f"{request_id}:persona",
-        )
+    if intent is None:
+        intent = persona_intent_from_result(precheck, result, floor=persona.floor)
     return replace(turn, persona_intent=intent)
+
+
+SETTINGS_UNAVAILABLE = "settings_unavailable"
 
 
 @dataclass(frozen=True)
 class PersonaTurnContext:
-    """Caller-supplied persona state for RFC-0218; unset fields load from settings."""
+    """Persona state for RFC-0218. Caller may preset ``current``/``locked``;
+    :func:`resolve_persona_context` fills the rest before the deadline window."""
 
     current: str | None = None
     locked: bool | None = None
     pinned: bool = False
+    floor: float | None = None
+    unavailable_reason: str = ""
 
 
-def _persona_context(
+def resolve_persona_context(
     persona: PersonaTurnContext | None,
     settings: Any | None,
-    *,
-    load: bool,
-) -> tuple[str, bool, bool]:
+) -> PersonaTurnContext:
+    """Resolve persona state from the caller's settings *before* the 50 ms window.
+
+    The decision lane never calls ``load_settings()``: every owner-turn caller
+    already holds its settings object. Without one the persona cannot be
+    resolved; that is logged as a warning and surfaces on the turn as
+    ``persona_intent.reason == "settings_unavailable"`` — never a silent default.
+    """
     ctx = persona or PersonaTurnContext()
-    current, locked = ctx.current, ctx.locked
-    if current is None or locked is None:
-        source = settings
-        if source is None and load:
-            try:
-                from ..config import load_settings
-
-                source = load_settings()
-            except Exception:  # noqa: BLE001 — persona context must never strand the turn
-                log.debug("persona context: settings unavailable", exc_info=True)
-        store = getattr(source, "named_personas", None)
-        if current is None:
-            # Missing store → "" → route_persona_intent reports no_current_persona.
-            current = str(getattr(store, "active_id", "") or "")
-        if locked is None:
-            locked = bool(getattr(store, "auto_switch_locked", False))
-    return (current or "").strip().lower(), bool(locked), bool(ctx.pinned)
-
-
-def _with_deadline_persona(
-    turn: OwnerTurnDecision,
-    persona: PersonaTurnContext | None,
-    settings: Any | None,
-) -> OwnerTurnDecision:
-    current, _locked, _pinned = _persona_context(persona, settings, load=False)
+    if settings is None:
+        log.warning("persona context: no settings supplied; persona_intent_switch not evaluated")
+        return replace(ctx, unavailable_reason=SETTINGS_UNAVAILABLE)
+    store = settings.named_personas
     return replace(
-        turn,
-        persona_intent=persona_intent_stay(
-            current, reason="deadline_fallback", source="deadline_fallback", confidence=0.0
-        ),
+        ctx,
+        current=(ctx.current if ctx.current is not None else store.active_id or "").strip().lower(),
+        locked=bool(ctx.locked if ctx.locked is not None else store.auto_switch_locked),
+        floor=float(settings.decision.persona_intent_confidence_floor),
     )
+
+
+def _with_deadline_persona(turn: OwnerTurnDecision, persona: PersonaTurnContext) -> OwnerTurnDecision:
+    if persona.unavailable_reason:
+        intent = PersonaIntentDecision("", "", persona.unavailable_reason, "rules", 1.0)
+    else:
+        intent = persona_intent_stay(
+            persona.current or "", reason="deadline_fallback", source="deadline_fallback", confidence=0.0
+        )
+    return replace(turn, persona_intent=intent)
 
 
 def rules_front_action(user_message: str, *, baseline: RequestRoute | None = None) -> str:
@@ -525,13 +526,13 @@ async def decide_owner_turn(
     Always calls ``decide()`` with a 50 ms wall-clock cap. A timeout becomes an
     audited ``deadline_fallback`` to the rules classifier — never a skipped call.
 
-    RFC-0218 S1: the same call answers ``persona_intent_switch`` on
-    ``OwnerTurnDecision.persona_intent`` (deadline fallback = stay).
+    RFC-0218 S1: the same single ``decide()`` answers ``persona_intent_switch`` on
+    ``OwnerTurnDecision.persona_intent`` (deadline fallback = stay); S2 consumes it.
     """
-    import time
-
     text = user_message or ""
     resolved_baseline = baseline or route_request(text)
+    # Persona state resolves here, outside the deadline window (#637 review).
+    persona_ctx = resolve_persona_context(persona, settings)
     started = time.perf_counter()
     request_id = uuid4().hex
     try:
@@ -544,7 +545,7 @@ async def decide_owner_turn(
                 settings,
                 inference_state,
                 request_id,
-                persona,
+                persona_ctx,
             ),
             timeout=OWNER_TURN_DEADLINE_S,
         )
@@ -569,8 +570,7 @@ async def decide_owner_turn(
                 literal=literal,
                 result=result,
             ),
-            persona,
-            settings,
+            persona_ctx,
         )
     except Exception:
         spent = (time.perf_counter() - started) * 1000.0
@@ -593,6 +593,5 @@ async def decide_owner_turn(
                 literal=literal,
                 result=result,
             ),
-            persona,
-            settings,
+            persona_ctx,
         )
