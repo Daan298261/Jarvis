@@ -30,7 +30,7 @@ def order_phone_reachable_endpoints(endpoints: list[str]) -> list[str]:
     ordered_ips = order_lan_hosts(ip_hosts)
     ip_rank = {host: index for index, host in enumerate(ordered_ips)}
 
-    def sort_key(url: str) -> tuple[int, int, str]:
+    def sort_key(url: str) -> tuple[int, int, int, str]:
         host = (urlsplit(url).hostname or "").strip()
         if host in ip_rank:
             meta = inventory.get(host) or {}
@@ -39,11 +39,11 @@ def order_phone_reachable_endpoints(endpoints: list[str]) -> list[str]:
                 prefix=meta.get("prefix") if isinstance(meta.get("prefix"), int) else None,
                 ifname=str(meta.get("name") or ""),
             )
-            # VPN/virtual IPs stay after .local hostnames; ordinary LAN stays before.
-            if rank >= 3:
-                return (2, ip_rank[host], url)
-            return (0, ip_rank[host], url)
-        return (1, 0, url)
+            # mDNS/hostnames stay before bare RFC1918 IPs; among IPs, home
+            # subnet (low lan_host_rank) still beats VPN/virtual (rank >= 3).
+            return (1, rank, ip_rank[host], url)
+        # .local / .lan / .home.arpa and other non-IP LAN labels
+        return (0, 0, 0, url)
 
     lan_urls = sorted(lan_urls, key=sort_key)
     return tailscale + lan_urls

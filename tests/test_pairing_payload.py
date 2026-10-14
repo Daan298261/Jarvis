@@ -38,3 +38,17 @@ def test_qr_envelope_tailscale_first(monkeypatch):
     assert qr["endpoint"] == "https://vrpc.tail1.ts.net:4781"
     assert qr["endpoints"] == ["https://vrpc.tail1.ts.net:4781", "https://10.0.0.4:4781"]
     assert "endpoint_kinds" not in qr
+
+
+def test_mdns_stays_before_bare_rfc1918_without_inventory(monkeypatch):
+    """CI has no ProtonVPN NIC metadata; .local must still beat bare 10/8."""
+    monkeypatch.setattr("app.mobile.wan_forward.interface_ipv4_inventory", lambda: [])
+    monkeypatch.setattr(
+        "app.mobile.wan_forward.default_gateway_ipv4",
+        lambda: (_ for _ in ()).throw(ValueError("no gw")),
+    )
+    ordered = order_phone_reachable_endpoints(
+        ["https://10.2.0.2:4781", "https://jarvis.local:4781"]
+    )
+    assert ordered == ["https://jarvis.local:4781", "https://10.2.0.2:4781"]
+
