@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.os.StatFs
 import android.util.Log
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
@@ -417,7 +418,12 @@ class CompanionPackManager(
         statusRef.set(CompanionPackStatus.RUNNING)
         val nCtx = DeviceInferenceGuard.contextTokens(app, pack)
         val parentJob = coroutineContext[Job]!!
-        val cancelWatch = launch(Dispatchers.Default) {
+        // Started UNDISPATCHED on Unconfined: the watcher is already suspended in
+        // awaitCancellation() before the engine runs, and cancel() resumes it inline on the
+        // cancelling thread. A Default-dispatched watcher could be cancelled before it ever ran
+        // (its finally then never fires) or wait behind a busy pool, leaving native decode
+        // running after the user pressed stop.
+        val cancelWatch = launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
             try {
                 awaitCancellation()
             } finally {
