@@ -49,6 +49,16 @@ class CompanionVoicePackManager(
     /** Voice pack ids with a download running (from any screen). */
     fun downloadingPackIds(): Set<String> = activeDownloads.toSet()
 
+    /** The download that owns [progressRef]; a second, concurrent download must not reset or overwrite it. */
+    private val progressOwner = AtomicReference<String?>(null)
+
+    private fun roleDownloading(role: String): Boolean =
+        activeDownloads.any { id -> catalog.firstOrNull { it.id == id }?.role == role }
+
+    private fun setProgress(packId: String, pct: Int) {
+        if (progressOwner.get() == packId) progressRef.set(pct)
+    }
+
     private fun mutexFor(role: String) = if (role == "stt") sttMutex else ttsMutex
 
     init {
@@ -181,7 +191,8 @@ class CompanionVoicePackManager(
 
     private fun refreshOne(pack: CompanionVoicePack?, statusRef: AtomicReference<String>) {
         // A running download owns this role's status; a refresh must not overwrite it.
-        if (pack != null && pack.id in activeDownloads) return
+        // A running download owns this role's status (whether or not it is the selected pack); a refresh must not overwrite it.
+        if (pack != null && roleDownloading(pack.role)) return
         if (pack == null) {
             statusRef.set(CompanionVoicePackStatus.ERROR)
             errorRef.set("No voice pack selected")
@@ -216,7 +227,7 @@ class CompanionVoicePackManager(
         if (pack.role == "stt") sttEngine.unload() else ttsEngine.unload()
         val statusRef = if (pack.role == "stt") sttStatusRef else ttsStatusRef
         statusRef.set(CompanionVoicePackStatus.DOWNLOADING)
-        progressRef.set(0)
+        if (progressOwner.compareAndSet(null, pack.id)) progressRef.set(0)
         errorRef.set("")
         val totalBytes = pack.artifacts.sumOf { it.sizeBytes.coerceAtLeast(1L) }
         var readTotal = 0L
@@ -238,7 +249,7 @@ class CompanionVoicePackManager(
                             output.write(buffer, 0, count)
                             readTotal += count
                             val pct = ((readTotal * 100) / totalBytes).toInt().coerceIn(0, 100)
-                            progressRef.set(pct)
+                            setProgress(pack.id, pct)
                             onProgress(pct)
                         }
                     }
@@ -259,11 +270,12 @@ class CompanionVoicePackManager(
             if (art.sha256.isNotBlank()) digestCache.remember(target, art.sha256)
         }
         statusRef.set(CompanionVoicePackStatus.READY)
-        progressRef.set(100)
+        setProgress(pack.id, 100)
         }
         }
         } finally {
             activeDownloads.remove(pack.id)
+            progressOwner.compareAndSet(pack.id, null)
         }
     }
 
