@@ -15,6 +15,7 @@ from sqlalchemy import select
 from ..auth import require_owner_private_key, require_owner_private_key_for_pairing
 from ..mobile.companion_onboarding import companion_onboarding_snapshot
 from ..mobile.pairing_payload import enrich_pairing_session
+from ..mobile.connectivity import CONNECTIVITY
 from ..db.models import Task
 from ..db.session import SessionLocal
 from ..mobile import companion_offline, companion_voice_packs, identity, realtime_voice, scheduler, service
@@ -64,6 +65,7 @@ class Confirm(BaseModel):
 
 
 class PairingCodeRequest(BaseModel):
+    prepare_connection: bool = False
     ttl_minutes: int = Field(default=identity.DEFAULT_PAIRING_TTL_MINUTES,
                              ge=identity.MIN_PAIRING_TTL_MINUTES,
                              le=identity.MAX_PAIRING_TTL_MINUTES)
@@ -136,8 +138,15 @@ def lan_enroll(body: LanEnroll, request: Request):
 
 
 @router.get("/challenge/{device_id}")
-def challenge(device_id: uuid.UUID):
-    return identity.challenge(str(device_id))
+def challenge(device_id: uuid.UUID, nonce: str = Query("", max_length=128, pattern=r"^[A-Za-z0-9_-]*$")):
+    # A phone nonce makes the desktop sign with its pinned TLS key (RFC-0215 server proof).
+    return identity.challenge(str(device_id), nonce)
+
+
+@router.get("/health")
+def companion_health():
+    """Unauthenticated liveness for the reachability self-test; reveals nothing else."""
+    return {"ok": True, "api_version": 1}
 
 
 @router.post("/session")
@@ -491,12 +500,16 @@ def invitation():
 
 
 @owner_router.post("/pairing-codes", dependencies=[Depends(require_owner_private_key_for_pairing)])
-def create_pairing_code(body: PairingCodeRequest):
+async def create_pairing_code(body: PairingCodeRequest):
+    if body.prepare_connection:
+        await CONNECTIVITY.prepare_pairing()
     return enrich_pairing_session(identity.generate_pairing_code(body.ttl_minutes))
 
 
 @owner_router.post("/pairing-codes/regenerate", dependencies=[Depends(require_owner_private_key_for_pairing)])
-def regenerate_pairing_code(body: PairingCodeRequest):
+async def regenerate_pairing_code(body: PairingCodeRequest):
+    if body.prepare_connection:
+        await CONNECTIVITY.prepare_pairing()
     return enrich_pairing_session(identity.regenerate_pairing_code(body.ttl_minutes))
 
 
@@ -525,36 +538,21 @@ class Build(BaseModel):
     endpoint: str = Field(default="", max_length=1024)
     mode: Literal["personalized", "generic"] = "personalized"
     prepare_connection: bool = True
-    remote: bool = True
 
 
 class ConnectionSetup(BaseModel):
     enabled: bool = True
-    remote: bool = True
-    wan_method: Literal["auto", "upnp", "ssh_reverse", "gateway_ssh"] | None = None
-    ssh_host: str | None = Field(default=None, max_length=255)
-    ssh_port: int | None = Field(default=None, ge=1, le=65535)
-    ssh_user: str | None = Field(default=None, max_length=64)
-    ssh_identity_file: str | None = Field(default=None, max_length=1024)
-    ssh_password: str | None = Field(default=None, max_length=256)
-    gateway_host: str | None = Field(default=None, max_length=255)
-    gateway_port: int | None = Field(default=None, ge=1, le=65535)
-    gateway_user: str | None = Field(default=None, max_length=64)
-    gateway_identity_file: str | None = Field(default=None, max_length=1024)
-    gateway_profile: Literal["openwrt_uci"] | None = None
-    gateway_username: str | None = Field(default=None, max_length=64)
-    gateway_password: str | None = Field(default=None, max_length=256)
-    wan_public_host: str | None = Field(default=None, max_length=255)
+    # RFC-0215: None keeps the current setting; internet exposure (Tailscale) is only ever an explicit owner choice.
+    remote: bool | None = None
+    tailscale: bool | None = None
 
 
 @owner_router.post("/connection", dependencies=[Depends(require_owner_private_key_for_pairing)])
 async def connection_setup(body: ConnectionSetup):
     from ..mobile.connectivity import CONNECTIVITY
 
-    extras = body.model_dump(exclude={"enabled", "remote"}, exclude_none=True)
-    if extras:
-        return await CONNECTIVITY.configure(body.enabled, body.remote, extras)
-    return await CONNECTIVITY.configure(body.enabled, body.remote)
+    remote = False if not body.enabled else body.remote
+    return await CONNECTIVITY.configure(body.enabled, remote, body.tailscale)
 
 
 @owner_router.get("/connection", dependencies=[Depends(require_owner_private_key_for_pairing)])
@@ -597,7 +595,7 @@ async def build_apk(body: Build):
     custom = (body.endpoint or "").strip()
     endpoint = custom or (prepared[0] if prepared else "")
     if not endpoint and body.prepare_connection:
-        snapshot = await CONNECTIVITY.configure(True, body.remote)
+        snapshot = await CONNECTIVITY.configure(True, None)
         prepared = order_phone_reachable_endpoints(list(snapshot.get("endpoints") or []))
         endpoint = prepared[0] if prepared else ""
     try:

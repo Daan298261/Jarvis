@@ -36,7 +36,7 @@ After files are in place, a wizard (GUI, not a raw console):
 2. **Data directory** — user picks where Jarvis keeps data (and model files if not next to the app). Default is a normal per-user location; do not silently write to a developer checkout.
 3. **Private key** — generate and store locally (same rules as `docs/INSTALL.md` / Settings). Show how to copy it when they need the phone later. Never put it in git, chat, or a screenshot-by-default log.
 4. **Optional LAN** — off by default (localhost). If they enable LAN, require the existing private-key gate. Bind deliberately.
-5. **WAN** — **do not** expose the Leader to the internet from this wizard. Off-LAN reachability is the **Link-device** flow in [`ANDROID_CLIENT.md`](ANDROID_CLIENT.md) (explain WAN, DIY vs Jarvis + router password). The installer must not add a WAN port-forward “for convenience.”
+5. **WAN** — **do not** expose the Leader to the internet from this wizard. Off-LAN phone reachability is **Tailscale only** ([`ANDROID_CLIENT.md`](ANDROID_CLIENT.md), [RFC-0215](docs/rfcs/0215-remote-companion-pairing.md)). The installer never opens a router port.
 
 ---
 

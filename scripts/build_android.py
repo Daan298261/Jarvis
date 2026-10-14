@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import time
+import zipfile
 from urllib.parse import urlsplit
 
 REPO = Path(__file__).resolve().parents[1]
@@ -223,6 +224,20 @@ def bundle_orb(env: dict[str, str], progress) -> None:
         raise RuntimeError("Apex orb assets were not produced; companion APK would lack presence UI")
 
 
+def verify_apk_native_runtimes(apk: Path) -> None:
+    """Fail release builds that compile voice code but omit it from the APK."""
+    with zipfile.ZipFile(apk) as archive:
+        names = {item.filename for item in archive.infolist() if item.file_size > 0}
+    required = {
+        f"lib/{abi}/lib{runtime}.so"
+        for abi in ("arm64-v8a", "x86_64")
+        for runtime in ("jarvis_llama", "jarvis_whisper", "jarvis_voice_tts", "onnxruntime")
+    }
+    missing = sorted(required - names)
+    if missing:
+        raise RuntimeError("APK is missing native runtimes: " + ", ".join(missing))
+
+
 def build(
     endpoint: str | None = None,
     progress=lambda message: print(message, flush=True),
@@ -337,6 +352,7 @@ def build(
         capture_output=True,
     )
     source = REPO / "android" / "app" / "build" / "outputs" / "apk" / "release" / "app-release.apk"
+    verify_apk_native_runtimes(source)
     verifier = sdk / "build-tools" / "35.0.0" / ("apksigner.bat" if os.name == "nt" else "apksigner")
     subprocess.run([str(verifier), "verify", str(source)], env=env, check=True, capture_output=True)
     target = folder / (f"JarvisCompanion-generic-{release_code}.apk" if generic else f"jarvis-{release_code}.apk")

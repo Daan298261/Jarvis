@@ -28,9 +28,11 @@ object CompanionOfflineStatus {
 
     fun offlineBannerText(state: CompanionState): String = when {
         state.leaderReachable -> ""
-        state.localPackStatus == "missing" -> "Leader unreachable — install a companion model pack to chat on-device"
-        state.localPackStatus == "downloading" -> "Leader unreachable — downloading companion model (${state.localPackProgress}%)"
-        state.localPackStatus in setOf("ready", "running") -> "Leader unreachable — answering on-device"
-        else -> "Leader unreachable — ${state.localPackError.ifBlank { "companion model unavailable" }}"
+        state.localPackStatus == "missing" -> "ANZU desktop unreachable — install a companion model pack to chat on this phone"
+        state.localPackStatus == "downloading" -> "ANZU desktop unreachable — downloading companion model (${state.localPackProgress}%)"
+        state.localPackStatus in setOf("ready", "running") -> "Answering on this phone."
+        else -> "ANZU desktop unreachable — ${state.localPackError.ifBlank { "companion model unavailable" }}"
     }
+
+    fun desktopBackBanner(): String = "Desktop is back — syncing this phone's conversation."
 }

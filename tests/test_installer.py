@@ -230,7 +230,7 @@ def test_startup_does_not_kill_its_launcher_before_backend_is_ready():
     start = _read(REPO_ROOT / "start-jarvis.ps1")
     stop = _read(INSTALLER_DIR / "force-stop-jarvis.ps1")
     assert "Local\\JarvisStartup" in start
-    assert "if ($portOccupied)" in start
+    assert "if ($portOccupied -or $forceRestart)" in start
     assert "-StartupCleanup" in start
     assert "Release-StartupLock" in start
     assert "if ($StartupCleanup -and ([string]$Proc.CommandLine) -match 'start-jarvis\\.ps1')" in stop

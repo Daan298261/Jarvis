@@ -31,7 +31,7 @@ import javax.net.ssl.X509TrustManager
 
 class ApiException(val status: Int, message: String) : Exception(message)
 
-class JarvisApi(context: Context) {
+class JarvisApi(private val context: Context) {
     private val prefs = context.getSharedPreferences("connection", Context.MODE_PRIVATE)
     private val bootstrap = runCatching { JSONObject(context.assets.open("bootstrap.json").bufferedReader().readText()) }.getOrDefault(JSONObject())
     var endpoint: String = prefs.getString("endpoint", bootstrap.optString("endpoint")) ?: ""
@@ -46,8 +46,9 @@ class JarvisApi(context: Context) {
         val supplied = JSONArray(prefs.getString("endpoints", null) ?: bootstrap.optJSONArray("endpoints")?.toString() ?: "[]")
         (0 until supplied.length()).map { TransportPolicy.origin(supplied.getString(it)) }.distinct().take(8)
     }.getOrDefault(emptyList())
-    @Volatile private var preferred = ""
-    @Volatile private var preferredAt = 0L
+    // RFC-0215: remember the origin that last worked across app restarts.
+    @Volatile private var preferred = prefs.getString("preferred_origin", "") ?: ""
+    @Volatile private var preferredAt = if (preferred.isNotEmpty()) System.currentTimeMillis() else 0L
     private val failedLock = Any()
     private var failedOrigins: List<Pair<String, Long>> = emptyList()
     @Volatile private var cachedClient: Pair<String, OkHttpClient>? = null
@@ -78,7 +79,8 @@ class JarvisApi(context: Context) {
         preferred = ""; preferredAt = 0
         synchronized(failedLock) { failedOrigins = emptyList() }
         endpoints = ordered.ifEmpty { listOf(endpoint) }
-        prefs.edit().putString("endpoint", endpoint).putString("pin", pin).putString("device", deviceId).putString("endpoints", JSONArray(endpoints).toString()).apply()
+        prefs.edit().putString("endpoint", endpoint).putString("pin", pin).putString("device", deviceId).putString("endpoints", JSONArray(endpoints).toString())
+            .remove("ca_hosts").remove("preferred_origin").apply()
     }
 
     suspend fun refreshEndpoints() {
@@ -86,6 +88,7 @@ class JarvisApi(context: Context) {
         if (settings.optString("server_pin") != pin) return
         val values = settings.optJSONArray("endpoints") ?: return
         val incoming = (0 until values.length()).map { values.getString(it) }
+        // RFC-0215: the pinned desktop's list is authoritative; unlisted origins are pruned.
         val addresses = TransportPolicy.mergeConnectionEndpoints(endpoints, incoming)
         if (addresses.isNotEmpty()) {
             persistEndpoints(addresses)
@@ -114,11 +117,11 @@ class JarvisApi(context: Context) {
         when (val validation = CompanionCodeValidator.validate(value)) {
             is CompanionCodeValidation.Valid -> body.put("code", validation.code)
             else -> {
-                require(value.length >= 20) { "Enter the 6-digit code shown on your Jarvis desktop" }
+                require(value.length >= 20) { "Enter the 6-digit code shown on your ANZU desktop" }
                 body.put("invitation", value)
             }
         }
-        val result = raw("/enroll", "POST", body.toString().toByteArray(), false)
+        val result = TransientRetry.run { raw("/enroll", "POST", body.toString().toByteArray(), false) }
         val device = JSONObject(result.toString(Charsets.UTF_8))
         deviceId = device.getString("id")
         prefs.edit().putString("device", deviceId).apply()
@@ -127,7 +130,7 @@ class JarvisApi(context: Context) {
 
     suspend fun lanEnroll(): JSONObject {
         val body = JSONObject().put("public_key", publicKey()).put("name", android.os.Build.MODEL)
-        val result = raw("/lan-enroll", "POST", body.toString().toByteArray(), false)
+        val result = TransientRetry.run { raw("/lan-enroll", "POST", body.toString().toByteArray(), false) }
         val device = JSONObject(result.toString(Charsets.UTF_8))
         deviceId = device.getString("id")
         prefs.edit().putString("device", deviceId).apply()
@@ -137,14 +140,21 @@ class JarvisApi(context: Context) {
     suspend fun session() = sessionLock.withLock {
         if (token.isNotEmpty() && System.currentTimeMillis() < expiresAt) return@withLock
         check(deviceId.isNotEmpty()) { "Pair this phone first" }
-        val challenge = JSONObject(raw("/challenge/$deviceId", authenticated = false).toString(Charsets.UTF_8))
+        val serverNonce = java.util.UUID.randomUUID().toString().replace("-", "")
+        val challenge = JSONObject(TransientRetry.run { raw("/challenge/$deviceId?nonce=$serverNonce", authenticated = false) }.toString(Charsets.UTF_8))
+        // We always send a nonce, so a valid pinned-key signature is always required,
+        // whichever pinned origin (LAN or Tailscale) answered.
+        if (!RemoteEndpoints.verifyServerProof(pin, serverNonce, challenge.optString("server_key"), challenge.optString("server_signature"))) {
+            throw java.security.GeneralSecurityException("ANZU did not prove it is your desktop (missing or invalid server signature)")
+        }
         val proof = Signature.getInstance("SHA256withECDSA").run {
             initSign(keys.getKey(keyAlias, null) as java.security.PrivateKey)
             val nonce = challenge.getString("challenge")
             update("jarvis-mobile-v1\n$deviceId\n$nonce".toByteArray())
             Base64.encodeToString(sign(), Base64.NO_WRAP)
         }
-        val result = JSONObject(raw("/session", "POST", JSONObject().put("device_id", deviceId).put("signature", proof).toString().toByteArray(), false).toString(Charsets.UTF_8))
+        val sessionBody = JSONObject().put("device_id", deviceId).put("signature", proof).toString().toByteArray()
+        val result = JSONObject(TransientRetry.run { raw("/session", "POST", sessionBody, false) }.toString(Charsets.UTF_8))
         token = result.getString("access_token")
         expiresAt = System.currentTimeMillis() + (result.getLong("expires_in") - 30) * 1000
     }
@@ -162,6 +172,7 @@ class JarvisApi(context: Context) {
 
     fun noteReachable(origin: String) {
         val address = TransportPolicy.origin(origin)
+        if (preferred != address) prefs.edit().putString("preferred_origin", address).apply()
         preferred = address
         preferredAt = System.currentTimeMillis()
         synchronized(failedLock) {
@@ -189,7 +200,7 @@ class JarvisApi(context: Context) {
         }
     }
     fun pinnedClient(): OkHttpClient {
-        require(endpoint.startsWith("https://") && pin.length == 64) { "Set the Jarvis endpoint and server fingerprint" }
+        require(endpoint.startsWith("https://") && pin.length == 64) { "Set the ANZU endpoint and server fingerprint" }
         val expectedPin = pin
         return cachedClient?.takeIf { it.first == expectedPin }?.second ?: run {
             val trust = object : X509TrustManager {
@@ -198,7 +209,7 @@ class JarvisApi(context: Context) {
                 override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
                     if (chain.isEmpty()) throw java.security.cert.CertificateException("Missing certificate")
                     chain[0].checkValidity()
-                    if (sha256(chain[0].publicKey.encoded) != expectedPin) throw java.security.cert.CertificateException("Jarvis server fingerprint changed; verify it on the desktop")
+                    if (sha256(chain[0].publicKey.encoded) != expectedPin) throw java.security.cert.CertificateException("ANZU server fingerprint changed; verify it on the desktop")
                 }
             }
             val tls = SSLContext.getInstance("TLS").apply { init(null, arrayOf(trust), null) }
@@ -206,6 +217,17 @@ class JarvisApi(context: Context) {
                 .followRedirects(false).followSslRedirects(false).connectTimeout(4, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS).build()
                 .also { cachedClient = expectedPin to it }
         }
+    }
+
+    /** RFC-0215: explain a Tailscale-only path that the phone cannot use right now. */
+    fun tailscaleHint(): String? {
+        val installed = runCatching { context.packageManager.getPackageInfo(RemoteEndpoints.TAILSCALE_PACKAGE, 0); true }.getOrDefault(false)
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+        val vpn = runCatching {
+            cm?.allNetworks?.any { cm.getNetworkCapabilities(it)?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) == true } == true
+        }.getOrDefault(false)
+        val onLan = endpoints.any { TransportPolicy.onAttachedLan(it, TransportPolicy.localIpv4Addresses()) }
+        return RemoteEndpoints.tailscaleHint(endpoints, installed, vpn, onLan)
     }
 
     suspend fun json(path: String, method: String = "GET", body: JSONObject? = null): JSONObject =
@@ -222,7 +244,7 @@ class JarvisApi(context: Context) {
         extraHeaders: Map<String, String> = emptyMap(),
     ): ByteArray = withContext(Dispatchers.IO) {
         if (authenticated) session()
-        require(endpoint.startsWith("https://") && pin.length == 64) { "Set the Jarvis endpoint and server fingerprint" }
+        require(endpoint.startsWith("https://") && pin.length == 64) { "Set the ANZU endpoint and server fingerprint" }
         val recent = preferred.takeIf { System.currentTimeMillis() - preferredAt < 60000 }
         val locals = TransportPolicy.localIpv4Addresses()
         val addresses = TransportPolicy.dialOrder(
@@ -240,7 +262,10 @@ class JarvisApi(context: Context) {
             }
             sequentialOrigins(client, addresses, path, method, body, authenticated, contentType, filename, extraHeaders)
         } catch (error: java.io.IOException) {
-            if (!recoverPairedLanFromBeacon()) throw error
+            if (!recoverPairedLanFromBeacon()) {
+                val hint = tailscaleHint() ?: throw error
+                throw java.io.IOException(hint, error)
+            }
             val retryLocals = TransportPolicy.localIpv4Addresses()
             val retryAddresses = TransportPolicy.dialOrder(
                 preferred.takeIf { System.currentTimeMillis() - preferredAt < 60_000 },
@@ -279,7 +304,7 @@ class JarvisApi(context: Context) {
                 failure = error
             }
         }
-        throw failure ?: java.io.IOException("No reachable Jarvis endpoint")
+        throw failure ?: java.io.IOException("No reachable ANZU endpoint")
     }
 
     private suspend fun raceOrigins(
@@ -333,7 +358,7 @@ class JarvisApi(context: Context) {
             }
             if (error is java.io.IOException) failure = error
         }
-        throw failure ?: java.io.IOException("No reachable Jarvis endpoint")
+        throw failure ?: java.io.IOException("No reachable ANZU endpoint")
     }
 
     private fun originRequest(
@@ -378,7 +403,7 @@ class JarvisApi(context: Context) {
                     expiresAt = 0
                 }
                 val reason = runCatching { JSONObject(result.toString(Charsets.UTF_8)).optString("detail") }.getOrDefault("")
-                throw ApiException(response.code, reason.ifEmpty { "Jarvis returned ${response.code}" })
+                throw ApiException(response.code, reason.ifEmpty { "ANZU returned ${response.code}" })
             }
             noteReachable(address)
             return result

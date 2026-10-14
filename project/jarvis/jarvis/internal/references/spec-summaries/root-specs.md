@@ -9,6 +9,6 @@ Short pointers to architect-owned root specs — not full copies.
 | `SECURITY.md` | Bind defaults, private-key LAN auth, filesystem policy |
 | `TROUBLESHOOTING.md` | Model unload, CUDA, Playwright, Office, Docker, stuck tasks |
 | `docs/PROCESS.md` | One RFC per PR; branch `development`; no spec doc edits by workers |
-| `ANDROID_CLIENT.md` | Phone client; Link-device for WAN — not installer port-forward |
+| `ANDROID_CLIENT.md` | Phone client; Link-device; off-LAN is Tailscale only, never a router port-forward |
 
 For queue priority and architecture, see `JARVIS_MASTER_PLAN.md` (architect-only edits).

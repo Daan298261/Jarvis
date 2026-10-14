@@ -35,7 +35,7 @@ object CompanionRouting {
             CompanionPackStatus.READY, CompanionPackStatus.RUNNING -> RoutingDecision(RoutingMode.DEVICE_OFFLINE)
             CompanionPackStatus.MISSING -> RoutingDecision(
                 RoutingMode.DEVICE_BLOCKED,
-                "Install a companion model pack in More → Models to chat while Jarvis is offline",
+                "Install a companion model pack in More → Models to chat while the ANZU desktop is unreachable",
             )
             CompanionPackStatus.DOWNLOADING -> RoutingDecision(
                 RoutingMode.DEVICE_BLOCKED,

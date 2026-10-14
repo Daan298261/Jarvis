@@ -381,3 +381,8 @@
 .hud-persona-sentence {
   display: block;
 }
+
+.named-persona-visual-sliders { display: grid; gap: 12px; margin: 12px 0; }
+.named-persona-visual-sliders label { display: grid; grid-template-columns: 80px minmax(70px, 1fr) 40px; align-items: center; gap: 8px; font-size: 13px; }
+.named-persona-visual-sliders input { width: 100%; accent-color: #d4a017; }
+.named-persona-visual-sliders output { text-align: right; font-variant-numeric: tabular-nums; }

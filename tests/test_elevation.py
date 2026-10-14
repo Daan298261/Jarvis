@@ -150,6 +150,8 @@ async def test_api_health_does_not_invoke_schtasks_on_repeat(monkeypatch):
     second = await health()
     assert first["ok"] is True
     assert second["ok"] is True
-    assert first["logon_task_registered"] is False
-    assert second["logon_task_registered"] is False
-    assert calls["n"] == 1
+    assert first["elevated"] is False
+    assert second["elevated"] is False
+    assert "logon_task_registered" not in first
+    assert "logon_task_registered" not in second
+    assert calls["n"] == 0

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import threading
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -25,6 +25,7 @@ class _Bucket:
 
 
 _BUCKETS: dict[tuple[str, str, str], _Bucket] = defaultdict(_Bucket)
+_RECORDED: OrderedDict[str, None] = OrderedDict()
 
 
 def _percentile(values: list[float], pct: float) -> float | None:
@@ -45,6 +46,12 @@ def _percentile(values: list[float], pct: float) -> float | None:
 def record(result: DecisionResult) -> None:
     key = (result.decision_class, result.provider, result.provider_version or result.model or "default")
     with _LOCK:
+        if result.request_id:
+            if result.request_id in _RECORDED:
+                return
+            _RECORDED[result.request_id] = None
+            if len(_RECORDED) > 800:
+                _RECORDED.popitem(last=False)
         bucket = _BUCKETS[key]
         bucket.hits += 1
         bucket.totals_ms.append(float(result.latency.total_ms or 0.0))
@@ -62,6 +69,7 @@ def record(result: DecisionResult) -> None:
 def reset_metrics() -> None:
     with _LOCK:
         _BUCKETS.clear()
+        _RECORDED.clear()
 
 
 def snapshot() -> dict[str, Any]:

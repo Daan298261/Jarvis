@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
+import secrets
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Literal
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -17,6 +21,7 @@ from pydantic import BaseModel
 
 from ..config import repo_root
 from ..hardware import hardware_dict
+from .supervisor import LAUNCH_LOG_MAX_BYTES, LAUNCH_LOGS_KEPT, CoreSupervisor, rotate_file
 
 CORE_HEALTH_URL = "http://127.0.0.1:4780/api/health"
 STATIC_DIR = Path(__file__).with_name("static")
@@ -109,6 +114,7 @@ async def status_snapshot() -> dict:
     return {
         "manager": {"healthy": True, "bind": "127.0.0.1:4782"},
         "core": {"state": state, "healthy": healthy, "process_present": process_present},
+        "supervisor": SUPERVISOR.snapshot(),
         "hardware": hardware_dict(),
         "storage": {"disk": disk, "paths": storage},
         "agents": details,
@@ -122,7 +128,19 @@ def _script(name: str) -> Path:
     return path
 
 
+# force-stop-jarvis.ps1 can take ~1 min (polite stop, then lockers, then port recheck).
+STOP_SCRIPT_TIMEOUT_SECONDS = 150.0
+START_HEALTH_WAIT_SECONDS = 90.0
+STOP_HEALTH_WAIT_SECONDS = 10.0
+
+
 def _launch(action: str) -> None:
+    """Start or stop the core. ``stop`` blocks until the stop script has exited.
+
+    force-stop kills every Jarvis process under the install root, so a start
+    launched while it is still running gets killed as a "locker"; the restart
+    and watchdog paths therefore must not start until stop has fully finished.
+    """
     root = _root()
     if action == "start":
         args = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(_script("start-jarvis.ps1")), "-NoBrowser"]
@@ -130,19 +148,102 @@ def _launch(action: str) -> None:
         args = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(_root() / "installer" / "windows" / "force-stop-jarvis.ps1"), "-InstallRoot", str(root), "-PreserveManager"]
     else:
         raise RuntimeError("restart is sequenced by the control endpoint")
-    subprocess.Popen(args, cwd=root, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    # Launcher output goes to a size-rotated log so a failed start is never silent.
+    log_path = root / "logs" / "anzu-launch.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    rotate_file(log_path, LAUNCH_LOGS_KEPT, LAUNCH_LOG_MAX_BYTES)
+    with log_path.open("ab") as handle:
+        handle.write(f"\n=== {action} {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n".encode("utf-8"))
+        handle.flush()
+        proc = subprocess.Popen(
+            args,
+            cwd=root,
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    if action == "stop":
+        try:
+            code = proc.wait(timeout=STOP_SCRIPT_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired as exc:
+            _kill_process_tree(proc)
+            log.error("ANZU stop script exceeded %ss; killed its process tree", int(STOP_SCRIPT_TIMEOUT_SECONDS))
+            raise RuntimeError(
+                f"ANZU stop did not finish within {int(STOP_SCRIPT_TIMEOUT_SECONDS)}s; start was not attempted"
+            ) from exc
+        if code != 0:
+            log.error("ANZU stop script failed with exit code %s", code)
+            raise RuntimeError(f"ANZU stop failed (exit code {code}); start was not attempted")
+
+
+def _kill_process_tree(proc: subprocess.Popen) -> None:
+    """Kill a timed-out stop script and its children, then reap it."""
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=30,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        else:
+            proc.kill()
+    except Exception:
+        log.warning("Could not kill stop-script tree %s", proc.pid, exc_info=True)
+    try:
+        proc.wait(timeout=30)
+    except Exception:
+        log.warning("Stop script %s still running after kill", proc.pid, exc_info=True)
 
 
 async def _wait_for(action: str) -> dict:
     expected = action != "stop"
-    for _ in range(20):
+    seconds = STOP_HEALTH_WAIT_SECONDS if action == "stop" else START_HEALTH_WAIT_SECONDS
+    for _ in range(int(seconds / 0.5)):
         if await _core_healthy() is expected:
             return await status_snapshot()
         await asyncio.sleep(0.5)
     return await status_snapshot()
 
 
+log = logging.getLogger(__name__)
+
+SUPERVISOR = CoreSupervisor(
+    root=lambda: _root(),
+    healthy=lambda: _core_healthy(),
+    process_present=lambda: _managed_process_running(),
+    launch=lambda action: _launch(action),
+)
+
+# Per-manager-session token for control actions. Clients on this computer get it
+# from /session (CORS limits browser readers to loopback portal origins); a page
+# that cannot read it cannot start, stop or restart ANZU.
+SESSION_TOKEN = secrets.token_urlsafe(32)
+TOKEN_HEADER = "X-Anzu-Manager-Token"
+
 app = FastAPI(title="ANZU Manager", docs_url=None, redoc_url=None)
+
+# The portal (served by the core on :4780, or Vite in dev) asks the manager why
+# the core is down and offers a Restart button. Only loopback portal origins may
+# read or call it; the loopback_only middleware still rejects remote clients.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"^https?://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$",
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", TOKEN_HEADER],
+)
+
+
+@app.on_event("startup")
+async def _start_supervisor() -> None:
+    SUPERVISOR.start()
+
+
+@app.on_event("shutdown")
+async def _stop_supervisor() -> None:
+    await SUPERVISOR.stop()
 
 
 @app.middleware("http")
@@ -158,22 +259,40 @@ async def manager_status():
     return await status_snapshot()
 
 
+@app.get("/api/manager/v1/session")
+async def manager_session():
+    return {"token": SESSION_TOKEN, "header": TOKEN_HEADER}
+
+
 @app.post("/api/manager/v1/control/{action}")
-async def manager_control(action: Literal["start", "stop", "restart"], body: ControlRequest):
+async def manager_control(
+    action: Literal["start", "stop", "restart"],
+    body: ControlRequest,
+    token: str | None = Header(default=None, alias=TOKEN_HEADER),
+):
+    if not token or not secrets.compare_digest(token, SESSION_TOKEN):
+        raise HTTPException(status_code=403, detail="Manager session token required")
     if not body.confirm:
         raise HTTPException(status_code=400, detail="Explicit confirmation is required")
-    try:
-        if action == "restart":
-            _launch("stop")
-            stopped = await _wait_for("stop")
-            if stopped["core"]["state"] != "stopped":
-                raise HTTPException(status_code=409, detail="ANZU did not stop; restart was not attempted")
-            _launch("start")
-        else:
-            _launch(action)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    snapshot = await _wait_for(action)
+    if SUPERVISOR.state.control_in_flight:
+        raise HTTPException(status_code=409, detail=f"ANZU {SUPERVISOR.state.control_in_flight} is already in progress")
+    SUPERVISOR.set_desired(action != "stop")
+    async with SUPERVISOR.control_action(action):
+        try:
+            if action == "restart":
+                await asyncio.to_thread(_launch, "stop")
+                stopped = await _wait_for("stop")
+                if stopped["core"]["state"] != "stopped":
+                    raise HTTPException(status_code=409, detail="ANZU did not stop; restart was not attempted")
+                await asyncio.to_thread(_launch, "start")
+                SUPERVISOR.note_launch()
+            else:
+                await asyncio.to_thread(_launch, action)
+                if action == "start":
+                    SUPERVISOR.note_launch()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        snapshot = await _wait_for(action)
     ok = snapshot["core"]["healthy"] if action != "stop" else snapshot["core"]["state"] == "stopped"
     return {"action": action, "ok": ok, "status": snapshot}
 

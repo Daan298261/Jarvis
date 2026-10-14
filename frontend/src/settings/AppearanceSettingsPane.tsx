@@ -1,8 +1,10 @@
 import { useState } from "react"
+import { CollapsibleSection } from "../components/CollapsibleSection"
 import { applyRuntimeProfile } from "../hud/applyRuntimeProfile"
 import { useHexStrikeSuiteActive } from "../hud/hexstrikeSuite"
 import { useHudOverlayOptional } from "../hud/hudOverlayContext"
 import { NamedPersonaControls } from "../persona/NamedPersonaControls"
+import { PersonaVisualSliders } from "../persona/PersonaVisualSliders"
 import { SessionPersonalityControls } from "../personality/SessionPersonalityControls"
 import { CustomPresencePanel } from "../presence/CustomPresencePanel"
 import { PresenceModePreview } from "../presence/PresenceModePreview"
@@ -10,8 +12,10 @@ import { updatePresentation } from "../presence/presentationSettings"
 import type { PresentationSettings } from "../presence/presenceTypes"
 import { MUSCULAR_HUMANOID_AVATAR_ID } from "../presence/renderers/HumanoidPresence"
 import {
+  MYTHIC_LIVING_AVATAR_ID,
+  MYTHIC_AVATAR_CHOICES,
+  LEGACY_HUMANOID_AVATAR_ID,
   MYTHIC_LIVE_B_AVATAR_ID,
-  MYTHIC_PORTRAIT_A_AVATAR_ID,
 } from "../presence/mythicPersonaVariant"
 
 type AppearanceSettingsPaneProps = {
@@ -65,12 +69,15 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
         ? "hexstrike"
         : settings.requestedPresence === "humanoid" && settings.avatarId === MUSCULAR_HUMANOID_AVATAR_ID
           ? "muscular_humanoid"
+          : settings.requestedPresence === "particle_bust" && settings.avatarId === MYTHIC_LIVING_AVATAR_ID
+            ? "mythic_living_b"
           : settings.requestedPresence === "particle_bust" && settings.avatarId === MYTHIC_LIVE_B_AVATAR_ID
             ? "mythic_live_b"
           : settings.requestedPresence
 
   return (
     <div className="settings-appearance-pane">
+      <CollapsibleSection title="Presence style" storageKey="appearance-presence-style">
       <p className="jarvis-presence-mode-lede" id="jarvis-presence-mode-help">
         Presence modes are style and profile controls on one shared renderer. Previews match the live look for each profile.
       </p>
@@ -103,7 +110,7 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
         <button
           type="button"
           disabled={busy}
-          className={selected === "humanoid" ? "active" : ""}
+          className={selected === "humanoid" && settings.avatarId !== LEGACY_HUMANOID_AVATAR_ID ? "active" : ""}
           onClick={() =>
             apply(
               { shell: "hud", requestedPresence: "humanoid", avatarId: "jarvis_base" },
@@ -128,34 +135,23 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
           <PresenceModePreview mode="muscular_humanoid" />
           Muscular humanoid · showcase
         </button>
-        <button
-          type="button"
-          disabled={busy}
-          className={selected === "particle_bust" ? "active" : ""}
-          onClick={() =>
-            apply(
-              { shell: "hud", requestedPresence: "particle_bust", avatarId: MYTHIC_PORTRAIT_A_AVATAR_ID },
-              "Mythic portrait cloud A active. Persona selections morph immediately on the shared particle stage.",
-            )
-          }
+        <button type="button" disabled={busy}
+          className={settings.requestedPresence === "humanoid" && settings.avatarId === LEGACY_HUMANOID_AVATAR_ID ? "active" : ""}
+          onClick={() => apply({ shell: "hud", requestedPresence: "humanoid", avatarId: LEGACY_HUMANOID_AVATAR_ID })}
         >
-          <PresenceModePreview mode="particle_bust" />
-          Mythic persona A · portrait cloud
+          <PresenceModePreview mode="humanoid" />
+          Humanoid · original particle sculpture
         </button>
-        <button
-          type="button"
-          disabled={busy}
-          className={selected === "mythic_live_b" ? "active" : ""}
-          onClick={() =>
-            apply(
-              { shell: "hud", requestedPresence: "particle_bust", avatarId: MYTHIC_LIVE_B_AVATAR_ID },
-              "Mythic persona B active: procedural live particles, direct gaze, pointer and camera attention.",
-            )
-          }
-        >
-          <PresenceModePreview mode="mythic_live_b" />
-          Mythic persona B · live gaze
-        </button>
+        {MYTHIC_AVATAR_CHOICES.map(choice => (
+          <button key={choice.id} type="button" disabled={busy}
+            className={settings.requestedPresence === "particle_bust" && settings.avatarId === choice.id ? "active" : ""}
+            aria-pressed={settings.requestedPresence === "particle_bust" && settings.avatarId === choice.id}
+            onClick={() => apply({ shell: "hud", requestedPresence: "particle_bust", avatarId: choice.id })}
+          >
+            <PresenceModePreview mode="particle_bust" />
+            Mythic persona {choice.label}
+          </button>
+        ))}
         <button
           type="button"
           disabled={busy || !hexstrikeProfile}
@@ -184,15 +180,18 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
       <p className="jarvis-presence-mode-apex-help" id="jarvis-apex-ui-help">
         {APEX_ASSISTIVE}
       </p>
+      </CollapsibleSection>
 
+      {!showPersona && <PersonaVisualSliders />}
       {showPersona && (
         <>
-          <SessionPersonalityControls />
-          <NamedPersonaControls />
+          <CollapsibleSection title="Personality" storageKey="appearance-personality"><SessionPersonalityControls /></CollapsibleSection>
+          <CollapsibleSection title="Persona" storageKey="appearance-persona"><NamedPersonaControls /></CollapsibleSection>
         </>
       )}
-      <CustomPresencePanel settings={settings} />
+      <CollapsibleSection title="Custom appearance" storageKey="appearance-custom"><CustomPresencePanel settings={settings} /></CollapsibleSection>
 
+      <CollapsibleSection title="Rendering and motion" storageKey="appearance-rendering">
       <label>
         Rendering
         <select
@@ -242,6 +241,7 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
         </select>
       </label>
 
+      </CollapsibleSection>
       {message && <p className="jarvis-presence-controls-message" role="status">{message}</p>}
     </div>
   )

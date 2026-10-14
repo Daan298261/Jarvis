@@ -11,7 +11,8 @@ import pytest
 from app.agent.front_responder import (
     ACK_HOLD_SECONDS,
     FrontReply,
-    consolidate_front_and_worker,
+    apply_disposition,
+    infer_arbitration_disposition,
     merge_front_and_worker,
     note_worker_first_sentence,
     wait_for_late_ack,
@@ -56,7 +57,7 @@ def test_duplicate_worker_is_suppressed_and_new_info_is_kept():
         "Those black bars you're seeing are just my viewport padding. "
         "If they bother you, tell me your screen resolution."
     )
-    suppressed = consolidate_front_and_worker(front, duplicate)
+    suppressed = apply_disposition(infer_arbitration_disposition(front, duplicate), front, duplicate)
     assert suppressed == front
     assert LABEL not in suppressed
 
@@ -69,7 +70,11 @@ def test_duplicate_worker_is_suppressed_and_new_info_is_kept():
     assert "Mild rain later, sir." in extended
     assert LABEL not in extended
 
-    corrected = consolidate_front_and_worker(
+    corrected = apply_disposition(
+        infer_arbitration_disposition(
+            "The meeting is at 3.",
+            "The meeting was moved to 4:30, and it's in the north conference room.",
+        ),
         "The meeting is at 3.",
         "The meeting was moved to 4:30, and it's in the north conference room.",
     )

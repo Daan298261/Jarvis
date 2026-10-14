@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   Stage the bundled Qwen3.5-2B Q4_K_M front-lane model before compiling JarvisSetup.exe.
@@ -13,6 +13,17 @@
   exists and matches the expected hash:
     - $env:JARVIS_FRONT_2B_GGUF (full path to the GGUF)
     - <repo>\models\Qwen3.5-2B-GGUF\Qwen3.5-2B-Q4_K_M.gguf
+
+  Otherwise the file is fetched over HTTPS from
+  https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf
+  by front-model-download.ps1 into a resumable "<file>.part". Each of up to
+  $DownloadAttempts attempts (with backoff) keeps that .part and resumes it with an
+  HTTP Range request, so a network blip only re-fetches the missing bytes; a
+  .part from an interrupted earlier run is resumed the same way. Once the .part is
+  full size its SHA-256 is checked inside the retry loop: a mismatch deletes it and
+  the next attempt downloads from zero. The .part is removed only after the final
+  failed attempt. No temp logs are written. $env:JARVIS_FRONT_2B_URL overrides the
+  source URL (mirror or test server); the size and SHA-256 checks still apply.
 #>
 param(
     [switch]$Force
@@ -29,6 +40,7 @@ $Include = "Qwen3.5-2B-Q4_K_M.gguf"
 # Official unsloth/Qwen3.5-2B-GGUF Q4_K_M (1,280,835,840 bytes).
 $ExpectedBytes = 1280835840
 $ExpectedSha = "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223"
+$DownloadAttempts = 4
 
 function Get-FrontSha256([string]$Path) {
     return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
@@ -121,50 +133,29 @@ foreach ($candidate in $candidates) {
     exit 0
 }
 
-function Get-PythonExe {
-    $venv = Join-Path $Root ".venv\Scripts\python.exe"
-    if (Test-Path $venv) { return $venv }
-    $python = Get-Command python -ErrorAction SilentlyContinue
-    if ($python) { return $python.Source }
-    $py = Get-Command py -ErrorAction SilentlyContinue
-    if ($py) {
-        $resolved = & $py.Source -3 -c "import sys; print(sys.executable)" 2>$null
-        if ($resolved) { return $resolved.Trim() }
-    }
-    return $null
+. (Join-Path $ScriptDir "front-model-download.ps1")
+
+# Stale hf CLI artifacts from older versions of this script are not resumable by
+# the HTTP downloader; drop them. Our own "<file>.part" is kept so it resumes.
+if (Test-Path -LiteralPath $Payload) {
+    Get-ChildItem -LiteralPath $Payload -Recurse -Force -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like '*.incomplete' -or $_.Name -like '*.gguf.lock' } |
+        ForEach-Object { Remove-Item -Force -LiteralPath $_.FullName -ErrorAction SilentlyContinue }
 }
 
-$Python = Get-PythonExe
-if (-not $Python) {
-    throw "Python is required to stage the Qwen3.5-2B front model before building the installer."
+$Url = if ($env:JARVIS_FRONT_2B_URL) { $env:JARVIS_FRONT_2B_URL } else { "https://huggingface.co/$Repo/resolve/main/$Include" }
+try {
+    Invoke-FrontResumableDownload -Url $Url -Destination $Canonical -ExpectedBytes $ExpectedBytes `
+        -ExpectedSha $ExpectedSha -Attempts $DownloadAttempts -BackoffSeconds 5
+} catch {
+    throw @"
+Qwen3.5-2B front model download failed.
+Repo: $Repo
+File: $Include
+$($_.Exception.Message)
+Tip: set JARVIS_FRONT_2B_GGUF to a verified local copy to skip the network download.
+"@
 }
-
-New-Item -ItemType Directory -Force -Path $Payload | Out-Null
-
-Write-Host "Ensuring huggingface_hub is available..." -ForegroundColor Cyan
-& $Python -m pip install --quiet --upgrade huggingface_hub
-if ($LASTEXITCODE -ne 0) { throw "Could not install/update huggingface_hub." }
-
-$Hf = Join-Path (Split-Path $Python -Parent) "hf.exe"
-if (-not (Test-Path $Hf)) {
-    $hfCmd = Get-Command hf -ErrorAction SilentlyContinue
-    if ($hfCmd) { $Hf = $hfCmd.Source }
-}
-if (-not (Test-Path $Hf)) { throw "hf CLI is unavailable after installing huggingface_hub." }
-
-$env:HF_XET_HIGH_PERFORMANCE = "1"
-Write-Host "Staging Qwen3.5-2B Q4_K_M front model..." -ForegroundColor Cyan
-& $Hf download $Repo --include $Include --local-dir $Payload
-if ($LASTEXITCODE -ne 0) { throw "Qwen3.5-2B front model download failed." }
-
-if (-not (Test-Path -LiteralPath $Canonical)) {
-    $found = Get-ChildItem -Path $Payload -Recurse -File -Filter $Include |
-        Where-Object { -not (Same-Path $_.FullName $Canonical) } |
-        Select-Object -First 1
-    if (-not $found) { throw "No $Include was found after downloading $Repo." }
-    Copy-Item -Force -LiteralPath $found.FullName -Destination $Canonical
-}
-
 Assert-ExpectedFrontFile $Canonical "Downloaded Qwen3.5-2B front model"
 Write-FrontVerifiedMarker
 

@@ -293,3 +293,26 @@ def test_git_clone_permission_ids():
         {"action": "clone", "url": "http://nas.local/git/repo.git"},
     ) == ["network.local"]
 
+
+def test_hexstrike_permission_rationale_defers_to_explicit_use(permission_store):
+    """cyber.hexstrike stays ask-by-default; copy says it is only for start/operate."""
+    from app.policy.computer_permissions import (
+        CATALOG,
+        describe_permission,
+        spoken_prompt_for_permission,
+    )
+
+    spec = next(item for item in CATALOG if item.id == "cyber.hexstrike")
+    assert spec.default == "ask"
+    assert "Asked only when" in spec.detail
+    assert "command/payload" in spec.detail.lower()
+    spoken = spoken_prompt_for_permission("cyber.hexstrike")
+    assert "HexStrike" in spoken
+    assert "permission" in spoken.lower()
+    assert "start the local suite" in spoken.lower() or "operator" in spoken.lower()
+    detail = describe_permission("cyber.hexstrike")
+    assert detail["id"] == "cyber.hexstrike"
+    assert "Asked only when" in detail["detail"]
+    assert detail["default"] == "ask"
+
+

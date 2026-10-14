@@ -68,13 +68,15 @@ fun offlineChatBanner(
     paired: Boolean,
     packStatus: DevicePackStatus,
 ): String? {
-    if (leaderConnected || !paired) return null
+    if (leaderConnected) return null
+    val where = if (paired) "ANZU desktop unreachable" else "No desktop paired"
     return when (packStatus) {
         DevicePackStatus.MISSING, DevicePackStatus.ERROR ->
-            "Leader unreachable — install a companion model pack under More → Models."
+            "$where — download or load a model under More → Models to chat on this phone."
         DevicePackStatus.DOWNLOADING ->
-            "Leader unreachable — model pack downloading…"
+            "$where — model downloading…"
         DevicePackStatus.READY, DevicePackStatus.RUNNING ->
-            "Leader unreachable — answering on-device."
+            if (paired) "$where — answering on this phone. Chats sync when the desktop is back."
+            else "Answering on this phone. Conversations stay on this device."
     }
 }

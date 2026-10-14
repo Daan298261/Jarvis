@@ -10,7 +10,7 @@ import java.nio.charset.StandardCharsets
 data class LanHost(
     val endpoint: String,
     val serverPin: String,
-    val name: String = "Jarvis",
+    val name: String = AnzuBranding.DISPLAY_NAME,
 )
 
 object LanBeacon {
@@ -36,7 +36,7 @@ object LanBeacon {
             val endpoint = TransportPolicy.origin(payload["https"]?.jsonPrimitive?.content.orEmpty())
             val host = URI(endpoint).host ?: return@runCatching null
             if (host == "127.0.0.1" || host.equals("localhost", ignoreCase = true)) return@runCatching null
-            val name = payload["name"]?.jsonPrimitive?.content.orEmpty().ifBlank { "Jarvis" }.take(80)
+            val name = payload["name"]?.jsonPrimitive?.content.orEmpty().ifBlank { AnzuBranding.DISPLAY_NAME }.take(80)
             LanHost(endpoint, pin, name)
         }.getOrNull()
     }

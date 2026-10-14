@@ -247,6 +247,9 @@ async def run_ingress_gate(
         gate.front_action = gate.front_action if gate.front_action != "final_basic" else "ack_continue"
     if tools_hint is not None:
         gate.needs_tools = bool(tools_hint)
+    # Tool-needed owner asks must not terminate as chat-only final_basic.
+    if gate.needs_tools and gate.front_action == "final_basic":
+        gate.front_action = "ack_continue"
 
     if gate.size_class == "big" and not blob_id and text:
         row = await store_ingress_blob(body=text, conversation_id=conversation_id, task_id=task_id)

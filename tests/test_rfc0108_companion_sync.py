@@ -65,7 +65,14 @@ async def test_model_pack_catalog_metadata_only(mobile_env):
         assert pack["size_bytes"] > 0
         assert "leader_cache" in pack
     recommended = next(p for p in body["packs"] if p["recommended"])
-    assert recommended["id"] == "qwen2.5-1.5b-instruct-q4"
+    assert recommended["id"] == "qwen3.5-2b-heretic-q4"
+    assert sum(1 for p in body["packs"] if p["recommended"]) == 1
+    opt_in = next(p for p in body["packs"] if p["id"] == "qwen3.5-4b-abliterated-q4")
+    assert opt_in["recommended"] is False and opt_in["min_ram_mb"] > recommended["min_ram_mb"]
+    for pack in body["packs"]:
+        if pack["id"].startswith("qwen3.5"):
+            # Pinned to an immutable HF commit, never the moving main branch.
+            assert "/resolve/main/" not in pack["url"]
     assert body["leader_pack_cache"]["pack_id"] == recommended["id"]
     assert body["leader_pack_cache"]["state"] in {"idle", "downloading", "ready", "error"}
 
@@ -79,7 +86,19 @@ async def test_leader_pack_cache_ready_when_hash_matches(mobile_env, monkeypatch
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(b"cached-pack-bytes")
     pack["sha256"] = companion_offline._sha256_file(target)
-    companion_offline.COMPANION_PACK_CATALOG[0] = pack
+    pack["size_bytes"] = target.stat().st_size
+    monkeypatch.setattr(companion_offline, "COMPANION_PACK_CATALOG", [
+        pack if entry["id"] == pack["id"] else entry
+        for entry in companion_offline.COMPANION_PACK_CATALOG
+    ])
+    assert companion_offline._cache_ready(pack) is False
+    import asyncio
+    assert await asyncio.to_thread(companion_offline._verify_and_mark, target, pack["sha256"])
+
+    def unexpected_hash(_path):
+        raise AssertionError("Pack status polling must not hash model weights")
+
+    monkeypatch.setattr(companion_offline, "_sha256_file", unexpected_hash)
     status = companion_offline.leader_cache_status(pack["id"])
     assert status["state"] == "ready"
     assert status["bytes_done"] == pack["size_bytes"]
@@ -198,3 +217,49 @@ async def test_offline_sync_idempotent_by_client_message_id(mobile_env, jarvis_e
     assert first.status_code == 200
     assert second.status_code == 200
     assert second.json()["appended"] == 0
+
+
+@pytest.mark.asyncio
+async def test_offline_sync_retry_into_client_thread_after_lost_reply(mobile_env, jarvis_env):
+    """Phone mints the thread id before posting; a lost reply plus a new turn must not fork or duplicate."""
+    import json
+
+    from app.api.companion import router
+    from app.db.models import Conversation
+    from app.db.session import SessionLocal
+
+    app = FastAPI()
+    app.include_router(router)
+    _, headers = _paired()
+    thread = str(uuid.uuid4())
+    ids = [str(uuid.uuid4()) for _ in range(3)]
+
+    def turn(i, role="user"):
+        return {
+            "request_id": ids[i],
+            "client_message_id": ids[i],
+            "role": role,
+            "text": f"turn {i}",
+            "origin": "device_offline" if role == "user" else "device_local_draft",
+        }
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        first = await client.post(
+            "/api/companion/sync/offline-turns",
+            headers=headers,
+            json={"conversation_id": thread, "turns": [turn(0), turn(1, "assistant")]},
+        )
+        # Reply "lost": the phone retries the same turns plus a new one into the same thread.
+        retry = await client.post(
+            "/api/companion/sync/offline-turns",
+            headers=headers,
+            json={"conversation_id": thread, "turns": [turn(0), turn(1, "assistant"), turn(2)]},
+        )
+    assert first.status_code == 200 and retry.status_code == 200
+    assert first.json()["conversation_id"] == thread == retry.json()["conversation_id"]
+    assert first.json()["appended"] == 2 and retry.json()["appended"] == 1
+    async with SessionLocal() as db:
+        conversation = await db.get(Conversation, thread)
+        messages = json.loads(conversation.messages_json)
+    assert [m["id"] for m in messages] == ids

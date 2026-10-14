@@ -1,3 +1,4 @@
+import { CollapsibleSection } from "../components/CollapsibleSection"
 import { useEffect, useState } from "react"
 import { VoiceProfilePicker } from "../tts/VoiceProfilePicker"
 import {
@@ -67,7 +68,7 @@ export function VoiceSettingsPane() {
   }
 
   return (
-    <div className="card grid settings-pane-card">
+    <CollapsibleSection className="card grid settings-pane-card" storageKey="voice-speech" title="Voice and speech">
       <p className="lede" style={{ margin: "0 0 12px" }}>
         ANZU speaks with local engines (Kokoro by default). You can also route speech through VoiceStudio or
         Pocket TTS, and choose a speech-to-text backend for microphone uploads.
@@ -87,7 +88,7 @@ export function VoiceSettingsPane() {
         <strong>Speak chat replies</strong>
       </label>
 
-      <h3 style={{ marginTop: 20, marginBottom: 8 }}>Speech-to-text</h3>
+      <CollapsibleSection title="Speech-to-text" storageKey="voice-stt">
       <label className="grid" style={{ gap: 6 }}>
         <span>STT backend</span>
         <select
@@ -114,7 +115,8 @@ export function VoiceSettingsPane() {
         />
       </label>
 
-      <h3 style={{ marginTop: 20, marginBottom: 8 }}>VoiceStudio</h3>
+      </CollapsibleSection>
+      <CollapsibleSection title="VoiceStudio" storageKey="voice-studio">
       <label className="grid" style={{ gap: 6 }}>
         <span>Local API base URL</span>
         <input
@@ -131,7 +133,8 @@ export function VoiceSettingsPane() {
         <code>JARVIS_VOICESTUDIO_API_KEY</code> when the server requires a bearer token.
       </p>
 
-      <h3 style={{ marginTop: 20, marginBottom: 8 }}>TTS engine preference</h3>
+      </CollapsibleSection>
+      <CollapsibleSection title="Speech engine" storageKey="voice-engine">
       <label className="grid" style={{ gap: 6 }}>
         <span>Default engine hint (profile still wins when set)</span>
         <select
@@ -147,9 +150,10 @@ export function VoiceSettingsPane() {
         </select>
       </label>
 
+      </CollapsibleSection>
       <p className="lede" style={{ margin: "12px 0 0", fontSize: 13 }}>
         {saving ? "Saving…" : "Installer optional tasks download Kokoro, Persona voices, Whisper, VoiceStudio clone, and Pocket TTS."}
       </p>
-    </div>
+    </CollapsibleSection>
   )
 }

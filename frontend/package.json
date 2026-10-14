@@ -10,11 +10,13 @@
     "test:projects-rail": "node --experimental-strip-types --import ./projects-test-register.mjs --test projects-rail-migration.test.mjs",
     "test:automation-breaker": "node --experimental-strip-types --test automation-breaker-view.test.mjs",
     "test:task-status": "node --experimental-strip-types --test task-status.test.mjs",
+    "test:companion-pairing-recovery": "node --experimental-strip-types --test companion-pairing-recovery.test.mjs",
     "test:settings-submenus": "node --experimental-strip-types --test settings-submenus.test.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "test:companion-remote-access": "node --experimental-strip-types --test companion-remote-access.test.mjs"
   },
   "dependencies": {
     "qrcode.react": "4.2.0",

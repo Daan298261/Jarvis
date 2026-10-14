@@ -49,6 +49,13 @@ def test_simple_open_steam_does_not_need_the_model():
         "jarvis_probe.txt",
         "hello from jarvis",
     )
+    assert simple_file_control(
+        'write "print(\'hello from elevated coding live probe\')" to Desktop/jarvis-coding-live.py'
+    ) == (
+        "write",
+        "Desktop/jarvis-coding-live.py",
+        "print('hello from elevated coding live probe')",
+    )
     assert simple_file_control("read notes.txt") == ("read", "notes.txt", "")
     assert simple_file_control("read notes.txt and then open steam") is None
     assert simple_file_control("delete C:\\Windows\\System32\\foo.txt") is None

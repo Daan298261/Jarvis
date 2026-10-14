@@ -1,3 +1,4 @@
+import { CollapsibleSection } from "../components/CollapsibleSection"
 import { useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import {
@@ -219,8 +220,8 @@ export function AutomationBreakerPanel() {
   const automations = loadState.status === "ready" ? loadState.automations : []
 
   return (
-    <div className="card grid settings-pane-card" id="automation-breaker">
-      <h2 id="automation-breaker-title">Automation circuit breaker</h2>
+    <CollapsibleSection className="card grid settings-pane-card" id="automation-breaker" storageKey="AutomationBreakerPanel-Automation-circuit-breaker" title={<span id="automation-breaker-title">Automation circuit breaker</span>}>
+
       <p className="lede" style={{ margin: 0 }}>
         Scheduled and event automations stop after repeated terminal failures. This list is the
         breaker record: state, consecutive failures against the threshold, and the last failure.
@@ -404,6 +405,6 @@ export function AutomationBreakerPanel() {
           </section>
         )
       })}
-    </div>
+    </CollapsibleSection>
   )
 }

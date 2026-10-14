@@ -1,4 +1,5 @@
 import type { ParticleOrb, PresenceShapeDefinition, PresenceShapeId } from "../particleTypes"
+import { makeRng } from "./figureKit"
 import { humanoidBustShape } from "./humanoidBust"
 import { energyCoreShape } from "./energyCore"
 import { hexAegisShape } from "./hexAegis"
@@ -107,36 +108,22 @@ export function resampleOrbs(orbs: ParticleOrb[], count: number): ParticleOrb[] 
       x: 0, y: 0, z: 0, gold: 0, light: 0.2, flow: 0, size: 1.4,
     }))
   }
-  const selected: ParticleOrb[] = new Array(count)
-  for (let i = 0; i < selected.length; i++) {
-    const t = i / selected.length
-    selected[i] = orbs[Math.min(orbs.length - 1, Math.floor(t * orbs.length))]
-  }
-  // Interleave semantic and spatial buckets so every prefix is a stable LOD:
-  // facial gold, silhouette, and the full cloud remain represented as count falls.
-  const buckets = new Map<number, ParticleOrb[]>()
-  const bin = (value: number) => Math.max(0, Math.min(7, Math.floor((value + 2.4) * 1.65)))
-  for (const orb of selected) {
-    const material = (orb.gold >= 0.5 ? 1 : 0) * 3 + Math.max(0, Math.min(2, Math.floor(orb.flow)))
-    const key = (((material * 8 + bin(orb.x)) * 8 + bin(orb.y)) * 8 + bin(orb.z))
-    const bucket = buckets.get(key) ?? []
-    bucket.push(orb)
-    buckets.set(key, bucket)
-  }
-  const keys = [...buckets.keys()].sort((a, b) => a - b)
-  const out: ParticleOrb[] = []
-  let remaining = true
-  for (let depth = 0; remaining; depth++) {
-    remaining = false
-    for (const key of keys) {
-      const orb = buckets.get(key)![depth]
-      if (orb) {
-        out.push(orb)
-        remaining = true
-      }
+  // Portraits arrive in raster order. Shuffle before sampling so reducing the
+  // GPU draw range removes scattered dots rather than contiguous rows/bars.
+  // A fixed seed gives a stable nested subset when density moves up or down.
+  const random = makeRng(6901210)
+  const shuffle = (points: ParticleOrb[]) => {
+    for (let i = points.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1))
+      ;[points[i], points[j]] = [points[j], points[i]]
     }
+    return points
   }
-  return out
+  const shuffled = shuffle(orbs.slice())
+  if (count <= shuffled.length) return shuffled.slice(0, count)
+  // Existing clouds may need more GPU slots than authored samples. Scatter
+  // the repeats too, so a sparse prefix never favours the first cycle.
+  return shuffle(Array.from({ length: count }, (_, i) => shuffled[i % shuffled.length]))
 }
 
 // Built-in shapes. Additional shapes register at module load or at runtime.

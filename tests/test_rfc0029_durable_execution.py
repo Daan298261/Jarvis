@@ -188,6 +188,47 @@ async def test_lease_expiry_allows_new_worker_claim(jarvis_env):
 
 
 @pytest.mark.asyncio
+async def test_startup_resets_orphaned_running_steps(jarvis_env):
+    from app.agent.durable_execution.recovery import reconcile_execution_on_startup
+    from app.agent.durable_execution.repository import (
+        claim_attempt,
+        mark_step_running,
+        reset_orphaned_in_flight_steps,
+        upsert_step,
+    )
+
+    run_id = str(uuid.uuid4())
+    await _seed_task(run_id)
+    step = await upsert_step(
+        run_id=run_id,
+        step_key="tool:filesystem:orphan:0",
+        predecessor_keys=[],
+        operation_type=OperationType.TOOL_CALL.value,
+        effect_class=EffectClass.INTERNAL.value,
+        replay_policy=ReplayPolicy.IDEMPOTENT.value,
+        input_hash="orphan",
+        idempotency_key="orphan-k",
+    )
+    attempt = await claim_attempt(step.id, "dead-worker", lease_seconds=1)
+    await mark_step_running(step.id)
+    past = datetime.now(timezone.utc) - timedelta(seconds=5)
+    async with SessionLocal() as session:
+        row = await session.get(ExecutionAttempt, attempt.id)
+        assert row is not None
+        row.lease_expires_at = past
+        await session.commit()
+
+    result = await reconcile_execution_on_startup()
+    assert attempt.id in result["abandoned_attempt_ids"]
+    assert step.id in result["reset_step_ids"]
+    steps = await list_steps(run_id)
+    orphan = next(item for item in steps if item.step_key == "tool:filesystem:orphan:0")
+    assert orphan.status == StepStatus.FAILED.value
+    # Idempotent when nothing is in-flight.
+    assert await reset_orphaned_in_flight_steps() == []
+
+
+@pytest.mark.asyncio
 async def test_park_and_resume_persist_wake_condition(jarvis_env):
     run_id = str(uuid.uuid4())
     await _seed_task(run_id)

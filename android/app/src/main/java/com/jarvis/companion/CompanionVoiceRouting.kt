@@ -13,12 +13,16 @@ enum class VoiceRouteMode {
 enum class SttVoiceRoute {
     GATEWAY,
     ON_DEVICE,
+    /** Android's built-in speech recognizer (offline when the phone has the language pack). */
+    PLATFORM,
     INSTALL,
 }
 
 enum class TtsVoiceRoute {
     HOST_NEURAL,
     ON_DEVICE,
+    /** Android's built-in TextToSpeech engine. */
+    PLATFORM,
     INSTALL,
 }
 
@@ -40,9 +44,25 @@ object CompanionVoiceRouting {
         ttsPackStatus: String,
         localLlmReady: Boolean = false,
         preferOnDeviceFrontend: Boolean = false,
+        platformSttAvailable: Boolean = false,
+        platformTtsAvailable: Boolean = false,
+        /** RFC-0216 S4: the installed TTS pack speaks the chosen voice language. */
+        ttsPackSpeaksLanguage: Boolean = true,
     ): VoiceRouteDecision {
         val sttReady = sttPackStatus in CompanionVoicePackStatus.USABLE
-        val ttsReady = ttsPackStatus in CompanionVoicePackStatus.USABLE
+        val ttsReady = ttsPackStatus in CompanionVoicePackStatus.USABLE && ttsPackSpeaksLanguage
+        // ANZU's own packs (Whisper / Pocket TTS) win; Android's engines cover a phone without them.
+        fun localStt() = when {
+            sttReady -> SttVoiceRoute.ON_DEVICE
+            platformSttAvailable -> SttVoiceRoute.PLATFORM
+            else -> SttVoiceRoute.INSTALL
+        }
+        fun localTts() = when {
+            ttsReady -> TtsVoiceRoute.ON_DEVICE
+            platformTtsAvailable -> TtsVoiceRoute.PLATFORM
+            else -> TtsVoiceRoute.INSTALL
+        }
+        fun usesPlatform(stt: SttVoiceRoute, tts: TtsVoiceRoute) = stt == SttVoiceRoute.PLATFORM || tts == TtsVoiceRoute.PLATFORM
 
         if (leaderReachable && realtimeVoiceHealthy && hostTtsHealthy && !preferOnDeviceFrontend) {
             return VoiceRouteDecision(
@@ -53,8 +73,8 @@ object CompanionVoiceRouting {
         }
 
         if (leaderReachable && (!realtimeVoiceHealthy || !hostTtsHealthy)) {
-            val stt = if (sttReady) SttVoiceRoute.ON_DEVICE else SttVoiceRoute.INSTALL
-            val tts = if (ttsReady) TtsVoiceRoute.ON_DEVICE else TtsVoiceRoute.INSTALL
+            val stt = localStt()
+            val tts = localTts()
             val error = if (stt == SttVoiceRoute.INSTALL || tts == TtsVoiceRoute.INSTALL) {
                 "Host voice failed and on-device voice packs are not installed — open More → Voice"
             } else {
@@ -64,7 +84,11 @@ object CompanionVoiceRouting {
                 mode = VoiceRouteMode.FALLBACK_A,
                 stt = stt,
                 tts = tts,
-                banner = if (error == null) "Host voice unavailable — using on-device voice" else null,
+                banner = when {
+                    error != null -> null
+                    usesPlatform(stt, tts) -> "Host voice unavailable — using this phone's built-in voice"
+                    else -> "Host voice unavailable — using on-device voice"
+                },
                 error = error,
                 onDeviceIndicator = error == null,
             )
@@ -72,10 +96,10 @@ object CompanionVoiceRouting {
 
         if (!leaderReachable) {
             val mode = if (localLlmReady) VoiceRouteMode.GRID_DOWN_B else VoiceRouteMode.FALLBACK_A
-            val stt = if (sttReady) SttVoiceRoute.ON_DEVICE else SttVoiceRoute.INSTALL
-            val tts = if (ttsReady) TtsVoiceRoute.ON_DEVICE else TtsVoiceRoute.INSTALL
+            val stt = localStt()
+            val tts = localTts()
             val error = if (stt == SttVoiceRoute.INSTALL || tts == TtsVoiceRoute.INSTALL) {
-                "Leader unreachable — install on-device voice packs in More → Voice"
+                "ANZU desktop unreachable — install on-device voice packs in More → Voice"
             } else {
                 null
             }
@@ -83,7 +107,11 @@ object CompanionVoiceRouting {
                 mode = mode,
                 stt = stt,
                 tts = tts,
-                banner = if (error == null) "On-device voice (Leader unreachable)" else null,
+                banner = when {
+                    error != null -> null
+                    usesPlatform(stt, tts) -> "This phone's built-in voice (ANZU desktop unreachable)"
+                    else -> "On-device voice (ANZU desktop unreachable)"
+                },
                 error = error,
                 onDeviceIndicator = error == null,
             )

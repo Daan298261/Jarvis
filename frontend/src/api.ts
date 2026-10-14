@@ -4608,6 +4608,8 @@ export type CompanionPairingCode = {
   endpoints?: string[]
   server_pin?: string
   qr?: CompanionPairingQr | null
+  remote?: boolean
+  lockout_remaining_seconds?: number
 }
 
 export type CompanionOnboardingOffer = {
@@ -4645,19 +4647,44 @@ export type CompanionStudioCapabilities = {
 
 export type CompanionPairingApiResult =
   | { available: true; pairing: CompanionPairingCode }
-  | { available: false; reason: "not_found" | "error"; message?: string }
+  | { available: false; reason: "not_found" | "error" | "unreachable" | "unhealthy"; message?: string }
+
+/** Core is up but not ready (critical startup step failed) or answering 5xx. */
+async function coreReportsUnhealthy(signal?: AbortSignal): Promise<{ unhealthy: boolean; detail: string }> {
+  try {
+    const response = await fetch(jarvisApiUrl("/api/health"), { cache: "no-store", signal })
+    if (!response.ok) return { unhealthy: true, detail: `health check returned HTTP ${response.status}` }
+    const body = (await response.json()) as { ok?: boolean; startup?: { failed_steps?: { step: string; critical?: boolean }[] } }
+    if (body.ok === false) {
+      const steps = (body.startup?.failed_steps || []).filter((item) => item.critical).map((item) => item.step)
+      return { unhealthy: true, detail: steps.length ? `startup failed: ${steps.join(", ")}` : "core reports not ready" }
+    }
+    return { unhealthy: false, detail: "" }
+  } catch (error) {
+    if (signal?.aborted) throw error
+    return { unhealthy: true, detail: "health check failed" }
+  }
+}
 
 async function companionPairingRequest(
   path: string,
   init?: RequestInit,
 ): Promise<CompanionPairingApiResult> {
+  const controller = new AbortController()
+  const deadline = globalThis.setTimeout(() => controller.abort(), 30000)
   try {
     const headers = authHeaders({ "Content-Type": "application/json", ...(init?.headers as Record<string, string> || {}) })
-    const response = await fetch(jarvisApiUrl(path), { ...init, headers })
+    const response = await fetch(jarvisApiUrl(path), { ...init, headers, signal: controller.signal })
     if (response.status === 404) {
       return { available: false, reason: "not_found" }
     }
     if (!response.ok) {
+      if (response.status >= 500) {
+        const health = await coreReportsUnhealthy(controller.signal)
+        if (health.unhealthy) {
+          return { available: false, reason: "unhealthy", message: `ANZU backend is running but unhealthy (${health.detail}).` }
+        }
+      }
       const text = await response.text()
       let message = text || response.statusText
       try {
@@ -4666,7 +4693,7 @@ async function companionPairingRequest(
       } catch {
         // not JSON
       }
-      return { available: false, reason: "error", message }
+      return { available: false, reason: "error", message: `Pairing request failed (HTTP ${response.status}): ${message}` }
     }
     const raw = await response.json() as CompanionPairingCode
     const pairing: CompanionPairingCode = {
@@ -4680,7 +4707,13 @@ async function companionPairingRequest(
     }
     return { available: true, pairing }
   } catch (err) {
-    return { available: false, reason: "error", message: String(err) }
+    if (controller.signal.aborted) {
+      return { available: false, reason: "error", message: "QR creation timed out. Check that ANZU is running, then try again." }
+    }
+    // Other fetch errors indicate the backend cannot be reached.
+    return { available: false, reason: "unreachable", message: `ANZU backend is not reachable (${String(err)}).` }
+  } finally {
+    globalThis.clearTimeout(deadline)
   }
 }
 
@@ -4697,12 +4730,12 @@ export async function getActiveCompanionPairingCode(): Promise<CompanionPairingA
 }
 
 export async function createCompanionPairingCode(): Promise<CompanionPairingApiResult> {
-  const result = await companionPairingRequest("/api/mobile/manage/pairing-codes", { method: "POST", body: "{}" })
+  const result = await companionPairingRequest("/api/mobile/manage/pairing-codes", { method: "POST", body: JSON.stringify({ prepare_connection: true }) })
   return result
 }
 
 export async function regenerateCompanionPairingCode(): Promise<CompanionPairingApiResult> {
-  const result = await companionPairingRequest("/api/mobile/manage/pairing-codes/regenerate", { method: "POST", body: "{}" })
+  const result = await companionPairingRequest("/api/mobile/manage/pairing-codes/regenerate", { method: "POST", body: JSON.stringify({ prepare_connection: true }) })
   return result
 }
 
@@ -4745,7 +4778,6 @@ export async function startCompanionBuild(options?: {
   endpoint?: string
   mode?: "personalized" | "generic"
   prepareConnection?: boolean
-  remote?: boolean
 }): Promise<CompanionBuildJob> {
   const mode = options?.mode ?? "personalized"
   return api<CompanionBuildJob>("/api/mobile/manage/builds", {
@@ -4754,7 +4786,6 @@ export async function startCompanionBuild(options?: {
       endpoint: options?.endpoint ?? "",
       mode,
       prepare_connection: options?.prepareConnection ?? mode === "personalized",
-      remote: options?.remote ?? true,
     }),
   })
 }
