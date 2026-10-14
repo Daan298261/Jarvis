@@ -338,19 +338,34 @@ def build(
     bundle_orb(env, progress)
     progress(f"Compiling and signing the {label} companion APK")
     release_code = int(time.time() // 60)
-    subprocess.run(
-        [
-            str(REPO / "android" / ("gradlew.bat" if os.name == "nt" else "gradlew")),
-            ":app:assembleRelease",
-            f"-PbootstrapFile={bootstrap}",
-            f"-PreleaseCode={release_code}",
-            "--console=plain",
-        ],
-        cwd=REPO / "android",
-        env=env,
-        check=True,
-        capture_output=True,
-    )
+    # lintVitalAnalyzeRelease fails on Windows when a leftover Gradle daemon holds
+    # lint-cache jars (FileSystemException: used by another process). Clear the
+    # cache and run without a daemon so autobuild is not racing itself.
+    lint_cache = REPO / "android" / "app" / "build" / "intermediates" / "lint-cache"
+    if lint_cache.is_dir():
+        shutil.rmtree(lint_cache, ignore_errors=True)
+    gradle = [
+        str(REPO / "android" / ("gradlew.bat" if os.name == "nt" else "gradlew")),
+        ":app:assembleRelease",
+        f"-PbootstrapFile={bootstrap}",
+        f"-PreleaseCode={release_code}",
+        "--console=plain",
+        "--no-daemon",
+    ]
+    try:
+        subprocess.run(
+            gradle,
+            cwd=REPO / "android",
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        detail = ((exc.stderr or "") + "\n" + (exc.stdout or ""))[-8000:]
+        raise RuntimeError(
+            f"Gradle assembleRelease failed (exit {exc.returncode}):\n{detail}"
+        ) from exc
     source = REPO / "android" / "app" / "build" / "outputs" / "apk" / "release" / "app-release.apk"
     verify_apk_native_runtimes(source)
     verifier = sdk / "build-tools" / "35.0.0" / ("apksigner.bat" if os.name == "nt" else "apksigner")

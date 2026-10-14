@@ -76,6 +76,10 @@ $env:PYTHONPATH = $backendImportPath + [IO.Path]::PathSeparator + $env:PYTHONPAT
     --collect-all phonemizer `
     --collect-submodules app `
     --collect-all app `
+    --exclude-module tensorboard `
+    --exclude-module tensorboardX `
+    --exclude-module torch.utils.tensorboard `
+    --exclude-module torch.contrib._tensorboard_vis `
     $entry
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
 
