@@ -1,0 +1,32 @@
+Auto-merging android/app/build.gradle.kts
+Auto-merging android/app/src/main/AndroidManifest.xml
+CONFLICT (content): Merge conflict in android/app/src/main/AndroidManifest.xml
+Auto-merging android/app/src/main/cpp/voice_native/CMakeLists.txt
+CONFLICT (content): Merge conflict in android/app/src/main/cpp/voice_native/CMakeLists.txt
+Auto-merging android/app/src/main/java/com/jarvis/companion/AppAccessLock.kt
+CONFLICT (content): Merge conflict in android/app/src/main/java/com/jarvis/companion/AppAccessLock.kt
+Auto-merging android/app/src/main/java/com/jarvis/companion/CompanionModel.kt
+CONFLICT (content): Merge conflict in android/app/src/main/java/com/jarvis/companion/CompanionModel.kt
+Auto-merging android/app/src/main/java/com/jarvis/companion/CompanionPackManager.kt
+CONFLICT (content): Merge conflict in android/app/src/main/java/com/jarvis/companion/CompanionPackManager.kt
+Auto-merging android/app/src/main/java/com/jarvis/companion/JarvisApi.kt
+Auto-merging android/app/src/main/java/com/jarvis/companion/MainActivity.kt
+CONFLICT (content): Merge conflict in android/app/src/main/java/com/jarvis/companion/MainActivity.kt
+Auto-merging android/app/src/main/res/values/strings.xml
+Auto-merging backend/app/api/companion.py
+CONFLICT (content): Merge conflict in backend/app/api/companion.py
+Auto-merging backend/app/mobile/connectivity.py
+CONFLICT (content): Merge conflict in backend/app/mobile/connectivity.py
+Auto-merging backend/app/mobile/gateway.py
+CONFLICT (content): Merge conflict in backend/app/mobile/gateway.py
+Auto-merging backend/app/mobile/identity.py
+Auto-merging frontend/src/components/CompanionPairingPanel.tsx
+Auto-merging tests/test_rfc0108_companion_sync.py
+error: could not apply bd38536e... rescue: auto-commit abandoned agent work (2026-10-13 04:37)
+hint: After resolving the conflicts, mark them with
+hint: "git add/rm <pathspec>", then run
+hint: "git cherry-pick --continue".
+hint: You can instead skip this commit with "git cherry-pick --skip".
+hint: To abort and get back to the state before "git cherry-pick",
+hint: run "git cherry-pick --abort".
+hint: Disable this message with "git config set advice.mergeConflict false"

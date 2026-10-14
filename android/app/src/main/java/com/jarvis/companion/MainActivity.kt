@@ -50,6 +50,8 @@ private val Panel = Color(0xFF111B28)
 internal val Muted = Color(0xFF8C9CAF)
 /** Shared error text colour for settings rows (voice packs, sponsor credit). */
 internal val ErrorText = Color(0xFFE8A87C)
+/** Key of the Notifications tab; the visible label is localized. */
+private const val NOTIFICATIONS_TAB = "Notifications"
 
 class MainActivity : FragmentActivity() {
     private lateinit var accessLock: AppAccessLock
@@ -103,6 +105,11 @@ class MainActivity : FragmentActivity() {
             var showPostPairVoiceOffer by remember { mutableStateOf(false) }
             val callState by CurrentCall.state.collectAsStateWithLifecycle()
             var tab by remember { mutableStateOf("Home") }
+            val noticeStore = app.notices
+            val notices by noticeStore.notices.collectAsStateWithLifecycle()
+            val unreadNotices = notices.count { !it.read }
+            // Viewing the tab reads everything in it, including notices that arrive while it is open.
+            LaunchedEffect(tab, notices) { if (tab == NOTIFICATIONS_TAB) noticeStore.markAllRead() }
             var pairingScanRequest by remember { mutableStateOf(false) }
             var draft by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
             var incomingCall by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
@@ -267,6 +274,17 @@ class MainActivity : FragmentActivity() {
                             "Tasks" to Icons.Outlined.Checklist, "Studio" to Icons.Outlined.AutoAwesome, "More" to Icons.Outlined.Tune).forEach { (label, icon) ->
                             NavigationBarItem(selected = tab == label, onClick = { tab = label }, icon = { Icon(icon, label) }, label = { Text(label) })
                         }
+                        val noticesLabel = stringResource(R.string.notices_tab)
+                        NavigationBarItem(
+                            selected = tab == NOTIFICATIONS_TAB,
+                            onClick = { tab = NOTIFICATIONS_TAB },
+                            icon = {
+                                BadgedBox(badge = { if (unreadNotices > 0) Badge { Text(if (unreadNotices > 99) "99+" else unreadNotices.toString()) } }) {
+                                    Icon(Icons.Outlined.Notifications, noticesLabel)
+                                }
+                            },
+                            label = { Text(noticesLabel, maxLines = 1) },
+                        )
                     }
                 }) { padding ->
                     Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp)) {
@@ -283,32 +301,10 @@ class MainActivity : FragmentActivity() {
                                     else -> Muted
                                 },
                             )
+                            HomeNoticeIndicator(unreadNotices) { tab = NOTIFICATIONS_TAB }
                         }
-                        val offlineBanner = when {
-                            tab == "Chat" -> "" // Chat shows its own offline card.
-                            tab == "Home" && CompanionMode.needsPhoneSetup(state.connected, state.localModelReady) -> "" // the setup card explains it
-                            else -> CompanionOfflineStatus.offlineBannerText(state)
-                        }
-                        if (offlineBanner.isNotEmpty()) Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF1D2A34)), modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                            Text(offlineBanner, Modifier.padding(12.dp), fontSize = 12.sp)
-                        }
-                        if (state.error != null) Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF34251D)), modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                            Text(state.error.orEmpty(), Modifier.padding(12.dp), fontSize = 12.sp)
-                        }
-                        if (state.pendingMessage) Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                            var dismiss by remember { mutableStateOf(false) }
-                            Column(Modifier.padding(12.dp)) {
-                                Text("A message is waiting for confirmation", fontSize = 13.sp)
-                                Row {
-                                    TextButton(onClick = { model.retryPending() }, enabled = !state.busy) { Text("Retry safely") }
-                                    TextButton(onClick = { dismiss = true }, enabled = !state.busy) { Text("Dismiss") }
-                                }
-                            }
-                            if (dismiss) AlertDialog(onDismissRequest = { dismiss = false }, title = { Text("Dismiss pending message?") },
-                                text = { Text(stringResource(R.string.pending_may_be_working)) },
-                                confirmButton = { TextButton(onClick = { dismiss = false; model.dismissPending() }) { Text("Dismiss") } },
-                                dismissButton = { TextButton(onClick = { dismiss = false }) { Text("Keep") } })
-                        }
+                        // Status banners (desktop offline, errors, pending message, download failures) live in the
+                        // Notifications tab now; Home only shows the unread marker in the header above.
                         if (callState.active) Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
                             var routes by remember { mutableStateOf(false) }
                             Column(Modifier.padding(12.dp)) {
@@ -329,6 +325,26 @@ class MainActivity : FragmentActivity() {
                             }
                         }
                         when (tab) {
+                            NOTIFICATIONS_TAB -> NotificationsScreen(
+                                notices = notices,
+                                actionsEnabled = !state.busy,
+                                onAction = { action ->
+                                    when (action) {
+                                        NoticeAction.RETRY_PENDING -> model.retryPending()
+                                        NoticeAction.DISCARD_PENDING -> model.dismissPending()
+                                        NoticeAction.PAIR -> { pairingScanRequest = true; tab = "More" }
+                                        NoticeAction.SCAN_WIFI -> model.startLanScan()
+                                        NoticeAction.RETRY_MODEL_DOWNLOAD -> model.downloadCompanionPack()
+                                        NoticeAction.RETRY_VOICE_DOWNLOAD -> model.downloadRecommendedVoicePacks()
+                                        NoticeAction.OPEN_APP_SETTINGS -> startActivity(
+                                            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                                android.net.Uri.fromParts("package", packageName, null)),
+                                        )
+                                    }
+                                },
+                                onDismiss = noticeStore::dismiss,
+                                onClearAll = noticeStore::clearAll,
+                            )
                             "Home" -> {
                                 Spacer(Modifier.height(12.dp))
                                 Text("YOUR INTELLIGENCE, EVERYWHERE", fontSize = 10.sp, color = Muted, letterSpacing = 2.sp)

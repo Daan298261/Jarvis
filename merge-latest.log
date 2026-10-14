@@ -1,0 +1,5 @@
+Auto-merging android/app/src/main/java/com/jarvis/companion/CompanionModel.kt
+Auto-merging android/app/src/main/java/com/jarvis/companion/MainActivity.kt
+Auto-merging android/app/src/main/res/values/strings.xml
+CONFLICT (content): Merge conflict in android/app/src/main/res/values/strings.xml
+Automatic merge failed; fix conflicts and then commit the result.

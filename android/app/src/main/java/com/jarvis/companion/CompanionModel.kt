@@ -180,6 +180,19 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                 DevicePackChromePublisher.publish(this@CompanionModel, deviceModelChrome, companionState)
             }
         }
+        // The single route from app state into the Notifications tab: live conditions are re-derived on every
+        // change (and clear themselves), and each newly reported error is logged once as a dated event.
+        viewModelScope.launch {
+            var lastError: String? = null
+            state.collect { s ->
+                jarvisApp.notices.syncLive(NoticeRules.conditions(s, api.deviceId.isNotEmpty()))
+                val error = s.error?.takeIf { it.isNotBlank() }
+                if (error != null && error != lastError) {
+                    jarvisApp.notices.postEvent(NoticeKind.ERROR, NoticeSeverity.ERROR, error, NoticeRules.errorActions(error))
+                }
+                lastError = error
+            }
+        }
         runCatching { loadLocalLibrary() }.onFailure {
             Log.e(TAG, "Cannot read conversations stored on this phone", it)
             mutable.value = mutable.value.copy(error = "Cannot read conversations stored on this phone: ${it.message}")

@@ -1,0 +1,19 @@
+[cursor/recover-phone-assistant-99ea b246cc29] rescue: auto-commit abandoned agent work (2026-10-13 04:37)
+ Date: Tue Oct 13 04:37:03 2026 +0200
+ 36 files changed, 1476 insertions(+), 35 deletions(-)
+ create mode 100644 android/app/src/androidTest/java/com/jarvis/companion/LocalAssistantRuntimeTest.kt
+ create mode 100644 android/app/src/main/java/com/jarvis/companion/AnzuAccessibilityService.kt
+ create mode 100644 android/app/src/main/java/com/jarvis/companion/AnzuVoiceInteraction.kt
+ create mode 100644 android/app/src/main/java/com/jarvis/companion/AnzuWakeService.kt
+ create mode 100644 android/app/src/main/java/com/jarvis/companion/AssistantSettings.kt
+ create mode 100644 android/app/src/main/java/com/jarvis/companion/PhoneTools.kt
+ create mode 100644 android/app/src/main/res/xml/anzu_accessibility.xml
+ create mode 100644 android/app/src/main/res/xml/anzu_voice_interaction.xml
+ create mode 100644 android/app/src/test/java/com/jarvis/companion/PhoneToolsTest.kt
+ create mode 100644 backend/app/mobile/phone_setup.py
+ create mode 100644 backend/app/mobile/phone_tools.py
+ create mode 100644 backend/app/tools/mobile_apps.py
+ create mode 100644 docs/rfcs/0215-android-connected-local-assistant.md
+ create mode 100644 frontend/src/components/PhoneConnectionSetup.tsx
+ create mode 100644 pytest-0215.log
+ create mode 100644 tests/test_rfc0215_phone_assistant.py

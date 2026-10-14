@@ -3,6 +3,7 @@ import { api } from "../api"
 import { LmStudioCatalogClassicSection } from "../lmstudio/LmStudioCatalogClassicSection"
 import { RuntimeProfilesSection } from "./RuntimeProfiles"
 import { SecurityModelGates } from "./SecurityModelGates"
+import { RunningModels } from "../hud/RunningModels"
 
 type Benchmark = {
   id: number
@@ -192,6 +193,7 @@ export function ModelPage() {
       <RuntimeProfilesSection />
       <SecurityModelGates />
       <LmStudioCatalogClassicSection />
+      <RunningModels showAll />
       <AgentSuiteCard />
       <HardwareGateCard />
       <div className="card" style={{ marginTop: 16 }}>

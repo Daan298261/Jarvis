@@ -1,0 +1,58 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.9/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:bootstrap
+> Task :app:prepareWakeRuntime UP-TO-DATE
+> Task :app:preBuild
+> Task :app:preDebugBuild
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:preDebugUnitTestBuild
+> Task :app:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :app:mergeDebugShaders UP-TO-DATE
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets UP-TO-DATE
+> Task :app:packageDebugUnitTestForUnitTest UP-TO-DATE
+> Task :app:generateDebugUnitTestConfig UP-TO-DATE
+> Task :app:compileDebugKotlin
+w: file:///C:/Users/daanv/.codex/worktrees/recover-phone-assistant/Jarvis/android/app/src/main/java/com/jarvis/companion/JarvisApi.kt:228:17 'val allNetworks: (Array<Network!>..Array<out Network!>)' is deprecated. Deprecated in Java.
+w: file:///C:/Users/daanv/.codex/worktrees/recover-phone-assistant/Jarvis/android/app/src/main/java/com/jarvis/companion/MainActivity.kt:467:182 'val Icons.Outlined.VolumeUp: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Outlined.VolumeUp.
+
+> Task :app:compileDebugJavaWithJavac
+> Task :app:processDebugJavaRes
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:bundleDebugClassesToCompileJar
+
+> Task :app:compileDebugUnitTestKotlin
+w: file:///C:/Users/daanv/.codex/worktrees/recover-phone-assistant/Jarvis/android/app/src/test/java/com/jarvis/companion/DownloadedContentManagerTest.kt:198:43 This is a delicate API and its use requires care. Make sure you fully read and understand documentation of the declaration that is marked as a delicate API.
+w: file:///C:/Users/daanv/.codex/worktrees/recover-phone-assistant/Jarvis/android/app/src/test/java/com/jarvis/companion/PlatformSttTest.kt:41:38 'fun addResolveInfoForIntent(p0: Intent!, p1: ResolveInfo!): Unit' is deprecated. Deprecated in Java.
+w: file:///C:/Users/daanv/.codex/worktrees/recover-phone-assistant/Jarvis/android/app/src/test/java/com/jarvis/companion/SponsorCreditTest.kt:64:46 'fun addResolveInfoForIntent(p0: Intent!, p1: ResolveInfo!): Unit' is deprecated. Deprecated in Java.
+w: file:///C:/Users/daanv/.codex/worktrees/recover-phone-assistant/Jarvis/android/app/src/test/java/com/jarvis/companion/StandaloneModeTest.kt:108:36 'field operation: PendingIntent?' is deprecated. Deprecated in Java.
+w: file:///C:/Users/daanv/.codex/worktrees/recover-phone-assistant/Jarvis/android/app/src/test/java/com/jarvis/companion/StandaloneModeTest.kt:109:98 'val isBroadcastIntent: Boolean' is deprecated. Deprecated in Java.
+w: file:///C:/Users/daanv/.codex/worktrees/recover-phone-assistant/Jarvis/android/app/src/test/java/com/jarvis/companion/StandaloneModeTest.kt:145:40 'field operation: PendingIntent?' is deprecated. Deprecated in Java.
+w: file:///C:/Users/daanv/.codex/worktrees/recover-phone-assistant/Jarvis/android/app/src/test/java/com/jarvis/companion/StandaloneModeTest.kt:145:51 'val isBroadcastIntent: Boolean' is deprecated. Deprecated in Java.
+w: file:///C:/Users/daanv/.codex/worktrees/recover-phone-assistant/Jarvis/android/app/src/test/java/com/jarvis/companion/StandaloneModeTest.kt:146:44 'field operation: PendingIntent?' is deprecated. Deprecated in Java.
+w: file:///C:/Users/daanv/.codex/worktrees/recover-phone-assistant/Jarvis/android/app/src/test/java/com/jarvis/companion/VoicePackDownloadRaceTest.kt:80:23 This is a delicate API and its use requires care. Make sure you fully read and understand documentation of the declaration that is marked as a delicate API.
+w: file:///C:/Users/daanv/.codex/worktrees/recover-phone-assistant/Jarvis/android/app/src/test/java/com/jarvis/companion/VoicePackDownloadRaceTest.kt:124:23 This is a delicate API and its use requires care. Make sure you fully read and understand documentation of the declaration that is marked as a delicate API.
+w: file:///C:/Users/daanv/.codex/worktrees/recover-phone-assistant/Jarvis/android/app/src/test/java/com/jarvis/companion/VoicePackDownloadRaceTest.kt:128:22 This is a delicate API and its use requires care. Make sure you fully read and understand documentation of the declaration that is marked as a delicate API.
+
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes
+> Task :app:testDebugUnitTest
+
+BUILD SUCCESSFUL in 1m 35s
+30 actionable tasks: 9 executed, 21 up-to-date

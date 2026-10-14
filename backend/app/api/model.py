@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -21,6 +23,7 @@ from ..inference.backends import probe_remote_server
 from ..inference.hardware_gate import hardware_purchase_gate
 from ..inference.harness import load_last_report, run_harness
 from ..inference.manager import MANAGER
+from ..inference.running_models import RUNNING_MODELS, Action
 from ..inference.tool_capability import capability_status, probe_tool_capability
 from ..inference.profiles import available_profiles, declared_profiles, resolve_profile
 from ..runtime_install import component_status_payload, start_component_install
@@ -31,6 +34,33 @@ router = APIRouter(prefix="/api/model", tags=["model"])
 
 class LoadBody(BaseModel):
     profile: str | None = None
+
+
+class RunningModelChoice(BaseModel):
+    action: Action
+    confirm: bool = False
+
+
+@router.get("/running")
+async def running_models():
+    return RUNNING_MODELS.snapshot()
+
+
+@router.post("/running/scan")
+async def scan_running_models():
+    return await RUNNING_MODELS.scan(force=True)
+
+
+@router.post("/running/{identifier}/choice")
+async def choose_running_model(identifier: str, body: RunningModelChoice):
+    if body.action in {"stop", "replace"} and not body.confirm:
+        raise HTTPException(400, "Confirm stopping this model; other clients may be using it")
+    try:
+        return await RUNNING_MODELS.decide(identifier, body.action)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(503, f"The model choice failed: {exc}") from exc
 
 
 class HarnessBody(BaseModel):
@@ -248,3 +278,25 @@ async def unload_model():
     from ..inference.status_monitor import STATUS_MONITOR
 
     return await STATUS_MONITOR.get_snapshot(settings, force_refresh=True)
+
+
+class DiscoverLocalBody(BaseModel):
+    deep: bool = False
+    import_new: bool = False
+    paths: list[str] | None = None
+
+
+@router.get("/discover-local")
+async def discover_local_models(deep: bool = False):
+    from ..inference.model_discovery import scan_local_ggufs
+    return await asyncio.to_thread(scan_local_ggufs, deep=deep)
+
+
+@router.post("/discover-local")
+async def discover_local_models_action(body: DiscoverLocalBody):
+    from ..inference.model_discovery import register_all_from_scan, register_discovered_paths, scan_local_ggufs
+    if body.paths:
+        return await asyncio.to_thread(register_discovered_paths, body.paths)
+    if body.import_new:
+        return await asyncio.to_thread(register_all_from_scan, deep=body.deep)
+    return await asyncio.to_thread(scan_local_ggufs, deep=body.deep)
