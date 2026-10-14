@@ -52,3 +52,28 @@ def test_mdns_stays_before_bare_rfc1918_without_inventory(monkeypatch):
     )
     assert ordered == ["https://jarvis.local:4781", "https://10.2.0.2:4781"]
 
+
+
+def test_vrpc_mix_home_lan_before_vpn_and_virtual(monkeypatch):
+    """Real VRPC NIC mix: mDNS + gateway LAN first, then ProtonVPN / Hyper-V."""
+    from app.mobile import wan_forward
+
+    monkeypatch.setattr(
+        wan_forward, "interface_ipv4_inventory",
+        lambda: [
+            {"ip": "192.168.1.212", "name": "Ethernet", "prefix": 24},
+            {"ip": "10.2.0.2", "name": "ProtonVPN", "prefix": 32},
+            {"ip": "172.30.112.1", "name": "vEthernet (Default Switch)", "prefix": 20},
+        ],
+    )
+    monkeypatch.setattr(wan_forward, "default_gateway_ipv4", lambda: "192.168.1.1")
+    ordered = order_phone_reachable_endpoints(
+        [
+            "https://10.2.0.2:4781",
+            "https://172.30.112.1:4781",
+            "https://192.168.1.212:4781",
+            "https://jarvis.local:4781",
+        ],
+    )
+    assert ordered[:2] == ["https://jarvis.local:4781", "https://192.168.1.212:4781"]
+    assert set(ordered[2:]) == {"https://10.2.0.2:4781", "https://172.30.112.1:4781"}
