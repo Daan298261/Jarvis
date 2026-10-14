@@ -37,6 +37,7 @@ from .rea_investigate import ReaInvestigateTool
 from .chat_projects import ChatProjectsTool
 from .vault_memory import VaultMemoryTool
 from .intelligence import IntelligenceTool
+from .blackgrid_studio import BlackGridStudioTool
 from .dcc_tools import BlenderTool, FreecadTool, OpenScadTool
 
 
@@ -93,6 +94,7 @@ class ToolRegistry:
             BlenderTool(getter),
             OpenScadTool(getter),
             FreecadTool(getter),
+            BlackGridStudioTool(),
         ]
         self.tools = {tool.name: tool for tool in items}
 
