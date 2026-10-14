@@ -98,6 +98,7 @@ class AnzuAccessibilityService : AccessibilityService() {
         return nodes[command.optInt("node_id", -1)]?.takeIf { it.refresh() && it.isVisibleToUser && !it.isPassword }
     }
 
+    @androidx.annotation.RequiresApi(30)
     private suspend fun screenshotText(): String = suspendCancellableCoroutine { continuation ->
         takeScreenshot(android.view.Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
             override fun onFailure(errorCode: Int) { if (continuation.isActive) continuation.resume("") }
