@@ -114,6 +114,9 @@ jobs:
       - name: Remote access helper tests (RFC-0215)
         run: npm run test:companion-remote-access
 
+      - name: HexStrike granted-only autostart tests
+        run: npm run test:hexstrike-autostart
+
   installer-compile:
     name: installer-compile
     runs-on: windows-latest

@@ -9,6 +9,7 @@ import {
   stopHexStrike,
   type RuntimeProfile,
 } from "../api"
+import { autostartHexStrikeIfGranted } from "./hexstrikeAutostart"
 import { isHexStrikeSuiteProfile } from "./hexstrikeSuite"
 
 type ModelPollSnapshot = {
@@ -64,8 +65,13 @@ async function finishModelActivation(load?: Record<string, unknown>): Promise<vo
   await waitForModelLoaded()
 }
 
+export type ApplyRuntimeProfileResult = RuntimeProfile & {
+  /** Set for HexStrike suite selects/restores: true when startHexStrike ran. */
+  hexStrikeAutoStarted?: boolean
+}
+
 /** Mirror Model page + RuntimeProfiles force-select for one-click HUD hotswap. */
-export async function applyRuntimeProfile(profileId: string): Promise<RuntimeProfile> {
+export async function applyRuntimeProfile(profileId: string): Promise<ApplyRuntimeProfileResult> {
   const id = profileId.trim()
   if (!id) {
     throw new Error("Runtime profile id is required.")
@@ -73,11 +79,12 @@ export async function applyRuntimeProfile(profileId: string): Promise<RuntimePro
   const profile = await getRuntimeProfile(id)
 
   if (isHexStrikeSuiteProfile(profile)) {
-    // Select the suite in the HUD only. Do not call /start here - that would
-    // park cyber.hexstrike on profile restore / ModelSelector click before the
-    // owner explicitly starts or operates HexStrike (RFC-0079 / RFC-0110).
+    // Always select the suite in the HUD (select + restore). Auto-start only
+    // when cyber.hexstrike is already granted so we do not park an ask prompt
+    // on profile restore / ModelSelector click (RFC-0079 / RFC-0110).
     syncRuntimeSelection(id)
-    return profile
+    const hexStrikeAutoStarted = await autostartHexStrikeIfGranted()
+    return { ...profile, hexStrikeAutoStarted }
   }
 
   try {

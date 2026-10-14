@@ -11,6 +11,7 @@ import {
   type RuntimeProfile,
 } from "../api"
 import { applyRuntimeProfile, playDiscoveredGguf, playLmStudioCatalogProfile } from "./applyRuntimeProfile"
+import { hexStrikeSelectMessage } from "./hexstrikeAutostart"
 import {
   clearSlot,
   HUD_MODEL_SLOT_COUNT,
@@ -226,7 +227,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
     try {
       const applied = await applyRuntimeProfile(hexstrikeProfile.id || hexstrikeProfile.name)
       setSelectedId(applied.id || applied.name)
-      setMsg("HexStrike selected. Open Daybreak and press Start when you want the suite running.")
+      setMsg(hexStrikeSelectMessage(!!applied.hexStrikeAutoStarted))
       setOpenState(false)
     } catch {
       setMsg("Could not open HexStrike.")
