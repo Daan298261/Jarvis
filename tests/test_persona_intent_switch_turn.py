@@ -27,9 +27,12 @@ FRONT_TEXT = "On it, writing that now."
 def _warm_decision():
     # Cold imports on the first turn can exceed the 50 ms owner-turn cap (the
     # deadline-fallback path, covered in S1). Warm them once.
-    from app.decision.owner_turn import _decide_sync
+    from app.config import AppSettings
+    from app.decision.owner_turn import _decide_sync, resolve_persona_context
 
-    _decide_sync("warm up", route_request("warm up"), "local", None, None, "warm", PersonaTurnContext(current="anzu"))
+    settings = AppSettings()
+    ctx = resolve_persona_context(PersonaTurnContext(current="anzu"), settings)
+    _decide_sync("warm up", route_request("warm up"), "local", settings, None, "warm", ctx)
 
 
 @pytest.fixture
