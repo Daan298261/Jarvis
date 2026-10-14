@@ -1,7 +1,7 @@
 # RFC-0167: Quality Loop — critic, verifier and correction learning
 
-**Status:** accepted  
-**Date:** 2026-09-24  
+**Status:** accepted
+**Date:** 2026-09-24
 **Updated:** 2026-09-25
 
 ## Problem

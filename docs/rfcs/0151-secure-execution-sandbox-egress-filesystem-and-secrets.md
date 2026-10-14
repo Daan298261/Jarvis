@@ -1,7 +1,7 @@
 # RFC-0151: Secure execution sandbox and zero-trust tool boundary
 
-**Status:** accepted  
-**Date:** 2026-09-24  
+**Status:** accepted
+**Date:** 2026-09-24
 **Updated:** 2026-09-25
 
 ## Problem

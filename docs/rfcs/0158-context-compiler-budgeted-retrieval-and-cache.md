@@ -1,7 +1,7 @@
 # RFC-0158: Context Compiler — budgeted retrieval, compression and cache
 
-**Status:** accepted  
-**Date:** 2026-09-24  
+**Status:** accepted
+**Date:** 2026-09-24
 **Updated:** 2026-09-25
 
 ## Problem
