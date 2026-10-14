@@ -639,9 +639,8 @@ def verify_phone_connection(body: RemoteCheck, request: Request, device=Device):
     snapshot = CONNECTIVITY.snapshot()
     if endpoint not in snapshot.get("endpoints", []):
         raise HTTPException(409, "Refresh the connection endpoints before verifying")
-    from ..mobile.pairing_payload import _is_lan_host
-    from urllib.parse import urlsplit
-    if _is_lan_host(urlsplit(endpoint).hostname or ""):
+    from ..mobile.remote_access import classify_endpoint
+    if classify_endpoint(endpoint) == "lan":
         raise HTTPException(400, "Use a remote public or Tailscale endpoint with phone Wi-Fi off")
     # This is authenticated phone-reported evidence, not an external internet probe.
     evidence = {"device_id": device["id"], "endpoint": endpoint, "network": body.network,

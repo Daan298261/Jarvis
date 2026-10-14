@@ -114,6 +114,9 @@ class Connectivity(PortForwardMixin):
         cfg = self.config()
         payload["remote"] = bool(cfg.get("remote"))
         payload["tailscale_enabled"] = cfg.get("tailscale", True) is not False
+        if cfg.get("connection_mode") == "public_forward":
+            from .wan_forward import redact_wan_config
+            payload["wan"] = redact_wan_config(cfg)
         payload["connection_mode"] = cfg.get("connection_mode", "tailscale" if cfg.get("remote") else "lan")
         evidence = self.state.get("phone_verification")
         payload["phone_verified"] = bool(evidence and evidence.get("endpoint") in payload.get("endpoints", [])
@@ -146,6 +149,7 @@ class Connectivity(PortForwardMixin):
             raise HTTPException(409, "Connection setup is already running")
         async with self.lock:
             config = self.config()
+            was_mode = config.get("connection_mode", "tailscale" if config.get("remote") else "lan")
             if isinstance(tailscale, dict):
                 extras, tailscale = tailscale, None
             if extras:
@@ -157,7 +161,8 @@ class Connectivity(PortForwardMixin):
                 config.update(remote=bool(remote), remote_explicit=True)
             if tailscale is not None:
                 config["tailscale"] = bool(tailscale)
-            if bool(config.get("remote")) != was_remote:
+            new_mode = config.get("connection_mode", "tailscale" if config.get("remote") else "lan")
+            if bool(config.get("remote")) != was_remote or (bool(config.get("remote")) and new_mode != was_mode):
                 # Codes minted for LAN-only use may live 60 minutes; any change of exposure burns them.
                 from .identity import invalidate_unclaimed_pairing_codes
 
@@ -448,7 +453,7 @@ class Connectivity(PortForwardMixin):
     async def _self_test(self, config, endpoints: list[str]) -> None:
         from .remote_access import exposure_summary, ordered_entries, self_test
 
-        entries = ordered_entries(endpoints)
+        entries = ordered_entries(endpoints, allow_public=config.get("connection_mode") == "public_forward" and bool(config.get("remote")))
         identity = self.identity
 
         async def _probe(url: str):
@@ -514,21 +519,18 @@ class Connectivity(PortForwardMixin):
                                 self.report(state="failed", activity=str(exc)[:300])
                         config = self.config()
                         if config["enabled"] and self.state.get("state") != "cooldown":
-                            if self.state.get("state") != "ready" or not self.remote_prepared:
-                                if (config.get("connection_mode") == "public_forward" and config.get("remote")
-                                    and self.remote_prepared and time.time() < self.state.get("next_renewal_at", 0)):
-                                await self._refresh_lan_dial_endpoints()
-                            else:
-                                await self.apply_remote(config)
-                            else:
-                                try:
+                            try:
+                                if self.state.get("state") != "ready" or not self.remote_prepared:
+                                    await self.apply_remote(config)
+                                elif config.get("connection_mode") == "public_forward" and config.get("remote"):
+                                    if time.time() >= self.state.get("next_renewal_at", 0):
+                                        await self._renew_wan_mapping(config)
+                                    else:
+                                        await self._refresh_lan_dial_endpoints()
+                                else:
                                     await self._refresh_endpoints()
-                                except Exception as exc:
-                                    log.warning("Companion endpoint refresh failed: %s", exc)
-                                    if (config.get("connection_mode") == "public_forward" and config.get("remote")
-                                    and self.remote_prepared and time.time() < self.state.get("next_renewal_at", 0)):
-                                await self._refresh_lan_dial_endpoints()
-                            else:
+                            except Exception as exc:
+                                log.warning("Companion endpoint refresh failed: %s", exc)
                                 await self.apply_remote(config)
                 await asyncio.sleep(30)
         finally:

@@ -54,6 +54,22 @@ def test_overlay_peers_cannot_auto_enroll():
     assert _private_client("192.168.1.9")
 
 
+def test_public_gateway_requires_explicit_forwarding_mode():
+    from app.mobile.gateway import client_allowed
+    assert not client_allowed("8.8.8.8", True)
+    assert client_allowed("8.8.8.8", True, public_forward=True)
+    assert not client_allowed("8.8.8.8", False, public_forward=True)
+
+
+def test_public_endpoint_is_advertised_only_in_explicit_mode(phone_env, monkeypatch):
+    from app.mobile.pairing_payload import order_phone_reachable_endpoints, CONNECTIVITY
+    endpoints = ["https://192.168.1.2:4781", "https://8.8.8.8:4781"]
+    monkeypatch.setattr(CONNECTIVITY, "config", lambda: {"remote": True, "connection_mode": "tailscale"})
+    assert "https://8.8.8.8:4781" not in order_phone_reachable_endpoints(endpoints)
+    monkeypatch.setattr(CONNECTIVITY, "config", lambda: {"remote": True, "connection_mode": "public_forward"})
+    assert order_phone_reachable_endpoints(endpoints)[0] == "https://8.8.8.8:4781"
+
+
 def test_tool_queue_scoped_to_active_phone_and_once_only(phone_env):
     with store.database() as db:
         store.put(db, "device", "a", {"id": "a", "status": "active"})
@@ -67,8 +83,7 @@ def test_tool_queue_scoped_to_active_phone_and_once_only(phone_env):
         phone_tools.finish("b", item["id"], {"ok": True})
     phone_tools.finish("a", item["id"], {"ok": False, "error": "declined"})
     assert phone_tools.pending("a") == []
-    with pytest.raises(HTTPException):
-        phone_tools.finish("a", item["id"], {"ok": True})
+    assert phone_tools.finish("a", item["id"], {"ok": True})["result"]["ok"] is False
 
 
 @pytest.mark.asyncio
@@ -80,14 +95,17 @@ async def test_tailscale_setup_never_maps_router(phone_env, monkeypatch):
     monkeypatch.setattr(connection, "ensure_gateway_listening", AsyncMock())
     monkeypatch.setattr(connection, "cover_phone_dial_hosts", AsyncMock())
     monkeypatch.setattr("app.mobile.connectivity.lan_hosts", lambda: ["192.168.1.2"])
-    monkeypatch.setattr(phone_setup, "tailscale_status", lambda: {
-        "available": True, "endpoints": ["https://100.100.100.1:4781"], "message": "Ready"})
+    monkeypatch.setattr("app.mobile.remote_access.tailscale_status", lambda: {
+        "running": True, "endpoints": ["https://100.100.100.1:4781"], "hint": ""})
+    monkeypatch.setattr(connection, "probe", AsyncMock())
+    monkeypatch.setattr(connection, "start_lan_beacon", AsyncMock())
+    monkeypatch.setattr(connection, "_self_test", AsyncMock())
     router = AsyncMock()
-    monkeypatch.setattr("app.mobile.connectivity.router_candidate", router)
+    monkeypatch.setattr("app.mobile.port_forward_access.router_candidate", router)
     await connection.apply_remote({"enabled": True, "remote": True, "connection_mode": "tailscale"})
     router.assert_not_called()
     assert "https://100.100.100.1:4781" in connection.state["endpoints"]
-    assert connection.state["wan_path"] == "tailscale"
+    assert connection.state["tailscale"]["running"]
     assert not connection.state.get("remote_verified")
 
 

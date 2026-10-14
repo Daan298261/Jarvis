@@ -37,7 +37,9 @@ def finish(device_id: str, item_id: str, result: dict) -> dict:
         item = get(db, "phone_tool", item_id)
         if not item or item["device_id"] != device_id:
             raise HTTPException(404, "Phone action not found")
-        if item["status"] != "pending" or item["expires_at"] <= time.time():
+        if item["status"] == "finished":
+            return item
+        if item["expires_at"] <= time.time():
             raise HTTPException(409, "Phone action expired or already finished")
         item.update(status="finished", result=result)
         put(db, "phone_tool", item_id, item)

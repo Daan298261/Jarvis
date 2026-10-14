@@ -141,7 +141,7 @@ def client_allowed(host: str, remote_enabled: bool, self_test_token: str = "", *
 
     Loopback is never a free pass (any local process could proxy for an outsider);
     only the desktop's own probes, carrying the per-boot secret, get through.
-    Public-internet clients are refused outright: off-LAN access is Tailscale only.
+    Public clients are refused unless the owner explicitly selected public forwarding.
     """
     try:
         address = ipaddress.ip_address(host)

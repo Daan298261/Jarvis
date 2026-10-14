@@ -24,14 +24,26 @@ class AnzuAccessibilityService : AccessibilityService() {
         current = this
         scope.launch {
             val api = (application as JarvisApp).api
+            val receipts = getSharedPreferences("phone_tool_receipts", MODE_PRIVATE)
             while (isActive) {
                 if (api.deviceId.isNotBlank() && PhoneToolPermissions(this@AnzuAccessibilityService).enabled()) {
                     runCatching {
                         val commands = api.json("/phone-tools").optJSONArray("commands")?.objects().orEmpty()
                         val epoch = PhoneTools.epoch()
                         for (item in commands.take(10)) {
-                            val result = PhoneTools.execute(this@AnzuAccessibilityService, item.getJSONObject("command"), epoch)
-                            api.json("/phone-tools/${item.getString("id")}/result", "POST", JSONObject().put("result", result))
+                            val id = item.getString("id")
+                            val key = "${api.deviceId}:$id"
+                            val cached = receipts.getString(key, null)
+                            val result = if (cached != null) JSONObject(cached) else {
+                                // Mark before execution: process death must never repeat a send/purchase.
+                                val interrupted = JSONObject().put("ok", false).put("error", "Action was interrupted; inspect the app before retrying.")
+                                check(receipts.edit().putString(key, interrupted.toString()).commit()) { "Could not record phone action" }
+                                val completed = PhoneTools.execute(this@AnzuAccessibilityService, item.getJSONObject("command"), epoch)
+                                check(receipts.edit().putString(key, completed.toString()).commit()) { "Could not record phone action result" }
+                                completed
+                            }
+                            api.json("/phone-tools/$id/result", "POST", JSONObject().put("result", result))
+                            receipts.edit().remove(key).apply()
                         }
                     }
                 }

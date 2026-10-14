@@ -40,3 +40,18 @@ Android companion model, JNI, permissions, assistant services, settings; focused
 ## Out of scope
 Root access, exploits, public owner/model APIs, changing protected Architect specs,
 automatic Tailscale account enrollment, and stable promotion to main.
+
+## Implementation verification
+- Current development fixes, remote opt-in migration, pairing deadlines, server
+  proof, screenshot settings, local conversations, voice language, and download
+  cancellation are preserved.
+- Local Android unit tests: 292 passed. Debug/release builds passed; all existing
+  native-runtime APK gates passed for arm64-v8a and x86_64, plus Sherpa and wake assets.
+- Focused backend checks: 95 passed, with 28 connection/approval checks rerun after
+  final integration. Windows runs use session event loops to avoid intermittent
+  Windows socketpair stalls. Full-suite results are reported in the PR.
+- Pinned 0.6B model generated multiple native token callbacks on Android emulator.
+  The corrected wake model initializes on host CPU and rejects silence.
+- Physical Samsung, cellular/router connectivity, audible wake activation, and
+  on-device assistant/app-control acceptance remain unverified. No router on the
+  owner's network was changed and no red-team model was invoked in development.
