@@ -15,7 +15,7 @@ The source inspection found working implementations for the first three capabili
 
 ## Install the optional Chrome connector
 
-1. Put `extensions/chrome` in a permanent folder. Open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select that folder.
+1. Use the `chrome` folder in the provided ZIP, or `extensions/chrome` in the source checkout. Put it in a permanent location. Open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select that folder.
 2. Copy the extension ID shown by Chrome. In PowerShell run:
 
    ```powershell
@@ -49,3 +49,7 @@ Use `chrome_fill` with an observed `target_id` and `text`. After any mutation, t
 To remove: stop sharing, run `install-host.ps1 -ExtensionId YOUR_EXTENSION_ID -Uninstall`, then remove the extension in Chrome. Local host files may be deleted afterward.
 
 Protocol references: [Chrome native messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging), [declarativeNetRequest session rules](https://developer.chrome.com/docs/extensions/reference/api/declarativeNetRequest).
+
+## Validation on the development PC
+
+99 focused Python checks and four Node checks passed. Real Chromium verified page operations, loaded extension/popup, and actual ad-request block/unblock. A real native-host process passed a stdio round trip. Live ANZU tool calls enumerated 18 visible Windows application windows and fetched a public HTTPS page. The full local pytest run stalled at 28% in async fixture setup; a process stack showed asyncio waiting and an idle aiosqlite worker. That run was stopped and is not a full-suite pass. The owner's normal Chrome installation and installed ANZU update remain unverified.
