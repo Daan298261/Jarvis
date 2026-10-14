@@ -1,4 +1,4 @@
-﻿package com.jarvis.companion
+package com.jarvis.companion
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
@@ -112,4 +112,46 @@ class VoicePackDownloadRaceTest {
         assertTrue(other != voice.selectedSttPackId())
         runRace(other)
     }
+
+    /** Same role: while STT pack A downloads slowly, STT pack B fails (via the page and via downloadPack directly). */
+    private fun sameRoleFailure(viaPage: Boolean) = runBlocking {
+        val a = voice.selectedSttPackId()
+        val b = "stt-race-broken"
+        voice.updateCatalog(JSONObject().put("packs", JSONArray()
+            .put(pack(a, "stt", "/slow.bin", slowBytes.size.toLong(), sha256(slowBytes)))
+            .put(pack(b, "stt", "/missing.bin", 10L, "00"))))
+        val source = VoicePackSource(voice)
+        val running = GlobalScope.async(Dispatchers.IO) { voice.downloadPack(a) }
+        awaitRunning(a)
+        val aDir = File(voice.packRoot(), a)
+        val errorBefore = voice.lastError()
+        val second = GlobalScope.async(Dispatchers.IO) {
+            runCatching {
+                if (viaPage) source.update(DownloadedEntry(ContentKind.VOICE, b, b, 0L, ContentState.PARTIAL, "", updateBytes = 10L))
+                else voice.downloadPack(b)
+            }
+        }
+        var lastProgress = voice.downloadProgress()
+        while (running.isActive) {
+            assertEquals(CompanionVoicePackStatus.DOWNLOADING, voice.sttStatus())
+            val now = voice.downloadProgress()
+            assertTrue("A's progress dropped from $lastProgress to $now", now >= lastProgress)
+            lastProgress = now
+            assertEquals("B must not change lastError while A runs", errorBefore, voice.lastError())
+            Thread.sleep(20)
+        }
+        running.await()
+        val aFiles = aDir.walkTopDown().filter { it.isFile }.associate { it.name to it.readBytes().toList() }
+        assertNotNull("B must fail", second.await().exceptionOrNull())
+        assertEquals("B must not touch A's files", aFiles,
+            aDir.walkTopDown().filter { it.isFile }.associate { it.name to it.readBytes().toList() })
+        assertTrue(voice.isPackInstalled(a))
+        voice.refreshStatus()
+        assertEquals(CompanionVoicePackStatus.READY, voice.sttStatus())
+        assertTrue(b !in voice.downloadingPackIds())
+    }
+
+    @Test fun same_role_failing_download_via_page_leaves_running_download_alone() = sameRoleFailure(viaPage = true)
+
+    @Test fun same_role_failing_direct_download_leaves_running_download_alone() = sameRoleFailure(viaPage = false)
 }
