@@ -64,11 +64,17 @@ class VoicePackDownloadRaceTest {
         .put("artifacts", JSONArray().put(JSONObject().put("filename", "model.bin")
             .put("url", server.url(path).toString()).put("sha256", sha).put("size_bytes", bytes)))
 
-    private fun awaitRunning(packId: String) {
+    private fun awaitRunning(packId: String, running: kotlinx.coroutines.Deferred<*>) {
         val deadline = System.currentTimeMillis() + 5_000
         while (!(packId in voice.downloadingPackIds() && voice.downloadProgress() in 1..99) &&
-            System.currentTimeMillis() < deadline) Thread.sleep(20)
-        assertTrue("download of $packId should be running: ${voice.lastError()} ${voice.sttStatus()} ${voice.catalog().map { it.id + "/" + it.role }}", packId in voice.downloadingPackIds())
+            !running.isCompleted && System.currentTimeMillis() < deadline) Thread.sleep(20)
+        // Fail fast with the real cause if the download already died (e.g. a loopback connect
+        // timeout to MockWebServer) instead of spinning out the 5 s window with no diagnosis.
+        val earlyFailure = if (running.isCompleted) runCatching { runBlocking { running.await() } }.exceptionOrNull() else null
+        assertTrue(
+            "download of $packId should be running: ${voice.lastError()} ${voice.sttStatus()} progress=${voice.downloadProgress()} earlyFailure=$earlyFailure",
+            packId in voice.downloadingPackIds(),
+        )
     }
 
     private fun runRace(runningId: String) = runBlocking {
@@ -78,7 +84,7 @@ class VoicePackDownloadRaceTest {
             .put(pack(tts, "tts", "/missing.bin", 10L, "00"))))
         val source = VoicePackSource(voice)
         val running = GlobalScope.async(Dispatchers.IO) { voice.downloadPack(runningId) }
-        awaitRunning(runningId)
+        awaitRunning(runningId, running)
         val progressBefore = voice.downloadProgress()
 
         // Refresh from the downloaded-content page.
@@ -122,7 +128,7 @@ class VoicePackDownloadRaceTest {
             .put(pack(b, "stt", "/missing.bin", 10L, "00"))))
         val source = VoicePackSource(voice)
         val running = GlobalScope.async(Dispatchers.IO) { voice.downloadPack(a) }
-        awaitRunning(a)
+        awaitRunning(a, running)
         val aDir = File(voice.packRoot(), a)
         val errorBefore = voice.lastError()
         val second = GlobalScope.async(Dispatchers.IO) {

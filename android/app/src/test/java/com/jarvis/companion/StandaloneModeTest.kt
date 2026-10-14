@@ -488,6 +488,10 @@ class StandaloneModeTest {
         }
         assertTrue(started.await(2, java.util.concurrent.TimeUnit.SECONDS))
         job.cancel()
+        // The cancel signal must reach the engine from cancel() itself, not from a watcher
+        // coroutine that still has to be scheduled on Dispatchers.Default (CI flake / phone
+        // stop-button lag when the pool is busy).
+        assertTrue("requestCancel must reach the engine synchronously from cancel()", engine.cancelled)
         job.join()
         assertTrue("requestCancel must run while generate is blocked", engine.cancelled)
         assertTrue(thrown is kotlinx.coroutines.CancellationException)
@@ -496,6 +500,60 @@ class StandaloneModeTest {
         assertEquals("abc", out.toString())
     }
 
+    @Test
+    fun generateCancelAbortsWhenDefaultPoolIsSaturated() = runBlocking {
+        // Reproduces the CI flake deterministically: every Dispatchers.Default worker is busy,
+        // so a cancel watcher that must be scheduled on Default never starts before cancel()
+        // and the engine keeps decoding. Cancel has to reach the engine anyway.
+        val pool = Runtime.getRuntime().availableProcessors().coerceAtLeast(2)
+        val saturated = java.util.concurrent.CountDownLatch(pool)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val blockers = List(pool) {
+            launch(Dispatchers.Default) {
+                saturated.countDown()
+                release.await(10, java.util.concurrent.TimeUnit.SECONDS)
+            }
+        }
+        try {
+            assertTrue("Default pool must be saturated", saturated.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            val started = java.util.concurrent.CountDownLatch(1)
+            val engine = object : ScriptedInferenceEngine("abcdef") {
+                override fun generate(prompt: String, maxTokens: Int, onToken: (String) -> Unit): GenerateOutcome {
+                    generateCalls += 1
+                    onToken("abc")
+                    started.countDown()
+                    val deadline = System.nanoTime() + 3_000_000_000L
+                    while (!cancelled && System.nanoTime() < deadline) {
+                        Thread.sleep(10)
+                    }
+                    if (cancelled) return GenerateOutcome(cancelled = true)
+                    onToken("def")
+                    return GenerateOutcome()
+                }
+            }
+            val manager = CompanionPackManager(context, engine)
+            val pack = CompanionPackCatalog.builtIn.first()
+            manager.selectPack(pack.id)
+            val file = manager.packFile(pack)
+            file.parentFile?.mkdirs()
+            file.writeBytes("gguf-fixture".toByteArray())
+            val out = StringBuilder()
+            val job = launch(Dispatchers.IO) {
+                manager.generate("hello", DeviceInferenceGuard.BUDGET_CLEAR) { out.append(it) }
+            }
+            assertTrue(started.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            job.cancel()
+            assertTrue("cancel must reach the engine while Dispatchers.Default is saturated", engine.cancelled)
+            release.countDown()
+            job.join()
+            assertTrue(job.isCancelled)
+            assertEquals(1, engine.generateCalls)
+            assertEquals("abc", out.toString())
+        } finally {
+            release.countDown()
+            blockers.forEach { it.join() }
+        }
+    }
     @Test
     fun contextTokensStayBoundedAndGrowWithRam() {
         assertEquals(2048, DeviceInferenceGuard.contextTokens(0, 3072))
