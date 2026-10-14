@@ -270,10 +270,10 @@ test("persona selection activates mythic mode on the shared morphable stage", as
   const host = await readFile(new URL("./src/presence/PresenceHost.tsx", import.meta.url), "utf8")
   assert.match(home, /presentation\.requestedPresence === "humanoid"/)
   assert.match(home, /\? "humanoid_bust"/)
-  assert.match(settings, /Mythic persona A · portrait cloud/)
-  assert.match(settings, /Mythic persona B · live gaze/)
+  assert.match(settings, /MYTHIC_AVATAR_CHOICES.map/)
+  assert.match(settings, /Mythic persona \{choice.label\}/)
   assert.match(activation, /requestedPresence: "particle_bust"/)
-  assert.match(activation, /avatarId: readPresentationBootstrap\(\).avatarId === MYTHIC_LIVING_AVATAR_ID \? MYTHIC_LIVING_AVATAR_ID : MYTHIC_LIVE_B_AVATAR_ID/)
+  assert.match(activation, /avatarId: mythicAvatarForSelection\(readPresentationBootstrap\(\).avatarId\)/)
   assert.match(activation, /Promise\.allSettled/)
   assert.match(controls, /chooseRevision\.current/)
   assert.doesNotMatch(controls, /className={`named-persona-card\$\{selected \? " active" : ""}`}[\s\S]{0,180}disabled={busy}/)
@@ -468,8 +468,8 @@ test("every mythic A and B persona shares persistent detail and brightness contr
   const personas = await readFile(new URL("./src/persona/namedPersonas.ts", import.meta.url), "utf8")
   const stage = await readFile(new URL("./src/presence/renderers/MorphablePresenceStage.tsx", import.meta.url), "utf8")
   const cloud = await readFile(new URL("./src/presence/renderers/morphableOrbCloud.ts", import.meta.url), "utf8")
-  assert.match(controls, /A · portrait cloud/)
-  assert.match(controls, /B · live gaze/)
+  assert.match(controls, /MYTHIC_AVATAR_CHOICES.map/)
+  assert.match(controls, /choice.label/)
   const sliders = await readFile(new URL("./src/persona/PersonaVisualSliders.tsx", import.meta.url), "utf8")
   assert.match(controls, /PersonaVisualSliders/)
   assert.match(sliders, /"Brightness"/)
@@ -701,4 +701,20 @@ test("attention controller fails closed to the pointer without a webcam", () => 
     else globalThis.window = previousWindow
     Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: undefined })
   }
+})
+
+
+test("all five persona versions persist across persona selection", () => {
+  assert.equal(variants.MYTHIC_AVATAR_CHOICES.length, 5)
+  for (const choice of variants.MYTHIC_AVATAR_CHOICES) {
+    assert.equal(variants.mythicAvatarForSelection(choice.id), choice.id)
+  }
+  assert.equal(variants.mythicAvatarForSelection("jarvis_base"), variants.MYTHIC_LIVE_B_AVATAR_ID)
+  for (const { shapeId } of Object.values(personas.PERSONA_VISUALS)) {
+    for (const avatar of [variants.MYTHIC_LEGACY_C_AVATAR_ID, variants.MYTHIC_LEGACY_D_AVATAR_ID]) {
+      const shape = variants.legacyPersonaShapeId(avatar, shapeId)
+      assert.equal(shapes.resolvePresenceShape(shape).id, shape)
+    }
+  }
+  assert.equal(variants.legacyPersonaShapeId(variants.MYTHIC_PORTRAIT_A_AVATAR_ID, "stormbird"), undefined)
 })
