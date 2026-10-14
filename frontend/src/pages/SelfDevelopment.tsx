@@ -4,7 +4,7 @@ import { api } from "../api"
 import "./self-development.css"
 
 type Config = {
-  enabled: boolean; resource_hold: string; repo: string; base_ref: string; interval_minutes: number
+  away_mode: boolean; enabled: boolean; resource_hold: string; repo: string; base_ref: string; interval_minutes: number
   max_run_minutes: number; failure_limit: number; ollama_url: string
   coder_model: string; vision_model: string; drive_folder_id: string
   drive_search_tool: string; drive_fetch_tool: string
@@ -44,7 +44,8 @@ export function SelfDevelopmentPage() {
   const numberField = (key: "interval_minutes" | "max_run_minutes" | "failure_limit", label: string) => <label key={key} style={{ display: "grid", gap: 6 }}>{label}<input type="number" min="1" value={config[key]} onChange={e => setConfig({ ...config, [key]: Number(e.target.value) })} /></label>
   return <main className="page self-development-page" style={{ maxWidth: 1100, margin: "0 auto", padding: 24 }}>
     <h1>Self-development</h1>
-    <p>Let your local Qwen worker develop ANZU, one RFC at a time. Choose the work, schedule it, and review the tested changes.</p>
+    <label><input type="checkbox" checked={state.config.away_mode || false} disabled={busy} onChange={event => void action("/away", { enabled: event.target.checked })} />Away Mode — develop ANZU</label>
+    <p>Let your local Qwen worker develop ANZU, one RFC at a time. Enable Away Mode to work through the backlog, review changes, merge verified improvements into development, and prepare builds.</p>
     <p><Link to="/coding">Coding review</Link> · <Link to="/mcp">Connections</Link> · <Link to="/tools">Tool permissions</Link></p>
     {(error || state.error) && <p role="alert">{error || state.error}</p>}
     {state.emergency_stop && <p role="alert">ANZU’s emergency stop is active. Resume it in System before starting work.</p>}

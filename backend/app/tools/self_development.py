@@ -13,7 +13,8 @@ class SelfDevelopmentTool(Tool):
     description = "Control ANZU's local Ollama self-development scheduler: scan accepted RFCs, queue an exact revision, run one queued RFC, stop, or configure the schedule. Use only when the owner requests self-development. Results stay in isolated worktrees for review."
     risk = RiskLevel.MEDIUM
     parameters = {"type": "object", "properties": {
-        "action": {"type": "string", "enum": ["status", "scan", "queue", "unqueue", "run", "stop", "configure"]},
+        "action": {"type": "string", "enum": ["status", "scan", "queue", "unqueue", "run", "stop", "configure", "reorder", "undo"]},
+        "ids": {"type": "array", "items": {"type": "string"}}, "order_revision": {"type": "integer"}, "reason": {"type": "string"},
         "item_id": {"type": "string"}, "revision": {"type": "string"},
         "config": {"type": "object", "properties": {"enabled": {"type": "boolean"}, "resource_hold": {"type": "string"}, "repo": {"type": "string"}, "interval_minutes": {"type": "integer"}, "coder_model": {"type": "string"}, "vision_model": {"type": "string"}}},
     }, "required": ["action"]}
@@ -31,7 +32,11 @@ class SelfDevelopmentTool(Tool):
                 await DEVELOPMENT.scan()
                 result = await DEVELOPMENT.launch()
             elif action == "stop": result = await DEVELOPMENT.stop()
+            elif action in {"reorder", "undo"}:
+                result = await DEVELOPMENT.reorder(_.get("ids", []), _.get("order_revision", -1), actor="assistant", reason=_.get("reason", "Automatic scheduling"), undo=action == "undo")
             elif action == "configure":
+                if "away_mode" in (config or {}):
+                    raise ValueError("Only the authenticated owner can grant Away Mode publication authority")
                 result = await DEVELOPMENT.configure(DevelopmentConfig.model_validate({**DEVELOPMENT.state()["config"], **(config or {})}))
             else: raise ValueError("Unknown scheduler action")
             return ToolResult(True, json.dumps(result, ensure_ascii=False), data=result)

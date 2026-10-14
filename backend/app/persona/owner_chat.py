@@ -271,6 +271,7 @@ async def stream_owner_chat(
     user_text: str,
     *,
     conversation_id: str | None = None,
+    policy_authorized: bool = False,
 ) -> AsyncIterator[dict[str, Any]]:
     """Stream a conversational owner reply without agent-loop approval gates."""
     cleaned = (user_text or "").strip()
@@ -280,6 +281,21 @@ async def stream_owner_chat(
 
     cid = _ensure_conversation(conversation_id)
     yield {"type": "start", "conversation_id": cid}
+
+    from ..agent.development_intent import away_intent
+    intent = away_intent(cleaned)
+    if intent is not None:
+        from ..agent.development_scheduler import DEVELOPMENT
+        if not policy_authorized:
+            reply = "Use Away Mode in Self-development to authorize development, review, merging and builds."
+        else:
+            await DEVELOPMENT.away(intent)
+            reply = "Away Mode is on. I’ll work through the backlog, merge verified improvements into development, and prepare builds." if intent else "Away Mode is paused. I won’t start more development or publish new changes."
+        _append(cid, "user", cleaned)
+        _append(cid, "assistant", reply)
+        yield {"type": "delta", "text": reply, "lane": "front"}
+        yield {"type": "done", "conversation_id": cid, "text": reply}
+        return
 
     from ..agent.planning import simple_app_control, simple_file_control
 
@@ -970,9 +986,9 @@ async def stream_owner_chat(
         yield {"type": "error", "detail": empty_generation_error()}
 
 
-async def complete_owner_chat(user_text: str, *, conversation_id: str | None = None) -> dict[str, Any]:
+async def complete_owner_chat(user_text: str, *, conversation_id: str | None = None, policy_authorized: bool = False) -> dict[str, Any]:
     last: dict[str, Any] = {"conversation_id": conversation_id, "text": ""}
-    async for event in stream_owner_chat(user_text, conversation_id=conversation_id):
+    async for event in stream_owner_chat(user_text, conversation_id=conversation_id, policy_authorized=policy_authorized):
         if event.get("type") == "error":
             return {"ok": False, **event}
         if event.get("type") == "done":

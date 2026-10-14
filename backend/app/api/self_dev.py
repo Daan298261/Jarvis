@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from ..auth import require_owner_private_key
 from pydantic import BaseModel
 
 from ..agent.self_dev import (
@@ -44,8 +45,10 @@ async def scheduler_status():
     return DEVELOPMENT.public()
 
 
-@router.put("/scheduler")
+@router.put("/scheduler", dependencies=[Depends(require_owner_private_key)])
 async def scheduler_config(body: DevelopmentConfig):
+    if body.away_mode != DEVELOPMENT.state()["config"].get("away_mode", False):
+        raise HTTPException(409, "Use the Away Mode control to change publication authority")
     try:
         return await DEVELOPMENT.configure(body)
     except ValueError as exc:
@@ -218,3 +221,28 @@ async def forbidden_merge(body: MergeBody | None = None):
         refuse_trusted_merge(body.target_branch)
     except PermissionError as exc:
         raise _http_error(exc) from exc
+
+
+
+class AwayModeBody(BaseModel):
+    enabled: bool
+
+class OrderBody(BaseModel):
+    ids: list[str] = []
+    revision: int
+    reason: str = "Owner ordering"
+    undo: bool = False
+
+@router.get("/scheduler/upcoming")
+async def upcoming_tasks():
+    return await DEVELOPMENT.upcoming()
+
+@router.post("/scheduler/away", dependencies=[Depends(require_owner_private_key)])
+async def development_away_mode(body: AwayModeBody):
+    try: return await DEVELOPMENT.away(body.enabled)
+    except ValueError as exc: raise HTTPException(409, str(exc)) from exc
+
+@router.post("/scheduler/order", dependencies=[Depends(require_owner_private_key)])
+async def development_queue_order(body: OrderBody):
+    try: return await DEVELOPMENT.reorder(body.ids, body.revision, reason=body.reason, undo=body.undo)
+    except ValueError as exc: raise HTTPException(409, str(exc)) from exc

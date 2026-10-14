@@ -1,3 +1,4 @@
+import { UpcomingTasks } from "./UpcomingTasks"
 import { useEffect, useState, type ReactNode } from "react"
 import { refreshSessionPersonality } from "./sessionPersonality"
 import { Link, NavLink, useLocation } from "react-router-dom"
@@ -169,6 +170,7 @@ export function HudTopChrome({
         >
           Classic
         </button>
+        <UpcomingTasks />
         <HudModelSelector model={model} onOpenChange={onModelMenuOpenChange} />
       </div>
 

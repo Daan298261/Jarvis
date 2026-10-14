@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import asyncio
 import base64
 import contextlib
@@ -495,7 +497,11 @@ class AgentRuntime:
                 existing = await session.get(Task, request_id)
                 if existing:
                     if existing.status == "queued" and request_id not in self._tasks:
-                        self._tasks[request_id] = asyncio.create_task(self._run(request_id, continue_existing=False))
+                        if os.environ.get("ANZU_DEVELOPMENT_MISSION"):
+                            self._start_runner(request_id, self._run(request_id, continue_existing=False))
+                        else:
+                            from .development_scheduler import DEVELOPMENT
+                            await DEVELOPMENT.enqueue_owner(existing, self)
                     return existing
         settings = load_settings()
         mode = execution_mode or settings.execution_mode or "balanced"
@@ -554,7 +560,11 @@ class AgentRuntime:
                 stored.first_response_ms = 0.0
                 await session.commit()
             await BUS.publish(task.id, "acknowledgement", "Acknowledged", acknowledgement, stage="queued")
-        self._start_runner(task.id, self._run(task.id, continue_existing=False))
+        if not os.environ.get("ANZU_DEVELOPMENT_MISSION"):
+            from .development_scheduler import DEVELOPMENT
+            await DEVELOPMENT.enqueue_owner(task, self)
+        else:
+            self._start_runner(task.id, self._run(task.id, continue_existing=False))
         return task
 
     async def continue_task(self, task_id: str, prompt: str | None = None) -> Task:

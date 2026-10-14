@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import Request, APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
@@ -25,18 +25,20 @@ class GreetingIn(BaseModel):
 
 
 @router.post("/messages")
-async def post_owner_message(body: OwnerMessageIn):
+async def post_owner_message(body: OwnerMessageIn, request: Request):
     """Non-streaming owner chat (tests and simple clients)."""
-    result = await complete_owner_chat(body.message, conversation_id=body.conversation_id)
+    authorized = _authorize_policy(body.message, request)
+    result = await complete_owner_chat(body.message, conversation_id=body.conversation_id, policy_authorized=authorized)
     if not result.get("ok", True) and result.get("type") == "error":
         raise HTTPException(503, result.get("detail") or "Chat failed")
     return result
 
 
 @router.post("/messages/stream")
-async def post_owner_message_stream(body: OwnerMessageIn):
+async def post_owner_message_stream(body: OwnerMessageIn, request: Request):
+    authorized = _authorize_policy(body.message, request)
     async def event_generator():
-        async for event in stream_owner_chat(body.message, conversation_id=body.conversation_id):
+        async for event in stream_owner_chat(body.message, conversation_id=body.conversation_id, policy_authorized=authorized):
             yield {"event": event.get("type", "message"), "data": json.dumps(event)}
 
     return EventSourceResponse(event_generator())
@@ -100,3 +102,11 @@ async def trigger_greeting(body: GreetingIn):
     if payload is None:
         return {"sent": False, "reason": "already_sent"}
     return {"sent": True, **payload}
+
+
+def _authorize_policy(text, request):
+    from ..agent.development_intent import away_intent
+    from ..auth import require_owner_private_key
+    if away_intent(text) is None: return False
+    require_owner_private_key(request)
+    return True

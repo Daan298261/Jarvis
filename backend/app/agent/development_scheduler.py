@@ -25,6 +25,7 @@ from .worktrees import create_worktree, run_git
 
 class DevelopmentConfig(BaseModel):
     enabled: bool = False
+    away_mode: bool = False
     resource_hold: str = Field(default="", max_length=500)
     repo: str = ""
     base_ref: str = "development"
@@ -71,7 +72,7 @@ def write_json(path: Path, value) -> None:
 
 
 def default_state():
-    return {"config": DevelopmentConfig().model_dump(), "items": {}, "runs": [], "next_run": 0, "failures": 0, "error": "", "drive_status": "Not connected"}
+    return {"config": DevelopmentConfig().model_dump(), "items": {}, "runs": [], "next_run": 0, "failures": 0, "error": "", "drive_status": "Not connected", "order": [], "order_revision": 0, "order_history": [], "owner_pins": []}
 
 
 def source_item(source: str, title: str, content: str, url: str = "", path: str = ""):
@@ -135,12 +136,128 @@ class DevelopmentScheduler:
         self.runner = None
         self.process = None
         self.lease = None
+        self.publication = None
+        self.owner_agent = None
 
     def state(self):
         return read_json(root() / "state.json", default_state())
 
     def save(self, state):
         write_json(root() / "state.json", state)
+
+    def ordered_items(self, state):
+        order = state.get("order", [])
+        return sorted(state["items"].values(), key=lambda item: (
+            order.index(item["id"]) if item["id"] in order else len(order),
+            item.get("priority", 3), item.get("updated_at", 0), item["id"]))
+
+    async def enqueue_owner(self, task, agent):
+        self.owner_agent = agent
+        async with self.lock:
+            state = self.state()
+            old = state["items"].get(task.id, {})
+            state["items"][task.id] = {**old, "id": task.id, "title": (task.title or task.prompt)[:300],
+                "source": "owner_task", "revision": "", "approved_revision": "", "status": "queued", "updated_at": time.time()}
+            self.save(state)
+        await self.dispatch_owner()
+
+    async def dispatch_owner(self):
+        from ..db.models import Task
+        from ..db.session import SessionLocal
+        if self.owner_agent is None:
+            from .loop import AGENT
+            self.owner_agent = AGENT
+        agent = self.owner_agent
+        if kill_switch_active() or any(not task.done() for task in agent._tasks.values()):
+            return
+        async with self.lock:
+            state = self.state()
+            pending = [i for i in self.ordered_items(state) if i.get("source") == "owner_task" and i["status"] == "queued"]
+            async with SessionLocal() as session:
+                for item in pending:
+                    task = await session.get(Task, item["id"])
+                    if not task or task.status != "queued":
+                        item["status"] = task.status if task else "unavailable"
+                        continue
+                    item["status"] = "dispatched"
+                    self.save(state)
+                    agent._start_runner(task.id, agent._run(task.id, continue_existing=False))
+                    agent._tasks[task.id].add_done_callback(lambda _: asyncio.create_task(self.dispatch_owner()))
+                    return
+            self.save(state)
+
+    async def upcoming(self):
+        from ..db.models import Task
+        from ..db.session import SessionLocal
+        from sqlalchemy import select
+        state = self.state()
+        tasks = []
+        async with SessionLocal() as session:
+            rows = (await session.execute(select(Task).where(Task.status.in_(["queued", "running"])))) .scalars().all()
+            tasks = [{"id": t.id, "title": t.title or t.prompt[:120], "status": t.status, "kind": "task"} for t in rows]
+        items = [{**{k: v for k, v in i.items() if k != "content"}, "kind": "development"}
+                 for i in self.ordered_items(state) if i.get("source") != "owner_task"
+                 and i["status"] in {"queued", "running", "reviewing", "testing", "building"}]
+        return {"items": tasks + items, "revision": state.get("order_revision", 0),
+                "away_mode": bool(state["config"].get("away_mode")), "can_undo": bool(state.get("order_history"))}
+
+    async def reorder(self, ids, revision, actor="owner", reason="Owner ordering", undo=False):
+        async with self.lock:
+            state = self.state()
+            if revision != state.get("order_revision", 0):
+                raise ValueError("Queue changed; refresh before reordering")
+            pending = {i["id"] for i in state["items"].values() if i["status"] == "queued"}
+            history = state.setdefault("order_history", [])
+            old = state.setdefault("order", [])
+            if actor != "owner" and any(i in state.get("owner_pins", []) for i in pending):
+                raise ValueError("Owner ordering takes precedence over automatic reordering")
+            if undo:
+                if not history: raise ValueError("No queue change to undo")
+                previous = history.pop()
+                ids = [i for i in previous["order"] if i in pending]
+                ids += sorted(i for i in pending if i not in ids)
+                state["owner_pins"] = previous.get("pins", [])
+            else:
+                if len(ids) != len(set(ids)) or set(ids) != pending:
+                    raise ValueError("Reorder must include each pending development task exactly once")
+                if actor != "owner" and any(i in state.get("owner_pins", []) for i in pending):
+                    raise ValueError("Owner ordering takes precedence over automatic reordering")
+                history.append({"order": list(old), "pins": list(state.get("owner_pins", [])),
+                                "actor": actor, "reason": reason[:500], "at": time.time()})
+                del history[:-30]
+                if actor == "owner": state["owner_pins"] = list(ids)
+            state["order"] = ids
+            state["order_revision"] = revision + 1
+            self.save(state)
+            return self.public(state)
+
+    async def away(self, enabled):
+        if os.environ.get("ANZU_DEVELOPMENT_MISSION"):
+            raise ValueError("Coding workers cannot activate publication policy")
+        if not enabled:
+            await self.stop()
+            async with self.lock:
+                state = self.state(); state["config"]["away_mode"] = False
+                self.save(state)
+            return self.public(state)
+        async with self.lock:
+            if kill_switch_active(): raise ValueError("Emergency stop is active")
+            state = self.state()
+            repo = Path(state["config"].get("repo") or repo_root()).resolve()
+            if not (repo / ".git").exists():
+                choices = [Path.home() / "Documents/Projects/Jarvis/Jarvis", Path.home() / "Documents/Projects/ANZU/ANZU"]
+                repo = next((p for p in choices if (p / ".git").exists()), repo)
+            run_git(repo, ["rev-parse", "--git-dir"])
+            state["config"].update(repo=str(repo), base_ref="origin/development", enabled=True, away_mode=True)
+            state["authorization"] = {"actor": "owner", "scope": "development review merge and build", "at": time.time()}
+            state["next_run"] = 0; state["failures"] = 0
+            self.save(state)
+        return self.public()
+
+    async def publication_status(self, run_id, status, **values):
+        async with self.lock:
+            state = self.state(); run = next(r for r in state["runs"] if r["id"] == run_id)
+            run.update(status=status, **values); self.save(state)
 
     async def configure(self, config: DevelopmentConfig):
         async with self.lock:
@@ -162,7 +279,7 @@ class DevelopmentScheduler:
             status = read_json(root() / run["id"] / "status.json", {})
             view["task"] = status
             runs.append(view)
-        return {**state, "items": [{k: v for k, v in item.items() if k != "content"} for item in state["items"].values()], "runs": runs, "emergency_stop": kill_switch_active()}
+        return {**state, "items": [{k: v for k, v in item.items() if k != "content"} for item in self.ordered_items(state)], "runs": runs, "emergency_stop": kill_switch_active()}
 
     async def import_drive(self, file_id: str, title: str, content: str):
         if not re.fullmatch(r"[a-zA-Z0-9_-]+", file_id):
@@ -280,7 +397,9 @@ class DevelopmentScheduler:
                 raise ValueError(f"Local workers reserved: {config.resource_hold}")
             if state["failures"] >= config.failure_limit:
                 raise ValueError("Failure limit reached; inspect results and save settings to resume")
-            item = next((i for i in state["items"].values() if i["status"] == "queued" and i["approved_revision"] == i["revision"]), None)
+            ordered = self.ordered_items(state)
+            item = next((i for i in ordered if i.get("source") != "owner_task" and i["status"] == "queued" and i["approved_revision"] == i["revision"]
+                         and all(state["items"].get(dep, {}).get("status") == "completed" for dep in i.get("dependencies", []))), None)
             if not item:
                 return self.public(state)
             await model_capabilities(config)
@@ -322,7 +441,7 @@ class DevelopmentScheduler:
                 finally:
                     log.close()
                 self.process = process
-                run = {"id": run_id, "task_id": task_id, "item_id": item["id"], "title": item["title"], "revision": item["revision"], "status": "running", "started_at": time.time(), "pid": process.pid, "created": psutil.Process(process.pid).create_time(), "worktree": spec.path, "base_sha": spec.start_commit, "branch": spec.branch}
+                run = {"id": run_id, "task_id": task_id, "item_id": item["id"], "title": item["title"], "revision": item["revision"], "status": "running", "started_at": time.time(), "worktree_id": spec.id, "pid": process.pid, "created": psutil.Process(process.pid).create_time(), "worktree": spec.path, "base_sha": spec.start_commit, "branch": spec.branch}
                 state["runs"].append(run)
                 item["status"] = "running"
                 self.save(state)
@@ -356,6 +475,7 @@ class DevelopmentScheduler:
         async with self.lock:
             state = self.state()
             state["config"]["enabled"] = False
+            state["config"]["away_mode"] = False
             for run in state["runs"]:
                 if run["status"] == "running":
                     await asyncio.to_thread(self.stop_process, run)
@@ -378,6 +498,14 @@ class DevelopmentScheduler:
             return {"queued": True}
 
     async def tick(self):
+        await self.dispatch_owner()
+        from .development_publication import deliver
+        if self.publication is None or self.publication.done():
+            state = self.state()
+            if state["config"].get("away_mode") and not state["config"].get("resource_hold") and not kill_switch_active():
+                ready = next((r for r in state["runs"] if r["status"] in {"review_ready", "build_pending"}), None)
+                if ready:
+                    self.publication = asyncio.create_task(deliver(self, ready["id"]))
         async with self.lock:
             state = self.state()
             config = DevelopmentConfig.model_validate(state["config"])
@@ -402,12 +530,19 @@ class DevelopmentScheduler:
                     item.update(status=status, approved_revision="")
                 self.release()
                 self.save(state)
-            due = config.enabled and not config.resource_hold and time.time() >= state["next_run"] and state["failures"] < config.failure_limit and not kill_switch_active()
+            due = config.enabled and not (self.publication and not self.publication.done()) and not config.resource_hold and time.time() >= state["next_run"] and state["failures"] < config.failure_limit and not kill_switch_active()
             if due:
                 state["next_run"] = time.time() + config.interval_minutes * 60
                 self.save(state)
         if due:
             await self.scan()
+            if config.away_mode:
+                async with self.lock:
+                    state = self.state()
+                    for item in self.ordered_items(state):
+                        if item.get("source", "").startswith("repo:") and item["status"] == "available":
+                            item.update(status="queued", approved_revision=item["revision"])
+                    self.save(state)
             await self.launch()
 
     async def loop(self):
@@ -442,10 +577,12 @@ class DevelopmentScheduler:
         # Preserve scheduling preference across clean app restarts. Active edits
         # are interrupted and remain reviewable; they are never replayed.
         enabled = self.state()["config"]["enabled"]
+        away_mode = self.state()["config"].get("away_mode", False)
         await self.stop()
         async with self.lock:
             state = self.state()
             state["config"]["enabled"] = enabled
+            state["config"]["away_mode"] = away_mode
             self.save(state)
 
 
