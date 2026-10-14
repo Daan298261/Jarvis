@@ -228,6 +228,146 @@ def interface_ipv4_addresses() -> list[str]:
     return found
 
 
+
+_VIRTUAL_IFACE_MARKERS = (
+    "proton",
+    "wireguard",
+    "nordlynx",
+    "tailscale",
+    "mullvad",
+    "openvpn",
+    "vpn",
+    "vethernet",
+    "hyper-v",
+    "wsl",
+    "docker",
+    "br-",
+    "veth",
+    "tun",
+    "tap",
+    "npcap",
+    "virtualbox",
+    "vmware",
+    "vbox",
+    "wintun",
+)
+
+
+def _prefix_from_netmask(netmask: str | None) -> int | None:
+    if not netmask:
+        return None
+    try:
+        return ipaddress.IPv4Network(f"0.0.0.0/{netmask}", strict=False).prefixlen
+    except ValueError:
+        return None
+
+
+def interface_ipv4_inventory() -> list[dict[str, object]]:
+    """Non-loopback IPv4 rows with interface name and prefix (for VPN/virtual ranking)."""
+    rows: list[dict[str, object]] = []
+    seen: set[str] = set()
+    try:
+        import psutil
+    except ImportError:
+        return []
+    try:
+        nics = psutil.net_if_addrs().items()
+    except Exception:
+        return []
+    for name, addrs in nics:
+        ifname = str(name or "")
+        for addr in addrs:
+            if getattr(addr, "family", None) != socket.AF_INET:
+                continue
+            ip = (getattr(addr, "address", None) or "").split("%", 1)[0].strip()
+            if not ip or ip.startswith("127.") or ip in seen:
+                continue
+            seen.add(ip)
+            rows.append(
+                {
+                    "ip": ip,
+                    "name": ifname,
+                    "prefix": _prefix_from_netmask(getattr(addr, "netmask", None)),
+                }
+            )
+    return rows
+
+
+def _iface_looks_virtual(ifname: str) -> bool:
+    value = (ifname or "").strip().lower()
+    if not value:
+        return False
+    return any(marker in value for marker in _VIRTUAL_IFACE_MARKERS)
+
+
+def lan_host_rank(
+    ip: str,
+    *,
+    gateway: str = "",
+    prefix: int | None = None,
+    ifname: str = "",
+) -> int:
+    """Lower is better for phone-facing LAN advertisement.
+
+    0 = on the home default-gateway /24
+    1 = ordinary LAN (reasonable prefix, not a virtual/VPN NIC)
+    2 = other RFC1918
+    3 = likely VPN/virtual (/31-/32 or virtual adapter name)
+    """
+    host = (ip or "").strip()
+    if not is_rfc1918_ipv4(host):
+        return 99
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return 99
+    virtual = _iface_looks_virtual(ifname)
+    tight = prefix is not None and int(prefix) >= 31
+    if virtual or tight:
+        base = 3
+    else:
+        base = 1
+    gw_text = (gateway or "").strip()
+    if gw_text:
+        try:
+            gw = ipaddress.ip_address(gw_text)
+            if gw.version == 4 and address in ipaddress.ip_network(f"{gw}/24", strict=False):
+                return 0 if not (virtual or tight) else 2
+        except ValueError:
+            pass
+    if base == 1 and address in ipaddress.ip_network("192.168.0.0/16"):
+        return 1
+    return base
+
+
+def order_lan_hosts(hosts: list[str], gateway: str = "") -> list[str]:
+    """Stable order: home-gateway subnet, then ordinary LAN, then VPN/virtual fallbacks."""
+    inventory = {str(row["ip"]): row for row in interface_ipv4_inventory()}
+    gw = (gateway or "").strip()
+    if not gw:
+        try:
+            gw = default_gateway_ipv4()
+        except Exception:
+            gw = ""
+    scored: list[tuple[int, int, str]] = []
+    seen: set[str] = set()
+    for index, raw in enumerate(hosts or []):
+        host = str(raw or "").strip()
+        if not host or host in seen or not is_rfc1918_ipv4(host):
+            continue
+        seen.add(host)
+        meta = inventory.get(host) or {}
+        rank = lan_host_rank(
+            host,
+            gateway=gw,
+            prefix=meta.get("prefix") if isinstance(meta.get("prefix"), int) else None,
+            ifname=str(meta.get("name") or ""),
+        )
+        scored.append((rank, index, host))
+    scored.sort(key=lambda item: (item[0], item[1]))
+    return [host for _, _, host in scored]
+
+
 def lan_source_ipv4_for_peer(peer: str) -> str:
     """This PC's RFC1918 address on the same network as *peer*.
 

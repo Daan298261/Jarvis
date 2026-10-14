@@ -259,7 +259,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                 lanLabel = "Found ${host.name} — asking your PC to approve this phone",
             )
             try {
-                api.configure(host.endpoint, host.serverPin)
+                api.configure(host.endpoint, host.serverPin, host.endpoints)
                 api.lanEnroll()
                 try {
                     api.session()
