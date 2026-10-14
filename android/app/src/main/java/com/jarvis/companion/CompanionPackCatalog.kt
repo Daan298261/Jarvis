@@ -25,6 +25,8 @@ data class CompanionPack(
 }
 
 object CompanionPackCatalog {
+    const val ABLITERATED_17B_ID = "qwen3-1.7b-abliterated-q4"
+    const val ABLITERATED_06B_ID = "qwen3-0.6b-abliterated-q4"
     /** Default offline pack (RFC-0204 §2.1): minimal-refusal Qwen3.5 2B, fits S20-class phones. */
     const val HERETIC_2B_ID = "qwen3.5-2b-heretic-q4"
     /** Opt-in stronger pack for 12 GB phones; only used when the owner selects it. */
@@ -44,6 +46,14 @@ object CompanionPackCatalog {
         "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf"
 
     val builtIn: List<CompanionPack> = listOf(
+        CompanionPack(ABLITERATED_17B_ID, "Qwen3 1.7B Abliterated (Q4_K_M)",
+            "Qwen3-1.7B-abliterated.Q4_K_M.gguf", 1_107_409_024L, 2048,
+            "6fb5977ef935e2a54c0bd5ec45e841d5ba4256b2223c25b4f707553abac8f448",
+            "https://huggingface.co/mradermacher/Qwen3-1.7B-abliterated-GGUF/resolve/ef85d5f367b9b49842f0ab88faf07e35d6dfa505/Qwen3-1.7B-abliterated.Q4_K_M.gguf", true),
+        CompanionPack(ABLITERATED_06B_ID, "Qwen3 0.6B Abliterated — low memory (Q4_K_M)",
+            "Qwen3-0.6B-abliterated.Q4_K_M.gguf", 396_704_896L, 1024,
+            "405ecd904c83015cabaf2f30a8ecb52b5d71711752a78a363f7abad5fa1b5c97",
+            "https://huggingface.co/mradermacher/Qwen3-0.6B-abliterated-GGUF/resolve/6447ed9befe9b70c34ed0af5f4706b9c11f6342a/Qwen3-0.6B-abliterated.Q4_K_M.gguf", false),
         CompanionPack(
             id = HERETIC_2B_ID,
             label = "Qwen3.5 2B Heretic — minimal refusals (Q4_K_M)",
@@ -52,7 +62,7 @@ object CompanionPackCatalog {
             minRamMb = 2560,
             sha256 = "dad8a69dddcd64f2221dd06ae5c46baceb31ed9bd0dec330306d77762c377cf1",
             url = URL_HERETIC_2B,
-            recommended = true,
+            recommended = false,
         ),
         CompanionPack(
             id = ABLITERATED_4B_ID,
@@ -140,8 +150,9 @@ object CompanionPackCatalog {
         selectedId: String,
         canLoad: (CompanionPack) -> Boolean,
     ): CompanionPack? {
-        catalog.firstOrNull { it.id == selectedId && isAbliteratedCandidate(it) && canLoad(it) }?.let { return it }
+        catalog.firstOrNull { it.id == selectedId && (isAbliteratedCandidate(it) || it.id.startsWith("import-")) && canLoad(it) }?.let { return it }
         catalog.firstOrNull { it.recommended && isAbliteratedCandidate(it) && canLoad(it) }?.let { return it }
+        catalog.firstOrNull { it.id == ABLITERATED_06B_ID && canLoad(it) }?.let { return it }
         catalog.firstOrNull { it.id == INSTRUCT_15B_ID && canLoad(it) }?.let { return it }
         if (selectedId == INSTRUCT_3B_ID) {
             catalog.firstOrNull { it.id == INSTRUCT_3B_ID && canLoad(it) }?.let { return it }

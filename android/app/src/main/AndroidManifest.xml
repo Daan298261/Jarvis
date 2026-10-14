@@ -24,8 +24,9 @@
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
-    <!-- Android 11+ package visibility: find the built-in speech recognizer and TTS engine for offline voice. -->
     <queries>
+        <intent><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent>
+        <package android:name="com.tailscale.ipn" />
         <intent><action android:name="android.speech.RecognitionService" /></intent>
         <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
     </queries>
@@ -48,7 +49,18 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="*/*" />
             </intent-filter>
+            <intent-filter><action android:name="android.intent.action.ASSIST" /><category android:name="android.intent.category.DEFAULT" /></intent-filter>
         </activity>
+        <service android:name=".AnzuAccessibilityService" android:exported="true" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/anzu_accessibility" />
+        </service>
+        <service android:name=".AnzuVoiceInteractionService" android:exported="true" android:permission="android.permission.BIND_VOICE_INTERACTION">
+            <intent-filter><action android:name="android.service.voice.VoiceInteractionService" /></intent-filter>
+            <meta-data android:name="android.voice_interaction" android:resource="@xml/anzu_voice_interaction" />
+        </service>
+        <service android:name=".AnzuVoiceSessionService" android:exported="true" android:permission="android.permission.BIND_VOICE_INTERACTION" />
+        <service android:name=".AnzuWakeService" android:exported="false" android:foregroundServiceType="microphone" />
         <service android:name=".JarvisPushService" android:exported="false">
             <intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT" /></intent-filter>
         </service>

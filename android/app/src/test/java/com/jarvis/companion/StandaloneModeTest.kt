@@ -381,7 +381,7 @@ class StandaloneModeTest {
         val all = CompanionPackCatalog.builtIn
         val canLoadAll: (CompanionPack) -> Boolean = { true }
         assertEquals(
-            CompanionPackCatalog.HERETIC_2B_ID,
+            CompanionPackCatalog.ABLITERATED_17B_ID,
             CompanionPackCatalog.resolveOfflinePack(all, CompanionPackCatalog.INSTRUCT_15B_ID, canLoadAll)?.id,
         )
         assertEquals(
@@ -397,7 +397,7 @@ class StandaloneModeTest {
         val fallbackTo2b = CompanionPackCatalog.resolveOfflinePack(all, CompanionPackCatalog.ABLITERATED_4B_ID) {
             it.id != CompanionPackCatalog.ABLITERATED_4B_ID
         }
-        assertEquals(CompanionPackCatalog.HERETIC_2B_ID, fallbackTo2b?.id)
+        assertEquals(CompanionPackCatalog.ABLITERATED_17B_ID, fallbackTo2b?.id)
     }
 
     @Test

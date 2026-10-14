@@ -18,7 +18,9 @@ def order_phone_reachable_endpoints(endpoints: list[str]) -> list[str]:
         order_lan_hosts,
     )
 
-    entries = ordered_entries(endpoints)
+    allow_public = CONNECTIVITY.config().get("connection_mode") == "public_forward" and bool(CONNECTIVITY.config().get("remote"))
+    entries = ordered_entries(endpoints, allow_public=allow_public)
+    public = [entry["url"] for entry in entries if entry.get("kind") == "public_forward"]
     tailscale = [entry["url"] for entry in entries if entry.get("kind") == "tailscale"]
     lan_urls = [entry["url"] for entry in entries if entry.get("kind") == "lan"]
     inventory = {str(row["ip"]): row for row in interface_ipv4_inventory()}
@@ -46,7 +48,7 @@ def order_phone_reachable_endpoints(endpoints: list[str]) -> list[str]:
         return (0, 0, 0, url)
 
     lan_urls = sorted(lan_urls, key=sort_key)
-    return tailscale + lan_urls
+    return public + tailscale + lan_urls
 
 
 def build_qr_envelope(code: str) -> dict[str, Any]:
