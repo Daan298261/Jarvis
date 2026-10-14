@@ -44,11 +44,11 @@ class JarvisPushService : FirebaseMessagingService() {
                     val call = (application as JarvisApp).api.json("/calls/$id")
                     if (call.optString("state") != "ringing") return@runCatching
                     val manager = getSystemService(NotificationManager::class.java)
-                    manager.createNotificationChannel(NotificationChannel(CALL_CHANNEL, "Jarvis calls", NotificationManager.IMPORTANCE_HIGH))
+                    manager.createNotificationChannel(NotificationChannel(CALL_CHANNEL, getString(R.string.anzu_calls_channel), NotificationManager.IMPORTANCE_HIGH))
                     val open = PendingIntent.getActivity(this@JarvisPushService, id.hashCode(), Intent(this@JarvisPushService, MainActivity::class.java).putExtra("incoming_call", id), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
                     val decline = PendingIntent.getService(this@JarvisPushService, id.hashCode(), Intent(this@JarvisPushService, CallService::class.java).setAction("decline").putExtra("call_id", id), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
                     val notification = NotificationCompat.Builder(this@JarvisPushService, CALL_CHANNEL).setSmallIcon(R.drawable.ic_jarvis)
-                        .setContentTitle("Jarvis is calling").setContentText("A critical event needs your attention")
+                        .setContentTitle(getString(R.string.anzu_is_calling)).setContentText(getString(R.string.critical_call_body))
                         .setCategory(NotificationCompat.CATEGORY_CALL).setPriority(NotificationCompat.PRIORITY_MAX)
                         .setContentIntent(open).setFullScreenIntent(open, true).setTimeoutAfter(45000)
                         .addAction(0, "Open to answer", open).addAction(0, "Decline", decline).setAutoCancel(true).build()
@@ -60,7 +60,7 @@ class JarvisPushService : FirebaseMessagingService() {
             manager.createNotificationChannel(NotificationChannel("jarvis-tasks", "Task updates", NotificationManager.IMPORTANCE_DEFAULT))
             val open = PendingIntent.getActivity(this, id.hashCode(), Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             manager.notify(id.hashCode(), NotificationCompat.Builder(this, "jarvis-tasks").setSmallIcon(R.drawable.ic_jarvis)
-                .setContentTitle("Jarvis has an update").setContentText("Open Jarvis to view the task").setContentIntent(open).setAutoCancel(true).build())
+                .setContentTitle(getString(R.string.anzu_has_update)).setContentText(getString(R.string.open_anzu_to_view_task)).setContentIntent(open).setAutoCancel(true).build())
         }
     }
     override fun onDestroy() { scope.cancel(); super.onDestroy() }
@@ -110,9 +110,9 @@ class CallService : Service() {
         starting = true
         CurrentCall.mutable.value = CallUiState(active = true, status = "Connecting")
         val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel(CALL_CHANNEL, "Jarvis calls", NotificationManager.IMPORTANCE_HIGH))
+        manager.createNotificationChannel(NotificationChannel(CALL_CHANNEL, getString(R.string.anzu_calls_channel), NotificationManager.IMPORTANCE_HIGH))
         val hangup = PendingIntent.getService(this, 1, Intent(this, CallService::class.java).setAction("end"), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        startForeground(9, NotificationCompat.Builder(this, CALL_CHANNEL).setSmallIcon(R.drawable.ic_jarvis).setContentTitle("Calling Jarvis")
+        startForeground(9, NotificationCompat.Builder(this, CALL_CHANNEL).setSmallIcon(R.drawable.ic_jarvis).setContentTitle(getString(R.string.calling_anzu))
             .setContentText("Connecting encrypted audio").setOngoing(true).addAction(0, "Hang up", hangup).build())
         scope.launch {
             try {
@@ -122,7 +122,7 @@ class CallService : Service() {
                 manager.cancel(callId!!.hashCode())
                 val callsManager = CallsManager(this@CallService)
                 callsManager.registerAppWithTelecom(CallsManager.CAPABILITY_BASELINE)
-                val attributes = CallAttributesCompat("Jarvis", Uri.parse("jarvis:swarm"), if (incoming != null) CallAttributesCompat.DIRECTION_INCOMING else CallAttributesCompat.DIRECTION_OUTGOING)
+                val attributes = CallAttributesCompat(AnzuBranding.DISPLAY_NAME, Uri.parse("jarvis:swarm"), if (incoming != null) CallAttributesCompat.DIRECTION_INCOMING else CallAttributesCompat.DIRECTION_OUTGOING)
                 callsManager.addCall(attributes,
                     onAnswer = { },
                     onDisconnect = { stopSelf() },
@@ -150,7 +150,7 @@ class CallService : Service() {
                     }
                 }
             } catch (e: Exception) {
-                if (e !is CancellationException) manager.notify(10, NotificationCompat.Builder(this@CallService, CALL_CHANNEL).setSmallIcon(R.drawable.ic_jarvis).setContentTitle("Jarvis call unavailable").setContentText(e.message ?: "Continue by text").build())
+                if (e !is CancellationException) manager.notify(10, NotificationCompat.Builder(this@CallService, CALL_CHANNEL).setSmallIcon(R.drawable.ic_jarvis).setContentTitle(getString(R.string.anzu_call_unavailable)).setContentText(e.message ?: "Continue by text").build())
                 stopSelf()
             }
         }

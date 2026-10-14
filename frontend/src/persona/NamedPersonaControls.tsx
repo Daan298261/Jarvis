@@ -12,11 +12,10 @@ import {
   type PersonaAppearance,
 } from "./namedPersonas"
 import { SpecialistShapeMark } from "./SpecialistShapeMark"
+import { PersonaVisualSliders } from "./PersonaVisualSliders"
 import { updatePresentation, usePresentationSettings } from "../presence/presentationSettings"
 import {
-  MYTHIC_LIVE_B_AVATAR_ID,
-  MYTHIC_PORTRAIT_A_AVATAR_ID,
-  usesMythicLiveVariantB,
+  MYTHIC_AVATAR_CHOICES,
 } from "../presence/mythicPersonaVariant"
 import "./named-persona.css"
 
@@ -125,32 +124,15 @@ export function NamedPersonaControls() {
         </select>
       </label>
       <div className="named-persona-render-variants" role="group" aria-label="Mythic avatar version">
-        <button
-          type="button"
-          className={!usesMythicLiveVariantB(presentation.avatarId) ? "active" : ""}
-          aria-pressed={!usesMythicLiveVariantB(presentation.avatarId)}
-          disabled={busy}
-          onClick={() => void run(() => updatePresentation({
-            shell: "hud",
-            requestedPresence: "particle_bust",
-            avatarId: MYTHIC_PORTRAIT_A_AVATAR_ID,
-          }))}
-        >
-          A · portrait cloud
-        </button>
-        <button
-          type="button"
-          className={usesMythicLiveVariantB(presentation.avatarId) ? "active" : ""}
-          aria-pressed={usesMythicLiveVariantB(presentation.avatarId)}
-          disabled={busy}
-          onClick={() => void run(() => updatePresentation({
-            shell: "hud",
-            requestedPresence: "particle_bust",
-            avatarId: MYTHIC_LIVE_B_AVATAR_ID,
-          }))}
-        >
-          B · live gaze
-        </button>
+        {MYTHIC_AVATAR_CHOICES.map(choice => (
+          <button key={choice.id} type="button" disabled={busy}
+            className={presentation.avatarId === choice.id ? "active" : ""}
+            aria-pressed={presentation.avatarId === choice.id}
+            onClick={() => void run(() => updatePresentation({
+              shell: "hud", requestedPresence: "particle_bust", avatarId: choice.id,
+            }))}
+          >{choice.label}</button>
+        ))}
       </div>
       <div className="named-persona-roster" role="group" aria-label="Named persona avatars">
         {options.map((persona) => {
@@ -299,34 +281,7 @@ export function NamedPersonaControls() {
               onChange={(event) => void patch({ accent_color: event.target.value })}
             />
           </label>
-          <label>
-            Brightness
-            <input
-              type="range"
-              min={0.35}
-              max={1}
-              step={0.05}
-              disabled={busy}
-              value={appearance.glow}
-              aria-label="Persona brightness"
-              onChange={(event) => void patch({ glow: Number(event.target.value) })}
-            />
-            <output>{Math.round(appearance.glow * 100)}%</output>
-          </label>
-          <label>
-            Particle detail
-            <input
-              type="range"
-              min={0.35}
-              max={1}
-              step={0.05}
-              disabled={busy}
-              value={appearance.detail ?? 0.68}
-              aria-label="Persona particle detail"
-              onChange={(event) => void patch({ detail: Number(event.target.value) })}
-            />
-            <output>{Math.round((appearance.detail ?? 0.68) * 100)}%</output>
-          </label>
+          <PersonaVisualSliders />
           <label>
             Animation
             <input

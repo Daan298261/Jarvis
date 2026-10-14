@@ -1,3 +1,4 @@
+import { CollapsibleSection } from "../components/CollapsibleSection"
 import { useEffect, useState } from "react"
 import { api, getAuthUrl } from "../api"
 
@@ -36,8 +37,8 @@ export function ReverseEngineeringSettings() {
     catch (err) { setError(err instanceof Error ? err.message : "Cancel failed") }
   }
   const installing = ready?.engine.status === "installing" || ready?.android.status === "installing"
-  return <section className="card grid">
-    <h2>Reverse Engineering</h2>
+  return <CollapsibleSection className="card grid" storageKey="ReverseEngineeringSettings-Reverse-Engineering" title={<span>Reverse Engineering</span>}>
+
     <p>Ask ANZU to reverse engineer a local file or app folder and tell it what you want to understand.
       Findings are saved with evidence. Running an application requires your approval.</p>
     <p>Analysis engine: <strong>{ready?.engine.status ?? "Checking"}</strong> — {ready?.engine.stage}<br />
@@ -65,5 +66,5 @@ export function ReverseEngineeringSettings() {
       </div>
       {row.evidence.map(e => <a key={e.id} href={getAuthUrl(`/api/investigations/${row.id}/evidence/${e.id}`)} download>{e.id}: {e.operation}</a>)}
     </article>)}
-  </section>
+  </CollapsibleSection>
 }

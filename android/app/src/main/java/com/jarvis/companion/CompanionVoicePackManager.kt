@@ -1,15 +1,19 @@
 package com.jarvis.companion
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.io.File
-import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.coroutineContext
 
 /**
  * RFC-0140 on-device STT/TTS pack lifecycle.
@@ -18,9 +22,13 @@ import java.util.concurrent.atomic.AtomicReference
 class CompanionVoicePackManager(
     context: Context,
     val sttEngine: OnDeviceSttEngine = WhisperCppSttEngine(),
-    val ttsEngine: OnDeviceTtsEngine = PocketOrPiperTtsEngine(),
+    val ttsEngine: OnDeviceTtsEngine = PocketTtsEngine(),
+    digestCache: VerifiedDigestCache? = null,
 ) {
     private val app = context.applicationContext
+    val digestCache: VerifiedDigestCache = digestCache ?: VerifiedDigestCache(
+        persist = context.applicationContext.getSharedPreferences("companion_voice_digest", Context.MODE_PRIVATE),
+    )
     private val prefs = app.getSharedPreferences("companion_voice_pack", Context.MODE_PRIVATE)
     private val packRoot = File(app.filesDir, "voice-packs").apply { mkdirs() }
     private val client = OkHttpClient.Builder()
@@ -33,24 +41,51 @@ class CompanionVoicePackManager(
     private val progressRef = AtomicReference(0)
     private val errorRef = AtomicReference("")
     private var catalog: List<CompanionVoicePack> = CompanionVoicePackCatalog.builtIn
+    private val sttMutex = Mutex()
+    private val ttsMutex = Mutex()
+
+    private val activeDownloads: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /** Voice pack ids with a download running (from any screen). */
+    fun downloadingPackIds(): Set<String> = activeDownloads.toSet()
+
+    /** The download that owns [progressRef]; a second, concurrent download must not reset or overwrite it. */
+    private val progressOwner = AtomicReference<String?>(null)
+
+    private fun roleDownloading(role: String): Boolean =
+        activeDownloads.any { id -> catalog.firstOrNull { it.id == id }?.role == role }
+
+    private fun setProgress(packId: String, pct: Int) {
+        if (progressOwner.get() == packId) progressRef.set(pct)
+    }
+
+    private fun mutexFor(role: String) = if (role == "stt") sttMutex else ttsMutex
 
     init {
         CompanionVoicePackCatalog.validateBuiltIn()
+        migrateTtsSelection()
     }
 
     fun selectedSttPackId(): String =
         prefs.getString("selected_stt_pack_id", CompanionVoicePackCatalog.builtIn.first { it.role == "stt" && it.recommended }.id)
             ?: "whisper-tiny-en-cpp"
 
-    fun selectedTtsPackId(): String =
-        prefs.getString("selected_tts_pack_id", CompanionVoicePackCatalog.builtIn.first { it.role == "tts" && it.recommended }.id)
-            ?: "pocket-tts-en"
+    fun selectedTtsPackId(): String {
+        migrateTtsSelection()
+        return prefs.getString("selected_tts_pack_id", CompanionVoicePackCatalog.POCKET_TTS_ID)
+            ?: CompanionVoicePackCatalog.POCKET_TTS_ID
+    }
 
     fun selectSttPack(id: String) {
         prefs.edit().putString("selected_stt_pack_id", id).apply()
     }
 
     fun selectTtsPack(id: String) {
+        val pack = catalog.firstOrNull { it.id == id && it.role == "tts" }
+        if (pack == null || !CompanionVoicePackCatalog.canSynthesize(pack)) {
+            prefs.edit().putString("selected_tts_pack_id", CompanionVoicePackCatalog.POCKET_TTS_ID).apply()
+            return
+        }
         prefs.edit().putString("selected_tts_pack_id", id).apply()
     }
 
@@ -67,6 +102,30 @@ class CompanionVoicePackManager(
 
     fun storageBytes(): Long = packRoot.walkTopDown().filter { it.isFile }.map { it.length() }.sum()
 
+    /** Current (Leader-merged) catalogue; read by the RFC-0216 S5 downloaded-content inventory. */
+    fun catalog(): List<CompanionVoicePack> = catalog
+
+    /** App-private directory holding one sub-directory per installed voice pack. */
+    fun packRoot(): File = packRoot
+
+    /** null = some artifact missing, "" = every artifact matches its pinned SHA-256, else the mismatch copy. */
+    fun verifyInstalled(pack: CompanionVoicePack): String? = verifyPack(pack)
+
+    /**
+     * Deletes one pack directory by name: catalogue packs go through [deletePackAwait] (engine unload +
+     * MISSING status); directories of packs no longer in the catalogue are removed directly.
+     */
+    suspend fun deleteInstalledDir(name: String) {
+        val dir = File(packRoot, name)
+        require(PackDownloadPlan.isDirectChild(packRoot, name)) { "Not a voice pack directory: $name" }
+        check(name !in activeDownloads) { "$name is downloading; wait for it to finish first" }
+        if (catalog.any { it.id == name }) deletePackAwait(name) else withContext(Dispatchers.IO) {
+            dir.walkTopDown().filter { it.isFile }.forEach { digestCache.invalidate(it) }
+            if (dir.exists() && !dir.deleteRecursively()) error("Could not delete $name")
+        }
+        refreshStatus()
+    }
+
     fun selectedSttPack(): CompanionVoicePack? = catalog.firstOrNull { it.id == selectedSttPackId() }
     fun selectedTtsPack(): CompanionVoicePack? = catalog.firstOrNull { it.id == selectedTtsPackId() }
 
@@ -80,6 +139,9 @@ class CompanionVoicePackManager(
 
     fun isTtsReady(): Boolean =
         selectedTtsPack()?.let { packReady(it) && ttsStatusRef.get() in CompanionVoicePackStatus.USABLE } == true
+
+    /** True when every artifact of [packId] is on disk (installed), whether or not it is the selected pack. */
+    fun isPackInstalled(packId: String): Boolean = catalog.firstOrNull { it.id == packId }?.let { packReady(it) } == true
 
     private fun packReady(pack: CompanionVoicePack): Boolean {
         if (pack.url.isBlank()) return false
@@ -96,8 +158,13 @@ class CompanionVoicePackManager(
             val file = artifactFile(pack, art)
             if (!file.isFile || file.length() == 0L) return null
             if (art.sha256.isNotBlank()) {
-                val digest = sha256(file)
+                val digest = if (digestCache.matchesExpected(file, art.sha256)) {
+                    art.sha256
+                } else {
+                    digestCache.digestOf(file)
+                }
                 if (!digest.equals(art.sha256, ignoreCase = true)) {
+                    digestCache.invalidate(file)
                     return "Checksum mismatch for ${art.filename} — delete and download again"
                 }
             }
@@ -106,11 +173,26 @@ class CompanionVoicePackManager(
     }
 
     suspend fun refreshStatus() = withContext(Dispatchers.IO) {
+        migrateTtsSelection()
+        pruneRetiredPackDirs()
         refreshOne(selectedSttPack(), sttStatusRef)
         refreshOne(selectedTtsPack(), ttsStatusRef)
     }
 
+    fun pruneRetiredPackDirs() {
+        val dirs = packRoot.listFiles() ?: return
+        for (dir in dirs) {
+            if (!dir.isDirectory) continue
+            if (dir.name !in CompanionVoicePackCatalog.RETIRED_PACK_IDS) continue
+            dir.walkTopDown().filter { it.isFile }.forEach { digestCache.invalidate(it) }
+            dir.deleteRecursively()
+        }
+    }
+
     private fun refreshOne(pack: CompanionVoicePack?, statusRef: AtomicReference<String>) {
+        // A running download owns this role's status; a refresh must not overwrite it.
+        // A running download owns this role's status (whether or not it is the selected pack); a refresh must not overwrite it.
+        if (pack != null && roleDownloading(pack.role)) return
         if (pack == null) {
             statusRef.set(CompanionVoicePackStatus.ERROR)
             errorRef.set("No voice pack selected")
@@ -135,13 +217,17 @@ class CompanionVoicePackManager(
         }
     }
 
-    suspend fun downloadPack(packId: String, onProgress: (Int) -> Unit = {}) = withContext(Dispatchers.IO) {
+    suspend fun downloadPack(packId: String, onProgress: (Int) -> Unit = {}) {
         val pack = catalog.firstOrNull { it.id == packId } ?: error("Unknown voice pack: $packId")
+        check(activeDownloads.add(pack.id)) { "${pack.label} is already downloading" }
+        try { mutexFor(pack.role).withLock {
+        withContext(Dispatchers.IO) {
         require(pack.url.isNotBlank()) { "Leader has not published a download URL for voice pack ${pack.id}" }
         DeviceVoiceGuard.blockReason(app, pack)?.let { error(it) }
+        if (pack.role == "stt") sttEngine.unload() else ttsEngine.unload()
         val statusRef = if (pack.role == "stt") sttStatusRef else ttsStatusRef
         statusRef.set(CompanionVoicePackStatus.DOWNLOADING)
-        progressRef.set(0)
+        if (progressOwner.compareAndSet(null, pack.id)) progressRef.set(0)
         errorRef.set("")
         val totalBytes = pack.artifacts.sumOf { it.sizeBytes.coerceAtLeast(1L) }
         var readTotal = 0L
@@ -163,25 +249,34 @@ class CompanionVoicePackManager(
                             output.write(buffer, 0, count)
                             readTotal += count
                             val pct = ((readTotal * 100) / totalBytes).toInt().coerceIn(0, 100)
-                            progressRef.set(pct)
+                            setProgress(pack.id, pct)
                             onProgress(pct)
                         }
                     }
                 }
             }
             if (art.sha256.isNotBlank()) {
-                val digest = sha256(partial)
+                val digest = digestCache.digestOf(partial)
                 if (!digest.equals(art.sha256, ignoreCase = true)) {
+                    digestCache.invalidate(partial)
                     partial.delete()
                     statusRef.set(CompanionVoicePackStatus.ERROR)
                     errorRef.set("Download checksum mismatch for ${art.filename}")
                     error("Download checksum mismatch for ${art.filename}")
                 }
             }
-            partial.renameTo(target)
+            PackDownloadPlan.replaceWithVerified(partial, target)
+            digestCache.invalidate(partial)
+            if (art.sha256.isNotBlank()) digestCache.remember(target, art.sha256)
         }
         statusRef.set(CompanionVoicePackStatus.READY)
-        progressRef.set(100)
+        setProgress(pack.id, 100)
+        }
+        }
+        } finally {
+            activeDownloads.remove(pack.id)
+            progressOwner.compareAndSet(pack.id, null)
+        }
     }
 
     suspend fun downloadSelectedStt(onProgress: (Int) -> Unit = {}) =
@@ -203,9 +298,10 @@ class CompanionVoicePackManager(
         downloadPack(tts.id, onProgress)
     }
 
-    fun deletePack(packId: String) {
+    private fun deletePackUnlocked(packId: String) {
         val pack = catalog.firstOrNull { it.id == packId } ?: return
         if (pack.role == "stt") sttEngine.unload() else ttsEngine.unload()
+        pack.artifacts.forEach { digestCache.invalidate(artifactFile(pack, it)) }
         packDir(pack).deleteRecursively()
         val statusRef = if (pack.role == "stt") sttStatusRef else ttsStatusRef
         statusRef.set(CompanionVoicePackStatus.MISSING)
@@ -213,10 +309,22 @@ class CompanionVoicePackManager(
         progressRef.set(0)
     }
 
-    fun deleteSelectedStt() = deletePack(selectedSttPackId())
-    fun deleteSelectedTts() = deletePack(selectedTtsPackId())
+    suspend fun deletePackAwait(packId: String) {
+        val pack = catalog.firstOrNull { it.id == packId } ?: return
+        mutexFor(pack.role).withLock {
+            deletePackUnlocked(packId)
+        }
+    }
 
-    suspend fun transcribePcm16le(pcm: ByteArray, sampleRate: Int = 16_000): String {
+    private fun migrateTtsSelection() {
+        val stored = prefs.getString("selected_tts_pack_id", null) ?: return
+        val valid = catalog.any { it.id == stored && it.role == "tts" && CompanionVoicePackCatalog.canSynthesize(it) }
+        if (!valid) {
+            prefs.edit().putString("selected_tts_pack_id", CompanionVoicePackCatalog.POCKET_TTS_ID).apply()
+        }
+    }
+
+    suspend fun transcribePcm16le(pcm: ByteArray, sampleRate: Int = 16_000): String = withContext(Dispatchers.IO) {
         val pack = selectedSttPack() ?: error("No STT pack selected")
         DeviceVoiceGuard.blockReason(app, pack)?.let { error(it) }
         if (!packReady(pack)) error("Install the on-device STT pack first (More → Voice)")
@@ -244,10 +352,11 @@ class CompanionVoicePackManager(
         }
         val text = result.getOrNull().orEmpty().trim()
         if (text.isEmpty()) error("On-device STT produced no text — retry or reinstall the pack")
-        return text
+        text
     }
 
-    suspend fun synthesize(text: String): ByteArray {
+    suspend fun synthesize(text: String): ByteArray = ttsMutex.withLock {
+        withContext(Dispatchers.IO) {
         val pack = selectedTtsPack() ?: error("No TTS pack selected")
         DeviceVoiceGuard.blockReason(app, pack)?.let { error(it) }
         if (!packReady(pack)) error("Install the on-device TTS pack first (More → Voice)")
@@ -267,6 +376,10 @@ class CompanionVoicePackManager(
             error(loadError)
         }
         val result = ttsEngine.synthesize(text)
+        if (!coroutineContext.isActive || result.exceptionOrNull() is CancellationException) {
+            ttsStatusRef.set(CompanionVoicePackStatus.READY)
+            throw CancellationException("TTS cancelled")
+        }
         ttsStatusRef.set(CompanionVoicePackStatus.READY)
         result.exceptionOrNull()?.let {
             ttsStatusRef.set(CompanionVoicePackStatus.ERROR)
@@ -275,7 +388,13 @@ class CompanionVoicePackManager(
         }
         val audio = result.getOrNull()
         if (audio == null || audio.isEmpty()) error("On-device TTS produced no audio — retry or reinstall the pack")
-        return audio
+        if (PocketTtsEngine.isNearSilentPcmWav(audio)) {
+            ttsStatusRef.set(CompanionVoicePackStatus.ERROR)
+            errorRef.set("On-device TTS returned near-silent audio — refusing soft-fail")
+            error("On-device TTS returned near-silent audio — refusing soft-fail")
+        }
+        audio
+        }
     }
 
     fun unloadIdle() {
@@ -285,16 +404,4 @@ class CompanionVoicePackManager(
         if (ttsStatusRef.get() == CompanionVoicePackStatus.RUNNING) ttsStatusRef.set(CompanionVoicePackStatus.READY)
     }
 
-    private fun sha256(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
-            val buffer = ByteArray(65536)
-            while (true) {
-                val read = input.read(buffer)
-                if (read < 0) break
-                digest.update(buffer, 0, read)
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
-    }
 }

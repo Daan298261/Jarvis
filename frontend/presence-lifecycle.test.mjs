@@ -51,6 +51,40 @@ test("portrait particles preserve colour and aspect, discard black, and cache de
   }
 })
 
+test("B samples the authored artwork into a separate volume, never the procedural mask", async () => {
+  const previousImage = globalThis.Image
+  const previousDocument = globalThis.document
+  globalThis.Image = class { width = 100; height = 100; async decode() {} }
+  globalThis.document = { createElement: () => ({ getContext: () => ({
+    drawImage() {},
+    getImageData(_x, _y, w, h) {
+      const data = new Uint8ClampedArray(w * h * 4)
+      for (let y = 70; y < 180; y++) for (let x = 40; x < 216; x++) data.set([120, 180, 240, 255], (y * w + x) * 4)
+      return { data }
+    },
+  }) }) }
+  try {
+    const a = await portraits.preparePortraitCloud("volume-artwork", "volume_test")
+    const bPromise = portraits.preparePortraitCloud("volume-artwork", "volume_test", true)
+    assert.equal(bPromise, portraits.preparePortraitCloud("volume-artwork", "volume_test", true))
+    const b = await bPromise
+    assert.equal(a, "portrait_volume_test")
+    assert.equal(b, "portrait_volume_test_b")
+    const points = shapes.resolvePresenceShape(b).buildFigure(1)
+    assert.ok(points.some(p => p.z < -0.4))
+    assert.ok(points.some(p => p.z > 0.4))
+    assert.ok(points.every(p => p.color[3] === 1 && p.flow === 0))
+    const mount = await readFile(new URL("./src/presence/renderers/HumanoidPresence.tsx", import.meta.url), "utf8")
+    assert.match(mount, /preparePortraitCloud\(portraitUrl, portraitId, volumetric, living\)/)
+    assert.doesNotMatch(mount, /mythicLiveVariantShapeId\(shapeId\)/)
+  } finally {
+    globalThis.Image = previousImage
+    globalThis.document = previousDocument
+    shapes.unregisterPresenceShape("portrait_volume_test")
+    shapes.unregisterPresenceShape("portrait_volume_test_b")
+  }
+})
+
 test("avatar decoding failures are retryable", async () => {
   const previousImage = globalThis.Image
   let decodes = 0
@@ -236,10 +270,10 @@ test("persona selection activates mythic mode on the shared morphable stage", as
   const host = await readFile(new URL("./src/presence/PresenceHost.tsx", import.meta.url), "utf8")
   assert.match(home, /presentation\.requestedPresence === "humanoid"/)
   assert.match(home, /\? "humanoid_bust"/)
-  assert.match(settings, /Mythic persona A · portrait cloud/)
-  assert.match(settings, /Mythic persona B · live gaze/)
+  assert.match(settings, /MYTHIC_AVATAR_CHOICES.map/)
+  assert.match(settings, /Mythic persona \{choice.label\}/)
   assert.match(activation, /requestedPresence: "particle_bust"/)
-  assert.match(activation, /avatarId: MYTHIC_LIVE_B_AVATAR_ID/)
+  assert.match(activation, /avatarId: mythicAvatarForSelection\(readPresentationBootstrap\(\).avatarId\)/)
   assert.match(activation, /Promise\.allSettled/)
   assert.match(controls, /chooseRevision\.current/)
   assert.doesNotMatch(controls, /className={`named-persona-card\$\{selected \? " active" : ""}`}[\s\S]{0,180}disabled={busy}/)
@@ -251,7 +285,7 @@ test("persona selection activates mythic mode on the shared morphable stage", as
   const humanoid = await readFile(new URL("./src/presence/renderers/HumanoidPresence.tsx", import.meta.url), "utf8")
   const stageCss = await readFile(new URL("./src/presence/renderers/presence-stage.css", import.meta.url), "utf8")
   assert.doesNotMatch(humanoid, /jarvis-mythic-avatar-shell/)
-  assert.match(humanoid, /Portrait sampling unavailable · using the live particle avatar/)
+  assert.match(humanoid, /Avatar artwork unavailable · retaining the previous figure/)
   assert.doesNotMatch(humanoid, /preparing \|\| prepareError/)
   assert.match(stageCss, /position: absolute;/)
   assert.match(stageCss, /overflow: hidden;/)
@@ -391,7 +425,7 @@ test("opening HUD settings morphs the live cloud without a background starfield 
   const humanoidCss = await readFile(new URL("./src/presence/renderers/humanoid-presence.css", import.meta.url), "utf8")
   assert.match(home, /settingsPanelOpen \? SETTINGS_CLOUD_SHAPE_ID/)
   assert.match(controls, /onOpenChange\?\.\(openMenu !== null, openMenu\)/)
-  assert.match(home, /setSettingsPanelOpen\(open && menu !== "persona"\)/)
+  assert.match(home, /setSettingsPanelOpen\(open && menu !== "persona" && menu !== "appearance"\)/)
   assert.equal(shapes.resolvePresenceShape(variants.SETTINGS_CLOUD_SHAPE_ID).id, "settings_cloud")
   assert.match(shell, /!isChat && <HudStarfield/)
   assert.match(hudCss, /inset: 0;/)
@@ -434,10 +468,12 @@ test("every mythic A and B persona shares persistent detail and brightness contr
   const personas = await readFile(new URL("./src/persona/namedPersonas.ts", import.meta.url), "utf8")
   const stage = await readFile(new URL("./src/presence/renderers/MorphablePresenceStage.tsx", import.meta.url), "utf8")
   const cloud = await readFile(new URL("./src/presence/renderers/morphableOrbCloud.ts", import.meta.url), "utf8")
-  assert.match(controls, /A · portrait cloud/)
-  assert.match(controls, /B · live gaze/)
-  assert.match(controls, /Persona brightness/)
-  assert.match(controls, /Persona particle detail/)
+  assert.match(controls, /MYTHIC_AVATAR_CHOICES.map/)
+  assert.match(controls, /choice.label/)
+  const sliders = await readFile(new URL("./src/persona/PersonaVisualSliders.tsx", import.meta.url), "utf8")
+  assert.match(controls, /PersonaVisualSliders/)
+  assert.match(sliders, /"Brightness"/)
+  assert.match(sliders, /"Density"/)
   assert.match(personas, /appearance: mergedAppearance/)
   assert.match(stage, /personaDetail\(current\.personaVisual\?\.detail\)/)
   assert.match(stage, /system\.currentShapeId\.endsWith\("_b"\)/)
@@ -665,4 +701,20 @@ test("attention controller fails closed to the pointer without a webcam", () => 
     else globalThis.window = previousWindow
     Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: undefined })
   }
+})
+
+
+test("all five persona versions persist across persona selection", () => {
+  assert.equal(variants.MYTHIC_AVATAR_CHOICES.length, 5)
+  for (const choice of variants.MYTHIC_AVATAR_CHOICES) {
+    assert.equal(variants.mythicAvatarForSelection(choice.id), choice.id)
+  }
+  assert.equal(variants.mythicAvatarForSelection("jarvis_base"), variants.MYTHIC_LIVE_B_AVATAR_ID)
+  for (const { shapeId } of Object.values(personas.PERSONA_VISUALS)) {
+    for (const avatar of [variants.MYTHIC_LEGACY_C_AVATAR_ID, variants.MYTHIC_LEGACY_D_AVATAR_ID]) {
+      const shape = variants.legacyPersonaShapeId(avatar, shapeId)
+      assert.equal(shapes.resolvePresenceShape(shape).id, shape)
+    }
+  }
+  assert.equal(variants.legacyPersonaShapeId(variants.MYTHIC_PORTRAIT_A_AVATAR_ID, "stormbird"), undefined)
 })

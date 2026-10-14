@@ -18,6 +18,7 @@ const SHELLS = new Set<ShellMode>(["classic", "hud"])
 const PRESETS = new Set<PresencePerformancePreset>(["auto", "efficient", "balanced", "cinematic"])
 const ATTENTION = new Set<AttentionMode>(["off", "pointer", "camera"])
 const MOTION = new Set<ReducedMotionMode>(["system", "reduce", "full"])
+let presentationRevision = 0
 
 function safeAvatarId(value: unknown): string {
   if (typeof value !== "string") return DEFAULT_PRESENTATION_SETTINGS.avatarId
@@ -91,8 +92,10 @@ function announce(settings: PresentationSettings): void {
 }
 
 export async function refreshPresentationFromBackend(): Promise<PresentationSettings> {
+  const revision = presentationRevision
   const response = await api<any>("/api/settings")
   const settings = normalizePresentation(response?.presentation)
+  if (revision !== presentationRevision) return readPresentationBootstrap()
   cachePresentation(settings)
   announce(settings)
   return settings
@@ -102,6 +105,7 @@ export async function updatePresentation(
   patch: Partial<PresentationSettings>,
 ): Promise<PresentationSettings> {
   const current = readPresentationBootstrap()
+  const revision = ++presentationRevision
   const requested = normalizePresentation({ ...current, ...patch })
   const body: Record<string, unknown> = {}
 
@@ -135,6 +139,7 @@ export async function updatePresentation(
     window.clearTimeout(deadline)
   }
   const settings = normalizePresentation(response?.presentation ?? requested)
+  if (revision !== presentationRevision) return readPresentationBootstrap()
   cachePresentation(settings)
   announce(settings)
   return settings

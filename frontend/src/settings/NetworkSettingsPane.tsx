@@ -1,3 +1,4 @@
+import { CollapsibleSection } from "../components/CollapsibleSection"
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { api } from "../api"
@@ -67,8 +68,8 @@ export function NetworkSettingsPane({
 
   return (
     <>
-      <div className="card grid settings-pane-card">
-        <h2>This PC</h2>
+      <CollapsibleSection className="card grid settings-pane-card" storageKey="NetworkSettingsPane-This-PC" title={<span>This PC</span>}>
+
         <p className="lede" style={{ margin: "0 0 12px" }}>
           {elevation?.elevated
             ? "Jarvis is running with administrator on this session."
@@ -83,10 +84,10 @@ export function NetworkSettingsPane({
           </div>
         ) : null}
         {elevationMsg ? <p className="lede">{elevationMsg}</p> : null}
-      </div>
+      </CollapsibleSection>
 
-      <div className="card grid settings-pane-card">
-        <h2>Security &amp; remote access</h2>
+      <CollapsibleSection className="card grid settings-pane-card" storageKey="NetworkSettingsPane-Security-amp-remote-access" title={<span>Security &amp; remote access</span>}>
+
         <p className="lede" style={{ margin: "0 0 12px" }}>
           Expose Jarvis remotely or over LAN with strict Private Key authentication. Every query requires{" "}
           <code>X-Jarvis-Key</code> or <code>Authorization: Bearer</code>.
@@ -144,20 +145,20 @@ export function NetworkSettingsPane({
             )}
           </div>
         </div>
-      </div>
+      </CollapsibleSection>
 
-      <div className="card grid settings-pane-card">
-        <h2>Phone pairing</h2>
+      <CollapsibleSection className="card grid settings-pane-card" storageKey="NetworkSettingsPane-Phone-pairing" title={<span>Phone pairing</span>}>
+
         <p className="lede" style={{ margin: "0 0 12px" }}>
           Pair the Android companion with a 6-digit code and QR after Prepare connection maps TCP 4781.
           Controls live under{" "}
           <Link to={settingsSubmenuPath("phone-pairing")}>Phone Pairing</Link> in Settings.{" "}
           <Link to="/phone">Android companion home</Link> is the same flow plus the LAN PWA.
         </p>
-      </div>
+      </CollapsibleSection>
 
-      <div className="card grid settings-pane-card">
-        <h2>Swarm</h2>
+      <CollapsibleSection className="card grid settings-pane-card" storageKey="NetworkSettingsPane-Swarm" title={<span>Swarm</span>}>
+
         <p className="lede" style={{ margin: "0 0 12px" }}>
           Manage multi-node swarm membership, heartbeats, and delegation — without leaving the admin rail.
         </p>
@@ -166,10 +167,10 @@ export function NetworkSettingsPane({
             Open Swarm admin
           </Link>
         </div>
-      </div>
+      </CollapsibleSection>
 
-      <div className="card grid settings-pane-card">
-        <h2>Guest portals</h2>
+      <CollapsibleSection className="card grid settings-pane-card" storageKey="NetworkSettingsPane-Guest-portals" title={<span>Guest portals</span>}>
+
         <p className="lede" style={{ margin: "0 0 12px" }}>
           Issue a scoped, revocable link so a client can see one task or decision — not this PC&apos;s
           files, tools, or settings. Preview effective permissions before the token is created.
@@ -179,7 +180,7 @@ export function NetworkSettingsPane({
             Open guest portals
           </Link>
         </div>
-      </div>
+      </CollapsibleSection>
     </>
   )
 }

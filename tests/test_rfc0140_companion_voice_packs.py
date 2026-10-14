@@ -102,8 +102,17 @@ def test_voice_pack_hash_ok_ready(mobile_env, monkeypatch):
     target.write_bytes(payload)
     art = dict(art)
     art["sha256"] = hashlib.sha256(payload).hexdigest()
+    art["size_bytes"] = len(payload)
     pack["artifacts"] = [art]
     pack["sha256"] = art["sha256"]
+    assert companion_voice_packs._cache_ready(pack) is False
+    assert companion_voice_packs._sha256_file(target) == art["sha256"]
+    companion_voice_packs._write_verified_marker(target, art["sha256"])
+
+    def unexpected_hash(_path):
+        raise AssertionError("Voice pack status polling must not hash weights")
+
+    monkeypatch.setattr(companion_voice_packs, "_sha256_file", unexpected_hash)
     assert companion_voice_packs._cache_ready(pack) is True
 
 

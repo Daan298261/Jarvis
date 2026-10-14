@@ -7,5 +7,6 @@
   "node": {"version":"24.14.0","url":"https://nodejs.org/dist/v24.14.0/node-v24.14.0-linux-x64.tar.xz","sha256":"41cd79bb7877c81605a9e68ec4c91547774f46a40c67a17e34d7179ef11729df"},
   "jdk": {"version":"21.0.12.1+1","url":"https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jdk_x64_linux_hotspot_21.0.12.1_1.tar.gz","sha256":"ce79869e1307ed8ee1e2baa86a412b1eb5b75d10a01006d788a6f968bcfaee94"},
   "ghidra": {"version":"12.1.4","url":"https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.4_build/ghidra_12.1.4_PUBLIC_20260921.zip","sha256":"ddac49f903da9d5bac833e5cc79395098b9c33cfd3279be5f31bd00387d2d4db"},
+  "apktool": {"version":"2.10.0","url":"https://github.com/iBotPeaches/Apktool/releases/download/v2.10.0/apktool_2.10.0.jar","sha256":"c0350abbab5314248dfe2ee0c907def4edd14f6faef1f5d372d3d4abd28f0431"},
   "jadx": {"version":"1.5.6","url":"https://github.com/skylot/jadx/releases/download/v1.5.6/jadx-1.5.6.zip","sha256":"545ea2be9c242511bc145755cf4bda2485ade42966e096f8b4d3da2a230e8974"}
 }

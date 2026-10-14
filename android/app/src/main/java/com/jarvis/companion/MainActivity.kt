@@ -11,7 +11,7 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -46,9 +47,21 @@ import java.util.concurrent.atomic.AtomicBoolean
 private val Gold = Color(0xFFF5A623)
 private val Ink = Color(0xFF070B12)
 private val Panel = Color(0xFF111B28)
-private val Muted = Color(0xFF8C9CAF)
+internal val Muted = Color(0xFF8C9CAF)
+/** Shared error text colour for settings rows (voice packs, sponsor credit). */
+internal val ErrorText = Color(0xFFE8A87C)
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
+    private lateinit var accessLock: AppAccessLock
+    private lateinit var secureScreen: SecureScreen
+    override fun onResume() {
+        super.onResume()
+        if (::secureScreen.isInitialized) secureScreen.apply()
+    }
+    override fun onStop() {
+        if (::accessLock.isInitialized) accessLock.background()
+        super.onStop()
+    }
     private var latestIntent by mutableStateOf<Intent?>(null)
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -56,9 +69,27 @@ class MainActivity : ComponentActivity() {
         latestIntent = intent
     }
     override fun onCreate(savedInstanceState: Bundle?) {
+        setTheme(R.style.AppTheme)
         super.onCreate(savedInstanceState)
+        secureScreen = SecureScreen(this)
+        accessLock = AppAccessLock(this)
         latestIntent = intent
         setContent {
+            val savedUi = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+            if (accessLock.locked) {
+                MaterialTheme(colorScheme = darkColorScheme(primary = Gold, background = Ink, surface = Panel)) {
+                    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                        AppLockedScreen(accessLock)
+                    }
+                }
+                return@setContent
+            }
+            savedUi.SaveableStateProvider("app") {
+            var showSplash by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
+            if (showSplash) {
+                AnzuSplash(onFinished = { showSplash = false })
+                return@SaveableStateProvider
+            }
             val model: CompanionModel = viewModel()
             val state by model.state.collectAsStateWithLifecycle()
             val app = application as JarvisApp
@@ -91,7 +122,9 @@ class MainActivity : ComponentActivity() {
                     incomingCall = null
                 }
             }
-            val mic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) model.toggleRecord() }
+            val mic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) model.toggleRecord() else model.micPermissionDenied() }
+            val modelFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(model::importModel) }
+            val pickModelFile = { modelFile.launch(arrayOf("application/octet-stream", "*/*")) }
             val attachment = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let(model::upload) }
             val videoPick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let(model::upload) }
             var photoPath by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
@@ -214,7 +247,7 @@ class MainActivity : ComponentActivity() {
                         PostPairVoicePackOfferPrefs.markHandled(context, model.api.deviceId)
                     },
                 )
-                if (incomingCall != null) AlertDialog(onDismissRequest = { incomingCall = null }, title = { Text("Jarvis is calling") },
+                if (incomingCall != null) AlertDialog(onDismissRequest = { incomingCall = null }, title = { Text(stringResource(R.string.anzu_is_calling)) },
                     text = { Text("Answer to discuss the event. Your microphone stays off until you answer.") },
                     confirmButton = { TextButton(onClick = { callPermission.launch(Manifest.permission.RECORD_AUDIO) }) { Text("Answer") } },
                     dismissButton = { TextButton(onClick = { val id = incomingCall; incomingCall = null; model.action { if (id != null) model.api.json("/calls/$id/end", "POST") } }) { Text("Decline") } })
@@ -228,8 +261,26 @@ class MainActivity : ComponentActivity() {
                 }) { padding ->
                     Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp)) {
                         Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("J A R V I S", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                            Text(if (state.connected) "● CONNECTED" else "○ OFFLINE", fontSize = 10.sp, color = if (state.connected) Color(0xFF74DCCD) else Muted)
+                            Text(AnzuBranding.DISPLAY_NAME, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                            val indicator = CompanionMode.indicator(state.connected, state.pendingApproval, state.localModelReady, paired)
+                            Text(
+                                indicator.label,
+                                fontSize = 10.sp,
+                                letterSpacing = 1.sp,
+                                color = when (indicator.mode) {
+                                    AnswerMode.DESKTOP -> Color(0xFF74DCCD)
+                                    AnswerMode.PHONE -> Gold
+                                    else -> Muted
+                                },
+                            )
+                        }
+                        val offlineBanner = when {
+                            tab == "Chat" -> "" // Chat shows its own offline card.
+                            tab == "Home" && CompanionMode.needsPhoneSetup(state.connected, state.localModelReady) -> "" // the setup card explains it
+                            else -> CompanionOfflineStatus.offlineBannerText(state)
+                        }
+                        if (offlineBanner.isNotEmpty()) Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF1D2A34)), modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                            Text(offlineBanner, Modifier.padding(12.dp), fontSize = 12.sp)
                         }
                         if (state.error != null) Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF34251D)), modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
                             Text(state.error.orEmpty(), Modifier.padding(12.dp), fontSize = 12.sp)
@@ -244,7 +295,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                             if (dismiss) AlertDialog(onDismissRequest = { dismiss = false }, title = { Text("Dismiss pending message?") },
-                                text = { Text("Jarvis may already be working on it. Check Tasks before sending it again. Dismissing does not cancel a task.") },
+                                text = { Text(stringResource(R.string.pending_may_be_working)) },
                                 confirmButton = { TextButton(onClick = { dismiss = false; model.dismissPending() }) { Text("Dismiss") } },
                                 dismissButton = { TextButton(onClick = { dismiss = false }) { Text("Keep") } })
                         }
@@ -295,15 +346,28 @@ class MainActivity : ComponentActivity() {
                                 Text(
                                     if (state.recording) "I’m listening."
                                     else if (state.speaking) "Speaking"
-                                    else if (!state.connected) "Pair with Jarvis on your desktop to connect."
+                                    else if (CompanionMode.needsPhoneSetup(state.connected, state.localModelReady)) stringResource(R.string.set_up_anzu_on_phone)
                                     else "What’s on your mind?",
-                                    fontSize = if (!state.connected && !state.recording && !state.speaking) 22.sp else 28.sp,
+                                    fontSize = if (CompanionMode.needsPhoneSetup(state.connected, state.localModelReady) && !state.recording && !state.speaking) 22.sp else 28.sp,
                                     fontWeight = FontWeight.Light,
                                 )
                                 if (state.liveTranscript.isNotEmpty()) Text(state.liveTranscript, fontSize = 14.sp, color = Gold, modifier = Modifier.padding(top = 8.dp))
                                 Text(state.activity, fontSize = 12.sp, color = Muted, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
                                 if (state.lanLabel.isNotEmpty()) Text(state.lanLabel, fontSize = 13.sp, color = Gold, modifier = Modifier.padding(bottom = 8.dp))
-                                if (!state.connected) {
+                                if (CompanionMode.needsPhoneSetup(state.connected, state.localModelReady)) {
+                                    PhoneSetupCard(state, devicePack, deviceChrome, pickModelFile)
+                                }
+                                if (!state.connected && state.localModelReady) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 12.dp)) {
+                                        Button(onClick = { mic.launch(Manifest.permission.RECORD_AUDIO) }, modifier = Modifier.weight(1f)) {
+                                            Icon(Icons.Outlined.Mic, null); Spacer(Modifier.width(6.dp)); Text(if (state.recording) "Send voice" else stringResource(R.string.talk_to_anzu))
+                                        }
+                                        OutlinedButton(onClick = { tab = "Chat" }, modifier = Modifier.weight(1f)) { Text("Write a message") }
+                                    }
+                                    if (!paired) TextButton(onClick = { tab = "More" }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                                        Text("Pair a desktop for tasks and tools", color = Muted)
+                                    }
+                                } else if (!state.connected) {
                                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                                         Button(
                                             onClick = { pairingScanRequest = true; tab = "More" },
@@ -324,7 +388,7 @@ class MainActivity : ComponentActivity() {
                                 } else {
                                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 12.dp)) {
                                         Button(onClick = { mic.launch(Manifest.permission.RECORD_AUDIO) }, modifier = Modifier.weight(1f)) {
-                                            Icon(Icons.Outlined.Mic, null); Spacer(Modifier.width(6.dp)); Text(if (state.recording) "Send voice" else "Talk to Jarvis")
+                                            Icon(Icons.Outlined.Mic, null); Spacer(Modifier.width(6.dp)); Text(if (state.recording) "Send voice" else stringResource(R.string.talk_to_anzu))
                                         }
                                         OutlinedButton(onClick = {
                                             callPermission.launch(Manifest.permission.RECORD_AUDIO)
@@ -357,20 +421,38 @@ class MainActivity : ComponentActivity() {
                                 if (state.onDeviceVoiceActive) {
                                     Text("On-device voice", color = Gold, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
                                 }
-                                ConversationPickers(state, model::selectModel, model::selectVoice)
+                                if (state.connected) ConversationPickers(state, model::selectModel, model::selectVoice)
+                                else Text(phoneModelStatus(state, devicePack), color = Muted, fontSize = 11.sp)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     TextButton(onClick = { model.openConversation(null) }) { Text("New conversation") }
                                     var history by remember { mutableStateOf(false) }
                                     Box { TextButton(onClick = { history = true }) { Text("History") }
-                                        DropdownMenu(history, { history = false }) { state.conversations.forEach { c -> DropdownMenuItem(text = { Text(c.optString("title")) }, onClick = { history = false; model.openConversation(c.getString("id")) }) } }
+                                        DropdownMenu(history, { history = false }) {
+                                            val desktop = if (state.connected) state.conversations else emptyList()
+                                            if (desktop.isEmpty() && state.localConversations.isEmpty()) {
+                                                DropdownMenuItem(text = { Text("No conversations yet", color = Muted) }, onClick = { history = false }, enabled = false)
+                                            }
+                                            desktop.forEach { c -> DropdownMenuItem(text = { Text(c.optString("title")) }, onClick = { history = false; model.openConversation(c.getString("id")) }) }
+                                            state.localConversations.forEach { c ->
+                                                DropdownMenuItem(
+                                                    text = { Text(c.optString("title") + " · on this phone") },
+                                                    onClick = { history = false; model.openConversation(c.getString("id")) },
+                                                    trailingIcon = {
+                                                        IconButton(onClick = { model.deleteLocalConversation(c.getString("id")) }) {
+                                                            Icon(Icons.Outlined.DeleteOutline, "Delete conversation")
+                                                        }
+                                                    },
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                                 LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
-                                    if (state.messages.isEmpty()) item { Text("One conversation across your phone and Jarvis. Send a message, file, or voice note.", color = Muted, modifier = Modifier.padding(vertical = 24.dp)) }
+                                    if (state.messages.isEmpty()) item { Text(stringResource(R.string.chat_empty_hint), color = Muted, modifier = Modifier.padding(vertical = 24.dp)) }
                                     items(state.messages) { message ->
                                         Card(colors = CardDefaults.cardColors(containerColor = if (message.optString("role") == "user") Color(0xFF222B38) else Panel), modifier = Modifier.fillMaxWidth()) {
                                             Column(Modifier.padding(16.dp)) {
-                                                Text(if (message.optString("role") == "user") "YOU" else "JARVIS", color = Gold, fontSize = 10.sp)
+                                                Text(if (message.optString("role") == "user") "YOU" else AnzuBranding.DISPLAY_NAME, color = Gold, fontSize = 10.sp)
                                                 Text(message.optString("text"), Modifier.padding(top = 8.dp), fontSize = 15.sp)
                                                 if (message.optString("role") == "assistant") TextButton(onClick = { model.speak(message.optString("text")) }) { Icon(Icons.Outlined.VolumeUp, null); Text(if (state.speaking) " Stop" else " Read aloud") }
                                             }
@@ -394,29 +476,75 @@ class MainActivity : ComponentActivity() {
                                     IconButton(onClick = { cameraPermission.launch(Manifest.permission.CAMERA) }) { Icon(Icons.Outlined.PhotoCamera, "Take photo") }
                                     IconButton(onClick = { mic.launch(Manifest.permission.RECORD_AUDIO) }) { Icon(if (state.recording) Icons.Outlined.Stop else Icons.Outlined.Mic, "Voice message") }
                                     Spacer(Modifier.weight(1f))
-                                    Button(onClick = { model.send(draft) }, enabled = draft.isNotBlank() && !state.busy) { Text("Send"); Icon(Icons.Outlined.ArrowUpward, null) }
+                                    Button(onClick = { model.send(draft); draft = "" }, enabled = draft.isNotBlank() && !state.busy) { Text("Send"); Icon(Icons.Outlined.ArrowUpward, null) }
                                 }
                             }
                             "Tasks" -> {
                                 Text("Your swarm at work", fontSize = 25.sp, modifier = Modifier.padding(vertical = 12.dp))
+                                if (!state.connected) InfoCard("Needs the ANZU desktop", CompanionMode.desktopOnlyNotice(DesktopFeature.TASKS))
                                 LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                     if (state.swarm.length() > 0) item { SwarmOverviewCard(state.swarm) }
                                     if (state.coding.length() > 0) item { CodingOverviewCard(state.coding) }
                                     items(state.codingDecisions, key = { "decision-${it.optString("id")}" }) { decision ->
                                         CodingDecisionCard(decision, model)
                                     }
-                                    if (state.tasks.isEmpty()) item { Text("Tasks appear here as soon as Jarvis starts working.", color = Muted) }
+                                    if (state.tasks.isEmpty() && state.connected) item { Text(stringResource(R.string.tasks_empty_hint), color = Muted) }
                                     items(state.tasks, key = { "task-${it.optString("id")}" }) { task -> TaskCard(task, model) }
                                 }
                             }
                             "Studio" -> StudioScreen(model, state)
-                            "More" -> MoreScreen(model, state, deviceChrome, devicePack, pairingScanRequest) { pairingScanRequest = false }
+                            "More" -> MoreScreen(model, state, deviceChrome, devicePack, accessLock, secureScreen, pickModelFile, pairingScanRequest) { pairingScanRequest = false }
                         }
                     }
                 }
             }
+            }
         }
     }
+}
+
+/** First run without a desktop: get a model onto the phone by download or from a file. */
+@Composable private fun PhoneSetupCard(
+    state: CompanionState,
+    devicePack: DevicePackChromeState,
+    chrome: CompanionDeviceModelChrome,
+    pickModelFile: () -> Unit,
+) {
+    Card(Modifier.fillMaxWidth().padding(bottom = 10.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2838))) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("ANZU ON THIS PHONE", color = Gold, fontSize = 10.sp, letterSpacing = 1.sp)
+            Text(stringResource(R.string.phone_setup_body), fontSize = 13.sp)
+            val recommended = devicePack.availablePacks.firstOrNull { it.id == devicePack.selectedPackId } ?: devicePack.availablePacks.firstOrNull()
+            recommended?.let { Text(it.label, color = Muted, fontSize = 12.sp) }
+            if (devicePack.status == DevicePackStatus.DOWNLOADING || state.modelImportBusy) {
+                LinearProgressIndicator(
+                    progress = { (state.localPackProgress / 100f).coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(if (state.modelImportBusy) state.modelImportMessage else "Downloading… ${state.localPackProgress}%", color = Muted, fontSize = 11.sp)
+            }
+            devicePack.error?.let { Text(it, color = Color(0xFFE8A87C), fontSize = 12.sp) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { chrome.downloadSelectedPack() },
+                    enabled = !state.busy && devicePack.status != DevicePackStatus.DOWNLOADING,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Download model") }
+                OutlinedButton(
+                    onClick = pickModelFile,
+                    enabled = !state.busy && devicePack.status != DevicePackStatus.DOWNLOADING,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Load from file") }
+            }
+            Text(stringResource(R.string.phone_setup_file_hint), color = Muted, fontSize = 11.sp)
+        }
+    }
+}
+
+private fun phoneModelStatus(state: CompanionState, devicePack: DevicePackChromeState): String = when {
+    state.offlineAnswering -> "Answering on this phone…"
+    state.localModelReady -> "On this phone · ${devicePack.selectedPackLabel.ifBlank { "offline model" }}"
+    else -> "No model on this phone yet — set one up under More → Models"
 }
 
 @Composable private fun ConversationPickers(
@@ -439,10 +567,9 @@ class MainActivity : ComponentActivity() {
 private fun inferenceStatus(state: CompanionState): String {
     val name = state.inferenceFamily.ifBlank { state.inferenceProfile }.ifBlank { "conversation model" }
     return when {
-        !state.connected -> "Jarvis is offline"
         state.inferenceLoading -> "Loading $name…"
         state.inferenceLoaded -> "Model loaded · $name"
-        else -> "Conversation model is not loaded on Jarvis"
+        else -> "Conversation model is not loaded on ${AnzuBranding.DISPLAY_NAME}"
     }
 }
 
@@ -451,7 +578,7 @@ private fun inferenceStatus(state: CompanionState): String {
     Box {
         TextButton(onClick = { expanded = true }) { Icon(Icons.Outlined.AutoAwesome, null, Modifier.size(16.dp)); Text("  ${state.selectedModel.uppercase()}  ▾") }
         DropdownMenu(expanded, { expanded = false }) {
-            DropdownMenuItem(text = { Text("Auto · Jarvis selects") }, onClick = { select("auto"); expanded = false })
+            DropdownMenuItem(text = { Text(stringResource(R.string.auto_anzu_selects)) }, onClick = { select("auto"); expanded = false })
             state.models.forEach { model ->
                 val extra = when {
                     model.optBoolean("active") -> " · loaded"
@@ -491,11 +618,13 @@ private fun inferenceStatus(state: CompanionState): String {
 @Composable private fun CompanionModelsSection(
     chrome: CompanionDeviceModelChrome,
     devicePack: DevicePackChromeState,
-    busy: Boolean,
+    state: CompanionState,
+    pickModelFile: () -> Unit,
 ) {
+    val busy = state.busy
     Text("Models (on-device)", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
     Text(
-        "When the Leader is unreachable, the companion can answer using a downloaded model pack (RFC-0108).",
+        "Without the ANZU desktop, ANZU answers on this phone with a downloaded model. You can also load a .gguf you copied to the phone; it is checked against the model's SHA-256 first.",
         color = Muted,
         fontSize = 12.sp,
         modifier = Modifier.padding(bottom = 8.dp),
@@ -552,9 +681,15 @@ private fun inferenceStatus(state: CompanionState): String {
                     modifier = Modifier.weight(1f),
                 ) { Text("Delete pack") }
             }
+            OutlinedButton(
+                onClick = pickModelFile,
+                enabled = !busy && devicePack.status != DevicePackStatus.DOWNLOADING,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Load model from file (.gguf)") }
+            if (state.modelImportMessage.isNotBlank()) Text(state.modelImportMessage, color = Muted, fontSize = 12.sp)
             if (!devicePack.nativeRuntimeBundled) {
                 Text(
-                    "On-device runtime not reported yet. D1 binds pack download/generation to this surface.",
+                    "This build has no on-device model runtime, so offline chat is unavailable.",
                     color = Muted,
                     fontSize = 11.sp,
                 )
@@ -585,7 +720,7 @@ private fun formatStorageBytes(bytes: Long): String {
     val ttsPacks = packs.filter { it.optString("role") == "tts" }
     Text("Voice (on-device)", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
     Text(
-        "Mode A/B fallback when the Leader is down. Online sessions still prefer host Kokoro / realtime voice (RFC-0140).",
+        "ANZU's own speech recognition and voice for when the desktop is unreachable. Without them, ANZU uses this phone's built-in speech engines. With the desktop connected, desktop voices are used.",
         color = Muted,
         fontSize = 12.sp,
         modifier = Modifier.padding(bottom = 8.dp),
@@ -640,9 +775,15 @@ private fun formatStorageBytes(bytes: Long): String {
                     }
                 }
             }
+            val selectedTtsId = model.voicePackManager.selectedTtsPackId()
+            ttsPacks.filter {
+                VoicePackCredit.shouldShow(it.optString("id"), selectedTtsId, model.voicePackManager.isPackInstalled(it.optString("id")))
+            }.forEach { pack ->
+                VoicePackCreditText(pack.optString("id"), pack.optString("attribution"), color = Muted, errorColor = ErrorText)
+            }
             Text(formatStorageBytes(model.voicePackManager.storageBytes()), color = Muted, fontSize = 12.sp)
             state.voicePackError.takeIf { it.isNotBlank() }?.let {
-                Text(it, color = Color(0xFFE8A87C), fontSize = 12.sp)
+                Text(it, color = ErrorText, fontSize = 12.sp)
             }
             if (state.voiceSttStatus == CompanionVoicePackStatus.DOWNLOADING ||
                 state.voiceTtsStatus == CompanionVoicePackStatus.DOWNLOADING ||
@@ -685,6 +826,27 @@ private fun formatStorageBytes(bytes: Long): String {
     }
 }
 
+@Composable private fun PhoneNotesSection(model: CompanionModel, state: CompanionState) {
+    Text("Notes on this phone", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
+    Text(
+        "Say \"take a note …\" or \"remember this …\" in Chat. Notes are encrypted on this phone and also sync to the desktop when it is back.",
+        color = Muted,
+        fontSize = 12.sp,
+        modifier = Modifier.padding(bottom = 8.dp),
+    )
+    if (state.notes.isEmpty()) Text("No notes yet.", color = Muted, fontSize = 12.sp)
+    state.notes.forEach { note ->
+        Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+            Row(Modifier.padding(start = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(note.optString("text"), Modifier.weight(1f).padding(vertical = 12.dp), fontSize = 14.sp)
+                IconButton(onClick = { model.deleteNote(note.getString("id")) }, enabled = !state.busy) {
+                    Icon(Icons.Outlined.DeleteOutline, "Delete note")
+                }
+            }
+        }
+    }
+}
+
 @Composable private fun InfoCard(title: String, text: String) {
     Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) { Column(Modifier.padding(18.dp)) { Text(title, fontWeight = FontWeight.SemiBold); Text(text, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp)) } }
 }
@@ -699,7 +861,7 @@ private fun formatStorageBytes(bytes: Long): String {
         try {
             studio = model.fetchStudioStatus()
         } catch (error: Exception) {
-            loadError = error.message ?: "Could not reach Jarvis."
+            loadError = error.message ?: "Could not reach ANZU."
             if (studio == null) {
                 val fallback = state.capabilities.optJSONObject("studio")
                 if (fallback != null && fallback.length() > 0) studio = fallback
@@ -749,7 +911,7 @@ private fun formatStorageBytes(bytes: Long): String {
         if (!available) {
             InfoCard(
                 "Generation",
-                "Creative tools stay read-only until Jarvis reports studio.available=true. No local preview engine runs on the phone.",
+                stringResource(R.string.studio_wait_for_anzu),
             )
         }
         Button(
@@ -758,7 +920,7 @@ private fun formatStorageBytes(bytes: Long): String {
             modifier = Modifier.padding(top = 8.dp),
         ) { Text(if (refreshing) "Refreshing…" else "Refresh status") }
         if (!state.connected) {
-            Text("Connect on the More tab to load live studio status from Jarvis.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+            Text(CompanionMode.desktopOnlyNotice(DesktopFeature.STUDIO), color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
         }
     }
 }
@@ -810,7 +972,7 @@ private fun formatStorageBytes(bytes: Long): String {
     if (responding) AlertDialog(
         onDismissRequest = { responding = false },
         title = { Text("Resolve coding decision") },
-        text = { OutlinedTextField(resolution, { resolution = it.take(2000) }, label = { Text("Instructions for Jarvis") }, minLines = 3) },
+        text = { OutlinedTextField(resolution, { resolution = it.take(2000) }, label = { Text(stringResource(R.string.instructions_for_anzu)) }, minLines = 3) },
         confirmButton = { TextButton(onClick = {
             responding = false
             model.resolveCodingDecision(decision.getString("id"), resolution.trim())
@@ -847,6 +1009,9 @@ private fun formatStorageBytes(bytes: Long): String {
     state: CompanionState,
     deviceChrome: CompanionDeviceModelChrome,
     devicePack: DevicePackChromeState,
+    accessLock: AppAccessLock,
+    secureScreen: SecureScreen,
+    pickModelFile: () -> Unit,
     openPairingScanner: Boolean = false,
     onPairingScannerConsumed: () -> Unit = {},
 ) {
@@ -876,9 +1041,11 @@ private fun formatStorageBytes(bytes: Long): String {
         }
     }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item { AppAccessSettings(accessLock) }
+        item { SecureScreenSettings(secureScreen) }
         item {
             Text("Connection", fontSize = 25.sp, modifier = Modifier.padding(vertical = 12.dp))
-            OutlinedTextField(endpoint, { endpoint = it }, label = { Text("Jarvis HTTPS endpoint") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(endpoint, { endpoint = it }, label = { Text(stringResource(R.string.anzu_https_endpoint)) }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(pin, { pin = it }, label = { Text("Server fingerprint") }, modifier = Modifier.fillMaxWidth())
             if (model.api.deviceId.isEmpty()) OutlinedTextField(
                 pairingCode,
@@ -898,16 +1065,16 @@ private fun formatStorageBytes(bytes: Long): String {
             }
             Button(onClick = { model.pair(endpoint, pin, pairingCode) },
                 enabled = !state.busy && (model.api.deviceId.isNotEmpty() || CompanionCodeValidator.isComplete(pairingCode))) {
-                Text(if (model.api.deviceId.isEmpty()) "Pair with Jarvis" else "Connect / check approval")
+                Text(if (model.api.deviceId.isEmpty()) stringResource(R.string.pair_with_anzu) else "Connect / check approval")
             }
             Text("Phone fingerprint: ${model.api.fingerprint().chunked(8).joinToString(" ")}", color = Muted, fontSize = 11.sp)
-            Text("Confirm this fingerprint on your Jarvis desktop to finish pairing.", color = Muted, fontSize = 12.sp)
+            Text(stringResource(R.string.confirm_fingerprint_anzu_desktop), color = Muted, fontSize = 12.sp)
         }
 
         if (scannerOpen) item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Scan the pairing QR shown on your Jarvis desktop", fontWeight = FontWeight.Medium)
+                    Text(stringResource(R.string.scan_pairing_qr_anzu_desktop), fontWeight = FontWeight.Medium)
                     PairingQrScanner(
                         onScanned = { value ->
                             runCatching { CompanionPairingQrParser.parse(value) }
@@ -923,7 +1090,7 @@ private fun formatStorageBytes(bytes: Long): String {
                                         invitation.endpoints,
                                     )
                                 }
-                                .onFailure { error -> scanError = error.message ?: "That QR code is not a valid Jarvis pairing invitation." }
+                                .onFailure { error -> scanError = error.message ?: "That QR code is not a valid ANZU pairing invitation." }
                         },
                         onDismiss = { scannerOpen = false },
                     )
@@ -935,7 +1102,7 @@ private fun formatStorageBytes(bytes: Long): String {
         item {
             Text("WhatsApp", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
             Text(
-                "Save Jarvis as a WhatsApp contact on this phone so you can message the linked desktop session.",
+                stringResource(R.string.whatsapp_save_anzu),
                 color = Muted,
                 fontSize = 12.sp,
             )
@@ -952,7 +1119,8 @@ private fun formatStorageBytes(bytes: Long): String {
                     else contactsPermission.launch(Manifest.permission.WRITE_CONTACTS)
                 },
                 enabled = state.connected && !state.busy,
-            ) { Text("Add Jarvis on WhatsApp") }
+            ) { Text(stringResource(R.string.add_anzu_on_whatsapp)) }
+            if (!state.connected) Text(CompanionMode.desktopOnlyNotice(DesktopFeature.WHATSAPP), color = Muted, fontSize = 12.sp)
         }
 
         item {
@@ -960,10 +1128,15 @@ private fun formatStorageBytes(bytes: Long): String {
             val device = state.capabilities.optJSONObject("device")
             Row(verticalAlignment = Alignment.CenterVertically) { Text("Task notifications", Modifier.weight(1f)); Switch(device?.optBoolean("notifications") == true, { model.preferences(it, device?.optBoolean("critical_calls") == true) }, enabled = state.connected) }
             Row(verticalAlignment = Alignment.CenterVertically) { Text("Calls for critical events", Modifier.weight(1f)); Switch(device?.optBoolean("critical_calls") == true, { model.preferences(device?.optBoolean("notifications") == true, it) }, enabled = state.connected) }
-            if (state.capabilities.optJSONObject("calls")?.optBoolean("push_configured") != true) Text("Background push needs the Jarvis push service configured.", color = Muted, fontSize = 12.sp)
+            if (!state.connected) Text(CompanionMode.desktopOnlyNotice(DesktopFeature.NOTIFICATIONS), color = Muted, fontSize = 12.sp)
+            else if (state.capabilities.optJSONObject("calls")?.optBoolean("push_configured") != true) Text(stringResource(R.string.push_needs_anzu_service), color = Muted, fontSize = 12.sp)
         }
-        item { CompanionModelsSection(deviceChrome, devicePack, state.busy) }
+        item { CompanionModelsSection(deviceChrome, devicePack, state, pickModelFile) }
+        item { PhoneNotesSection(model, state) }
+        item { VoiceLanguageSettings(model, state) }
         item { CompanionVoicePacksSection(model, state) }
+        item { OffGridContentSection() }
+        item { DownloadedContentSection(model) }
         item {
             Text("Voice & presence", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
             Text("Presence", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
@@ -976,12 +1149,13 @@ private fun formatStorageBytes(bytes: Long): String {
                 OutlinedButton(onClick = { model.previewVoice(state.selectedVoice) },
                     enabled = state.connected && state.selectedVoice.isNotEmpty() && !state.busy) { Text("Preview voice") }
             }
+            if (!state.connected) Text(CompanionMode.desktopOnlyNotice(DesktopFeature.DESKTOP_VOICES), color = Muted, fontSize = 12.sp)
             val voice = state.capabilities.optJSONObject("voice")
-            Text("Speech recognition · ${if (voice?.optBoolean("stt_ready") == true) "ready" else "unavailable"}  ·  Speech output · ${if (voice?.optBoolean("tts_ready") == true) "ready" else "unavailable"}",
+            if (state.connected) Text("Speech recognition · ${if (voice?.optBoolean("stt_ready") == true) "ready" else "unavailable"}  ·  Speech output · ${if (voice?.optBoolean("tts_ready") == true) "ready" else "unavailable"}",
                 color = Muted, fontSize = 12.sp)
-            Text(
+            if (state.connected) Text(
                 if (voice?.optBoolean("realtime") == true) "Realtime duplex voice is available over pinned TLS. Clip STT/TTS remains the fallback."
-                else "Audio is processed by your paired Jarvis host and transported through pinned TLS.",
+                else stringResource(R.string.audio_via_paired_anzu),
                 color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp),
             )
             if (state.onDeviceVoiceActive) {
@@ -993,13 +1167,14 @@ private fun formatStorageBytes(bytes: Long): String {
         }
         item {
             Text("Schedules", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
-            OutlinedTextField(schedulePrompt, { schedulePrompt = it }, label = { Text("What should Jarvis do?") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(schedulePrompt, { schedulePrompt = it }, label = { Text(stringResource(R.string.what_should_anzu_do)) }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(whenText, { whenText = it }, label = { Text("Local date/time · YYYY-MM-DDTHH:MM") }, modifier = Modifier.fillMaxWidth())
             Row { listOf("once", "daily", "weekly").forEach { value -> FilterChip(recurrence == value, { recurrence = value }, { Text(value) }, modifier = Modifier.padding(end = 6.dp)) } }
             Button(onClick = { runCatching { LocalDateTime.parse(whenText).atZone(ZoneId.systemDefault()) }.onSuccess {
                 model.schedule(editingSchedule, schedulePrompt, it, recurrence)
                 editingSchedule = null
-            } }, enabled = state.connected && schedulePrompt.isNotBlank()) { Text(if (editingSchedule == null) "Schedule on Jarvis" else "Save schedule") }
+            } }, enabled = state.connected && schedulePrompt.isNotBlank()) { Text(if (editingSchedule == null) stringResource(R.string.schedule_on_anzu) else "Save schedule") }
+            if (!state.connected) Text(CompanionMode.desktopOnlyNotice(DesktopFeature.SCHEDULES), color = Muted, fontSize = 12.sp)
             if (editingSchedule != null) TextButton(onClick = { editingSchedule = null; schedulePrompt = "" }) { Text("Cancel editing") }
         }
         items(state.schedules) { schedule -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp)) {
@@ -1018,7 +1193,11 @@ private fun formatStorageBytes(bytes: Long): String {
             }
         } } }
         item { Text("Call history", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp)) }
-        items(state.calls) { call -> InfoCard("Jarvis · ${call.optString("state")}", call.optString("direction")) }
+        items(state.calls) { call -> InfoCard("${AnzuBranding.DISPLAY_NAME} · ${call.optString("state")}", call.optString("direction")) }
+        item {
+            Text(stringResource(R.string.about), fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
+            SponsorCreditRow()
+        }
         item { Spacer(Modifier.height(20.dp)) }
     }
 }

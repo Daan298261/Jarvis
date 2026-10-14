@@ -162,21 +162,23 @@ class TransportPolicyTest {
         assertEquals(0, TransportPolicy.reachabilityRank("https://home.example.test:4781"))
     }
 
-    @Test fun connectionRefreshKeepsLanWhenServerListsWanFirst() {
+    @Test fun connectionRefreshPrunesOriginsTheDesktopNoLongerLists() {
         val lan = "https://10.2.0.2:4781"
         val wan = "https://203.0.113.4:4781"
         val dns = "https://home.example.test:4781"
+        // RFC-0215: the pinned desktop's list is authoritative; the unlisted LAN origin is dropped.
         val merged = TransportPolicy.mergeConnectionEndpoints(listOf(lan), listOf(dns, wan))
-        assertEquals(dns, merged[0])
-        assertEquals(wan, merged[1])
-        assertEquals(lan, merged.last())
+        assertEquals(listOf(dns, wan), merged)
+        val staleWan = TransportPolicy.mergeConnectionEndpoints(listOf(lan, wan), listOf(lan, dns))
+        assertFalse(wan in staleWan)
+        // An empty listing carries no information, so the known set survives.
         val unchanged = TransportPolicy.mergeConnectionEndpoints(listOf(lan, wan), emptyList())
         assertEquals(lan, unchanged.last())
         assertTrue(wan in unchanged)
-        val crowded = (1..8).map { "https://relay$it.example.test:4781" }
+        val crowded = (1..9).map { "https://relay$it.example.test:4781" }
         val kept = TransportPolicy.mergeConnectionEndpoints(listOf(lan), crowded)
         assertEquals(8, kept.size)
-        assertEquals(lan, kept.last())
+        assertFalse(lan in kept)
     }
 
     @Test fun connectionRefreshReplacesStaleLanWhenServerListsLiveLan() {
@@ -211,5 +213,7 @@ class TransportPolicyTest {
         assertNull(TransportPolicy.absorbMatchingLanOrigin(listOf(stale), "short", live, "short"))
         val cellular = TransportPolicy.absorbMatchingLanOrigin(listOf(wan), pin, live, pin)
         assertEquals(listOf(wan, live), cellular)
+        val tailscale = "https://vrpc.tail1.ts.net:4781"
+        assertEquals(listOf(tailscale, live), TransportPolicy.absorbMatchingLanOrigin(listOf(stale, tailscale), pin, live, pin))
     }
 }

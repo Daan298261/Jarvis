@@ -14,13 +14,15 @@ from .repository import (
     list_steps,
     load_committed_result,
     predecessors_committed,
+    reset_orphaned_in_flight_steps,
 )
 from .types import AttemptStatus, StepStatus
 
 
 async def reconcile_execution_on_startup() -> dict[str, Any]:
     abandoned = await expire_abandoned_attempts()
-    return {"abandoned_attempt_ids": abandoned}
+    reset = await reset_orphaned_in_flight_steps()
+    return {"abandoned_attempt_ids": abandoned, "reset_step_ids": reset}
 
 
 async def recover_run_state(run_id: str) -> dict[str, Any]:

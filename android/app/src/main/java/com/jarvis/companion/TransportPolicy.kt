@@ -35,24 +35,18 @@ object TransportPolicy {
 
     fun orderedForReachability(addresses: Iterable<String>): List<String> {
         val distinct = addresses.map { origin(it) }.distinct()
-        return distinct.sortedWith(compareBy({ reachabilityRank(it) }, { it }))
+        return distinct.sortedWith(compareBy({ reachabilityRank(it) }, { RemoteEndpoints.tier(it) }, { it }))
     }
 
+    /**
+     * RFC-0215: the pinned desktop's list is authoritative. Origins it no longer lists are
+     * dropped (a stale LAN or Tailscale address must not keep being dialled). An empty
+     * list carries no information, so the known set is kept.
+     */
     fun mergeConnectionEndpoints(existing: Iterable<String>, incoming: Iterable<String>): List<String> {
         val live = incoming.mapNotNull { runCatching { origin(it) }.getOrNull() }
-        val known = existing.mapNotNull { runCatching { origin(it) }.getOrNull() }
-        val livePrivate = live.filter { isPrivateOrigin(it) }.toSet()
-        val retained = if (livePrivate.isEmpty()) {
-            known
-        } else {
-            known.filter { !isPrivateOrigin(it) || it in livePrivate }
-        }
-        val ranked = orderedForReachability(live + retained)
-        if (ranked.size <= 8) return ranked
-        val privateOrigins = ranked.filter { isPrivateOrigin(it) }
-        val keptPrivate = privateOrigins.takeLast(2)
-        val publicOrigins = ranked.filter { it !in keptPrivate }
-        return publicOrigins.take(8 - keptPrivate.size) + keptPrivate
+        if (live.isEmpty()) return orderedForReachability(existing.mapNotNull { runCatching { origin(it) }.getOrNull() })
+        return orderedForReachability(live).take(8)
     }
 
     fun absorbMatchingLanOrigin(
@@ -65,7 +59,10 @@ object TransportPolicy {
         val advertised = discoveredPin.trim().lowercase()
         if (expected.length != 64 || advertised != expected) return null
         val live = runCatching { origin(discoveredOrigin) }.getOrNull() ?: return null
-        return mergeConnectionEndpoints(existing, listOf(live))
+        // A pin-matching LAN beacon replaces stale LAN origins only; Tailscale origins the
+        // desktop listed stay (the authoritative /connection refresh prunes those).
+        val kept = existing.mapNotNull { runCatching { origin(it) }.getOrNull() }.filter { !isPrivateOrigin(it) }
+        return orderedForReachability(kept + live).take(8)
     }
 
     fun localIpv4Addresses(): List<String> = runCatching {

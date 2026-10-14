@@ -30,8 +30,48 @@ _URL_3B = (
     "qwen2.5-3b-instruct-q4_k_m.gguf"
 )
 
+# Minimal-refusal phone packs (RFC-0204 §2.1). URLs pin the Hugging Face commit so
+# the SHA-256/size below always describe the bytes served. qwen35 needs llama.cpp
+# >= v0.6.0 in the companion APK.
+_HERETIC_2B_REV = "c166d9f30a342a379bbe3299aef938834654e1aa"
+_URL_HERETIC_2B = (
+    f"https://huggingface.co/jordanwoodson/Qwen3.5-2B-heretic-GGUF/resolve/{_HERETIC_2B_REV}/"
+    "Qwen3.5-2B-heretic-Q4_K_M.gguf"
+)
+_ABLITERATED_4B_REV = "f3b61227dde75c72d12391c443efd6fa0229e0eb"
+_URL_ABLITERATED_4B = (
+    f"https://huggingface.co/mradermacher/Qwen3.5-4B-abliterated-GGUF/resolve/{_ABLITERATED_4B_REV}/"
+    "Qwen3.5-4B-abliterated.Q4_K_M.gguf"
+)
+
+RECOMMENDED_PACK_ID = "qwen3.5-2b-heretic-q4"
+
 # Pinned allowlist — weights live under data/companion-packs/ (gitignored).
 COMPANION_PACK_CATALOG: list[dict[str, Any]] = [
+    {
+        "id": RECOMMENDED_PACK_ID,
+        "label": "Qwen3.5 2B Heretic — minimal refusals (Q4_K_M)",
+        "filename": "Qwen3.5-2B-heretic-Q4_K_M.gguf",
+        "size_bytes": 1_270_807_936,
+        "min_ram_mb": 2560,
+        "context_tokens": 4096,
+        "sha256": "dad8a69dddcd64f2221dd06ae5c46baceb31ed9bd0dec330306d77762c377cf1",
+        "url": _URL_HERETIC_2B,
+        "license": "apache-2.0",
+        "recommended": True,
+    },
+    {
+        "id": "qwen3.5-4b-abliterated-q4",
+        "label": "Qwen3.5 4B Abliterated — opt-in, needs ~4.5 GB free RAM (8 GB+ phones) (Q4_K_M)",
+        "filename": "Qwen3.5-4B-abliterated.Q4_K_M.gguf",
+        "size_bytes": 2_707_514_688,
+        "min_ram_mb": 4608,
+        "context_tokens": 4096,
+        "sha256": "1ec0b30c75b49223c82542caf2635a7af4edcda80d8c89759cc000d3871bf48e",
+        "url": _URL_ABLITERATED_4B,
+        "license": "apache-2.0",
+        "recommended": False,
+    },
     {
         "id": "qwen2.5-1.5b-instruct-q4",
         "label": "Qwen2.5 1.5B Instruct (Q4_K_M)",
@@ -41,7 +81,7 @@ COMPANION_PACK_CATALOG: list[dict[str, Any]] = [
         "context_tokens": 2048,
         "sha256": "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e",
         "url": _URL_15B,
-        "recommended": True,
+        "recommended": False,
     },
     {
         "id": "qwen2.5-3b-instruct-q4",
@@ -107,17 +147,69 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _cache_ready(pack: dict[str, Any]) -> bool:
-    path = pack_cache_path(pack)
-    if not path.is_file() or path.stat().st_size <= 0:
+def _verified_marker_path(path: Path) -> Path:
+    return path.with_suffix(path.suffix + ".verified")
+
+
+def _write_verified_marker(path: Path, digest: str) -> None:
+    marker = _verified_marker_path(path)
+    try:
+        marker.write_text(
+            json.dumps({"sha256": digest.lower(), "size_bytes": path.stat().st_size}),
+            encoding="utf-8",
+        )
+    except OSError:
+        log.debug("Could not write companion pack verified marker for %s", path, exc_info=True)
+
+
+def _marker_matches(path: Path, expected: str) -> bool:
+    marker = _verified_marker_path(path)
+    if not marker.is_file():
         return False
+    try:
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        if str(payload.get("sha256") or "").lower() != expected.lower():
+            return False
+        return int(payload.get("size_bytes") or -1) == path.stat().st_size
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return False
+
+
+def _cache_ready(pack: dict[str, Any]) -> bool:
+    """True when the pack file exists at the expected size and has been verified.
+
+    Full SHA-256 of a ~1GB GGUF must not run on every /api/companion/models poll —
+    that stalls the asyncio event loop. After the first successful verify we trust a
+    sidecar marker until size or expected digest changes.
+    """
+    path = pack_cache_path(pack)
     expected = (pack.get("sha256") or "").lower()
     if not expected or set(expected) == {"0"}:
         return False
     try:
-        return _sha256_file(path).lower() == expected
+        if not path.is_file():
+            return False
+        size = path.stat().st_size
+        if size <= 0:
+            return False
+        expected_size = int(pack.get("size_bytes") or 0)
+        if expected_size > 0 and size != expected_size:
+            return False
+        if _marker_matches(path, expected):
+            return True
+        # Incomplete downloads stay as .partial; a full-size file without a marker
+        # still needs one hash (off hot path when possible).
+        return False
     except OSError:
         return False
+
+
+def _verify_and_mark(path: Path, expected: str) -> bool:
+    digest = _sha256_file(path).lower()
+    if digest != expected.lower():
+        return False
+    _write_verified_marker(path, digest)
+    return True
 
 
 def leader_cache_status(pack_id: str | None = None) -> dict[str, Any]:
@@ -154,7 +246,7 @@ def pack_catalog() -> dict[str, Any]:
         item["leader_cache"] = leader_cache_status(entry["id"])
         item["leader_cached"] = item["leader_cache"]["state"] == "ready"
         packs.append(item)
-    recommended = pack_by_id("qwen2.5-1.5b-instruct-q4")
+    recommended = pack_by_id(RECOMMENDED_PACK_ID)
     cache = leader_cache_status(recommended["id"]) if recommended else _CACHE
     return {
         "catalog_version": 1,
@@ -178,13 +270,27 @@ def resolve_pack_file(pack_id: str) -> Path:
 
 
 async def _download_recommended() -> None:
-    pack = pack_by_id("qwen2.5-1.5b-instruct-q4")
+    pack = pack_by_id(RECOMMENDED_PACK_ID)
     if not pack:
         return
     if _cache_ready(pack):
         _CACHE.update(state="ready", pack_id=pack["id"], bytes_done=pack["size_bytes"], size_bytes=pack["size_bytes"], last_error="")
         return
     target = pack_cache_path(pack)
+    expected = str(pack.get("sha256") or "").lower()
+    expected_size = int(pack.get("size_bytes") or 0)
+    # One-time off-loop verify for an already-complete file that lacks a marker.
+    if target.is_file() and expected and (expected_size <= 0 or target.stat().st_size == expected_size):
+        ok = await asyncio.to_thread(_verify_and_mark, target, expected)
+        if ok:
+            _CACHE.update(
+                state="ready",
+                pack_id=pack["id"],
+                bytes_done=expected_size or target.stat().st_size,
+                size_bytes=expected_size or target.stat().st_size,
+                last_error="",
+            )
+            return
     partial = pack_partial_path(pack)
     size_bytes = int(pack["size_bytes"])
     _CACHE.update(state="downloading", pack_id=pack["id"], bytes_done=partial.stat().st_size if partial.is_file() else 0,
@@ -213,11 +319,22 @@ async def _download_recommended() -> None:
                     handle.write(chunk)
                     resume_at += len(chunk)
                     _CACHE["bytes_done"] = resume_at
-        digest = _sha256_file(partial).lower()
-        if digest != pack["sha256"].lower():
+                    # Yield so health/task routes stay responsive during multi-GB cache.
+                    await asyncio.sleep(0)
+        expected = str(pack["sha256"]).lower()
+        ok = await asyncio.to_thread(_verify_and_mark, partial, expected)
+        if not ok:
             partial.unlink(missing_ok=True)
+            _verified_marker_path(partial).unlink(missing_ok=True)
             raise RuntimeError("Downloaded pack failed SHA-256 verification")
         partial.replace(target)
+        # Move marker with the final filename.
+        partial_marker = _verified_marker_path(partial)
+        final_marker = _verified_marker_path(target)
+        if partial_marker.is_file():
+            partial_marker.replace(final_marker)
+        else:
+            _write_verified_marker(target, expected)
         _CACHE.update(state="ready", bytes_done=size_bytes, last_error="")
     except Exception as exc:
         log.warning("Companion pack cache download failed: %s", exc)

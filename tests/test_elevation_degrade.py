@@ -102,17 +102,21 @@ def test_log_elevation_startup_status_warns_when_degraded(monkeypatch, caplog):
 
 
 @pytest.mark.asyncio
-async def test_api_health_includes_elevation_degrade_fields(monkeypatch):
+async def test_api_health_keeps_expensive_elevation_details_out(monkeypatch):
     from app.main import health
 
     elev.invalidate_logon_task_cache()
     monkeypatch.setattr(elev.os, "name", "nt")
     monkeypatch.setattr(elev, "is_elevated", lambda: False)
-    monkeypatch.setattr(elev, "_query_logon_task_registered", lambda: False)
+    def unexpected_query():
+        raise AssertionError("Liveness must not query the scheduled elevation task")
+
+    monkeypatch.setattr(elev, "_query_logon_task_registered", unexpected_query)
     monkeypatch.setattr(elev, "_LOGON_TASK_CACHE_TTL_S", 60.0)
 
     payload = await health()
     assert payload["ok"] is True
-    assert payload["elevation_degraded"] is True
-    assert payload["run_mode"] == "standard"
-    assert "kill_protected_processes" in payload["limited_features"]
+    assert payload["elevated"] is False
+    assert "elevation_degraded" not in payload
+    assert "run_mode" not in payload
+    assert "limited_features" not in payload

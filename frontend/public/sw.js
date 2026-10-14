@@ -1,4 +1,4 @@
-const CACHE = "jarvis-shell-v1.5.1"
+const CACHE = "jarvis-shell-personas-20261014"
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -18,6 +18,13 @@ self.addEventListener("fetch", (event) => {
     return
   }
   event.respondWith(
-    fetch(event.request).catch(() => caches.match(event.request).then((cached) => cached || caches.match("/"))),
+    fetch(event.request).then((response) => {
+      if (response.ok && url.origin === self.location.origin) {
+        const copy = response.clone()
+        event.waitUntil(caches.open(CACHE).then(cache => cache.put(event.request, copy)))
+      }
+      return response
+    }).catch(() => caches.match(event.request).then((cached) =>
+      cached || (event.request.mode === "navigate" ? caches.match("/") : Response.error()))),
   )
 })

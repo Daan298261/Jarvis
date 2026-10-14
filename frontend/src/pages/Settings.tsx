@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { CollapsibleSection } from "../components/CollapsibleSection"
 import { Navigate, useLocation, useParams } from "react-router-dom"
 import { api, getPrivateKey, setPrivateKey } from "../api"
 import { usePresentationSettings } from "../presence/presentationSettings"
@@ -179,7 +180,7 @@ export function SettingsPage() {
       )}
 
       <div className="settings-shell">
-        <SettingsNav active={activeSubmenu} />
+        <CollapsibleSection title="Settings menus" storageKey="settings-navigation"><SettingsNav active={activeSubmenu} /></CollapsibleSection>
         <div className="settings-content" aria-labelledby="settings-pane-title">
           <h2 id="settings-pane-title" className="settings-pane-heading">
             {SETTINGS_SUBMENU_LABELS[activeSubmenu]}

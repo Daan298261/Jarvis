@@ -226,7 +226,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
     try {
       const applied = await applyRuntimeProfile(hexstrikeProfile.id || hexstrikeProfile.name)
       setSelectedId(applied.id || applied.name)
-      setMsg("HexStrike AI suite ready.")
+      setMsg("HexStrike selected. Open Daybreak and press Start when you want the suite running.")
       setOpenState(false)
     } catch {
       setMsg("Could not open HexStrike.")

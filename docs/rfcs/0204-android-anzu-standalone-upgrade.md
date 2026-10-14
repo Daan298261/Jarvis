@@ -404,6 +404,16 @@ The slice tables in §6 are the contract. Summary:
 
 ## Notes
 
+### Implementation record — 2026-10-10
+
+S1/S2 standalone and native voice code landed in #576; S3/S4 ANZU branding and
+sponsor credit landed in #575 (`f2255cf5`). All four implementation slices are now
+on `development`. RFC-0213 adds QR preparation before discovery and optional native
+app access protection. The abliterated pack's exact model/file remains an owner
+decision; no placeholder row was added. Physical GGUF, Whisper/Pocket audio,
+camera pairing and incoming-call acceptance remain pending; no phone was attached
+during this verification. This record does not mark those device checks as passed.
+
 - North star gate: a phone that only shows “desktop offline” is not ANZU. Black Grid mode is the same assistant, fewer tools, still honest.
 - RFC-0108 amendment (2026-10-08) is in this PR: Instruct-only is revised; the §3 must-not list allows the abliterated weights and keeps the tool prohibitions.
 - Implement launch, after this merges: one D1 PR for S1+S2 (`cursor/<slug>-…` from `development`) and one UX PR for S3+S4. Do not edit Architect specs in those PRs. Do not merge unrelated PRs.

@@ -70,6 +70,10 @@ $env:PYTHONPATH = $backendImportPath + [IO.Path]::PathSeparator + $env:PYTHONPAT
     --collect-all kokoro `
     --hidden-import soundfile `
     --collect-all soundfile `
+    --collect-data language_tags `
+    --collect-all espeakng_loader `
+    --collect-all misaki `
+    --collect-all phonemizer `
     --collect-submodules app `
     --collect-all app `
     $entry

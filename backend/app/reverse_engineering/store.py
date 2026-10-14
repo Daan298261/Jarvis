@@ -175,7 +175,7 @@ def prepare(target: str, question: str, allowed: list[str], task_id: str | None)
 
 
 def validate_snapshot(row: dict) -> None:
-    if row["kind"] != "browser" and fingerprint(Path(row["snapshot"]))[0] != row["sha256"]:
+    if row["kind"] not in {"browser", "forensic"} and row.get("snapshot") and fingerprint(Path(row["snapshot"]))[0] != row["sha256"]:
         raise ValueError("Analysis snapshot changed; prepare a new investigation")
 
 

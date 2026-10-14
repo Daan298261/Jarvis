@@ -1,3 +1,4 @@
+import asyncio
 import json
 import pytest
 
@@ -18,6 +19,16 @@ def test_enqueue_and_parse_prompt_file(jarvis_env):
     assert parsed["prompt"] == "Organize my desktop into folders"
     assert parsed["autonomy"] == "autonomous"
     assert parsed["execution_mode"] == "reliable"
+
+
+def test_parse_queue_file_strips_utf8_bom(jarvis_env, tmp_path):
+    path = tmp_path / "bom_task.json"
+    path.write_bytes(
+        b"\xef\xbb\xbf"
+        + json.dumps({"prompt": "hello from bom", "autonomy": "autonomous"}).encode("utf-8")
+    )
+    parsed = parse_queue_file(path)
+    assert parsed["prompt"] == "hello from bom"
 
 
 async def test_queue_watcher_processes_pending_and_moves_to_processed(jarvis_env):
@@ -59,3 +70,28 @@ async def test_queue_watcher_processes_pending_and_moves_to_processed(jarvis_env
     # Check that processed folder has the file
     processed_files = [f for f in (root / "processed").iterdir() if f.is_file() and not f.name.startswith(".")]
     assert len(processed_files) >= 1
+
+
+async def test_queue_watcher_claim_prevents_double_ingest(jarvis_env):
+    from app.agent.loop import AGENT
+    from app.providers.base import ChatResult
+
+    class FakeProvider:
+        async def health(self): return True
+        async def chat(self, *args, **kwargs): return ChatResult(content="Done")
+
+    jarvis_env["manager"].provider = FakeProvider()
+    enqueue_prompt_file(
+        prompt="Only create one task for this file",
+        autonomy="autonomous",
+        execution_mode="fast",
+        filename="once_only.json",
+    )
+    first, second = await asyncio.gather(
+        QUEUE_WATCHER.process_pending(),
+        QUEUE_WATCHER.process_pending(),
+    )
+    assert len(first) + len(second) == 1
+    task_id = (first or second)[0]
+    if task_id in AGENT._tasks:
+        await AGENT._tasks[task_id]

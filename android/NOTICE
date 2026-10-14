@@ -1,0 +1,22 @@
+ANZU Android companion — third-party notices
+============================================
+
+ONNX Runtime
+------------
+This APK links ONNX Runtime Android (onnxruntime-android) 1.20.0.
+Copyright (c) Microsoft Corporation.
+License: MIT
+https://github.com/microsoft/onnxruntime
+
+Pocket TTS (on-device voice)
+----------------------------
+Pack id: pocket-tts-en
+Source: soniqo/Pocket-TTS-100M-ONNX-INT8 v1.0.0
+https://huggingface.co/soniqo/Pocket-TTS-100M-ONNX-INT8
+
+The checkpoint is Kyutai Pocket TTS, licensed CC BY 4.0.
+https://huggingface.co/kyutai/pocket-tts-without-voice-cloning
+
+The baked-in English voice was performed by Alba MacKenna and is
+released under CC BY 4.0. Voice source:
+https://huggingface.co/kyutai/tts-voices#alba-mackenna
