@@ -7,7 +7,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 from ..agent.planning import (
@@ -404,6 +404,7 @@ def _decide_sync(
     inference_state: Any | None,
     request_id: str,
     persona: "PersonaTurnContext",
+    clock: Callable[[], float] = time.perf_counter,
 ) -> OwnerTurnDecision:
     """One ``decide()`` per turn. ``persona`` is already resolved by
     :func:`resolve_persona_context`; nothing here reads config or disk."""
@@ -435,6 +436,7 @@ def _decide_sync(
         "request_routing",
         OWNER_TURN_DEADLINE_MS,
         privacy_for_tier(tier),
+        clock=clock,
     )
     turn = _apply_floors(
         user_message=user_message,
@@ -520,6 +522,7 @@ async def decide_owner_turn(
     settings: Any | None = None,
     inference_state: Any | None = None,
     persona: PersonaTurnContext | None = None,
+    clock: Callable[[], float] | None = None,
 ) -> OwnerTurnDecision:
     """Mandatory System-One entry for owner chat and agent-loop intake.
 
@@ -528,29 +531,39 @@ async def decide_owner_turn(
 
     RFC-0218 S1: the same single ``decide()`` answers ``persona_intent_switch`` on
     ``OwnerTurnDecision.persona_intent`` (deadline fallback = stay); S2 consumes it.
+
+    ``clock`` injects the time source the 50 ms budget is measured on. Default
+    (``None``) is the wall clock with a hard ``wait_for`` cancel. With an injected
+    clock the same 50 ms budget is enforced on that clock instead (inside Reflex
+    and after the worker), which makes deadline behaviour deterministic in tests.
     """
     text = user_message or ""
     resolved_baseline = baseline or route_request(text)
     # Persona state resolves here, outside the deadline window (#637 review).
     persona_ctx = resolve_persona_context(persona, settings)
-    started = time.perf_counter()
+    now = clock or time.perf_counter
+    started = now()
     request_id = uuid4().hex
     try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(
-                _decide_sync,
-                text,
-                resolved_baseline,
-                decision_tier,
-                settings,
-                inference_state,
-                request_id,
-                persona_ctx,
-            ),
-            timeout=OWNER_TURN_DEADLINE_S,
+        worker = asyncio.to_thread(
+            _decide_sync,
+            text,
+            resolved_baseline,
+            decision_tier,
+            settings,
+            inference_state,
+            request_id,
+            persona_ctx,
+            now,
         )
+        if clock is None:
+            return await asyncio.wait_for(worker, timeout=OWNER_TURN_DEADLINE_S)
+        turn = await worker
+        if (now() - started) * 1000.0 > OWNER_TURN_DEADLINE_MS:
+            raise TimeoutError
+        return turn
     except TimeoutError:
-        spent = (time.perf_counter() - started) * 1000.0
+        spent = (now() - started) * 1000.0
         log.info("Owner-turn reflex exceeded 50 ms; using rules deadline fallback")
         literal = extract_literal_candidate(text)
         tier = _resolved_tier(decision_tier, settings)
@@ -573,7 +586,7 @@ async def decide_owner_turn(
             persona_ctx,
         )
     except Exception:
-        spent = (time.perf_counter() - started) * 1000.0
+        spent = (now() - started) * 1000.0
         log.warning("Owner-turn reflex unavailable; using rules deadline fallback", exc_info=True)
         literal = extract_literal_candidate(text)
         tier = _resolved_tier(decision_tier, settings)

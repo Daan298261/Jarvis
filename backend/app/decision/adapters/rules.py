@@ -235,7 +235,7 @@ def decide(
                 if pick not in question.choices:
                     pick = question.choices[0] if question.choices else "keep_front"
                 answers[qid] = _answer_choice(qid, pick, 0.9)
-            elif qid == "persona_intent":
+            elif question.decision_class == "persona_intent_switch":
                 # Explicit name and lock are resolved before decide() in
                 # surfaces.persona_intent_precheck; this branch is the intent baseline only.
                 current = str(state.get("current_persona") or "")
