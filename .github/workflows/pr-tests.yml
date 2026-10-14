@@ -23,6 +23,13 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Chrome connector protocol and revocation tests
+        run: npm --prefix extensions/chrome test
+
       - name: Install Linux test dependencies
         shell: bash
         run: |

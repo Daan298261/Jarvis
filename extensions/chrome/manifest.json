@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "ANZU Website Connector",
+  "version": "0.1.0",
+  "description": "Share a selected Chrome tab with your local ANZU assistant.",
+  "permissions": ["activeTab", "scripting", "nativeMessaging", "declarativeNetRequest"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "background": {"service_worker": "background.js", "type": "module"},
+  "action": {"default_title": "Share this tab with ANZU", "default_popup": "popup.html"}
+}

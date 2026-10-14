@@ -154,6 +154,9 @@ _BROWSER_OBSERVE = frozenset(
         "tabs",
         "action_frame",
         "close",
+        "chrome_status",
+        "chrome_snapshot",
+        "chrome_find",
     }
 )
 _BROWSER_MUTATE = frozenset(
@@ -165,6 +168,9 @@ _BROWSER_MUTATE = frozenset(
         "evaluate",
         "download",
         "upload",
+        "chrome_click",
+        "chrome_fill",
+        "chrome_block_ads",
     }
 )
 _WEB_FETCH_OBSERVE = frozenset({"", "get", "fetch", "head", "read", "retrieve"})
