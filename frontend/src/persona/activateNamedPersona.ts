@@ -1,6 +1,6 @@
 import { isApiError } from "../api"
 import { readPresentationBootstrap, updatePresentation } from "../presence/presentationSettings"
-import { MYTHIC_LIVE_B_AVATAR_ID, MYTHIC_LIVING_AVATAR_ID } from "../presence/mythicPersonaVariant"
+import { mythicAvatarForSelection } from "../presence/mythicPersonaVariant"
 import { installVoiceProfile } from "../tts/voiceProfiles"
 import { PERSONA_LABELS, selectNamedPersona, type NamedPersonaState } from "./namedPersonas"
 
@@ -19,7 +19,7 @@ export async function activateNamedPersona(
   const presenceUpdate = updatePresentation({
     shell: "hud",
     requestedPresence: "particle_bust",
-    avatarId: readPresentationBootstrap().avatarId === MYTHIC_LIVING_AVATAR_ID ? MYTHIC_LIVING_AVATAR_ID : MYTHIC_LIVE_B_AVATAR_ID,
+    avatarId: mythicAvatarForSelection(readPresentationBootstrap().avatarId),
   })
   const personaUpdate = activatePersonaVoice(id, options)
   const [presenceResult, personaResult] = await Promise.allSettled([presenceUpdate, personaUpdate])
