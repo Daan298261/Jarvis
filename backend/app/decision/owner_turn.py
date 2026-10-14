@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 from uuid import uuid4
 
@@ -24,7 +24,12 @@ from ..agent.planning import (
     simple_file_control,
 )
 from .reflex import decide
-from .surfaces import privacy_for_tier
+from .surfaces import (
+    PersonaIntentDecision,
+    persona_intent_stay,
+    privacy_for_tier,
+    route_persona_intent,
+)
 from .types import Answer, DecisionResult, LatencyBreakdown, Question
 
 log = logging.getLogger("jarvis.decision.owner_turn")
@@ -145,6 +150,8 @@ class OwnerTurnDecision:
     reflex: DecisionResult | None = None
     snapshot_covers: bool = False
     meta: dict[str, Any] = field(default_factory=dict)
+    # RFC-0218 S1: persona_intent_switch result for this turn (stay or switch).
+    persona_intent: PersonaIntentDecision | None = None
 
 
 def extract_literal_candidate(user_message: str) -> str:
@@ -394,6 +401,7 @@ def _decide_sync(
     settings: Any | None,
     inference_state: Any | None,
     request_id: str,
+    persona: "PersonaTurnContext | None" = None,
 ) -> OwnerTurnDecision:
     literal = extract_literal_candidate(user_message)
     tier = _resolved_tier(decision_tier, settings)
@@ -404,6 +412,9 @@ def _decide_sync(
         "literal_candidate": literal,
         "decision_tier": tier,
     }
+    import time
+
+    started = time.perf_counter()
     result = decide(
         state,
         OWNER_TURN_QUESTIONS,
@@ -411,11 +422,76 @@ def _decide_sync(
         OWNER_TURN_DEADLINE_MS,
         privacy_for_tier(tier),
     )
-    return _apply_floors(
+    turn = _apply_floors(
         user_message=user_message,
         baseline=baseline,
         literal=literal,
         result=result,
+    )
+    current, locked, pinned = _persona_context(persona, settings, load=True)
+    remaining = OWNER_TURN_DEADLINE_MS - (time.perf_counter() - started) * 1000.0
+    if remaining <= 1.0:
+        intent = persona_intent_stay(current, reason="deadline_fallback", source="deadline_fallback", confidence=0.0)
+    else:
+        intent = route_persona_intent(
+            user_message,
+            current_persona=current,
+            pinned=pinned,
+            locked=locked,
+            settings=settings,
+            deadline_ms=remaining,
+            privacy=privacy_for_tier(tier),
+            request_id=f"{request_id}:persona",
+        )
+    return replace(turn, persona_intent=intent)
+
+
+@dataclass(frozen=True)
+class PersonaTurnContext:
+    """Caller-supplied persona state for RFC-0218; unset fields load from settings."""
+
+    current: str | None = None
+    locked: bool | None = None
+    pinned: bool = False
+
+
+def _persona_context(
+    persona: PersonaTurnContext | None,
+    settings: Any | None,
+    *,
+    load: bool,
+) -> tuple[str, bool, bool]:
+    ctx = persona or PersonaTurnContext()
+    current, locked = ctx.current, ctx.locked
+    if current is None or locked is None:
+        source = settings
+        if source is None and load:
+            try:
+                from ..config import load_settings
+
+                source = load_settings()
+            except Exception:  # noqa: BLE001 — persona context must never strand the turn
+                log.debug("persona context: settings unavailable", exc_info=True)
+        store = getattr(source, "named_personas", None)
+        if current is None:
+            # Missing store → "" → route_persona_intent reports no_current_persona.
+            current = str(getattr(store, "active_id", "") or "")
+        if locked is None:
+            locked = bool(getattr(store, "auto_switch_locked", False))
+    return (current or "").strip().lower(), bool(locked), bool(ctx.pinned)
+
+
+def _with_deadline_persona(
+    turn: OwnerTurnDecision,
+    persona: PersonaTurnContext | None,
+    settings: Any | None,
+) -> OwnerTurnDecision:
+    current, _locked, _pinned = _persona_context(persona, settings, load=False)
+    return replace(
+        turn,
+        persona_intent=persona_intent_stay(
+            current, reason="deadline_fallback", source="deadline_fallback", confidence=0.0
+        ),
     )
 
 
@@ -442,11 +518,15 @@ async def decide_owner_turn(
     decision_tier: str = "",
     settings: Any | None = None,
     inference_state: Any | None = None,
+    persona: PersonaTurnContext | None = None,
 ) -> OwnerTurnDecision:
     """Mandatory System-One entry for owner chat and agent-loop intake.
 
     Always calls ``decide()`` with a 50 ms wall-clock cap. A timeout becomes an
     audited ``deadline_fallback`` to the rules classifier — never a skipped call.
+
+    RFC-0218 S1: the same call answers ``persona_intent_switch`` on
+    ``OwnerTurnDecision.persona_intent`` (deadline fallback = stay).
     """
     import time
 
@@ -464,6 +544,7 @@ async def decide_owner_turn(
                 settings,
                 inference_state,
                 request_id,
+                persona,
             ),
             timeout=OWNER_TURN_DEADLINE_S,
         )
@@ -481,11 +562,15 @@ async def decide_owner_turn(
             spent_ms=spent,
             request_id=request_id,
         )
-        return _apply_floors(
-            user_message=text,
-            baseline=resolved_baseline,
-            literal=literal,
-            result=result,
+        return _with_deadline_persona(
+            _apply_floors(
+                user_message=text,
+                baseline=resolved_baseline,
+                literal=literal,
+                result=result,
+            ),
+            persona,
+            settings,
         )
     except Exception:
         spent = (time.perf_counter() - started) * 1000.0
@@ -501,9 +586,13 @@ async def decide_owner_turn(
             spent_ms=spent,
             request_id=request_id,
         )
-        return _apply_floors(
-            user_message=text,
-            baseline=resolved_baseline,
-            literal=literal,
-            result=result,
+        return _with_deadline_persona(
+            _apply_floors(
+                user_message=text,
+                baseline=resolved_baseline,
+                literal=literal,
+                result=result,
+            ),
+            persona,
+            settings,
         )

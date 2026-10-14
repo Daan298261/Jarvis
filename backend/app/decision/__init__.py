@@ -10,11 +10,14 @@ from .policy import (
 from .reflex import decide, decide_many
 from .surfaces import (
     browser_operation_target,
+    PersonaIntentDecision,
     complexity_and_escalate,
+    route_persona_intent,
     route_persona_model,
     score_memory_relevance,
     select_tools,
 )
+from .owner_turn import PersonaTurnContext
 from .tier import (
     FEATURE_JEV_PLUS,
     decide_turn,
@@ -27,6 +30,8 @@ from .tier import (
 
 __all__ = [
     "FEATURE_JEV_PLUS",
+    "PersonaIntentDecision",
+    "PersonaTurnContext",
     "apply_complexity_tier",
     "approval_popup_required",
     "browser_operation_target",
@@ -39,6 +44,7 @@ __all__ = [
     "probe_jev",
     "rerank_tools",
     "resolve_status",
+    "route_persona_intent",
     "route_persona_model",
     "score_memory_relevance",
     "select_tools",

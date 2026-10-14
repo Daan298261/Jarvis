@@ -8,10 +8,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from .reflex import decide
-from .types import Answer, DecisionResult, LatencyBreakdown, PrivacyMode, Question
+from .types import Answer, DecisionResult, DecisionSource, LatencyBreakdown, PrivacyMode, Question
 
 log = logging.getLogger("jarvis.decision.surfaces")
 
@@ -45,6 +46,137 @@ def route_persona_model(
         deadline_ms,
         privacy,
     )
+
+
+PERSONA_INTENT_CONFIDENCE_FLOOR = 0.75
+PERSONA_INTENT_DEADLINE_MS = 50.0
+
+
+@dataclass(frozen=True)
+class PersonaIntentDecision:
+    """RFC-0218 S1: which persona should run this turn.
+
+    ``to`` equals ``current`` when the turn stays. ``reason`` is ``"explicit_name"``,
+    ``"intent"`` for a switch, else why it stayed (``"locked"``, ``"no_intent"``,
+    ``"below_floor"``, ``"already_active"``, ``"deadline_fallback"``).
+    ``"no_current_persona"`` has empty ``current``/``to``: no switch is possible.
+    """
+
+    current: str
+    to: str
+    reason: str
+    decision_source: DecisionSource
+    confidence: float
+    reflex: DecisionResult | None = None
+
+    @property
+    def switch(self) -> bool:
+        return self.to != self.current
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "from": self.current,
+            "to": self.to,
+            "switch": self.switch,
+            "reason": self.reason,
+            "decision_source": self.decision_source,
+            "confidence": round(float(self.confidence), 3),
+        }
+
+
+def persona_intent_floor(settings: Any | None) -> float:
+    try:
+        raw = getattr(getattr(settings, "decision", None), "persona_intent_confidence_floor", None)
+        return float(raw) if raw is not None else PERSONA_INTENT_CONFIDENCE_FLOOR
+    except (TypeError, ValueError):
+        return PERSONA_INTENT_CONFIDENCE_FLOOR
+
+
+def persona_intent_question() -> Question:
+    from .adapters.rules import PERSONA_STAY
+    from ..persona.named_persona import CATALOG
+
+    ids = tuple(CATALOG)
+    return Question(
+        id="persona_intent",
+        type="choice",
+        prompt="Which ANZU persona should handle this turn? Choose stay unless a new task clearly fits a specialist.",
+        choices=(PERSONA_STAY, *ids),
+        descriptions=(
+            "stay on the current persona: chit-chat, thanks, acknowledgement, or no specialist fit",
+            *(f"{CATALOG[pid].label}: {CATALOG[pid].role}" for pid in ids),
+        ),
+    )
+
+
+def persona_intent_stay(current: str, *, reason: str, source: DecisionSource, confidence: float = 1.0,
+                        reflex: DecisionResult | None = None) -> PersonaIntentDecision:
+    return PersonaIntentDecision(current, current, reason, source, confidence, reflex)
+
+
+def route_persona_intent(
+    user_message: str,
+    *,
+    current_persona: str,
+    pinned: bool = False,
+    locked: bool = False,
+    settings: Any | None = None,
+    deadline_ms: float = PERSONA_INTENT_DEADLINE_MS,
+    privacy: PrivacyMode = "local_only",
+    request_id: str | None = None,
+) -> PersonaIntentDecision:
+    """Precedence: explicit roster name > manual pin/lock > intent decision > stay.
+
+    A manual pin is the owner's explicit selection with the lock setting on
+    (RFC-0218 terms), so ``locked`` is what holds the persona. ``pinned`` alone
+    (e.g. docked on the HUD) does not block intent; it is passed to providers as
+    context. An explicit name always wins.
+    """
+    from .adapters.rules import PERSONA_STAY, explicit_persona_name
+    from ..persona.named_persona import CATALOG
+
+    current = (current_persona or "").strip().lower()
+    if current not in CATALOG:
+        # No (or unknown) current persona: there is nothing to switch *from*, so the
+        # turn cannot auto-switch. Reported, not defaulted: S2 activates nothing.
+        log.warning("persona_intent_switch: no valid current persona (%r); not switching", current_persona)
+        return PersonaIntentDecision("", "", "no_current_persona", "rules", 1.0)
+    explicit = explicit_persona_name(user_message)
+    # Naming the persona that is already active is addressing it ("Anzu, write me a
+    # script" → enki), not a pin: intent still decides, and a stay reports
+    # "already_active" instead of "no_intent".
+    addressed_current = explicit == current
+    if explicit and not addressed_current:
+        return PersonaIntentDecision(current, explicit, "explicit_name", "rules", 1.0)
+    if locked:
+        return persona_intent_stay(current, reason="locked", source="rules")
+
+    question = persona_intent_question()
+    result = decide(
+        {"user_message": user_message, "current_persona": current, "pinned": bool(pinned)},
+        [question],
+        "persona_intent_switch",
+        deadline_ms,
+        privacy,
+        request_id=request_id,
+    )
+    if result.fallback_used and (
+        result.source == "deadline_fallback" and "deadline" in (result.fallback_reason or "").lower()
+    ):
+        return persona_intent_stay(current, reason="deadline_fallback", source="deadline_fallback",
+                                   confidence=0.0, reflex=result)
+    answer = result.answers.get(question.id)
+    if answer is None or answer.type != "choice" or answer.value not in question.choices:
+        return persona_intent_stay(current, reason="no_intent", source=result.source, reflex=result)
+    confidence = float(answer.confidence or 0.0)
+    pick = str(answer.value)
+    if pick in {PERSONA_STAY, current}:
+        return persona_intent_stay(current, reason="already_active" if addressed_current else "no_intent", source=result.source,
+                                   confidence=confidence, reflex=result)
+    if confidence < persona_intent_floor(settings):
+        return persona_intent_stay(current, reason="below_floor", source=result.source,
+                                   confidence=confidence, reflex=result)
+    return PersonaIntentDecision(current, pick, "intent", result.source, confidence, result)
 
 
 NO_TOOL_DESCRIPTION = "no tool: greeting, small talk, opinion or a question answered from knowledge"
