@@ -21,6 +21,8 @@ from .lan_beacon import LanBeaconServer, public_beacon_payload
 from .store import database, get, put
 
 PORT = 4781
+PAIRING_LOCK_TIMEOUT_SECONDS = 3
+PAIRING_GATEWAY_TIMEOUT_SECONDS = 25
 log = logging.getLogger(__name__)
 
 
@@ -154,28 +156,43 @@ class Connectivity:
             await self.apply_remote(config)
         return self.snapshot()
 
+    def _pairing_ready(self, snapshot):
+        return bool(self.config().get("enabled") and snapshot.get("local_verified")
+                    and snapshot.get("endpoints") and snapshot.get("server_pin")
+                    and self.server_task and not self.server_task.done())
+
     async def prepare_pairing(self):
-        """Owner pair intent prepares LAN ingress without device discovery or WAN setup."""
+        """Reuse ready LAN ingress without waiting for unrelated remote discovery."""
         if GUARD.cooldown_active():
             raise HTTPException(409, "Pairing is paused during the security cooldown")
-        async with self.lock:
+        snapshot = self.snapshot()
+        if self._pairing_ready(snapshot):
+            return snapshot
+        try:
+            await asyncio.wait_for(self.lock.acquire(), timeout=PAIRING_LOCK_TIMEOUT_SECONDS)
+        except TimeoutError as exc:
+            raise HTTPException(409, "The companion gateway is still starting. Try creating the QR again in a few seconds.") from exc
+        try:
             if GUARD.cooldown_active():
                 raise HTTPException(409, "Pairing is paused during the security cooldown")
             snapshot = self.snapshot()
-            if (self.config().get("enabled") and snapshot.get("local_verified")
-                    and snapshot.get("endpoints") and snapshot.get("server_pin")
-                    and self.server_task and not self.server_task.done()):
+            if self._pairing_ready(snapshot):
                 return snapshot
             config = self.config()
             if not config.get("enabled"):
                 config.update(enabled=True, remote=False)
                 with database() as db:
                     put(db, "network", "config", config)
-            await self.ensure_gateway_listening()
+            try:
+                await asyncio.wait_for(self.ensure_gateway_listening(), timeout=PAIRING_GATEWAY_TIMEOUT_SECONDS)
+            except TimeoutError as exc:
+                raise HTTPException(504, "The companion gateway did not become ready in time. Try creating the QR again.") from exc
             snapshot = self.snapshot()
             if not snapshot.get("endpoints") or not snapshot.get("server_pin"):
                 raise HTTPException(409, "Connect this desktop to Wi-Fi or Ethernet, then generate the pairing QR again")
             return snapshot
+        finally:
+            self.lock.release()
 
     async def stop_gateway(self, beacons: bool = True):
         if beacons:
