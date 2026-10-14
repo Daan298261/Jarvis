@@ -34,18 +34,73 @@ target_link_options(jarvis_whisper PRIVATE -Wl,--exclude-libs,ALL)
 set(ORT_VERSION "1.20.0")
 set(ORT_AAR_SHA256 "07a8f71ef890afed8c6087a56220e6d558a492804276ee2dd7cb7f6262242027")
 set(ORT_AAR_DIR "${CMAKE_CURRENT_BINARY_DIR}/ort-aar")
-set(ORT_AAR_FILE "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime-android-${ORT_VERSION}.aar")
 set(ORT_AAR_URL "https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/${ORT_VERSION}/onnxruntime-android-${ORT_VERSION}.aar")
-
-message(STATUS "Fetching ONNX Runtime Android ${ORT_VERSION} (hashed)")
-file(DOWNLOAD "${ORT_AAR_URL}" "${ORT_AAR_FILE}"
-     EXPECTED_HASH SHA256=${ORT_AAR_SHA256}
-     SHOW_PROGRESS TLS_VERIFY ON
-     STATUS ORT_DL_STATUS)
-list(GET ORT_DL_STATUS 0 ORT_DL_CODE)
-if(NOT ORT_DL_CODE EQUAL 0)
-    message(FATAL_ERROR "Failed to download ONNX Runtime Android AAR: ${ORT_DL_STATUS}")
+# One verified copy of the AAR is shared by every ABI and reused across builds
+# (it used to be re-downloaded per ABI per build, so a single dropped
+# connection failed the whole APK). Override with JARVIS_ORT_CACHE_DIR.
+if(DEFINED ENV{JARVIS_ORT_CACHE_DIR} AND NOT "$ENV{JARVIS_ORT_CACHE_DIR}" STREQUAL "")
+    file(TO_CMAKE_PATH "$ENV{JARVIS_ORT_CACHE_DIR}" ORT_CACHE_DIR)
+else()
+    get_filename_component(ORT_CACHE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../build/ort-cache" ABSOLUTE)
 endif()
+set(ORT_AAR_FILE "${ORT_CACHE_DIR}/onnxruntime-android-${ORT_VERSION}.aar")
+set(ORT_DL_ATTEMPTS 4)
+
+file(MAKE_DIRECTORY "${ORT_CACHE_DIR}")
+# ABIs configure in parallel; serialize check + download on the shared cache.
+file(LOCK "${ORT_CACHE_DIR}/onnxruntime-android-${ORT_VERSION}.lock"
+     GUARD PROCESS TIMEOUT 1800 RESULT_VARIABLE ORT_LOCK_RESULT)
+if(NOT ORT_LOCK_RESULT EQUAL 0)
+    message(FATAL_ERROR "Could not lock ONNX Runtime cache ${ORT_CACHE_DIR}: ${ORT_LOCK_RESULT}")
+endif()
+
+set(ORT_AAR_VALID FALSE)
+if(EXISTS "${ORT_AAR_FILE}")
+    file(SHA256 "${ORT_AAR_FILE}" ORT_CACHED_SHA256)
+    if(ORT_CACHED_SHA256 STREQUAL ORT_AAR_SHA256)
+        set(ORT_AAR_VALID TRUE)
+        message(STATUS "ONNX Runtime Android ${ORT_VERSION}: using verified cache ${ORT_AAR_FILE}")
+    else()
+        message(WARNING "Discarding cached ONNX Runtime AAR with wrong SHA-256 ${ORT_CACHED_SHA256}")
+        file(REMOVE "${ORT_AAR_FILE}")
+    endif()
+endif()
+
+if(NOT ORT_AAR_VALID)
+    # Hash is verified by hand rather than with EXPECTED_HASH: a mismatch there
+    # is a non-fatal CMake error that still fails configure after a good retry.
+    set(ORT_AAR_PART "${ORT_AAR_FILE}.part")
+    foreach(ORT_DL_ATTEMPT RANGE 1 ${ORT_DL_ATTEMPTS})
+        message(STATUS "Fetching ONNX Runtime Android ${ORT_VERSION} (hashed), attempt ${ORT_DL_ATTEMPT}/${ORT_DL_ATTEMPTS}")
+        file(REMOVE "${ORT_AAR_PART}")
+        file(DOWNLOAD "${ORT_AAR_URL}" "${ORT_AAR_PART}"
+             TLS_VERIFY ON
+             INACTIVITY_TIMEOUT 60
+             TIMEOUT 900
+             STATUS ORT_DL_STATUS)
+        list(GET ORT_DL_STATUS 0 ORT_DL_CODE)
+        if(ORT_DL_CODE EQUAL 0)
+            file(SHA256 "${ORT_AAR_PART}" ORT_DL_SHA256)
+            if(ORT_DL_SHA256 STREQUAL ORT_AAR_SHA256)
+                file(RENAME "${ORT_AAR_PART}" "${ORT_AAR_FILE}")
+                set(ORT_AAR_VALID TRUE)
+                break()
+            endif()
+            set(ORT_DL_STATUS "SHA-256 mismatch: got ${ORT_DL_SHA256}, expected ${ORT_AAR_SHA256}")
+        endif()
+        message(WARNING "ONNX Runtime AAR download attempt ${ORT_DL_ATTEMPT}/${ORT_DL_ATTEMPTS} failed: ${ORT_DL_STATUS}")
+        if(ORT_DL_ATTEMPT LESS ORT_DL_ATTEMPTS)
+            math(EXPR ORT_DL_BACKOFF "${ORT_DL_ATTEMPT} * 10")
+            execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep ${ORT_DL_BACKOFF})
+        endif()
+    endforeach()
+    file(REMOVE "${ORT_AAR_PART}")
+    if(NOT ORT_AAR_VALID)
+        file(LOCK "${ORT_CACHE_DIR}/onnxruntime-android-${ORT_VERSION}.lock" RELEASE)
+        message(FATAL_ERROR "Failed to download ONNX Runtime Android AAR after ${ORT_DL_ATTEMPTS} attempts: ${ORT_DL_STATUS}")
+    endif()
+endif()
+file(LOCK "${ORT_CACHE_DIR}/onnxruntime-android-${ORT_VERSION}.lock" RELEASE)
 
 if(NOT EXISTS "${ORT_AAR_DIR}/jni" OR NOT EXISTS "${ORT_AAR_DIR}/headers/onnxruntime_cxx_api.h")
     file(MAKE_DIRECTORY "${ORT_AAR_DIR}")
