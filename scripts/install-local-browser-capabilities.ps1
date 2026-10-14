@@ -5,6 +5,8 @@ $sourceRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $targetRoot = (Resolve-Path -LiteralPath $InstallRoot).Path
 if ($sourceRoot -eq $targetRoot) { throw 'Source and installed checkout must be different folders' }
 if (-not (Test-Path -LiteralPath (Join-Path $targetRoot 'backend\app\main.py'))) { throw 'This updater needs a source-based ANZU installation' }
+$distSource = Join-Path $sourceRoot 'frontend\dist'
+if (-not (Test-Path -LiteralPath (Join-Path $distSource 'index.html'))) { throw 'Build the frontend before installing this update' }
 $files = @(
     'backend/app/agent/prompts.py','backend/app/api/tools.py','backend/app/policy/reversibility.py',
     'backend/app/tools/browser.py','backend/app/tools/chrome_connector.py','backend/app/tools/chrome_setup.py',
@@ -41,15 +43,15 @@ foreach ($relative in $files) {
     New-Item -ItemType Directory -Path (Split-Path $target) -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $sourceRoot $relative) -Destination $target -Force
 }
-$distSource = Join-Path $sourceRoot 'frontend\dist'
 $distTarget = Join-Path $targetRoot 'frontend\dist'
 if (Test-Path -LiteralPath $distTarget) { Copy-Item -LiteralPath $distTarget -Destination (Join-Path $backup 'frontend-dist') -Recurse -Force }
-if (-not (Test-Path -LiteralPath (Join-Path $distSource 'index.html'))) { throw 'Build the frontend before installing this update' }
 New-Item -ItemType Directory -Path $distTarget -Force | Out-Null
 Get-ChildItem -LiteralPath $distSource | Copy-Item -Destination $distTarget -Recurse -Force
 $native = Join-Path $sourceRoot 'runtime\chrome-native-host\anzu-chrome-host.exe'
 if (Test-Path -LiteralPath $native) {
     $nativeTarget = Join-Path $targetRoot 'runtime\chrome-native-host'
+    $existingNative = Join-Path $nativeTarget 'anzu-chrome-host.exe'
+    if (Test-Path -LiteralPath $existingNative) { Copy-Item -LiteralPath $existingNative -Destination (Join-Path $backup 'anzu-chrome-host.exe') -Force }
     New-Item -ItemType Directory -Path $nativeTarget -Force | Out-Null
     Copy-Item -LiteralPath $native -Destination $nativeTarget -Force
 }
