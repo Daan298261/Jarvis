@@ -83,7 +83,16 @@ object StandaloneMode {
     }
 
     fun shouldSpeakVoiceReply(fromVoice: Boolean, ttsRoute: TtsVoiceRoute): Boolean =
-        fromVoice && ttsRoute == TtsVoiceRoute.ON_DEVICE
+        fromVoice && (ttsRoute == TtsVoiceRoute.ON_DEVICE || ttsRoute == TtsVoiceRoute.PLATFORM)
+
+    /** The note itself, without the "remember this" / "take a note" cue that triggered it. */
+    fun noteBody(text: String): String {
+        val trimmed = text.trim()
+        val match = noteCue.find(trimmed) ?: return trimmed
+        val after = trimmed.substring(match.range.last + 1).trimStart(' ', ':', ',', '-', '—', '.').trim()
+        val before = trimmed.substring(0, match.range.first).trim().trimEnd(',', ':', '-', '—').trim()
+        return after.ifEmpty { before }.ifEmpty { trimmed }
+    }
 
     fun desktopOnlyNeverDone(decision: StandaloneDecision): Boolean =
         decision.intent == StandaloneIntent.QUEUE_OR_REFUSE ||

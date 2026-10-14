@@ -13,6 +13,7 @@ ProviderName = Literal["rules", "laya", "jev", "generative"]
 # Decision classes that may use Reflex. Open-ended generation stays off this list.
 REFLEX_DECISION_CLASSES: frozenset[str] = frozenset(
     {
+        "persona_intent_switch",
         "persona_model_routing",
         "request_routing",
         "tool_shortlist",
@@ -59,6 +60,10 @@ class Question:
     # Optional per-choice descriptions (same order as ``choices``); encoder providers
     # such as Laya score descriptions far better than bare labels.
     descriptions: tuple[str, ...] = ()
+    # Decision class of this question when it rides another class's decide() call
+    # (RFC-0218: persona_intent_switch inside the owner-turn request_routing call).
+    # Empty means the call's own class. Must be in REFLEX_DECISION_CLASSES.
+    decision_class: str = ""
 
     def choice_criteria(self) -> dict[str, str]:
         return {
@@ -189,6 +194,7 @@ def normalize_questions(
                 min_score=raw.min_score,
                 max_score=raw.max_score,
                 descriptions=raw.descriptions,
+                decision_class=raw.decision_class,
             ))
             continue
         if not isinstance(raw, dict):

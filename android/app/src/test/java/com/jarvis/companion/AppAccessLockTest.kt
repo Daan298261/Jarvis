@@ -6,7 +6,6 @@ import android.content.Intent
 import android.content.Context
 import android.os.Bundle
 import android.provider.Settings
-import android.view.WindowManager
 import androidx.fragment.app.FragmentActivity
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.*
@@ -39,14 +38,12 @@ class AppAccessLockTest {
     @Test fun opted_out_app_opens_without_authentication() {
         val activity = Robolectric.buildActivity(AccessTestActivity::class.java).setup().get()
         assertFalse(activity.lock.locked)
-        assertEquals(0, activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE)
     }
 
-    @Test fun stored_protection_starts_locked_and_blocks_screen_capture() {
+    @Test fun stored_protection_starts_locked() {
         context.getSharedPreferences("app_access", Context.MODE_PRIVATE).edit().putBoolean("required", true).commit()
         val activity = Robolectric.buildActivity(AccessTestActivity::class.java).setup().get()
         assertTrue(activity.lock.locked)
-        assertNotEquals(0, activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE)
         activity.lock.background()
         assertTrue(activity.lock.locked)
     }

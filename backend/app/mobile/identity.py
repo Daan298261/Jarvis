@@ -5,6 +5,7 @@ import base64
 import hashlib
 import hmac
 import ipaddress
+import logging
 import secrets
 import threading
 import time
@@ -25,6 +26,10 @@ MIN_PAIRING_TTL_MINUTES = 5
 MAX_PAIRING_TTL_MINUTES = 60
 ENROLL_RATE_LIMIT = 5
 ENROLL_RATE_WINDOW_SECONDS = 15 * 60
+# RFC-0215: a distributed guesser can rotate IPs, so failed codes also count globally.
+GLOBAL_FAILED_CODE_LIMIT = 10
+PAIRING_LOCKOUT_SECONDS = 15 * 60
+REMOTE_MAX_PAIRING_TTL_MINUTES = 10
 _PAIRING_LOCK = threading.Lock()
 _DISPLAY_CODES: dict[str, str] = {}
 
@@ -95,8 +100,53 @@ def _random_pairing_code() -> str:
     raise HTTPException(503, "Could not generate a pairing code; try again")
 
 
+def _remote_enabled() -> bool:
+    try:
+        from .connectivity import CONNECTIVITY
+
+        return bool(CONNECTIVITY.config().get("remote"))
+    except Exception:
+        # Fail closed: assume remote so codes get the short 10-minute cap.
+        logging.getLogger(__name__).exception("Could not read companion remote setting; capping pairing codes at 10 minutes")
+        return True
+
+
+def invalidate_unclaimed_pairing_codes() -> None:
+    with _PAIRING_LOCK:
+        with database() as db:
+            _invalidate_unclaimed_pairing_codes(db)
+
+
 def _clamp_pairing_ttl_minutes(ttl_minutes: int) -> int:
-    return max(MIN_PAIRING_TTL_MINUTES, min(MAX_PAIRING_TTL_MINUTES, ttl_minutes))
+    ceiling = REMOTE_MAX_PAIRING_TTL_MINUTES if _remote_enabled() else MAX_PAIRING_TTL_MINUTES
+    return max(MIN_PAIRING_TTL_MINUTES, min(ceiling, ttl_minutes))
+
+
+def pairing_lockout_remaining(db=None) -> int:
+    def _read(handle):
+        record = get(handle, "pairing_lockout", PAIRING_OWNER) or {}
+        return max(0, int(float(record.get("until", 0)) - time.time()))
+
+    if db is not None:
+        return _read(db)
+    with database() as handle:
+        return _read(handle)
+
+
+def _record_failed_code(db) -> None:
+    """Count a wrong/expired code; past the global limit, burn the active code and lock pairing."""
+    now = time.time()
+    record = get(db, "pairing_lockout", PAIRING_OWNER) or {"failures": [], "until": 0}
+    failures = [stamp for stamp in record.get("failures", []) if stamp > now - ENROLL_RATE_WINDOW_SECONDS] + [now]
+    record["failures"] = failures
+    if len(failures) >= GLOBAL_FAILED_CODE_LIMIT:
+        record["until"] = now + PAIRING_LOCKOUT_SECONDS
+        record["failures"] = []
+        _invalidate_unclaimed_pairing_codes(db)
+        logging.getLogger(__name__).warning(
+            "Companion pairing locked for %ss after %s failed codes", PAIRING_LOCKOUT_SECONDS, len(failures)
+        )
+    put(db, "pairing_lockout", PAIRING_OWNER, record)
 
 
 def _invalidate_unclaimed_pairing_codes(db) -> None:
@@ -123,6 +173,7 @@ def generate_pairing_code(ttl_minutes: int = DEFAULT_PAIRING_TTL_MINUTES) -> dic
     with _PAIRING_LOCK:
         with database() as db:
             _invalidate_unclaimed_pairing_codes(db)
+            delete(db, "pairing_lockout", PAIRING_OWNER)
             put(db, "pairing_code", code_hash, record)
             put(
                 db,
@@ -155,11 +206,12 @@ def pairing_code_status() -> dict:
     with _PAIRING_LOCK:
         with database() as db:
             session = get(db, "pairing_session", PAIRING_OWNER)
+            locked = pairing_lockout_remaining(db)
             if not session:
-                return {"active": False, "claimed": False, "ttl_remaining_seconds": 0}
+                return {"active": False, "claimed": False, "ttl_remaining_seconds": 0, "lockout_remaining_seconds": locked}
             record = get(db, "pairing_code", session["active_hash"])
             if not record:
-                return {"active": False, "claimed": False, "ttl_remaining_seconds": 0}
+                return {"active": False, "claimed": False, "ttl_remaining_seconds": 0, "lockout_remaining_seconds": locked}
             remaining = max(0, int(record["expires_at"] - now))
             claimed = bool(record.get("claimed_by"))
             active = remaining > 0 and not claimed
@@ -169,6 +221,7 @@ def pairing_code_status() -> dict:
                 "expires_at": record["expires_at"],
                 "ttl_remaining_seconds": remaining,
                 "id": record["id"],
+                "lockout_remaining_seconds": locked,
             }
             display_code = _DISPLAY_CODES.get(session["active_hash"])
             if active and display_code:
@@ -231,12 +284,20 @@ def enroll_pairing_code(code: str, encoded_key: str, name: str, *, client_ip: st
     check_enroll_rate_limit(client_ip, fp)
     with _PAIRING_LOCK:
         with database() as db:
+            if pairing_lockout_remaining(db):
+                raise HTTPException(423, "Pairing is locked after repeated wrong codes. Generate a new code on ANZU.")
             record = get(db, "pairing_code", code_hash)
             session = get(db, "pairing_session", PAIRING_OWNER)
-            if not record or record["expires_at"] < time.time():
-                raise HTTPException(401, "Pairing code expired or invalid. Generate a new code on Jarvis.")
-            if not session or session.get("active_hash") != code_hash:
-                raise HTTPException(401, "Pairing code expired or invalid. Generate a new code on Jarvis.")
+            if (not record or record["expires_at"] < time.time()
+                    or not session or session.get("active_hash") != code_hash):
+                _record_failed_code(db)
+                failure = True
+            else:
+                failure = False
+        if failure:
+            raise HTTPException(401, "Pairing code expired or invalid. Generate a new code on Jarvis.")
+        with database() as db:
+            record = get(db, "pairing_code", code_hash)
             if record["claimed_by"]:
                 device = get(db, "device", record["claimed_by"])
                 if device and device["fingerprint"] == fp and device["status"] != "revoked":
@@ -319,7 +380,16 @@ def set_status(device_id: str, status: str, expected_fingerprint: str | None = N
     return safe_device(device)
 
 
-def challenge(device_id: str):
+def challenge(device_id: str, nonce: str = ""):
+    value = _challenge(device_id)
+    if nonce:
+        from .gateway import server_proof
+
+        return {**value, **server_proof(nonce)}
+    return value
+
+
+def _challenge(device_id: str):
     now = time.time()
     with database() as db:
         device = get(db, "device", device_id)

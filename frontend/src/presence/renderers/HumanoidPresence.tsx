@@ -6,9 +6,12 @@ import { MorphablePresenceStage } from "./MorphablePresenceStage"
 import { preparePortraitCloud } from "./shapes/portraitCloud"
 import {
   MYTHIC_LIVING_AVATAR_ID,
+  LEGACY_HUMANOID_AVATAR_ID,
+  legacyPersonaShapeId,
   SETTINGS_CLOUD_SHAPE_ID,
   usesMythicLiveVariantB,
 } from "../mythicPersonaVariant"
+import { PERSONA_VISUALS, type NamedPersonaId } from "../../persona/namedPersonas"
 import "./humanoid-presence.css"
 
 // The default is the locked production humanoid. Keep its asset and fallback
@@ -52,7 +55,10 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
   const artworkKey = `${portraitId}:${portraitUrl}:${volumetric}:${living}`
   const [artwork, setArtwork] = useState<{ key: string; shapeId: string }>()
   const [failedArtworkKey, setFailedArtworkKey] = useState<string>()
-  const portraitBacked = !galaxy && !settingsCloud
+  const legacyShape = mythic
+    ? legacyPersonaShapeId(settings.avatarId, PERSONA_VISUALS[personaVisual?.personaId as NamedPersonaId]?.shapeId || "stormbird")
+    : settings.avatarId === LEGACY_HUMANOID_AVATAR_ID ? "humanoid_bust" : undefined
+  const portraitBacked = !galaxy && !settingsCloud && !legacyShape
   const preparing = portraitBacked && mythic && artwork?.key !== artworkKey && failedArtworkKey !== artworkKey
   const prepareError = portraitBacked && mythic && failedArtworkKey === artworkKey
   useEffect(() => {
@@ -104,7 +110,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
             ? shapeId
             : portraitBacked
               ? artwork?.shapeId || "humanoid_bust"
-              : shapeId || "humanoid_bust"}
+              : legacyShape || shapeId || "humanoid_bust"}
       personaVisual={personaVisual}
       className={`jarvis-presence jarvis-presence-stage jarvis-presence-humanoid${mythic ? " jarvis-presence-particle" : ""}${galaxy ? " galaxy" : ""}`}
       ariaLabel={`${mythic ? personaVisual?.personaLabel || "ANZU mythic" : muscular ? "ANZU muscular humanoid" : "ANZU particle"} presence is ${snapshot.phase === "executing" ? "working" : snapshot.phase}`}

@@ -31,7 +31,7 @@ import javax.net.ssl.X509TrustManager
 
 class ApiException(val status: Int, message: String) : Exception(message)
 
-class JarvisApi(context: Context) {
+class JarvisApi(private val context: Context) {
     private val prefs = context.getSharedPreferences("connection", Context.MODE_PRIVATE)
     private val bootstrap = runCatching { JSONObject(context.assets.open("bootstrap.json").bufferedReader().readText()) }.getOrDefault(JSONObject())
     var endpoint: String = prefs.getString("endpoint", bootstrap.optString("endpoint")) ?: ""
@@ -47,8 +47,9 @@ class JarvisApi(context: Context) {
         val supplied = JSONArray(prefs.getString("endpoints", null) ?: bootstrap.optJSONArray("endpoints")?.toString() ?: "[]")
         (0 until supplied.length()).map { TransportPolicy.origin(supplied.getString(it)) }.distinct().take(8)
     }.getOrDefault(emptyList())
-    @Volatile private var preferred = ""
-    @Volatile private var preferredAt = 0L
+    // RFC-0215: remember the origin that last worked across app restarts.
+    @Volatile private var preferred = prefs.getString("preferred_origin", "") ?: ""
+    @Volatile private var preferredAt = if (preferred.isNotEmpty()) System.currentTimeMillis() else 0L
     private val failedLock = Any()
     private var failedOrigins: List<Pair<String, Long>> = emptyList()
     @Volatile private var cachedClient: Pair<String, OkHttpClient>? = null
@@ -79,7 +80,8 @@ class JarvisApi(context: Context) {
         preferred = ""; preferredAt = 0
         synchronized(failedLock) { failedOrigins = emptyList() }
         endpoints = ordered.ifEmpty { listOf(endpoint) }
-        prefs.edit().putString("endpoint", endpoint).putString("pin", pin).putString("device", deviceId).putString("endpoints", JSONArray(endpoints).toString()).apply()
+        prefs.edit().putString("endpoint", endpoint).putString("pin", pin).putString("device", deviceId).putString("endpoints", JSONArray(endpoints).toString())
+            .remove("ca_hosts").remove("preferred_origin").apply()
     }
 
     suspend fun refreshEndpoints() {
@@ -87,6 +89,7 @@ class JarvisApi(context: Context) {
         if (settings.optString("server_pin") != pin) return
         val values = settings.optJSONArray("endpoints") ?: return
         val incoming = (0 until values.length()).map { values.getString(it) }
+        // RFC-0215: the pinned desktop's list is authoritative; unlisted origins are pruned.
         val addresses = TransportPolicy.mergeConnectionEndpoints(endpoints, incoming)
         if (addresses.isNotEmpty()) {
             persistEndpoints(addresses)
@@ -138,7 +141,13 @@ class JarvisApi(context: Context) {
     suspend fun session() = sessionLock.withLock {
         if (token.isNotEmpty() && System.currentTimeMillis() < expiresAt) return@withLock
         check(deviceId.isNotEmpty()) { "Pair this phone first" }
-        val challenge = JSONObject(TransientRetry.run { raw("/challenge/$deviceId", authenticated = false) }.toString(Charsets.UTF_8))
+        val serverNonce = java.util.UUID.randomUUID().toString().replace("-", "")
+        val challenge = JSONObject(TransientRetry.run { raw("/challenge/$deviceId?nonce=$serverNonce", authenticated = false) }.toString(Charsets.UTF_8))
+        // We always send a nonce, so a valid pinned-key signature is always required,
+        // whichever pinned origin (LAN or Tailscale) answered.
+        if (!RemoteEndpoints.verifyServerProof(pin, serverNonce, challenge.optString("server_key"), challenge.optString("server_signature"))) {
+            throw java.security.GeneralSecurityException("ANZU did not prove it is your desktop (missing or invalid server signature)")
+        }
         val proof = Signature.getInstance("SHA256withECDSA").run {
             initSign(keys.getKey(keyAlias, null) as java.security.PrivateKey)
             val nonce = challenge.getString("challenge")
@@ -164,6 +173,7 @@ class JarvisApi(context: Context) {
 
     fun noteReachable(origin: String) {
         val address = TransportPolicy.origin(origin)
+        if (preferred != address) prefs.edit().putString("preferred_origin", address).apply()
         preferred = address
         preferredAt = System.currentTimeMillis()
         synchronized(failedLock) {
@@ -210,6 +220,17 @@ class JarvisApi(context: Context) {
         }
     }
 
+    /** RFC-0215: explain a Tailscale-only path that the phone cannot use right now. */
+    fun tailscaleHint(): String? {
+        val installed = runCatching { context.packageManager.getPackageInfo(RemoteEndpoints.TAILSCALE_PACKAGE, 0); true }.getOrDefault(false)
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+        val vpn = runCatching {
+            cm?.allNetworks?.any { cm.getNetworkCapabilities(it)?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) == true } == true
+        }.getOrDefault(false)
+        val onLan = endpoints.any { TransportPolicy.onAttachedLan(it, TransportPolicy.localIpv4Addresses()) }
+        return RemoteEndpoints.tailscaleHint(endpoints, installed, vpn, onLan)
+    }
+
     suspend fun json(path: String, method: String = "GET", body: JSONObject? = null): JSONObject =
         JSONObject(raw(path, method, body?.toString()?.toByteArray()).toString(Charsets.UTF_8))
     suspend fun array(path: String): JSONArray = JSONArray(raw(path).toString(Charsets.UTF_8))
@@ -242,7 +263,10 @@ class JarvisApi(context: Context) {
             }
             sequentialOrigins(client, addresses, path, method, body, authenticated, contentType, filename, extraHeaders)
         } catch (error: java.io.IOException) {
-            if (!recoverPairedLanFromBeacon()) throw error
+            if (!recoverPairedLanFromBeacon()) {
+                val hint = tailscaleHint() ?: throw error
+                throw java.io.IOException(hint, error)
+            }
             val retryLocals = TransportPolicy.localIpv4Addresses()
             val retryAddresses = TransportPolicy.dialOrder(
                 preferred.takeIf { System.currentTimeMillis() - preferredAt < 60_000 },

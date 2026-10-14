@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notices_tab">Meldingen</string>
+    <string name="notices_empty">Geen meldingen. Verbindingsproblemen, mislukte downloads en fouten verschijnen hier.</string>
+    <string name="notices_clear_all">Alles wissen</string>
+    <string name="notices_dismiss">Sluiten</string>
+    <plurals name="notices_unread">
+        <item quantity="one">%1$d ongelezen melding</item>
+        <item quantity="other">%1$d ongelezen meldingen</item>
+    </plurals>
+    <string name="notice_severity_info">Info</string>
+    <string name="notice_severity_warning">Waarschuwing</string>
+    <string name="notice_severity_error">Fout</string>
+    <string name="notice_ongoing">Actueel</string>
+    <string name="notice_title_desktop_offline">Desktopverbinding</string>
+    <string name="notice_title_pending">Bericht wacht op bevestiging</string>
+    <string name="notice_title_model_download">Probleem met modeldownload</string>
+    <string name="notice_title_voice_download">Probleem met spraakpakket</string>
+    <string name="notice_title_error">Er ging iets mis</string>
+    <string name="notice_body_pending">Een bericht is mogelijk niet bij ANZU aangekomen. Veilig opnieuw proberen verstuurt het één keer, zonder dubbel werk.</string>
+    <string name="notice_action_retry_pending">Veilig opnieuw proberen</string>
+    <string name="notice_action_discard_pending">Verwijderen</string>
+    <string name="notice_action_pair">Desktop koppelen</string>
+    <string name="notice_action_scan_wifi">Wifi scannen</string>
+    <string name="notice_action_retry">Opnieuw proberen</string>
+    <string name="notice_action_open_settings">Instellingen openen</string>
+    <string name="notice_discard_title">Wachtend bericht verwijderen?</string>
+    <string name="notice_discard_body">ANZU is er mogelijk al mee bezig. Kijk bij Taken voordat je het opnieuw verstuurt. Verwijderen annuleert geen taak.</string>
+    <string name="notice_discard_keep">Bewaren</string>
+</resources>

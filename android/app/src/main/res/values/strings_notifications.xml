@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Notifications tab. Translated in values-nl; keep both files in sync (MissingTranslation is checked here). -->
+<resources>
+    <string name="notices_tab">Notifications</string>
+    <string name="notices_empty">No notifications. Connection problems, failed downloads and errors show up here.</string>
+    <string name="notices_clear_all">Clear all</string>
+    <string name="notices_dismiss">Dismiss</string>
+    <plurals name="notices_unread">
+        <item quantity="one">%1$d unread notification</item>
+        <item quantity="other">%1$d unread notifications</item>
+    </plurals>
+    <string name="notice_severity_info">Info</string>
+    <string name="notice_severity_warning">Warning</string>
+    <string name="notice_severity_error">Error</string>
+    <string name="notice_ongoing">Ongoing</string>
+    <string name="notice_title_desktop_offline">Desktop connection</string>
+    <string name="notice_title_pending">Message waiting for confirmation</string>
+    <string name="notice_title_model_download">Model download problem</string>
+    <string name="notice_title_voice_download">Voice pack problem</string>
+    <string name="notice_title_error">Something went wrong</string>
+    <string name="notice_body_pending">A message may not have reached ANZU. Retry safely sends it once, without duplicating work.</string>
+    <string name="notice_action_retry_pending">Retry safely</string>
+    <string name="notice_action_discard_pending">Discard</string>
+    <string name="notice_action_pair">Pair desktop</string>
+    <string name="notice_action_scan_wifi">Scan Wi-Fi</string>
+    <string name="notice_action_retry">Retry</string>
+    <string name="notice_action_open_settings">Open settings</string>
+    <string name="notice_discard_title">Discard pending message?</string>
+    <string name="notice_discard_body">ANZU may already be working on it. Check Tasks before sending it again. Discarding does not cancel a task.</string>
+    <string name="notice_discard_keep">Keep</string>
+</resources>

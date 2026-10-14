@@ -217,3 +217,49 @@ async def test_offline_sync_idempotent_by_client_message_id(mobile_env, jarvis_e
     assert first.status_code == 200
     assert second.status_code == 200
     assert second.json()["appended"] == 0
+
+
+@pytest.mark.asyncio
+async def test_offline_sync_retry_into_client_thread_after_lost_reply(mobile_env, jarvis_env):
+    """Phone mints the thread id before posting; a lost reply plus a new turn must not fork or duplicate."""
+    import json
+
+    from app.api.companion import router
+    from app.db.models import Conversation
+    from app.db.session import SessionLocal
+
+    app = FastAPI()
+    app.include_router(router)
+    _, headers = _paired()
+    thread = str(uuid.uuid4())
+    ids = [str(uuid.uuid4()) for _ in range(3)]
+
+    def turn(i, role="user"):
+        return {
+            "request_id": ids[i],
+            "client_message_id": ids[i],
+            "role": role,
+            "text": f"turn {i}",
+            "origin": "device_offline" if role == "user" else "device_local_draft",
+        }
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        first = await client.post(
+            "/api/companion/sync/offline-turns",
+            headers=headers,
+            json={"conversation_id": thread, "turns": [turn(0), turn(1, "assistant")]},
+        )
+        # Reply "lost": the phone retries the same turns plus a new one into the same thread.
+        retry = await client.post(
+            "/api/companion/sync/offline-turns",
+            headers=headers,
+            json={"conversation_id": thread, "turns": [turn(0), turn(1, "assistant"), turn(2)]},
+        )
+    assert first.status_code == 200 and retry.status_code == 200
+    assert first.json()["conversation_id"] == thread == retry.json()["conversation_id"]
+    assert first.json()["appended"] == 2 and retry.json()["appended"] == 1
+    async with SessionLocal() as db:
+        conversation = await db.get(Conversation, thread)
+        messages = json.loads(conversation.messages_json)
+    assert [m["id"] for m in messages] == ids

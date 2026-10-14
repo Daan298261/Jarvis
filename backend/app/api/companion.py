@@ -138,8 +138,15 @@ def lan_enroll(body: LanEnroll, request: Request):
 
 
 @router.get("/challenge/{device_id}")
-def challenge(device_id: uuid.UUID):
-    return identity.challenge(str(device_id))
+def challenge(device_id: uuid.UUID, nonce: str = Query("", max_length=128, pattern=r"^[A-Za-z0-9_-]*$")):
+    # A phone nonce makes the desktop sign with its pinned TLS key (RFC-0215 server proof).
+    return identity.challenge(str(device_id), nonce)
+
+
+@router.get("/health")
+def companion_health():
+    """Unauthenticated liveness for the reachability self-test; reveals nothing else."""
+    return {"ok": True, "api_version": 1}
 
 
 @router.post("/session")
@@ -531,12 +538,11 @@ class Build(BaseModel):
     endpoint: str = Field(default="", max_length=1024)
     mode: Literal["personalized", "generic"] = "personalized"
     prepare_connection: bool = True
-    remote: bool = True
 
 
 class ConnectionSetup(BaseModel):
     enabled: bool = True
-    remote: bool = True
+    remote: bool | None = None
     connection_mode: Literal["lan", "public_forward", "tailscale"] | None = None
     wan_method: Literal["auto", "upnp", "ssh_reverse", "gateway_ssh"] | None = None
     ssh_host: str | None = Field(default=None, max_length=255)
@@ -553,6 +559,7 @@ class ConnectionSetup(BaseModel):
     gateway_password: str | None = Field(default=None, max_length=256)
     wan_public_host: str | None = Field(default=None, max_length=255)
     router_approval_id: str | None = None
+    tailscale: bool | None = None
 
 
 @owner_router.post("/connection", dependencies=[Depends(require_owner_private_key_for_pairing)])
@@ -562,10 +569,11 @@ async def connection_setup(body: ConnectionSetup):
     if body.gateway_host:
         from ..mobile.phone_setup import require_router_approval
         require_router_approval(body.router_approval_id or "", body.gateway_host)
-    extras = body.model_dump(exclude={"enabled", "remote", "router_approval_id"}, exclude_none=True)
+    extras = body.model_dump(exclude={"enabled", "remote", "tailscale", "router_approval_id"}, exclude_none=True)
+    remote = False if not body.enabled else body.remote
     if extras:
-        return await CONNECTIVITY.configure(body.enabled, body.remote, extras)
-    return await CONNECTIVITY.configure(body.enabled, body.remote)
+        return await CONNECTIVITY.configure(body.enabled, remote, body.tailscale, extras=extras)
+    return await CONNECTIVITY.configure(body.enabled, remote, body.tailscale)
 
 
 @owner_router.get("/phone-setup", dependencies=[Depends(require_owner_private_key_for_pairing)])
@@ -700,7 +708,7 @@ async def build_apk(body: Build):
     custom = (body.endpoint or "").strip()
     endpoint = custom or (prepared[0] if prepared else "")
     if not endpoint and body.prepare_connection:
-        snapshot = await CONNECTIVITY.configure(True, body.remote)
+        snapshot = await CONNECTIVITY.configure(True, None)
         prepared = order_phone_reachable_endpoints(list(snapshot.get("endpoints") or []))
         endpoint = prepared[0] if prepared else ""
     try:

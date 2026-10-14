@@ -429,6 +429,8 @@ class NamedPersonaSettings(BaseModel):
     activated_voice_profile_id: str = ""
     voice_profile_requested: str = ""
     profiles: dict[str, PersonaAppearanceSettings] = Field(default_factory=dict)
+    # RFC-0218: owner lock. When on, intent never auto-switches the persona.
+    auto_switch_locked: bool = False
 
 
 class DecisionSettings(BaseModel):
@@ -448,6 +450,8 @@ class DecisionSettings(BaseModel):
     laya_warm: bool = True
     reflex_cache_ttl_s: float = 8.0
     reflex_default_deadline_ms: float = 100.0
+    # RFC-0218 / RFC-0214 per-class floor for persona_intent_switch.
+    persona_intent_confidence_floor: float = Field(default=0.75, ge=0.0, le=1.0)
 
 
 class AppSettings(BaseModel):

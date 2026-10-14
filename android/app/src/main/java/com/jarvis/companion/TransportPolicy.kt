@@ -35,24 +35,25 @@ object TransportPolicy {
 
     fun orderedForReachability(addresses: Iterable<String>): List<String> {
         val distinct = addresses.map { origin(it) }.distinct()
-        return distinct.sortedWith(compareBy({ reachabilityRank(it) }, { it }))
+        return distinct.sortedWith(
+            compareBy(
+                { reachabilityRank(it) },
+                { RemoteEndpoints.tier(it) },
+                { lanCandidateRank(it) },
+                { it },
+            ),
+        )
     }
 
+    /**
+     * RFC-0215: the pinned desktop's list is authoritative. Origins it no longer lists are
+     * dropped (a stale LAN or Tailscale address must not keep being dialled). An empty
+     * list carries no information, so the known set is kept.
+     */
     fun mergeConnectionEndpoints(existing: Iterable<String>, incoming: Iterable<String>): List<String> {
         val live = incoming.mapNotNull { runCatching { origin(it) }.getOrNull() }
-        val known = existing.mapNotNull { runCatching { origin(it) }.getOrNull() }
-        val livePrivate = live.filter { isPrivateOrigin(it) }.toSet()
-        val retained = if (livePrivate.isEmpty()) {
-            known
-        } else {
-            known.filter { !isPrivateOrigin(it) || it in livePrivate }
-        }
-        val ranked = orderedForReachability(live + retained)
-        if (ranked.size <= 8) return ranked
-        val privateOrigins = ranked.filter { isPrivateOrigin(it) }
-        val keptPrivate = privateOrigins.takeLast(2)
-        val publicOrigins = ranked.filter { it !in keptPrivate }
-        return publicOrigins.take(8 - keptPrivate.size) + keptPrivate
+        if (live.isEmpty()) return orderedForReachability(existing.mapNotNull { runCatching { origin(it) }.getOrNull() })
+        return orderedForReachability(live).take(8)
     }
 
     fun absorbMatchingLanOrigin(
@@ -65,7 +66,10 @@ object TransportPolicy {
         val advertised = discoveredPin.trim().lowercase()
         if (expected.length != 64 || advertised != expected) return null
         val live = runCatching { origin(discoveredOrigin) }.getOrNull() ?: return null
-        return mergeConnectionEndpoints(existing, listOf(live))
+        // A pin-matching LAN beacon replaces stale LAN origins only; Tailscale origins the
+        // desktop listed stay (the authoritative /connection refresh prunes those).
+        val kept = existing.mapNotNull { runCatching { origin(it) }.getOrNull() }.filter { !isPrivateOrigin(it) }
+        return orderedForReachability(kept + live).take(8)
     }
 
     fun localIpv4Addresses(): List<String> = runCatching {
@@ -98,6 +102,7 @@ object TransportPolicy {
         val usable = rest.filter { it !in skip }
         val deferred = rest.filter { it in skip }
         val home = usable.filter { onAttachedLan(it, locals) }
+            .sortedWith(compareBy({ lanCandidateRank(it) }, { it }))
         if (home.isNotEmpty()) {
             val head = home.first()
             return (listOf(head) + usable.filter { it != head } + deferred).distinct()
@@ -177,6 +182,28 @@ object TransportPolicy {
     internal fun sameSlash24(a: IntArray, b: IntArray): Boolean = sameNetwork(a, b, 24)
 
     internal fun isPrivateOrigin(value: String): Boolean = reachabilityRank(value) >= 2
+
+    /**
+     * Soft tie-break among RFC1918 dial targets when the phone is not already on
+     * that subnet: prefer ordinary home LAN (192.168) over Hyper-V/WSL-ish 172.16/12
+     * and VPN-ish 10/8. Tailscale and public origins keep reachabilityRank/tier.
+     */
+    internal fun lanCandidateRank(value: String): Int {
+        val host = runCatching { URI(value).host?.trim()?.lowercase().orEmpty() }.getOrDefault("")
+        if (host.isEmpty()) return 50
+        if (RemoteEndpoints.isTailscaleHost(host)) return 0
+        if (isLanHostname(host)) return 2
+        val octets = parseV4(host) ?: return 1
+        if (!isRfc1918(octets)) return 1
+        val a = octets[0]
+        val b = octets[1]
+        return when {
+            a == 192 && b == 168 -> 10
+            a == 172 && b in 16..31 -> 20
+            a == 10 -> 30
+            else -> 40
+        }
+    }
 
     internal fun reachabilityRank(value: String): Int {
         val host = runCatching { URI(value).host?.trim()?.lowercase().orEmpty() }.getOrDefault("")

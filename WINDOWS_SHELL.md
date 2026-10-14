@@ -38,7 +38,7 @@ If there is a **Startup** (run at Windows login) toggle: it must match master pl
 ## 3. Out of scope
 
 - Extra Inno knowledge in the user UI
-- WAN / port-forward / Link-device
+- Off-LAN (Tailscale only) / Link-device
 - P3 swarm join
 - Voice crash fix (D1; do not touch voice backend files from this ticket)
 - First-run wizard / GPU fork / no-WAN installer gaps (`INSTALLER.md`)

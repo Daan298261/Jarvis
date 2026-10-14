@@ -47,10 +47,19 @@ import java.util.concurrent.atomic.AtomicBoolean
 private val Gold = Color(0xFFF5A623)
 private val Ink = Color(0xFF070B12)
 private val Panel = Color(0xFF111B28)
-private val Muted = Color(0xFF8C9CAF)
+internal val Muted = Color(0xFF8C9CAF)
+/** Shared error text colour for settings rows (voice packs, sponsor credit). */
+internal val ErrorText = Color(0xFFE8A87C)
+/** Key of the Notifications tab; the visible label is localized. */
+private const val NOTIFICATIONS_TAB = "Notifications"
 
 class MainActivity : FragmentActivity() {
     private lateinit var accessLock: AppAccessLock
+    private lateinit var secureScreen: SecureScreen
+    override fun onResume() {
+        super.onResume()
+        if (::secureScreen.isInitialized) secureScreen.apply()
+    }
     override fun onStop() {
         if (::accessLock.isInitialized) accessLock.background()
         super.onStop()
@@ -64,6 +73,7 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         setTheme(R.style.AppTheme)
         super.onCreate(savedInstanceState)
+        secureScreen = SecureScreen(this)
         accessLock = AppAccessLock(this)
         latestIntent = intent
         setContent {
@@ -95,6 +105,11 @@ class MainActivity : FragmentActivity() {
             var showPostPairVoiceOffer by remember { mutableStateOf(false) }
             val callState by CurrentCall.state.collectAsStateWithLifecycle()
             var tab by remember { mutableStateOf("Home") }
+            val noticeStore = app.notices
+            val notices by noticeStore.notices.collectAsStateWithLifecycle()
+            val unreadNotices = notices.count { !it.read }
+            // Viewing the tab reads everything in it, including notices that arrive while it is open.
+            LaunchedEffect(tab, notices) { if (tab == NOTIFICATIONS_TAB) noticeStore.markAllRead() }
             var pairingScanRequest by remember { mutableStateOf(false) }
             var draft by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
             var incomingCall by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
@@ -115,7 +130,9 @@ class MainActivity : FragmentActivity() {
                     incomingCall = null
                 }
             }
-            val mic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) model.toggleRecord() }
+            val mic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) model.toggleRecord() else model.micPermissionDenied() }
+            val modelFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(model::importModel) }
+            val pickModelFile = { modelFile.launch(arrayOf("application/octet-stream", "*/*")) }
             val attachment = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let(model::upload) }
             val videoPick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let(model::upload) }
             var photoPath by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
@@ -257,34 +274,37 @@ class MainActivity : FragmentActivity() {
                             "Tasks" to Icons.Outlined.Checklist, "Studio" to Icons.Outlined.AutoAwesome, "More" to Icons.Outlined.Tune).forEach { (label, icon) ->
                             NavigationBarItem(selected = tab == label, onClick = { tab = label }, icon = { Icon(icon, label) }, label = { Text(label) })
                         }
+                        val noticesLabel = stringResource(R.string.notices_tab)
+                        NavigationBarItem(
+                            selected = tab == NOTIFICATIONS_TAB,
+                            onClick = { tab = NOTIFICATIONS_TAB },
+                            icon = {
+                                BadgedBox(badge = { if (unreadNotices > 0) Badge { Text(if (unreadNotices > 99) "99+" else unreadNotices.toString()) } }) {
+                                    Icon(Icons.Outlined.Notifications, noticesLabel)
+                                }
+                            },
+                            label = { Text(noticesLabel, maxLines = 1) },
+                        )
                     }
                 }) { padding ->
                     Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp)) {
                         Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(AnzuBranding.DISPLAY_NAME, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                            Text(if (state.connected) "● CONNECTED" else "○ OFFLINE", fontSize = 10.sp, color = if (state.connected) Color(0xFF74DCCD) else Muted)
+                            val indicator = CompanionMode.indicator(state.connected, state.pendingApproval, state.localModelReady, paired)
+                            Text(
+                                indicator.label,
+                                fontSize = 10.sp,
+                                letterSpacing = 1.sp,
+                                color = when (indicator.mode) {
+                                    AnswerMode.DESKTOP -> Color(0xFF74DCCD)
+                                    AnswerMode.PHONE -> Gold
+                                    else -> Muted
+                                },
+                            )
+                            HomeNoticeIndicator(unreadNotices) { tab = NOTIFICATIONS_TAB }
                         }
-                        val offlineBanner = if (paired) CompanionOfflineStatus.offlineBannerText(state) else ""
-                        if (offlineBanner.isNotEmpty()) Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF1D2A34)), modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                            Text(offlineBanner, Modifier.padding(12.dp), fontSize = 12.sp)
-                        }
-                        if (state.error != null) Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF34251D)), modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                            Text(state.error.orEmpty(), Modifier.padding(12.dp), fontSize = 12.sp)
-                        }
-                        if (state.pendingMessage) Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                            var dismiss by remember { mutableStateOf(false) }
-                            Column(Modifier.padding(12.dp)) {
-                                Text("A message is waiting for confirmation", fontSize = 13.sp)
-                                Row {
-                                    TextButton(onClick = { model.retryPending() }, enabled = !state.busy) { Text("Retry safely") }
-                                    TextButton(onClick = { dismiss = true }, enabled = !state.busy) { Text("Dismiss") }
-                                }
-                            }
-                            if (dismiss) AlertDialog(onDismissRequest = { dismiss = false }, title = { Text("Dismiss pending message?") },
-                                text = { Text(stringResource(R.string.pending_may_be_working)) },
-                                confirmButton = { TextButton(onClick = { dismiss = false; model.dismissPending() }) { Text("Dismiss") } },
-                                dismissButton = { TextButton(onClick = { dismiss = false }) { Text("Keep") } })
-                        }
+                        // Status banners (desktop offline, errors, pending message, download failures) live in the
+                        // Notifications tab now; Home only shows the unread marker in the header above.
                         if (callState.active) Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
                             var routes by remember { mutableStateOf(false) }
                             Column(Modifier.padding(12.dp)) {
@@ -305,6 +325,26 @@ class MainActivity : FragmentActivity() {
                             }
                         }
                         when (tab) {
+                            NOTIFICATIONS_TAB -> NotificationsScreen(
+                                notices = notices,
+                                actionsEnabled = !state.busy,
+                                onAction = { action ->
+                                    when (action) {
+                                        NoticeAction.RETRY_PENDING -> model.retryPending()
+                                        NoticeAction.DISCARD_PENDING -> model.dismissPending()
+                                        NoticeAction.PAIR -> { pairingScanRequest = true; tab = "More" }
+                                        NoticeAction.SCAN_WIFI -> model.startLanScan()
+                                        NoticeAction.RETRY_MODEL_DOWNLOAD -> model.downloadCompanionPack()
+                                        NoticeAction.RETRY_VOICE_DOWNLOAD -> model.downloadRecommendedVoicePacks()
+                                        NoticeAction.OPEN_APP_SETTINGS -> startActivity(
+                                            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                                android.net.Uri.fromParts("package", packageName, null)),
+                                        )
+                                    }
+                                },
+                                onDismiss = noticeStore::dismiss,
+                                onClearAll = noticeStore::clearAll,
+                            )
                             "Home" -> {
                                 Spacer(Modifier.height(12.dp))
                                 Text("YOUR INTELLIGENCE, EVERYWHERE", fontSize = 10.sp, color = Muted, letterSpacing = 2.sp)
@@ -332,15 +372,28 @@ class MainActivity : FragmentActivity() {
                                 Text(
                                     if (state.recording) "I’m listening."
                                     else if (state.speaking) "Speaking"
-                                    else if (!state.connected) stringResource(R.string.pair_with_anzu_desktop)
+                                    else if (CompanionMode.needsPhoneSetup(state.connected, state.localModelReady)) stringResource(R.string.set_up_anzu_on_phone)
                                     else "What’s on your mind?",
-                                    fontSize = if (!state.connected && !state.recording && !state.speaking) 22.sp else 28.sp,
+                                    fontSize = if (CompanionMode.needsPhoneSetup(state.connected, state.localModelReady) && !state.recording && !state.speaking) 22.sp else 28.sp,
                                     fontWeight = FontWeight.Light,
                                 )
                                 if (state.liveTranscript.isNotEmpty()) Text(state.liveTranscript, fontSize = 14.sp, color = Gold, modifier = Modifier.padding(top = 8.dp))
                                 Text(state.activity, fontSize = 12.sp, color = Muted, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
                                 if (state.lanLabel.isNotEmpty()) Text(state.lanLabel, fontSize = 13.sp, color = Gold, modifier = Modifier.padding(bottom = 8.dp))
-                                if (!state.connected) {
+                                if (CompanionMode.needsPhoneSetup(state.connected, state.localModelReady)) {
+                                    PhoneSetupCard(state, devicePack, deviceChrome, pickModelFile)
+                                }
+                                if (!state.connected && state.localModelReady) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 12.dp)) {
+                                        Button(onClick = { mic.launch(Manifest.permission.RECORD_AUDIO) }, modifier = Modifier.weight(1f)) {
+                                            Icon(Icons.Outlined.Mic, null); Spacer(Modifier.width(6.dp)); Text(if (state.recording) "Send voice" else stringResource(R.string.talk_to_anzu))
+                                        }
+                                        OutlinedButton(onClick = { tab = "Chat" }, modifier = Modifier.weight(1f)) { Text("Write a message") }
+                                    }
+                                    if (!paired) TextButton(onClick = { tab = "More" }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                                        Text("Pair a desktop for tasks and tools", color = Muted)
+                                    }
+                                } else if (!state.connected) {
                                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                                         Button(
                                             onClick = { pairingScanRequest = true; tab = "More" },
@@ -394,12 +447,30 @@ class MainActivity : FragmentActivity() {
                                 if (state.onDeviceVoiceActive) {
                                     Text("On-device voice", color = Gold, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
                                 }
-                                ConversationPickers(state, model::selectModel, model::selectVoice)
+                                if (state.connected) ConversationPickers(state, model::selectModel, model::selectVoice)
+                                else Text(phoneModelStatus(state, devicePack), color = Muted, fontSize = 11.sp)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     TextButton(onClick = { model.openConversation(null) }) { Text("New conversation") }
                                     var history by remember { mutableStateOf(false) }
                                     Box { TextButton(onClick = { history = true }) { Text("History") }
-                                        DropdownMenu(history, { history = false }) { state.conversations.forEach { c -> DropdownMenuItem(text = { Text(c.optString("title")) }, onClick = { history = false; model.openConversation(c.getString("id")) }) } }
+                                        DropdownMenu(history, { history = false }) {
+                                            val desktop = if (state.connected) state.conversations else emptyList()
+                                            if (desktop.isEmpty() && state.localConversations.isEmpty()) {
+                                                DropdownMenuItem(text = { Text("No conversations yet", color = Muted) }, onClick = { history = false }, enabled = false)
+                                            }
+                                            desktop.forEach { c -> DropdownMenuItem(text = { Text(c.optString("title")) }, onClick = { history = false; model.openConversation(c.getString("id")) }) }
+                                            state.localConversations.forEach { c ->
+                                                DropdownMenuItem(
+                                                    text = { Text(c.optString("title") + " · on this phone") },
+                                                    onClick = { history = false; model.openConversation(c.getString("id")) },
+                                                    trailingIcon = {
+                                                        IconButton(onClick = { model.deleteLocalConversation(c.getString("id")) }) {
+                                                            Icon(Icons.Outlined.DeleteOutline, "Delete conversation")
+                                                        }
+                                                    },
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                                 LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
@@ -431,23 +502,24 @@ class MainActivity : FragmentActivity() {
                                     IconButton(onClick = { cameraPermission.launch(Manifest.permission.CAMERA) }) { Icon(Icons.Outlined.PhotoCamera, "Take photo") }
                                     IconButton(onClick = { mic.launch(Manifest.permission.RECORD_AUDIO) }) { Icon(if (state.recording) Icons.Outlined.Stop else Icons.Outlined.Mic, "Voice message") }
                                     Spacer(Modifier.weight(1f))
-                                    Button(onClick = { model.send(draft) }, enabled = draft.isNotBlank() && !state.busy) { Text("Send"); Icon(Icons.Outlined.ArrowUpward, null) }
+                                    Button(onClick = { model.send(draft); draft = "" }, enabled = draft.isNotBlank() && !state.busy) { Text("Send"); Icon(Icons.Outlined.ArrowUpward, null) }
                                 }
                             }
                             "Tasks" -> {
                                 Text("Your swarm at work", fontSize = 25.sp, modifier = Modifier.padding(vertical = 12.dp))
+                                if (!state.connected) InfoCard("Needs the ANZU desktop", CompanionMode.desktopOnlyNotice(DesktopFeature.TASKS))
                                 LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                     if (state.swarm.length() > 0) item { SwarmOverviewCard(state.swarm) }
                                     if (state.coding.length() > 0) item { CodingOverviewCard(state.coding) }
                                     items(state.codingDecisions, key = { "decision-${it.optString("id")}" }) { decision ->
                                         CodingDecisionCard(decision, model)
                                     }
-                                    if (state.tasks.isEmpty()) item { Text(stringResource(R.string.tasks_empty_hint), color = Muted) }
+                                    if (state.tasks.isEmpty() && state.connected) item { Text(stringResource(R.string.tasks_empty_hint), color = Muted) }
                                     items(state.tasks, key = { "task-${it.optString("id")}" }) { task -> TaskCard(task, model) }
                                 }
                             }
                             "Studio" -> StudioScreen(model, state)
-                            "More" -> MoreScreen(model, state, deviceChrome, devicePack, accessLock, pairingScanRequest) { pairingScanRequest = false }
+                            "More" -> MoreScreen(model, state, deviceChrome, devicePack, accessLock, secureScreen, pickModelFile, pairingScanRequest) { pairingScanRequest = false }
                         }
                     }
                 }
@@ -455,6 +527,50 @@ class MainActivity : FragmentActivity() {
             }
         }
     }
+}
+
+/** First run without a desktop: get a model onto the phone by download or from a file. */
+@Composable private fun PhoneSetupCard(
+    state: CompanionState,
+    devicePack: DevicePackChromeState,
+    chrome: CompanionDeviceModelChrome,
+    pickModelFile: () -> Unit,
+) {
+    Card(Modifier.fillMaxWidth().padding(bottom = 10.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2838))) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("ANZU ON THIS PHONE", color = Gold, fontSize = 10.sp, letterSpacing = 1.sp)
+            Text(stringResource(R.string.phone_setup_body), fontSize = 13.sp)
+            val recommended = devicePack.availablePacks.firstOrNull { it.id == devicePack.selectedPackId } ?: devicePack.availablePacks.firstOrNull()
+            recommended?.let { Text(it.label, color = Muted, fontSize = 12.sp) }
+            if (devicePack.status == DevicePackStatus.DOWNLOADING || state.modelImportBusy) {
+                LinearProgressIndicator(
+                    progress = { (state.localPackProgress / 100f).coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(if (state.modelImportBusy) state.modelImportMessage else "Downloading… ${state.localPackProgress}%", color = Muted, fontSize = 11.sp)
+            }
+            devicePack.error?.let { Text(it, color = Color(0xFFE8A87C), fontSize = 12.sp) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { chrome.downloadSelectedPack() },
+                    enabled = !state.busy && devicePack.status != DevicePackStatus.DOWNLOADING,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Download model") }
+                OutlinedButton(
+                    onClick = pickModelFile,
+                    enabled = !state.busy && devicePack.status != DevicePackStatus.DOWNLOADING,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Load from file") }
+            }
+            Text(stringResource(R.string.phone_setup_file_hint), color = Muted, fontSize = 11.sp)
+        }
+    }
+}
+
+private fun phoneModelStatus(state: CompanionState, devicePack: DevicePackChromeState): String = when {
+    state.offlineAnswering -> "Answering on this phone…"
+    state.localModelReady -> "On this phone · ${devicePack.selectedPackLabel.ifBlank { "offline model" }}"
+    else -> "No model on this phone yet — set one up under More → Models"
 }
 
 @Composable private fun ConversationPickers(
@@ -477,7 +593,6 @@ class MainActivity : FragmentActivity() {
 private fun inferenceStatus(state: CompanionState): String {
     val name = state.inferenceFamily.ifBlank { state.inferenceProfile }.ifBlank { "conversation model" }
     return when {
-        !state.connected -> "${AnzuBranding.DISPLAY_NAME} is offline"
         state.inferenceLoading -> "Loading $name…"
         state.inferenceLoaded -> "Model loaded · $name"
         else -> "Conversation model is not loaded on ${AnzuBranding.DISPLAY_NAME}"
@@ -529,11 +644,13 @@ private fun inferenceStatus(state: CompanionState): String {
 @Composable private fun CompanionModelsSection(
     chrome: CompanionDeviceModelChrome,
     devicePack: DevicePackChromeState,
-    busy: Boolean,
+    state: CompanionState,
+    pickModelFile: () -> Unit,
 ) {
+    val busy = state.busy
     Text("Models (on-device)", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
     Text(
-        "When the Leader is unreachable, the companion can answer using a downloaded model pack (RFC-0108).",
+        "Without the ANZU desktop, ANZU answers on this phone with a downloaded model. You can also load a .gguf you copied to the phone; it is checked against the model's SHA-256 first.",
         color = Muted,
         fontSize = 12.sp,
         modifier = Modifier.padding(bottom = 8.dp),
@@ -590,9 +707,15 @@ private fun inferenceStatus(state: CompanionState): String {
                     modifier = Modifier.weight(1f),
                 ) { Text("Delete pack") }
             }
+            OutlinedButton(
+                onClick = pickModelFile,
+                enabled = !busy && devicePack.status != DevicePackStatus.DOWNLOADING,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Load model from file (.gguf)") }
+            if (state.modelImportMessage.isNotBlank()) Text(state.modelImportMessage, color = Muted, fontSize = 12.sp)
             if (!devicePack.nativeRuntimeBundled) {
                 Text(
-                    "On-device runtime not reported yet. D1 binds pack download/generation to this surface.",
+                    "This build has no on-device model runtime, so offline chat is unavailable.",
                     color = Muted,
                     fontSize = 11.sp,
                 )
@@ -623,7 +746,7 @@ private fun formatStorageBytes(bytes: Long): String {
     val ttsPacks = packs.filter { it.optString("role") == "tts" }
     Text("Voice (on-device)", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
     Text(
-        "Mode A/B fallback when the Leader is down. Online sessions still prefer host Kokoro / realtime voice (RFC-0140).",
+        "ANZU's own speech recognition and voice for when the desktop is unreachable. Without them, ANZU uses this phone's built-in speech engines. With the desktop connected, desktop voices are used.",
         color = Muted,
         fontSize = 12.sp,
         modifier = Modifier.padding(bottom = 8.dp),
@@ -678,9 +801,15 @@ private fun formatStorageBytes(bytes: Long): String {
                     }
                 }
             }
+            val selectedTtsId = model.voicePackManager.selectedTtsPackId()
+            ttsPacks.filter {
+                VoicePackCredit.shouldShow(it.optString("id"), selectedTtsId, model.voicePackManager.isPackInstalled(it.optString("id")))
+            }.forEach { pack ->
+                VoicePackCreditText(pack.optString("id"), pack.optString("attribution"), color = Muted, errorColor = ErrorText)
+            }
             Text(formatStorageBytes(model.voicePackManager.storageBytes()), color = Muted, fontSize = 12.sp)
             state.voicePackError.takeIf { it.isNotBlank() }?.let {
-                Text(it, color = Color(0xFFE8A87C), fontSize = 12.sp)
+                Text(it, color = ErrorText, fontSize = 12.sp)
             }
             if (state.voiceSttStatus == CompanionVoicePackStatus.DOWNLOADING ||
                 state.voiceTtsStatus == CompanionVoicePackStatus.DOWNLOADING ||
@@ -718,6 +847,27 @@ private fun formatStorageBytes(bytes: Long): String {
             }
             if (state.onDeviceVoiceActive) {
                 Text("On-device voice indicator · active", color = Gold, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+@Composable private fun PhoneNotesSection(model: CompanionModel, state: CompanionState) {
+    Text("Notes on this phone", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
+    Text(
+        "Say \"take a note …\" or \"remember this …\" in Chat. Notes are encrypted on this phone and also sync to the desktop when it is back.",
+        color = Muted,
+        fontSize = 12.sp,
+        modifier = Modifier.padding(bottom = 8.dp),
+    )
+    if (state.notes.isEmpty()) Text("No notes yet.", color = Muted, fontSize = 12.sp)
+    state.notes.forEach { note ->
+        Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+            Row(Modifier.padding(start = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(note.optString("text"), Modifier.weight(1f).padding(vertical = 12.dp), fontSize = 14.sp)
+                IconButton(onClick = { model.deleteNote(note.getString("id")) }, enabled = !state.busy) {
+                    Icon(Icons.Outlined.DeleteOutline, "Delete note")
+                }
             }
         }
     }
@@ -796,7 +946,7 @@ private fun formatStorageBytes(bytes: Long): String {
             modifier = Modifier.padding(top = 8.dp),
         ) { Text(if (refreshing) "Refreshing…" else "Refresh status") }
         if (!state.connected) {
-            Text(stringResource(R.string.studio_connect_hint), color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+            Text(CompanionMode.desktopOnlyNotice(DesktopFeature.STUDIO), color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
         }
     }
 }
@@ -886,6 +1036,8 @@ private fun formatStorageBytes(bytes: Long): String {
     deviceChrome: CompanionDeviceModelChrome,
     devicePack: DevicePackChromeState,
     accessLock: AppAccessLock,
+    secureScreen: SecureScreen,
+    pickModelFile: () -> Unit,
     openPairingScanner: Boolean = false,
     onPairingScannerConsumed: () -> Unit = {},
 ) {
@@ -916,6 +1068,7 @@ private fun formatStorageBytes(bytes: Long): String {
     }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { AppAccessSettings(accessLock) }
+        item { SecureScreenSettings(secureScreen) }
         item {
             Text("Connection", fontSize = 25.sp, modifier = Modifier.padding(vertical = 12.dp))
             OutlinedTextField(endpoint, { endpoint = it }, label = { Text(stringResource(R.string.anzu_https_endpoint)) }, modifier = Modifier.fillMaxWidth())
@@ -993,6 +1146,7 @@ private fun formatStorageBytes(bytes: Long): String {
                 },
                 enabled = state.connected && !state.busy,
             ) { Text(stringResource(R.string.add_anzu_on_whatsapp)) }
+            if (!state.connected) Text(CompanionMode.desktopOnlyNotice(DesktopFeature.WHATSAPP), color = Muted, fontSize = 12.sp)
         }
 
         item {
@@ -1000,11 +1154,16 @@ private fun formatStorageBytes(bytes: Long): String {
             val device = state.capabilities.optJSONObject("device")
             Row(verticalAlignment = Alignment.CenterVertically) { Text("Task notifications", Modifier.weight(1f)); Switch(device?.optBoolean("notifications") == true, { model.preferences(it, device?.optBoolean("critical_calls") == true) }, enabled = state.connected) }
             Row(verticalAlignment = Alignment.CenterVertically) { Text("Calls for critical events", Modifier.weight(1f)); Switch(device?.optBoolean("critical_calls") == true, { model.preferences(device?.optBoolean("notifications") == true, it) }, enabled = state.connected) }
-            if (state.capabilities.optJSONObject("calls")?.optBoolean("push_configured") != true) Text(stringResource(R.string.push_needs_anzu_service), color = Muted, fontSize = 12.sp)
+            if (!state.connected) Text(CompanionMode.desktopOnlyNotice(DesktopFeature.NOTIFICATIONS), color = Muted, fontSize = 12.sp)
+            else if (state.capabilities.optJSONObject("calls")?.optBoolean("push_configured") != true) Text(stringResource(R.string.push_needs_anzu_service), color = Muted, fontSize = 12.sp)
         }
-        item { CompanionModelsSection(deviceChrome, devicePack, state.busy) }
+        item { CompanionModelsSection(deviceChrome, devicePack, state, pickModelFile) }
+        item { PhoneNotesSection(model, state) }
+        item { VoiceLanguageSettings(model, state) }
         item { AssistantSettings(model) }
         item { CompanionVoicePacksSection(model, state) }
+        item { OffGridContentSection() }
+        item { DownloadedContentSection(model) }
         item {
             Text("Voice & presence", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
             Text("Presence", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
@@ -1017,10 +1176,11 @@ private fun formatStorageBytes(bytes: Long): String {
                 OutlinedButton(onClick = { model.previewVoice(state.selectedVoice) },
                     enabled = state.connected && state.selectedVoice.isNotEmpty() && !state.busy) { Text("Preview voice") }
             }
+            if (!state.connected) Text(CompanionMode.desktopOnlyNotice(DesktopFeature.DESKTOP_VOICES), color = Muted, fontSize = 12.sp)
             val voice = state.capabilities.optJSONObject("voice")
-            Text("Speech recognition · ${if (voice?.optBoolean("stt_ready") == true) "ready" else "unavailable"}  ·  Speech output · ${if (voice?.optBoolean("tts_ready") == true) "ready" else "unavailable"}",
+            if (state.connected) Text("Speech recognition · ${if (voice?.optBoolean("stt_ready") == true) "ready" else "unavailable"}  ·  Speech output · ${if (voice?.optBoolean("tts_ready") == true) "ready" else "unavailable"}",
                 color = Muted, fontSize = 12.sp)
-            Text(
+            if (state.connected) Text(
                 if (voice?.optBoolean("realtime") == true) "Realtime duplex voice is available over pinned TLS. Clip STT/TTS remains the fallback."
                 else stringResource(R.string.audio_via_paired_anzu),
                 color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp),
@@ -1041,6 +1201,7 @@ private fun formatStorageBytes(bytes: Long): String {
                 model.schedule(editingSchedule, schedulePrompt, it, recurrence)
                 editingSchedule = null
             } }, enabled = state.connected && schedulePrompt.isNotBlank()) { Text(if (editingSchedule == null) stringResource(R.string.schedule_on_anzu) else "Save schedule") }
+            if (!state.connected) Text(CompanionMode.desktopOnlyNotice(DesktopFeature.SCHEDULES), color = Muted, fontSize = 12.sp)
             if (editingSchedule != null) TextButton(onClick = { editingSchedule = null; schedulePrompt = "" }) { Text("Cancel editing") }
         }
         items(state.schedules) { schedule -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp)) {

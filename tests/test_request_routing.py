@@ -1,5 +1,5 @@
 import asyncio
-import time
+import threading
 
 import pytest
 
@@ -25,7 +25,7 @@ def _laya_route(kind: str, shape: str = "ack") -> DecisionResult:
 async def test_intake_uses_bounded_provider_before_returning_parser(monkeypatch):
     seen = []
 
-    def decide(state, questions, decision_class, deadline, privacy):
+    def decide(state, questions, decision_class, deadline, privacy, **_kw):
         seen.append((state, questions, decision_class, deadline, privacy))
         return _laya_route(MANAGED_TASK, "handoff")
 
@@ -42,7 +42,7 @@ async def test_intake_uses_bounded_provider_before_returning_parser(monkeypatch)
 async def test_encoder_cannot_drop_explicit_action(monkeypatch):
     monkeypatch.setattr(
         "app.decision.owner_turn.decide",
-        lambda *args: _laya_route(DIRECT_REPLY, "social"),
+        lambda *args, **_kw: _laya_route(DIRECT_REPLY, "social"),
     )
     result = await request_routing.evaluate_request_route("open steam", route_request("open steam"))
     assert result.route.kind == MANAGED_TASK
@@ -50,18 +50,44 @@ async def test_encoder_cannot_drop_explicit_action(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_deadline_does_not_block_event_loop(monkeypatch):
+    # Deterministic: the encoder blocks until released, so the route can only come
+    # back through the deadline, and a ticker proves the loop kept running meanwhile.
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+
     def slow(*_args):
-        time.sleep(0.4)
+        started.set()
+        release.wait(10)
+        finished.set()
         raise RuntimeError("slow encoder")
 
     monkeypatch.setattr("app.decision.owner_turn._decide_sync", slow)
     baseline = route_request("hello")
-    started = time.perf_counter()
-    task = asyncio.create_task(request_routing.evaluate_request_route("hello", baseline))
-    await asyncio.sleep(0.02)
-    assert not task.done()
-    assert (await task).route == baseline
-    assert time.perf_counter() - started < 0.3
+    ticks = 0
+    stop = asyncio.Event()
+
+    async def ticker():
+        nonlocal ticks
+        while not stop.is_set():
+            ticks += 1
+            await asyncio.sleep(0)
+
+    tick_task = asyncio.create_task(ticker())
+    try:
+        task = asyncio.create_task(request_routing.evaluate_request_route("hello", baseline))
+        assert await asyncio.to_thread(started.wait, 5), "encoder was never called"
+        ticks_at_block = ticks
+        await asyncio.sleep(0)
+        assert not task.done()
+        result = await task
+        assert ticks > ticks_at_block, "event loop stalled while the encoder was blocked"
+        assert not finished.is_set(), "route waited for the blocked encoder instead of the deadline"
+        assert result.route == baseline
+    finally:
+        release.set()
+        stop.set()
+        await tick_task
 
 
 @pytest.mark.asyncio

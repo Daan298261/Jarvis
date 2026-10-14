@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import time
+import threading
 from pathlib import Path
 
 import pytest
@@ -19,6 +19,24 @@ from app.decision.owner_turn import (
 )
 from app.decision.types import Answer, DecisionResult
 from app.persona.owner_chat import stream_owner_chat
+
+
+# Wall-clock bounds flake on loaded CI runners (134 ms seen against 120 ms) because
+# they also measure thread and event-loop scheduling. The deadline is proven
+# structurally instead: the stubbed decision (or cold Laya load) blocks until the
+# test releases it, so the turn can only return without waiting for it.
+
+
+class _Blocker:
+    def __init__(self) -> None:
+        self.release = threading.Event()
+        self.started = threading.Event()
+        self.finished = threading.Event()
+
+    def block(self) -> None:
+        self.started.set()
+        self.release.wait(10)
+        self.finished.set()
 
 
 def test_verify_command_intake_hooks_owner_turn_decide():
@@ -53,7 +71,7 @@ def test_loop_intake_calls_evaluate_request_route():
 async def test_decide_owner_turn_always_calls_decide(monkeypatch):
     seen = []
 
-    def spy(state, questions, decision_class, deadline, privacy):
+    def spy(state, questions, decision_class, deadline, privacy, **_kw):
         seen.append(
             {
                 "class": decision_class,
@@ -107,8 +125,10 @@ async def test_local_tier_opens_no_jev_socket(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_deadline_fallback_within_50ms(monkeypatch):
+    blocker = _Blocker()
+
     def blocking(*_args, **_kwargs):
-        time.sleep(0.25)
+        blocker.block()
         return DecisionResult(
             answers={
                 "request_route": Answer("request_route", "choice", DIRECT_REPLY, 0.9),
@@ -120,10 +140,12 @@ async def test_deadline_fallback_within_50ms(monkeypatch):
         )
 
     monkeypatch.setattr("app.decision.owner_turn.decide", blocking)
-    started = time.perf_counter()
-    turn = await decide_owner_turn("Hello there", baseline=route_request("Hello there"), decision_tier="local")
-    elapsed_ms = (time.perf_counter() - started) * 1000.0
-    assert elapsed_ms < 120.0
+    try:
+        turn = await decide_owner_turn("Hello there", baseline=route_request("Hello there"), decision_tier="local")
+        assert blocker.started.is_set(), "decide() was never called"
+        assert not blocker.finished.is_set(), "turn waited for the slow decision instead of the deadline"
+    finally:
+        blocker.release.set()
     assert turn.reflex is not None
     assert turn.reflex.fallback_used is True
     assert turn.reflex.source == "deadline_fallback"
@@ -197,7 +219,7 @@ async def test_tool_and_app_floors_stay_managed():
 async def test_low_confidence_route_keeps_rules_baseline(monkeypatch):
     monkeypatch.setattr(
         "app.decision.owner_turn.decide",
-        lambda *args: DecisionResult(
+        lambda *args, **_kw: DecisionResult(
             answers={
                 "request_route": Answer("request_route", "choice", MANAGED_TASK, 0.2),
                 "reply_shape": Answer("reply_shape", "choice", "handoff", 0.9),
@@ -240,7 +262,7 @@ async def test_domain_questions_do_not_route_to_self_status(utterance):
 async def test_domain_veto_overrides_confident_provider_self_status(utterance, monkeypatch):
     monkeypatch.setattr(
         "app.decision.owner_turn.decide",
-        lambda *args: DecisionResult(
+        lambda *args, **_kw: DecisionResult(
             answers={
                 "request_route": Answer("request_route", "choice", DIRECT_REPLY, 0.95),
                 "reply_shape": Answer("reply_shape", "choice", "self_status", 0.95),
@@ -277,7 +299,7 @@ def test_what_are_you_matches_self_status_regex():
 async def test_confident_provider_self_status_is_kept(utterance, monkeypatch):
     monkeypatch.setattr(
         "app.decision.owner_turn.decide",
-        lambda *args: DecisionResult(
+        lambda *args, **_kw: DecisionResult(
             answers={
                 "request_route": Answer("request_route", "choice", DIRECT_REPLY, 0.95),
                 "reply_shape": Answer("reply_shape", "choice", "self_status", 0.95),
@@ -376,6 +398,9 @@ async def test_stub_jev_on_connected_optional_is_source_jev(jarvis_env, monkeypa
             answers["request_route"] = {"type": "choice", "choice": DIRECT_REPLY, "confidence": 0.96}
         if "reply_shape" in questions:
             answers["reply_shape"] = {"type": "choice", "choice": "social", "confidence": 0.94}
+        if "persona_intent" in questions:
+            # RFC-0218: the persona question rides the same owner-turn decide().
+            answers["persona_intent"] = {"type": "choice", "choice": "stay", "confidence": 0.93}
         return 200, {"model": "jev-latest", "answers": answers}, ""
 
     set_http_post(jev_post, fixture=True)
@@ -403,18 +428,30 @@ async def test_stub_jev_on_connected_optional_is_source_jev(jarvis_env, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_cold_laya_does_not_stall_the_turn(jarvis_env):
+async def test_cold_laya_does_not_stall_the_turn(jarvis_env, monkeypatch):
     from app.decision.laya import runtime as laya_runtime
 
     laya_runtime.reset_runtime()
-    started = time.perf_counter()
-    turn = await decide_owner_turn(
-        "Hello there",
-        baseline=route_request("Hello there"),
-        decision_tier="local",
-    )
-    elapsed_ms = (time.perf_counter() - started) * 1000.0
-    assert elapsed_ms < 120.0
+    loader = _Blocker()
+    monkeypatch.setattr(laya_runtime, "_load_agent", loader.block)
+    with laya_runtime._LOCK:
+        laya_runtime._STATE.enabled = True
+    laya_runtime._start_load()
+    try:
+        assert loader.started.wait(5), "cold Laya load never started"
+        turn = await decide_owner_turn(
+            "Hello there",
+            baseline=route_request("Hello there"),
+            decision_tier="local",
+        )
+        assert not loader.finished.is_set(), "turn waited for the cold Laya load"
+        assert laya_runtime.is_ready() is False
+    finally:
+        loader.release.set()
+        thread = laya_runtime._LOAD_THREAD
+        if thread is not None:
+            thread.join(timeout=5)
+        laya_runtime.reset_runtime()
     assert turn.reflex is not None
     assert turn.reflex.source != "laya"
     assert turn.route.kind == DIRECT_REPLY
@@ -433,8 +470,10 @@ async def test_slow_laya_fixture_falls_back_inside_deadline(jarvis_env, monkeypa
     laya_pins.write_test_install()
     laya_runtime.enable(warm=True)
 
+    blocker = _Blocker()
+
     def slow_decide(**_kwargs):
-        time.sleep(0.25)
+        blocker.block()
         return {
             "request_route": Answer("request_route", "choice", DIRECT_REPLY, 0.99),
             "reply_shape": Answer("reply_shape", "choice", "social", 0.99),
@@ -442,17 +481,17 @@ async def test_slow_laya_fixture_falls_back_inside_deadline(jarvis_env, monkeypa
 
     laya_runtime.set_decide_fn(slow_decide)
     try:
-        started = time.perf_counter()
         turn = await decide_owner_turn(
             "Hello there",
             baseline=route_request("Hello there"),
             decision_tier="local",
         )
-        elapsed_ms = (time.perf_counter() - started) * 1000.0
-        assert elapsed_ms < 120.0
+        assert blocker.started.is_set(), "slow Laya fixture was never called"
+        assert not blocker.finished.is_set(), "turn waited for the slow Laya fixture"
         assert turn.reflex is not None
         assert turn.reflex.source != "laya" or turn.reflex.fallback_used is True
         assert turn.reflex.source in {"rules", "generative", "deadline_fallback"} or turn.reflex.fallback_used
     finally:
+        blocker.release.set()
         laya_runtime.reset_runtime()
         laya_pins.clear_install()

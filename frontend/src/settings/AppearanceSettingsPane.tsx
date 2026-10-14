@@ -13,8 +13,9 @@ import type { PresentationSettings } from "../presence/presenceTypes"
 import { MUSCULAR_HUMANOID_AVATAR_ID } from "../presence/renderers/HumanoidPresence"
 import {
   MYTHIC_LIVING_AVATAR_ID,
+  MYTHIC_AVATAR_CHOICES,
+  LEGACY_HUMANOID_AVATAR_ID,
   MYTHIC_LIVE_B_AVATAR_ID,
-  MYTHIC_PORTRAIT_A_AVATAR_ID,
 } from "../presence/mythicPersonaVariant"
 
 type AppearanceSettingsPaneProps = {
@@ -109,7 +110,7 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
         <button
           type="button"
           disabled={busy}
-          className={selected === "humanoid" ? "active" : ""}
+          className={selected === "humanoid" && settings.avatarId !== LEGACY_HUMANOID_AVATAR_ID ? "active" : ""}
           onClick={() =>
             apply(
               { shell: "hud", requestedPresence: "humanoid", avatarId: "jarvis_base" },
@@ -134,42 +135,23 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
           <PresenceModePreview mode="muscular_humanoid" />
           Muscular humanoid · showcase
         </button>
-        <button
-          type="button"
-          disabled={busy}
-          className={selected === "particle_bust" ? "active" : ""}
-          onClick={() =>
-            apply(
-              { shell: "hud", requestedPresence: "particle_bust", avatarId: MYTHIC_PORTRAIT_A_AVATAR_ID },
-              "Mythic portrait cloud A active. Persona selections morph immediately on the shared particle stage.",
-            )
-          }
-        >
-          <PresenceModePreview mode="particle_bust" />
-          Mythic persona A · portrait cloud
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          className={selected === "mythic_live_b" ? "active" : ""}
-          onClick={() =>
-            apply(
-              { shell: "hud", requestedPresence: "particle_bust", avatarId: MYTHIC_LIVE_B_AVATAR_ID },
-              "Mythic persona B active: detailed particle artwork with live gaze.",
-            )
-          }
-        >
-          <PresenceModePreview mode="mythic_live_b" />
-          Mythic persona B · live gaze
-        </button>
         <button type="button" disabled={busy}
-          className={selected === "mythic_living_b" ? "active" : ""}
-          onClick={() => apply({ shell: "hud", requestedPresence: "particle_bust", avatarId: MYTHIC_LIVING_AVATAR_ID },
-            "Anzu and Nabu emerge from the window edge with breathing bodies and settling wings. Other personas retain their detailed B avatars.")}
+          className={settings.requestedPresence === "humanoid" && settings.avatarId === LEGACY_HUMANOID_AVATAR_ID ? "active" : ""}
+          onClick={() => apply({ shell: "hud", requestedPresence: "humanoid", avatarId: LEGACY_HUMANOID_AVATAR_ID })}
         >
-          <PresenceModePreview mode="mythic_live_b" />
-          Living body · Anzu / Nabu
+          <PresenceModePreview mode="humanoid" />
+          Humanoid · original particle sculpture
         </button>
+        {MYTHIC_AVATAR_CHOICES.map(choice => (
+          <button key={choice.id} type="button" disabled={busy}
+            className={settings.requestedPresence === "particle_bust" && settings.avatarId === choice.id ? "active" : ""}
+            aria-pressed={settings.requestedPresence === "particle_bust" && settings.avatarId === choice.id}
+            onClick={() => apply({ shell: "hud", requestedPresence: "particle_bust", avatarId: choice.id })}
+          >
+            <PresenceModePreview mode="particle_bust" />
+            Mythic persona {choice.label}
+          </button>
+        ))}
         <button
           type="button"
           disabled={busy || !hexstrikeProfile}

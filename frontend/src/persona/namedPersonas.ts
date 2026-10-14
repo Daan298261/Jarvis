@@ -156,6 +156,11 @@ function fallbackState(activeId: NamedPersonaId): NamedPersonaState {
   }
 }
 
+/** Id of the currently published active persona, if any (read-only). */
+export function currentActivePersonaId(): string | undefined {
+  return cache?.active?.id
+}
+
 export async function loadNamedPersonas(): Promise<NamedPersonaState> {
   const revision = selectionRevision
   const state = await api<NamedPersonaState>("/api/named-personas")

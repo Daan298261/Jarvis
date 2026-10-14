@@ -36,9 +36,9 @@ def test_pair_intent_prepares_qr_without_detected_device(companion_env, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_prepare_pairing_preserves_wan_config_and_does_not_discover_devices(monkeypatch):
+async def test_prepare_pairing_preserves_remote_config_and_does_not_discover_devices(monkeypatch):
     manager = connectivity.Connectivity()
-    config = {"enabled": True, "remote": True, "wan_method": "ssh_reverse"}
+    config = {"enabled": True, "remote": True, "remote_explicit": True, "tailscale": True, "rfc0215_migrated": True}
     monkeypatch.setattr(manager, "config", lambda: config)
     monkeypatch.setattr(connectivity.GUARD, "cooldown_active", lambda: False)
 
@@ -80,3 +80,66 @@ def test_failed_preparation_does_not_issue_pairing_code(companion_env, monkeypat
                            json={"prepare_connection": True})
     assert response.status_code == 409
     assert client.get("/api/mobile/manage/pairing-codes/status", headers=headers).json()["active"] is False
+
+
+@pytest.mark.asyncio
+async def test_ready_lan_qr_does_not_wait_for_remote_setup_lock(monkeypatch):
+    import asyncio
+    manager = connectivity.Connectivity()
+    monkeypatch.setattr(connectivity.GUARD, "cooldown_active", lambda: False)
+    monkeypatch.setattr(manager, "config", lambda: {"enabled": True, "remote": True})
+    monkeypatch.setattr(manager, "snapshot", lambda: manager.state)
+    manager.report(local_verified=True, endpoints=["https://192.168.1.9:4781"], server_pin="b" * 64)
+    manager.server_task = asyncio.create_task(asyncio.sleep(60))
+    listen = AsyncMock()
+    monkeypatch.setattr(manager, "ensure_gateway_listening", listen)
+    await manager.lock.acquire()
+    try:
+        result = await asyncio.wait_for(manager.prepare_pairing(), 0.2)
+        assert result["server_pin"] == "b" * 64
+        assert manager.lock.locked()  # The background owner still owns the lock.
+        listen.assert_not_awaited()
+    finally:
+        manager.lock.release()
+        manager.server_task.cancel()
+        await asyncio.gather(manager.server_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_unready_gateway_lock_returns_bounded_retry_error(monkeypatch):
+    manager = connectivity.Connectivity()
+    monkeypatch.setattr(connectivity.GUARD, "cooldown_active", lambda: False)
+    monkeypatch.setattr(manager, "config", lambda: {"enabled": True})
+    monkeypatch.setattr(manager, "snapshot", lambda: {})
+    monkeypatch.setattr(connectivity, "PAIRING_LOCK_TIMEOUT_SECONDS", 0.01)
+    await manager.lock.acquire()
+    try:
+        with pytest.raises(HTTPException) as error:
+            await manager.prepare_pairing()
+        assert error.value.status_code == 409
+        assert "still starting" in error.value.detail
+        assert manager.lock.locked()
+    finally:
+        manager.lock.release()
+
+
+@pytest.mark.asyncio
+async def test_gateway_timeout_cancels_preparation_and_releases_lock(monkeypatch):
+    import asyncio
+    manager = connectivity.Connectivity()
+    monkeypatch.setattr(connectivity.GUARD, "cooldown_active", lambda: False)
+    monkeypatch.setattr(manager, "config", lambda: {"enabled": True})
+    monkeypatch.setattr(manager, "snapshot", lambda: {})
+    monkeypatch.setattr(connectivity, "PAIRING_GATEWAY_TIMEOUT_SECONDS", 0.01)
+    cancelled = asyncio.Event()
+    async def hang():
+        try:
+            await asyncio.sleep(60)
+        finally:
+            cancelled.set()
+    monkeypatch.setattr(manager, "ensure_gateway_listening", hang)
+    with pytest.raises(HTTPException) as error:
+        await manager.prepare_pairing()
+    assert error.value.status_code == 504
+    assert cancelled.is_set()
+    assert not manager.lock.locked()

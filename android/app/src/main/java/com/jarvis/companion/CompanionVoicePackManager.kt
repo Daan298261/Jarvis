@@ -44,6 +44,21 @@ class CompanionVoicePackManager(
     private val sttMutex = Mutex()
     private val ttsMutex = Mutex()
 
+    private val activeDownloads: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /** Voice pack ids with a download running (from any screen). */
+    fun downloadingPackIds(): Set<String> = activeDownloads.toSet()
+
+    /** The download that owns [progressRef]; a second, concurrent download must not reset or overwrite it. */
+    private val progressOwner = AtomicReference<String?>(null)
+
+    private fun roleDownloading(role: String): Boolean =
+        activeDownloads.any { id -> catalog.firstOrNull { it.id == id }?.role == role }
+
+    private fun setProgress(packId: String, pct: Int) {
+        if (progressOwner.get() == packId) progressRef.set(pct)
+    }
+
     private fun mutexFor(role: String) = if (role == "stt") sttMutex else ttsMutex
 
     init {
@@ -87,6 +102,30 @@ class CompanionVoicePackManager(
 
     fun storageBytes(): Long = packRoot.walkTopDown().filter { it.isFile }.map { it.length() }.sum()
 
+    /** Current (Leader-merged) catalogue; read by the RFC-0216 S5 downloaded-content inventory. */
+    fun catalog(): List<CompanionVoicePack> = catalog
+
+    /** App-private directory holding one sub-directory per installed voice pack. */
+    fun packRoot(): File = packRoot
+
+    /** null = some artifact missing, "" = every artifact matches its pinned SHA-256, else the mismatch copy. */
+    fun verifyInstalled(pack: CompanionVoicePack): String? = verifyPack(pack)
+
+    /**
+     * Deletes one pack directory by name: catalogue packs go through [deletePackAwait] (engine unload +
+     * MISSING status); directories of packs no longer in the catalogue are removed directly.
+     */
+    suspend fun deleteInstalledDir(name: String) {
+        val dir = File(packRoot, name)
+        require(PackDownloadPlan.isDirectChild(packRoot, name)) { "Not a voice pack directory: $name" }
+        check(name !in activeDownloads) { "$name is downloading; wait for it to finish first" }
+        if (catalog.any { it.id == name }) deletePackAwait(name) else withContext(Dispatchers.IO) {
+            dir.walkTopDown().filter { it.isFile }.forEach { digestCache.invalidate(it) }
+            if (dir.exists() && !dir.deleteRecursively()) error("Could not delete $name")
+        }
+        refreshStatus()
+    }
+
     fun selectedSttPack(): CompanionVoicePack? = catalog.firstOrNull { it.id == selectedSttPackId() }
     fun selectedTtsPack(): CompanionVoicePack? = catalog.firstOrNull { it.id == selectedTtsPackId() }
 
@@ -100,6 +139,9 @@ class CompanionVoicePackManager(
 
     fun isTtsReady(): Boolean =
         selectedTtsPack()?.let { packReady(it) && ttsStatusRef.get() in CompanionVoicePackStatus.USABLE } == true
+
+    /** True when every artifact of [packId] is on disk (installed), whether or not it is the selected pack. */
+    fun isPackInstalled(packId: String): Boolean = catalog.firstOrNull { it.id == packId }?.let { packReady(it) } == true
 
     private fun packReady(pack: CompanionVoicePack): Boolean {
         if (pack.url.isBlank()) return false
@@ -148,6 +190,9 @@ class CompanionVoicePackManager(
     }
 
     private fun refreshOne(pack: CompanionVoicePack?, statusRef: AtomicReference<String>) {
+        // A running download owns this role's status; a refresh must not overwrite it.
+        // A running download owns this role's status (whether or not it is the selected pack); a refresh must not overwrite it.
+        if (pack != null && roleDownloading(pack.role)) return
         if (pack == null) {
             statusRef.set(CompanionVoicePackStatus.ERROR)
             errorRef.set("No voice pack selected")
@@ -174,14 +219,15 @@ class CompanionVoicePackManager(
 
     suspend fun downloadPack(packId: String, onProgress: (Int) -> Unit = {}) {
         val pack = catalog.firstOrNull { it.id == packId } ?: error("Unknown voice pack: $packId")
-        mutexFor(pack.role).withLock {
+        check(activeDownloads.add(pack.id)) { "${pack.label} is already downloading" }
+        try { mutexFor(pack.role).withLock {
         withContext(Dispatchers.IO) {
         require(pack.url.isNotBlank()) { "Leader has not published a download URL for voice pack ${pack.id}" }
         DeviceVoiceGuard.blockReason(app, pack)?.let { error(it) }
         if (pack.role == "stt") sttEngine.unload() else ttsEngine.unload()
         val statusRef = if (pack.role == "stt") sttStatusRef else ttsStatusRef
         statusRef.set(CompanionVoicePackStatus.DOWNLOADING)
-        progressRef.set(0)
+        if (progressOwner.compareAndSet(null, pack.id)) progressRef.set(0)
         errorRef.set("")
         val totalBytes = pack.artifacts.sumOf { it.sizeBytes.coerceAtLeast(1L) }
         var readTotal = 0L
@@ -203,7 +249,7 @@ class CompanionVoicePackManager(
                             output.write(buffer, 0, count)
                             readTotal += count
                             val pct = ((readTotal * 100) / totalBytes).toInt().coerceIn(0, 100)
-                            progressRef.set(pct)
+                            setProgress(pack.id, pct)
                             onProgress(pct)
                         }
                     }
@@ -219,13 +265,17 @@ class CompanionVoicePackManager(
                     error("Download checksum mismatch for ${art.filename}")
                 }
             }
-            partial.renameTo(target)
+            PackDownloadPlan.replaceWithVerified(partial, target)
             digestCache.invalidate(partial)
             if (art.sha256.isNotBlank()) digestCache.remember(target, art.sha256)
         }
         statusRef.set(CompanionVoicePackStatus.READY)
-        progressRef.set(100)
+        setProgress(pack.id, 100)
         }
+        }
+        } finally {
+            activeDownloads.remove(pack.id)
+            progressOwner.compareAndSet(pack.id, null)
         }
     }
 

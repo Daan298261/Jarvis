@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<!-- Existing English-only strings; new UI strings go in their own translated files (see strings_notifications.xml). -->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
     <string name="anzu_app_control_description">With your permission, ANZU reads the current app screen and performs requested app actions. Choose apps and action permissions in ANZU. Stop or disable control at any time.</string>
     <string name="app_name">ANZU</string>
     <string name="anzu_is_calling">ANZU is calling</string>
@@ -9,14 +10,15 @@
     <string name="anzu_call_unavailable">ANZU call unavailable</string>
     <string name="anzu_calls_channel">ANZU calls</string>
     <string name="pair_with_anzu">Pair with ANZU</string>
-    <string name="pair_with_anzu_desktop">Pair with ANZU on your desktop to connect.</string>
+    <string name="set_up_anzu_on_phone">Set up ANZU on this phone, or pair your desktop.</string>
+    <string name="phone_setup_body">ANZU can answer right here, with no desktop and no internet. Download the model once (about 1.3 GB), or load a model file you already copied to this phone.</string>
+    <string name="phone_setup_file_hint">Files are checked against the model\'s SHA-256 before ANZU uses them.</string>
     <string name="talk_to_anzu">Talk to ANZU</string>
     <string name="chat_empty_hint">One conversation across your phone and ANZU. Send a message, file, or voice note.</string>
     <string name="tasks_empty_hint">Tasks appear here as soon as ANZU starts working.</string>
     <string name="pending_may_be_working">ANZU may already be working on it. Check Tasks before sending it again. Dismissing does not cancel a task.</string>
     <string name="auto_anzu_selects">Auto · ANZU selects</string>
     <string name="studio_wait_for_anzu">Creative tools stay read-only until ANZU reports studio.available=true. No local preview engine runs on the phone.</string>
-    <string name="studio_connect_hint">Connect on the More tab to load live studio status from ANZU.</string>
     <string name="instructions_for_anzu">Instructions for ANZU</string>
     <string name="anzu_https_endpoint">ANZU HTTPS endpoint</string>
     <string name="confirm_fingerprint_anzu_desktop">Confirm this fingerprint on your ANZU desktop to finish pairing.</string>
@@ -28,6 +30,12 @@
     <string name="what_should_anzu_do">What should ANZU do?</string>
     <string name="schedule_on_anzu">Schedule on ANZU</string>
     <string name="about">About</string>
+    <string name="voice_credit_open_failed">Could not open the voice credit link in a browser.</string>
+    <string name="voice_credit_open_label">Open voice credit</string>
+    <string name="voice_credit_link_voice">Open Alba MacKenna voice</string>
+    <string name="voice_credit_link_license">Open CC BY 4.0 licence</string>
+    <string name="voice_credit_link_model">Open Kyutai Pocket TTS model</string>
+    <string name="voice_credit_link_conversion">Open soniqo ONNX INT8 conversion</string>
     <string name="sponsor_open_failed">Could not open Black Grid Publishing in a browser.</string>
     <string name="critical_call_body">A critical event needs your attention</string>
 </resources>

@@ -9,7 +9,9 @@ import argparse
 import asyncio
 import hashlib
 import ipaddress
+import logging
 import os
+import secrets
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
@@ -106,6 +108,77 @@ def _private_client(host: str) -> bool:
                 and not (address.version == 6 and address in ipaddress.ip_network("fd7a:115c:a1e0::/48")))
 
 
+_REMOTE_CACHE: dict[str, float | bool] = {"at": 0.0, "value": False}
+# Per-boot secret: the desktop's own loopback probes carry it, so loopback is not a free pass.
+SELF_TEST_HEADER = "x-anzu-self-test"
+SELF_TEST_SECRET = secrets.token_urlsafe(32)
+log = logging.getLogger(__name__)
+
+
+def invalidate_remote_cache() -> None:
+    """Drop the cached remote setting so a toggle (especially *off*) applies to the next request."""
+    _REMOTE_CACHE["at"] = 0.0
+    _REMOTE_CACHE["value"] = False
+
+
+def _remote_enabled() -> bool:
+    now = time.monotonic()
+    if not _REMOTE_CACHE["at"] or now - float(_REMOTE_CACHE["at"]) > 5:
+        try:
+            from .connectivity import CONNECTIVITY
+
+            _REMOTE_CACHE["value"] = bool(CONNECTIVITY.config().get("remote"))
+        except Exception:
+            # Fail closed: an unreadable config means LAN-only.
+            log.exception("Could not read companion remote setting; treating remote access as off")
+            _REMOTE_CACHE["value"] = False
+        _REMOTE_CACHE["at"] = now
+    return bool(_REMOTE_CACHE["value"])
+
+
+def client_allowed(host: str, remote_enabled: bool, self_test_token: str = "", *, public_forward: bool = False) -> bool:
+    """RFC-0215 gate: LAN clients always; Tailscale clients only with remote access on.
+
+    Loopback is never a free pass (any local process could proxy for an outsider);
+    only the desktop's own probes, carrying the per-boot secret, get through.
+    Public-internet clients are refused outright: off-LAN access is Tailscale only.
+    """
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    if address.is_loopback:
+        return bool(self_test_token) and secrets.compare_digest(self_test_token, SELF_TEST_SECRET)
+    from .remote_access import _is_lan_ip, is_tailscale_host
+
+    if is_tailscale_host(str(address)):
+        return remote_enabled
+    return _is_lan_ip(address) or bool(remote_enabled and public_forward and address.is_global)
+
+
+def _public_forward_enabled() -> bool:
+    from .connectivity import CONNECTIVITY
+    try:
+        return CONNECTIVITY.config().get("connection_mode") == "public_forward"
+    except Exception:
+        return False
+
+
+def server_proof(nonce: str) -> dict[str, str]:
+    """Sign a phone nonce with the gateway TLS key (the key the QR pin hashes).
+
+    Defence in depth on top of the TLS pin: the phone refuses a session unless the
+    desktop proves possession of the pinned key for a fresh phone nonce.
+    """
+    import base64
+
+    key_path = root() / "tls" / "server.key"
+    key = serialization.load_pem_private_key(key_path.read_bytes(), password=None)
+    public = key.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+    signature = key.sign(f"anzu-server-v1\n{nonce}".encode(), ec.ECDSA(hashes.SHA256()))
+    return {"server_key": base64.b64encode(public).decode(), "server_signature": base64.b64encode(signature).decode()}
+
+
 def gateway_app(upstream: str = "http://127.0.0.1:4780"):
     from .companion_security import GUARD
 
@@ -130,6 +203,8 @@ def gateway_app(upstream: str = "http://127.0.0.1:4780"):
         if not _companion_path_allowed(path):
             return JSONResponse({"detail": "Route unavailable on mobile gateway"}, 404)
         client_host = request.client.host if request.client else ""
+        if not client_allowed(client_host, _remote_enabled(), request.headers.get(SELF_TEST_HEADER, ""), public_forward=_public_forward_enabled()):
+            return JSONResponse({"detail": "Remote access is off on ANZU; turn it on in the pairing panel."}, 403)
         if path in {"api/companion/lan-beacon", "api/companion/lan-enroll"} and not _private_client(client_host):
             return JSONResponse({"detail": "LAN pairing is only available on the same local network as Jarvis."}, 403)
         if path.startswith((
@@ -177,6 +252,10 @@ def gateway_app(upstream: str = "http://127.0.0.1:4780"):
             await websocket.close(code=1013)
             return
         if not _companion_path_allowed(path):
+            await websocket.close(code=1008)
+            return
+        ws_host = websocket.client.host if websocket.client else ""
+        if not client_allowed(ws_host, _remote_enabled(), websocket.headers.get(SELF_TEST_HEADER, ""), public_forward=_public_forward_enabled()):
             await websocket.close(code=1008)
             return
         headers = [

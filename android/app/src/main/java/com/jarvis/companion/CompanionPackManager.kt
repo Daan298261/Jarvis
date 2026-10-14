@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.os.StatFs
 import android.util.Log
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
@@ -130,6 +131,10 @@ class CompanionPackManager(
     private val errorRef = AtomicReference("")
     private var catalog: List<CompanionPack> = CompanionPackCatalog.builtIn
     private val llamaDispatcher = Dispatchers.IO.limitedParallelism(1)
+    private val activeDownloads: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /** Pack ids with a download running (from any screen). */
+    fun downloadingPackIds(): Set<String> = activeDownloads.toSet()
 
     fun selectedPackId(): String = prefs.getString("selected_pack_id", CompanionPackCatalog.builtIn.first().id) ?: CompanionPackCatalog.builtIn.first().id
 
@@ -200,6 +205,28 @@ class CompanionPackManager(
 
     fun selectedPack(): CompanionPack? = catalog.firstOrNull { it.id == selectedPackId() }
 
+    /** Current (Leader-merged) catalogue; read by the RFC-0216 S5 downloaded-content inventory. */
+    fun catalog(): List<CompanionPack> = catalog
+
+    /** App-private directory holding model packs (and their `.partial` / `.importing` files). */
+    fun packRoot(): File = packDir
+
+    /**
+     * Deletes one file from [packRoot] by name (installed, retired, partial or import temp). The engine
+     * is unloaded first so a mapped model is released; status falls back to MISSING when the selected
+     * pack is gone, so chat routing fails closed.
+     */
+    suspend fun deleteInstalledFile(name: String) = withContext(llamaDispatcher) {
+        val file = File(packDir, name)
+        require(PackDownloadPlan.isDirectChild(packDir, name)) { "Not a model pack file: $name" }
+        check(activeDownloads.isEmpty()) { "A model download is running; wait for it to finish or cancel it first" }
+        engine.unload()
+        digestCache.invalidate(file)
+        if (file.exists() && !file.delete()) error("Could not delete $name")
+        refreshStatus()
+        progressRef.set(0)
+    }
+
     fun packFile(pack: CompanionPack): File = File(packDir, pack.filename)
 
     fun packCanLoad(pack: CompanionPack): Boolean {
@@ -220,6 +247,8 @@ class CompanionPackManager(
     }
 
     suspend fun refreshStatus() = withContext(Dispatchers.IO) {
+        // A running download of the selected pack owns the status; a refresh must not overwrite it.
+        if (selectedPackId() in activeDownloads) return@withContext
         val fallback = resolveOfflinePack()
         if (fallback != null) {
             statusRef.set(CompanionPackStatus.READY)
@@ -256,8 +285,26 @@ class CompanionPackManager(
         errorRef.set("")
     }
 
-    suspend fun downloadSelected(onProgress: (Int) -> Unit = {}) = withContext(Dispatchers.IO) {
-        val pack = selectedPack() ?: error("No pack selected")
+    suspend fun downloadSelected(onProgress: (Int) -> Unit = {}) =
+        downloadPack(selectedPack() ?: error("No pack selected"), onProgress)
+
+    /**
+     * Downloads [pack] into a `.partial` and only replaces the installed file after the pinned SHA-256
+     * verifies, so a failed update never removes the last good copy. Status reflects the selected pack
+     * again afterwards when [pack] is not the selected one.
+     */
+    suspend fun downloadPack(pack: CompanionPack, onProgress: (Int) -> Unit = {}) {
+        check(activeDownloads.add(pack.id)) { "${pack.label} is already downloading" }
+        try {
+            downloadPackInternal(pack, onProgress)
+        } finally {
+            activeDownloads.remove(pack.id)
+            // refreshStatus skips while the selected pack is still downloading elsewhere.
+            if (pack.id != selectedPackId()) withContext(kotlinx.coroutines.NonCancellable) { refreshStatus() }
+        }
+    }
+
+    private suspend fun downloadPackInternal(pack: CompanionPack, onProgress: (Int) -> Unit) = withContext(Dispatchers.IO) {
         require(pack.url.isNotBlank()) { "ANZU desktop has not published a download URL for this pack yet" }
         DeviceInferenceGuard.blockReason(app, pack)?.let { error(it) }
         statusRef.set(CompanionPackStatus.DOWNLOADING)
@@ -302,7 +349,7 @@ class CompanionPackManager(
                 error("Download checksum mismatch")
             }
         }
-        check(partial.renameTo(target)) { "Could not save the downloaded model" }
+        PackDownloadPlan.replaceWithVerified(partial, target)
         digestCache.invalidate(partial)
         if (pack.sha256.isNotBlank()) digestCache.remember(target, pack.sha256)
         statusRef.set(CompanionPackStatus.READY)
@@ -345,6 +392,51 @@ class CompanionPackManager(
         }
     }
 
+    /**
+     * Imports a GGUF the owner picked from storage. The bytes are copied into app storage, hashed, and
+     * only kept when they match a catalog model's pinned SHA-256; that model is then selected.
+     */
+    suspend fun importSideloaded(input: java.io.InputStream, declaredBytes: Long, onProgress: (Int) -> Unit = {}): CompanionPack = withContext(Dispatchers.IO) {
+        val maxBytes = (catalog.maxOfOrNull { it.sizeBytes } ?: 0L).coerceAtLeast(1L)
+        if (declaredBytes > maxBytes) error(ModelSideload.tooLargeCopy(maxBytes))
+        PackDownloadPlan.storageBlockReason(StatFs(packDir.absolutePath).availableBytes, declaredBytes.coerceAtLeast(0L), 0L)?.let { error(it) }
+        val temp = File(packDir, "sideload-${System.nanoTime()}.importing")
+        statusRef.set(CompanionPackStatus.DOWNLOADING)
+        progressRef.set(0)
+        errorRef.set("")
+        try {
+            val copied = ModelSideload.copyAndHash(input, temp, maxBytes, isCancelled = { !coroutineContext.isActive }) { bytes ->
+                if (declaredBytes > 0L) {
+                    val pct = ((bytes * 100) / declaredBytes).toInt().coerceIn(0, 99)
+                    progressRef.set(pct)
+                    onProgress(pct)
+                }
+            }
+            if (!copied.ggufHeader) error(ModelSideload.notGgufCopy())
+            val pack = ModelSideload.match(copied.digest, copied.bytes, catalog) ?: error(ModelSideload.unknownModelCopy(copied.digest))
+            engine.unload()
+            val target = packFile(pack)
+            digestCache.invalidate(target)
+            target.delete()
+            if (!temp.renameTo(target)) error("Could not move the model into ANZU storage")
+            digestCache.remember(target, pack.sha256)
+            selectPack(pack.id)
+            progressRef.set(100)
+            onProgress(100)
+            refreshStatus()
+            pack
+        } catch (error: Throwable) {
+            temp.delete()
+            // A rejected file must not mark an already-installed model as broken.
+            withContext(kotlinx.coroutines.NonCancellable) { refreshStatus() }
+            if (error !is CancellationException) {
+                Log.w(TAG, "Model import rejected: ${error.message}")
+                errorRef.set(error.message ?: "Model import failed")
+            }
+            throw error
+        }
+    }
+
     fun deleteSelected() {
         val pack = selectedPack()
         engine.unload()
@@ -373,7 +465,12 @@ class CompanionPackManager(
         statusRef.set(CompanionPackStatus.RUNNING)
         val nCtx = DeviceInferenceGuard.contextTokens(app, pack)
         val parentJob = coroutineContext[Job]!!
-        val cancelWatch = launch(Dispatchers.Default) {
+        // Started UNDISPATCHED on Unconfined: the watcher is already suspended in
+        // awaitCancellation() before the engine runs, and cancel() resumes it inline on the
+        // cancelling thread. A Default-dispatched watcher could be cancelled before it ever ran
+        // (its finally then never fires) or wait behind a busy pool, leaving native decode
+        // running after the user pressed stop.
+        val cancelWatch = launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
             try {
                 awaitCancellation()
             } finally {

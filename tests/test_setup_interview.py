@@ -131,15 +131,18 @@ def test_security_intent_keeps_red_team_manual_gated():
     assert rows["red_deephat"]["status"] == "manual authorization"
 
 
-def test_mobile_plan_uses_prepare_connection_not_tailscale():
+def test_mobile_plan_off_lan_is_tailscale_only():
     plan = plan_interview({}, hw=hw())
     assert plan["mobile"]["remote_access"] == "companion TLS 4781"
     assert plan["mobile"]["router_forwarding_required"] is False
-    assert "4781" in plan["mobile"]["router_forwarding"]
+    assert "Tailscale only" in plan["mobile"]["router_forwarding"]
+    assert "Tailscale only" in plan["mobile"]["reason"]
     assert plan["mobile"]["client"] == "Jarvis Android companion"
     script = render_mobile_script(plan)
-    assert "Prepare connection" in script
-    assert "UseRouterPortForward" in script
+    assert "Tailscale only" in script
+    assert "UseRouterPortForward" not in script
+    for removed in ("UPnP", "NAT-PMP", "PCP", "reverse tunnel"):
+        assert removed not in script
     assert "$Port = 4781" in script
     assert "$BeaconPort = 4782" in script
     assert "profile=any" in script
@@ -149,7 +152,6 @@ def test_mobile_plan_uses_prepare_connection_not_tailscale():
     assert "protocol=UDP" in script
     assert "Jarvis companion LAN beacon 4782" in script
     assert "profile=private" not in script
-    assert "Tailscale" not in script
     assert "winget install --id Tailscale" not in script
 
 

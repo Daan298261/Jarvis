@@ -14,15 +14,29 @@ BEACON_SERVICE = "jarvis-companion"
 
 
 def encode_beacon(payload: dict[str, Any]) -> bytes:
+    endpoints = []
+    seen: set[str] = set()
+    for item in list(payload.get("endpoints") or []) + [payload.get("https")]:
+        url = str(item or "").rstrip("/")
+        if not url.startswith("https://") or url in seen:
+            continue
+        seen.add(url)
+        endpoints.append(url)
     body = {
         "service": BEACON_SERVICE,
         "version": 1,
-        "https": payload["https"],
+        "https": str(payload["https"]).rstrip("/"),
         "server_pin": str(payload["server_pin"]).lower(),
         "name": str(payload.get("name") or "Jarvis")[:80],
         "lan_pair": True,
     }
+    if endpoints:
+        body["endpoints"] = endpoints[:8]
     blob = BEACON_MAGIC + json.dumps(body, separators=(",", ":")).encode()
+    if len(blob) > 1200:
+        # Keep the primary HTTPS origin; drop the candidate list if the datagram would overflow.
+        body.pop("endpoints", None)
+        blob = BEACON_MAGIC + json.dumps(body, separators=(",", ":")).encode()
     if len(blob) > 1200:
         raise ValueError("Beacon payload too large")
     return blob
@@ -50,12 +64,27 @@ def parse_beacon(raw: bytes) -> dict[str, Any] | None:
         return None
     if not https.startswith("https://"):
         return None
+    endpoints = []
+    seen: set[str] = set()
+    raw_endpoints = body.get("endpoints")
+    if isinstance(raw_endpoints, list):
+        for item in raw_endpoints:
+            url = str(item or "").rstrip("/")
+            if not url.startswith("https://") or url in seen:
+                continue
+            seen.add(url)
+            endpoints.append(url)
+    primary = https.rstrip("/")
+    if primary not in seen:
+        endpoints.insert(0, primary)
+        seen.add(primary)
     return {
         "service": BEACON_SERVICE,
-        "https": https.rstrip("/"),
+        "https": primary,
         "server_pin": pin,
         "name": str(body.get("name") or "Jarvis")[:80],
         "lan_pair": True,
+        "endpoints": endpoints[:8],
     }
 
 
@@ -78,9 +107,10 @@ def prefer_lan_https(endpoints: list[str], prefer_host: str = "") -> str:
     """LAN beacons must advertise an RFC1918 / .local origin, not the public hairpin.
 
     A VPN NIC often sorts ahead of 192.168. Prefer the origin on the same /24 as
-    the phone that probed, or the mapped home-LAN dest, never a WAN hostname.
+    the phone that probed, the mapped home-LAN dest, or the ranked home LAN ?
+    never a WAN hostname or a lexicographic VPN winner.
     """
-    from .wan_forward import is_rfc1918_ipv4
+    from .wan_forward import is_rfc1918_ipv4, order_lan_hosts
 
     values = [str(item).rstrip("/") for item in endpoints if item]
     lan_items = [item for item in values if _is_lan_origin(item)]
@@ -104,20 +134,34 @@ def prefer_lan_https(endpoints: list[str], prefer_host: str = "") -> str:
                         return item
                 except ValueError:
                     continue
+    hosts = [_lan_origin_host(item) for item in lan_items]
+    ordered = order_lan_hosts([host for host in hosts if is_rfc1918_ipv4(host)])
+    if ordered:
+        best = ordered[0]
+        for item in lan_items:
+            if _lan_origin_host(item) == best:
+                return item
+    # Hostnames (.local) keep their relative order after ranked IPs.
     return lan_items[0]
 
 
 def public_beacon_payload(snapshot: dict[str, Any], *, prefer_host: str = "") -> dict[str, Any] | None:
+    from .pairing_payload import order_phone_reachable_endpoints
+
     pin = str(snapshot.get("server_pin") or "").strip().lower()
-    endpoints = [str(item).rstrip("/") for item in (snapshot.get("endpoints") or []) if item]
+    endpoints = order_phone_reachable_endpoints(
+        [str(item).rstrip("/") for item in (snapshot.get("endpoints") or []) if item]
+    )
     if len(pin) != 64 or not endpoints:
         return None
     host = (prefer_host or "").strip() or str(snapshot.get("mapped_lan_ip") or "").strip()
     chosen = prefer_lan_https(endpoints, host)
     if not chosen:
         return None
+    ordered = list(dict.fromkeys([chosen, *endpoints]))
     return {
         "https": chosen,
+        "endpoints": ordered[:8],
         "server_pin": pin,
         "name": "Jarvis",
         "lan_pair": True,
@@ -257,19 +301,23 @@ class _BeaconProtocol(asyncio.DatagramProtocol):
     async def _broadcast_loop(self):
         try:
             while True:
-                payload = self._payload()
-                if payload:
+                for source, dest in beacon_send_plan():
+                    # Advertise the source NIC's LAN origin so a VPN default route
+                    # cannot win the lexicographic race in undirected broadcasts.
+                    payload = self._payload(str(source or ""))
+                    if not payload:
+                        continue
                     blob = encode_beacon(payload)
-                    for source, dest in beacon_send_plan():
-                        try:
-                            send_beacon_datagram(blob, dest, self._port, source)
-                        except OSError:
-                            continue
-                    if self._transport:
-                        try:
-                            self._transport.sendto(blob, ("255.255.255.255", self._port))
-                        except OSError:
-                            pass
+                    try:
+                        send_beacon_datagram(blob, dest, self._port, source)
+                    except OSError:
+                        continue
+                payload = self._payload()
+                if payload and self._transport:
+                    try:
+                        self._transport.sendto(encode_beacon(payload), ("255.255.255.255", self._port))
+                    except OSError:
+                        pass
                 await asyncio.sleep(2)
         except asyncio.CancelledError:
             return

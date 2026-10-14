@@ -48,8 +48,11 @@ class IngestBody(BaseModel):
 
 
 class ApkPrepareBody(BaseModel):
-    source_type: Literal["file"] = "file"
-    target: str = Field(min_length=1, max_length=4096)
+    source_type: Literal["file", "device", "ffs"] = "file"
+    target: str = Field(default="", max_length=4096)
+    device_serial: str | None = Field(default=None, max_length=256)
+    package_name: str | None = Field(default=None, max_length=256)
+    ffs_investigation_id: str | None = Field(default=None, max_length=64)
     question: str = Field(default="Static APK analysis: manifest, permissions and exported components",
                           min_length=1, max_length=10000)
     task_id: str | None = None
@@ -57,11 +60,12 @@ class ApkPrepareBody(BaseModel):
 
 class ApkDecompileBody(BaseModel):
     skip_jadx: bool = False
+    decompile_smali_fallback: bool = True
     background: bool = False
 
 
 def public_row(row: dict) -> dict:
-    return {k: v for k, v in row.items() if k not in {"manifest", "snapshot"}}
+    return {k: v for k, v in row.items() if k not in {"manifest", "snapshot", "_claim_token"}}
 
 
 async def _setup(android: bool):
@@ -138,16 +142,26 @@ async def ingest(body: IngestBody):
 @router.post("/apk/prepare")
 async def apk_prepare(body: ApkPrepareBody):
     try:
-        row = await asyncio.to_thread(apk_sidecar.prepare_apk, body.target, body.question,
-                                      load_settings().allowed_directories, body.task_id)
+        row = await asyncio.to_thread(
+            apk_sidecar.prepare_apk,
+            body.target or None,
+            body.question,
+            load_settings().allowed_directories,
+            body.task_id,
+            source_type=body.source_type,
+            device_serial=body.device_serial,
+            package_name=body.package_name,
+            ffs_investigation_id=body.ffs_investigation_id,
+        )
         return public_row(row)
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError) as exc:  # PermissionError/FileNotFoundError are OSError
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-async def _apk_decompile_background(ident: str, skip_jadx: bool, claimed: dict):
+async def _apk_decompile_background(ident: str, skip_jadx: bool, decompile_smali_fallback: bool, claimed: dict):
     try:
-        await SERVICE.run_apk(ident, "apk_decompile", {"skip_jadx": skip_jadx}, claimed)
+        await SERVICE.run_apk(ident, "apk_decompile", {
+            "skip_jadx": skip_jadx, "decompile_smali_fallback": decompile_smali_fallback}, claimed)
     except asyncio.CancelledError:
         logger.info("APK decompile for investigation %s was cancelled", ident)
         raise
@@ -156,7 +170,7 @@ async def _apk_decompile_background(ident: str, skip_jadx: bool, claimed: dict):
         logger.exception("Background APK decompile failed for investigation %s", ident)
     finally:
         # Covers a task cancelled before run_apk started; a no-op once decompile owns or finished the claim.
-        await asyncio.to_thread(apk_sidecar.release, ident)
+        await asyncio.to_thread(apk_sidecar.release, ident, claimed.get("_claim_token"))
 
 
 @router.post("/{ident}/apk/decompile")
@@ -169,15 +183,15 @@ async def apk_decompile(ident: str, body: ApkDecompileBody):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if body.background:
         try:
-            task = asyncio.create_task(_apk_decompile_background(ident, body.skip_jadx, row))
+            task = asyncio.create_task(_apk_decompile_background(ident, body.skip_jadx, body.decompile_smali_fallback, row))
         except BaseException:
-            await asyncio.to_thread(apk_sidecar.release, ident)
+            await asyncio.to_thread(apk_sidecar.release, ident, row.get("_claim_token"))
             raise
         _apk_tasks.add(task)
         task.add_done_callback(_apk_tasks.discard)
         return public_row(row)
     try:
-        await SERVICE.run_apk(ident, "apk_decompile", {"skip_jadx": body.skip_jadx}, row)
+        await SERVICE.run_apk(ident, "apk_decompile", {"skip_jadx": body.skip_jadx, "decompile_smali_fallback": body.decompile_smali_fallback}, row)
         return public_row(store.load(ident))
     except (ValueError, OSError, RuntimeError) as exc:
         # run_apk already released any claim decompile() never took over.
@@ -192,8 +206,20 @@ async def apk_summary(ident: str):
         raise HTTPException(status_code=404, detail="Unknown APK investigation") from exc
 
 
+@router.post("/{ident}/apk/report")
+async def apk_report(ident: str):
+    """Synthesize an APK investigation report from recorded evidence (RFC-0207 §9.4)."""
+    try:
+        row = await asyncio.to_thread(apk_sidecar.apk_synthesize_report, ident)
+        return public_row(row)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Unknown investigation") from exc
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("/{ident}/apk/{document}")
-async def apk_metadata(ident: str, document: Literal["manifest", "components"]):
+async def apk_metadata(ident: str, document: Literal["manifest", "components", "native", "endpoints", "crypto", "smali", "obfuscation"]):
     try:
         return await asyncio.to_thread(apk_sidecar.metadata, ident, document)
     except (ValueError, FileNotFoundError) as exc:

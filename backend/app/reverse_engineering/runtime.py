@@ -338,6 +338,7 @@ class Investigations:
         from . import apk_sidecar
         if operation == "apk_decompile" and claimed is None:
             claimed = await asyncio.to_thread(apk_sidecar.preflight, ident)
+        token = claimed.get("_claim_token") if claimed is not None else None
         work = None
         self.active[ident] = asyncio.current_task()
         try:
@@ -351,9 +352,10 @@ class Investigations:
                     work.exception()
             raise
         finally:
-            if claimed is not None:
-                # Frees a claim decompile() never took over; a no-op once decompile owns the row.
-                await asyncio.to_thread(apk_sidecar.release, ident)
+            if token is not None:
+                # Frees this claim if no operation took it over; a no-op once one owns or finished it,
+                # and the token keeps a late release from touching a newer claim.
+                await asyncio.to_thread(apk_sidecar.release, ident, token)
             if self.active.get(ident) is asyncio.current_task():
                 self.active.pop(ident, None)
 
