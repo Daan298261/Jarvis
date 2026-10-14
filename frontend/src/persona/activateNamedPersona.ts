@@ -2,10 +2,26 @@ import { isApiError } from "../api"
 import { readPresentationBootstrap, updatePresentation } from "../presence/presentationSettings"
 import { mythicAvatarForSelection } from "../presence/mythicPersonaVariant"
 import { installVoiceProfile } from "../tts/voiceProfiles"
-import { PERSONA_LABELS, selectNamedPersona, type NamedPersonaState } from "./namedPersonas"
+import { awaitPersonaMorphWithTimeout, type PersonaMorphContext } from "../presence/personaMorphHook"
+import {
+  PERSONA_LABELS,
+  ROSTER_IDS,
+  canonicalizePersonaId,
+  currentActivePersonaId,
+  selectNamedPersona,
+  type NamedPersonaId,
+  type NamedPersonaState,
+} from "./namedPersonas"
 
 export type ActivatePersonaOptions = {
   onProgress?: (message: string) => void
+  /** Why the switch happened; owner-initiated activation is "manual" (RFC-0218 S3 passes "intent"). */
+  reason?: PersonaMorphContext["reason"]
+}
+
+function rosterId(raw: string | undefined | null): NamedPersonaId | undefined {
+  const id = canonicalizePersonaId(raw || "")
+  return ROSTER_IDS.find((personaId) => personaId === id)
 }
 
 /** Select a main persona; install its neural voice pack first when the server requires it. */
@@ -16,13 +32,25 @@ export async function activateNamedPersona(
   // A named persona owns the main figure as well as the voice. Apply the HUD
   // mode optimistically so the existing particle stage starts morphing on the
   // same click instead of leaving the generic humanoid on screen.
+  const fromId = rosterId(currentActivePersonaId()) ?? "anzu"
+  const variant = mythicAvatarForSelection(readPresentationBootstrap().avatarId)
   const presenceUpdate = updatePresentation({
     shell: "hud",
     requestedPresence: "particle_bust",
     avatarId: mythicAvatarForSelection(readPresentationBootstrap().avatarId),
   })
   const personaUpdate = activatePersonaVoice(id, options)
-  const [presenceResult, personaResult] = await Promise.allSettled([presenceUpdate, personaUpdate])
+  // RFC-0218 S5: cloud → persona morph seam. Bounded by a timeout and never throws,
+  // so it cannot block or fail activation. Layout stays "A" until S4 lands.
+  const toId = rosterId(id)
+  const morph = toId
+    ? awaitPersonaMorphWithTimeout(fromId, toId, {
+      reason: options.reason ?? "manual",
+      layout: "A",
+      variant,
+    })
+    : Promise.resolve()
+  const [presenceResult, personaResult] = await Promise.allSettled([presenceUpdate, personaUpdate, morph])
   if (personaResult.status === "rejected") throw personaResult.reason
   if (presenceResult.status === "rejected") throw presenceResult.reason
   return personaResult.value
