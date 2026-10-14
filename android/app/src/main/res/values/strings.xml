@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<!-- Existing English-only strings; new UI strings go in their own translated files (see strings_notifications.xml). -->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
     <string name="app_name">ANZU</string>
     <string name="anzu_is_calling">ANZU is calling</string>
     <string name="anzu_has_update">ANZU has an update</string>
