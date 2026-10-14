@@ -129,7 +129,8 @@ class BrowserUseBackend:
     license_id = "MIT"
 
     def available(self) -> bool:
-        return _module_available("browser_use")
+        from .isolated_runtime import installed_worker_python
+        return installed_worker_python("browser-use") is not None or _module_available("browser_use")
 
     def probe(self) -> dict[str, Any]:
         if self.available():
@@ -194,6 +195,21 @@ class BrowserUseBackend:
                 return ToolResult(False, "", error=blocked)
 
         current = settings or load_settings()
+        from .isolated_runtime import installed_worker_python, run_isolated
+        if installed_worker_python("browser-use"):
+            from ..config import apply_playwright_browsers_path
+            from .local_llm import local_openai_base_url
+            apply_playwright_browsers_path()
+            executable_path = None
+            try:
+                from playwright.async_api import async_playwright
+                async with async_playwright() as pw:
+                    if Path(pw.chromium.executable_path).is_file():
+                        executable_path = pw.chromium.executable_path
+            except ImportError:
+                pass
+            import os
+            return await run_isolated("browser-use", {"goal": cleaned_goal, "url": cleaned_url, "base_url": local_openai_base_url(current), "model": local_browser_use_model(current), "api_key": os.environ.get("JARVIS_LLM_API_KEY") or "local", "headless": current.browser.headless, "profile_dir": str(browser_use_user_data_dir()), "executable_path": executable_path}, timeout=180)
         _SESSION_REUSED = False
         task = cleaned_goal
         if cleaned_url and cleaned_url not in task:

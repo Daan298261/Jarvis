@@ -29,7 +29,13 @@ Add an optional Manifest V3 Chrome extension and a Windows native messaging host
 
 ## Out of scope
 
-Chrome Web Store publication, installer changes, full filter-list ad blocker, iframe/shadow-DOM automation, cloud computer-use dependencies, and bypassing site protections. Live Chrome installation and model-driven Windows end-to-end acceptance remain separate from source tests.
+Chrome Web Store publication and bypassing site protections. Live Chrome installation and model-driven Windows end-to-end acceptance remain separate from source tests.
+
+## Owner-approved completion scope (2026-10-14)
+
+Daan requested implementation of the remaining listed capabilities, explicitly including optional Browser Use, UFO and Cua workers. Extend this ticket with open-shadow-DOM and permitted-frame controls, observed-link downloads and bounded owner-file uploads, built-in web search, broader filter-list ad blocking, stable extension identity and easier native-host setup, and working isolated optional-worker installation/runtime adapters. Keep private cookies/passwords out of snapshots, preserve per-site/tab sharing and existing approvals, and report closed shadow roots or inaccessible frames honestly. Configure workers for the local model and avoid changing ANZU's Python dependencies through worker installs.
+
+Additional likely files: `backend/app/workers/{install,browser,computer}.py`, optional-worker runners and runtime helpers, `backend/app/api/tools.py`, browser connector setup API/UI, and their focused tests. Installer payload changes are authorized only if needed to deliver this ticket's connector; no stable promotion is requested.
 
 ## Validation
 

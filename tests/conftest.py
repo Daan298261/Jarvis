@@ -22,6 +22,13 @@ async def _database_engine_hygiene_after_test():
     await dispose_database_engine()
 
 
+@pytest.fixture(autouse=True)
+def _isolated_optional_worker_test_paths(tmp_path, monkeypatch):
+    """Unit tests must never install into or detect the owner's worker environments."""
+    from app.workers import isolated_runtime
+    monkeypatch.setattr(isolated_runtime, "runtime_root", lambda worker_id: tmp_path / "workers" / worker_id)
+
+
 @pytest.fixture
 async def jarvis_env(tmp_path, monkeypatch):
     from app.db import session as session_mod

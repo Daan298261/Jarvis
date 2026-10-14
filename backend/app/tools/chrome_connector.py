@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import math
+import mimetypes
 import os
 import time
 import uuid
@@ -12,7 +14,7 @@ from urllib.parse import urlparse
 
 from .base import ToolResult
 
-ACTIONS = frozenset({"chrome_status", "chrome_snapshot", "chrome_find", "chrome_click", "chrome_fill", "chrome_block_ads"})
+ACTIONS = frozenset({"chrome_status", "chrome_snapshot", "chrome_find", "chrome_click", "chrome_fill", "chrome_block_ads", "chrome_frames", "chrome_upload", "chrome_download"})
 
 
 def connector_dir() -> Path:
@@ -56,7 +58,7 @@ async def execute_connector(action: str, **arguments) -> ToolResult:
     gate = evaluate_tool_permissions("browser", {"url": url, "action": action})
     if gate.status != "allow":
         return ToolResult(False, "", error=gate.reason or "Browser permission required")
-    if action in {"chrome_click", "chrome_fill"} and not str(arguments.get("target_id") or "").strip():
+    if action in {"chrome_click", "chrome_fill", "chrome_upload", "chrome_download"} and not str(arguments.get("target_id") or "").strip():
         return ToolResult(False, "", error="target_id from a fresh chrome_snapshot is required")
     if action == "chrome_find" and not str(arguments.get("text") or "").strip():
         return ToolResult(False, "", error="text is required")
@@ -71,14 +73,62 @@ async def execute_connector(action: str, **arguments) -> ToolResult:
         timeout = min(30, max(1, timeout))
     except (TypeError, ValueError):
         return ToolResult(False, "", error="timeout_seconds must be a finite number")
+    frame_id = arguments.get("frame_id", 0)
+    if not isinstance(frame_id, int) or isinstance(frame_id, bool) or frame_id < 0:
+        return ToolResult(False, "", error="frame_id must be a non-negative integer")
+    for key in ("frame_url", "download_url"):
+        target = str(arguments.get(key) or "")
+        if (key == "frame_url" and frame_id) or (key == "download_url" and action == "chrome_download"):
+            parsed_target = urlparse(target)
+            if parsed_target.scheme not in {"http", "https"} or not parsed_target.hostname or parsed_target.username or parsed_target.password:
+                return ToolResult(False, "", error=f"An exact HTTP(S) {key} is required")
+            extra_gate = evaluate_tool_permissions("browser", {"url": target, "action": action})
+            if extra_gate.status != "allow":
+                return ToolResult(False, "", error=extra_gate.reason or "Browser permission required")
+    payload = {"action": action, "url": url, "frame_id": frame_id}
+    for key in ("target_id", "text", "enabled", "frame_url", "download_url"):
+        if key in arguments:
+            payload[key] = arguments[key]
+    if not frame_id:
+        payload.pop("frame_url", None)
+    if action == "chrome_upload":
+        from .safety import resolve_allowed_path
+        try:
+            path = Path(resolve_allowed_path(str(arguments.get("path") or ""), arguments.get("_allowed", [])))
+            if not path.is_file():
+                raise ValueError("Upload path must be a file")
+            size = path.stat().st_size
+            if size > 20 * 1024 * 1024:
+                raise ValueError("Chrome uploads are limited to 20 MiB")
+            upload_id = uuid.uuid4().hex
+            payload.update(upload_id=upload_id, filename=path.name, mime=mimetypes.guess_type(path.name)[0] or "application/octet-stream", size=size)
+            result = await _send(root, state, {**payload, "stage": "begin"}, timeout)
+            if not result.success:
+                return result
+            with path.open("rb") as source:
+                while chunk := source.read(192 * 1024):
+                    result = await _send(root, state, {**payload, "stage": "chunk", "chunk": base64.b64encode(chunk).decode("ascii")}, timeout)
+                    if not result.success:
+                        return result
+            return await _send(root, state, {**payload, "stage": "finish"}, timeout)
+        except (OSError, ValueError, PermissionError) as exc:
+            return ToolResult(False, "", error=str(exc))
+    result = await _send(root, state, payload, timeout)
+    if action == "chrome_download" and result.success:
+        final_url = str(result.data.get("url") or "")
+        if final_url:
+            final_gate = evaluate_tool_permissions("browser", {"url": final_url, "action": action})
+            if final_gate.status != "allow":
+                return ToolResult(False, "", error=final_gate.reason or "Download redirected to an unapproved URL")
+    return result
+
+
+async def _send(root: Path, state: dict, payload: dict, timeout: float) -> ToolResult:
     request_id = uuid.uuid4().hex
     request = root / f"{request_id}.request.json"
     response = root / f"{request_id}.response.json"
     expires = time.time() + timeout
-    payload = {"id": request_id, "session": state["session"], "expires": expires, "action": action, "url": url}
-    for key in ("target_id", "text", "enabled"):
-        if key in arguments:
-            payload[key] = arguments[key]
+    payload = {**payload, "id": request_id, "session": state["session"], "expires": expires}
     atomic_json(request, payload)
     try:
         while time.time() < expires:

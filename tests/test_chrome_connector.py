@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import importlib.util
 import io
 import json
@@ -226,5 +227,73 @@ async def test_manifest_and_popup_load_in_real_chromium(tmp_path):
             async with website.expect_response("https://doubleclick.net/anzu-test-unblocked.png") as unblocked:
                 await website.evaluate("() => {const img = new Image(); img.src='https://doubleclick.net/anzu-test-unblocked.png'; document.body.append(img);}")
             assert (await unblocked.value).status == 200
+            ad_source = (ROOT / "extensions/chrome/ad-rules.js").read_text().replace("export async function", "async function", 1)
+            filters = await worker.evaluate(f"async id => {{ {ad_source}; const filters=await adRules(id); await chrome.declarativeNetRequest.updateSessionRules({{addRules:filters.rules}}); return {{count:filters.count, rules:filters.rules.length}}; }}", tab_id)
+            assert filters["count"] > 40000 and filters["rules"] < 5000
+            await worker.evaluate("async () => {const rules=await chrome.declarativeNetRequest.getSessionRules(); await chrome.declarativeNetRequest.updateSessionRules({removeRuleIds:rules.map(rule=>rule.id)});}")
         finally:
             await context.close()
+
+
+async def test_upload_is_chunked_and_workspace_scoped(bridge, monkeypatch):
+    from app.tools.base import ToolResult
+    sent = []
+    async def transport(root, state, payload, timeout):
+        sent.append(payload)
+        return ToolResult(True, "", data={"selected_file": payload.get("filename")})
+    monkeypatch.setattr(connector, "_send", transport)
+    source = bridge / "allowed" / "document.txt"
+    source.parent.mkdir()
+    source.write_bytes(b"x" * 500000)
+    result = await connector.execute_connector("chrome_upload", url="https://example.test/", target_id="observed", path=str(source), _allowed=[str(source.parent)])
+    assert result.success
+    assert [item["stage"] for item in sent] == ["begin", "chunk", "chunk", "chunk", "finish"]
+    assert b"".join(base64.b64decode(item["chunk"]) for item in sent if item["stage"] == "chunk") == source.read_bytes()
+    assert all(len(json.dumps(item)) < native.MAX_MESSAGE for item in sent)
+    sent.clear()
+    result = await connector.execute_connector("chrome_upload", url="https://example.test/", target_id="observed", path=str(source), _allowed=[str(bridge / "elsewhere")])
+    assert not result.success and not sent
+
+
+async def test_frame_and_download_urls_use_network_permissions(bridge):
+    from app.policy.computer_permissions import apply_grant
+    apply_grant("network.local", "deny")
+    for action, extra in [("chrome_snapshot", {"frame_id":2,"frame_url":"http://127.0.0.1/"}), ("chrome_download", {"target_id":"link","download_url":"http://127.0.0.1/file"})]:
+        result = await connector.execute_connector(action, url="https://example.test/", **extra)
+        assert not result.success
+    assert not list(bridge.glob("*.request.json"))
+
+
+async def test_real_shadow_controls_and_upload_selection():
+    from playwright.async_api import async_playwright
+    from app.config import apply_playwright_browsers_path
+    apply_playwright_browsers_path()
+    source = (ROOT / "extensions/chrome/page.js").read_text().replace("export function", "function", 1)
+    async with async_playwright() as pw:
+        if not Path(pw.chromium.executable_path).is_file():
+            pytest.skip("Chromium required for browser smoke")
+        browser = await pw.chromium.launch(headless=True)
+        try:
+            page = await browser.new_page()
+            await page.route("https://example.test/**", lambda route: route.fulfill(body='<h1>Embedded information</h1>' if route.request.url.endswith('/frame') else '<div id="host"></div><input type="file" aria-label="Document"><a href="/file.txt">Download</a><iframe src="/frame"></iframe>'))
+            await page.goto("https://example.test/")
+            await page.evaluate("() => {const root=document.getElementById('host').attachShadow({mode:'open'}); root.innerHTML='<button>Shadow action</button><p>Shadow information</p>'; root.querySelector('button').onclick=()=>root.querySelector('p').textContent='Verified shadow action';}")
+            async def run(action, **extra):
+                return await page.evaluate(f"request => {{ {source}; return pageOperation(request); }}", {"action":action,"url":page.url,"expires":time.time()+10,**extra})
+            snapshot = await run("chrome_snapshot")
+            assert snapshot["open_shadow_roots"] == 1 and "Shadow information" in snapshot["text"]
+            shadow = next(control for control in snapshot["controls"] if control["name"] == "Shadow action")
+            await run("chrome_click", target_id=shadow["target_id"])
+            assert "Verified shadow action" in (await run("chrome_snapshot"))["text"]
+            snapshot = await run("chrome_snapshot")
+            field = next(control for control in snapshot["controls"] if control["input_type"] == "file")
+            common = {"target_id":field["target_id"],"upload_id":"test","filename":"document.txt","mime":"text/plain","size":5}
+            await run("chrome_upload", stage="begin", **common)
+            await run("chrome_upload", stage="chunk", chunk=base64.b64encode(b"hello").decode(), **common)
+            await run("chrome_upload", stage="finish", **common)
+            assert await page.locator('input[type=file]').evaluate("async el => await el.files[0].text()") == "hello"
+            frame = page.frames[1]
+            result = await frame.evaluate(f"request => {{ {source}; return pageOperation(request); }}", {"action":"chrome_snapshot","url":page.url,"frame_url":frame.url,"frame_id":2,"expires":time.time()+5})
+            assert result["frame_id"] == 2
+        finally:
+            await browser.close()

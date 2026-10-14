@@ -19,6 +19,8 @@ globalThis.chrome = {
     async updateSessionRules({removeRuleIds = [], addRules = []}) {rules = rules.filter(rule => !removeRuleIds.includes(rule.id)).concat(addRules);}
   },
   tabs: {async get() {return tab;}, onUpdated: updated, onRemoved: removed},
+  webNavigation: {async getAllFrames() {return [{frameId:0,url:tab.url},{frameId:2,url:"https://embedded.test/"}];}},
+  downloads: {async download({url}) {return url === "https://example.test/file.txt" ? 1 : 0;}, async search() {return [{state:"complete",finalUrl:"https://example.test/file.txt",filename:"file.txt",fileSize:5}];}},
   scripting: {async executeScript() {injections++; return [{result: {text: "hello"}}];}},
   action: {async setBadgeText() {}},
   permissions: {async contains() {return allowed;}},
@@ -31,6 +33,7 @@ globalThis.chrome = {
     }
   }
 };
+globalThis.fetch = async () => ({ok: true, async json() {return {domains:{any:["doubleclick.net","adnxs.com"],thirdParty:["third-party.test"]},source:"packaged-test-list"};}});
 await import("../background.js");
 const tick = () => new Promise(resolve => setTimeout(resolve, 10));
 async function message(value) {
@@ -54,7 +57,7 @@ test("shared tab commands, URL guard, expiry and tab-scoped reversible ad rules"
   assert.equal((await command("evaluate", {script: "alert(1)"})).success, false);
   assert.equal(injections, 1);
   assert.equal((await command("chrome_block_ads", {enabled: true})).success, true);
-  assert.equal(rules.length, 4);
+  assert.equal(rules.length, 2);
   assert.ok(rules.every(rule => JSON.stringify(rule.condition.tabIds) === "[7]"));
   assert.equal((await command("chrome_block_ads", {enabled: false})).success, true);
   assert.equal(rules.length, 0);
@@ -92,4 +95,20 @@ test("host disconnect and tab closure clear rules and sharing", async () => {
 test("ordinary web pages cannot send control messages", () => {
   const handled = messages.handlers[0]({action: "share", tabId: 7}, {id: "test", tab: {id: 7}, url: tab.url}, () => {throw new Error("must not respond");});
   assert.equal(handled, false);
+});
+
+test("frame discovery, URL binding and download dispatch", async () => {
+  await message({action:"share",tabId:7,include_frames:true});
+  assert.equal((await command("chrome_frames")).data.frames.length, 2);
+  assert.equal((await command("chrome_snapshot",{frame_id:2,frame_url:"https://wrong.test/"})).success, false);
+  assert.equal((await command("chrome_snapshot",{frame_id:2,frame_url:"https://embedded.test/"})).success, true);
+  allowed = false;
+  assert.equal((await command("chrome_snapshot",{frame_id:2,frame_url:"https://embedded.test/"})).success, false);
+  allowed = true;
+  // Return an observed link for the page extraction phase.
+  const old = chrome.scripting.executeScript;
+  chrome.scripting.executeScript = async () => [{result:{download_url:"https://example.test/file.txt"}}];
+  assert.equal((await command("chrome_download",{download_url:"https://example.test/file.txt"})).data.state, "complete");
+  chrome.scripting.executeScript = old;
+  await message({action:"revoke"});
 });

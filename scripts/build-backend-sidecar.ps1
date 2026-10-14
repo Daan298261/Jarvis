@@ -91,6 +91,18 @@ if ($LASTEXITCODE -ne 0) {
     throw "Frozen backend cannot import kokoro/soundfile. The desktop voice would stay degraded."
 }
 
+# RFC-0217: ship the connector and a stdlib native host; consumers need no Python.
+$chromeAssets = Join-Path $OutDir "$name\_internal\app\tools\chrome_assets"
+New-Item -ItemType Directory -Path $chromeAssets -Force | Out-Null
+@('manifest.json','background.js','ad-rules.js','page.js','popup.html','popup.js','native_host.py','install-host.ps1') | ForEach-Object {
+    Copy-Item -LiteralPath (Join-Path $Root "extensions\chrome\$_") -Destination $chromeAssets -Force
+}
+Copy-Item -LiteralPath (Join-Path $Root 'extensions\chrome\filters') -Destination $chromeAssets -Recurse -Force
+$nativeHostDir = Join-Path $chromeAssets 'native'
+New-Item -ItemType Directory -Path $nativeHostDir -Force | Out-Null
+& $py -m PyInstaller --noconfirm --clean --onefile --name anzu-chrome-host --distpath $nativeHostDir --workpath (Join-Path $work 'chrome-host') --specpath (Join-Path $work 'chrome-host') (Join-Path $Root 'extensions\chrome\native_host.py')
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $nativeHostDir 'anzu-chrome-host.exe'))) { throw 'Chrome native-host build failed' }
+
 # Namespace-package collection can omit on-demand REA assets. Stage these
 # explicitly beside the frozen package so setup and skill loading work installed.
 $reaSource = Join-Path $Root "backend\app\reverse_engineering"
