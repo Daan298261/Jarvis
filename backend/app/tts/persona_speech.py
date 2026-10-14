@@ -16,6 +16,7 @@ skips it and speaks with Kokoro instead of going silent or evicting the
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -31,6 +32,8 @@ CHATTERBOX_VRAM_FLOOR_MIB = 2560
 _VRAM_CACHE_TTL_SECONDS = 30.0
 _vram_cache: tuple[float, tuple[bool, str]] | None = None
 _CHATTERBOX_ENGINES = frozenset({"chatterbox", "chatterbox_turbo", "chatterbox-turbo"})
+logger = logging.getLogger(__name__)
+
 _SYSTEM_ENGINES = frozenset({"system", "sapi", "windows", "espeak", "espeak-ng", "pyttsx3"})
 _KNOWN_NEURAL_IDS = frozenset(
     {
@@ -367,3 +370,43 @@ async def announce_stream_stall(
         return False
     await speak_stream_stall(exc, settings=settings, source=source)
     return True
+
+
+# RFC-0218 S2: spoken persona-switch line. Strong refs keep scheduled lines alive
+# until they finish (asyncio only holds weak references to tasks).
+_switch_announcements: set[asyncio.Task] = set()
+
+
+def persona_switch_line(persona_id: str, settings: AppSettings | None = None) -> str:
+    """Short spoken line announcing that ``persona_id`` has taken the turn."""
+    row = CATALOG[persona_id]
+    return with_address(f"{row.label} here, taking this one", settings)
+
+
+async def announce_persona_switch(persona_id: str, *, source: str = "persona_switch") -> dict[str, Any]:
+    """Queue the switch line on the front lane, voiced by the now-active persona.
+
+    The persona must already be active: delivery resolves the voice through
+    ``resolve_speaking_voice`` and playback synthesizes it with ``speak_text``.
+    """
+    from ..persona.chat_delivery import publish_owner_text
+
+    line = persona_switch_line(persona_id)
+    return await publish_owner_text(line, source=source, speak=True, lane="front")
+
+
+def _log_switch_announcement(task: asyncio.Task) -> None:
+    _switch_announcements.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning("persona switch line not spoken: %s", exc)
+
+
+def schedule_persona_switch_announcement(persona_id: str) -> asyncio.Task:
+    """Fire-and-forget the switch line. A failure is logged and never reaches the turn."""
+    task = asyncio.get_running_loop().create_task(announce_persona_switch(persona_id))
+    _switch_announcements.add(task)
+    task.add_done_callback(_log_switch_announcement)
+    return task

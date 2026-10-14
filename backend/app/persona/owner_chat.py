@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import uuid
 from collections import defaultdict
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Literal, TypedDict
 import time
 
 from ..config import load_settings
@@ -25,7 +26,7 @@ from .chat_delivery import (
 )
 from .weather import weather_system_message
 from ..events import BUS
-from ..tts.persona_speech import speech_lane_for_model
+from ..tts.persona_speech import schedule_persona_switch_announcement, speech_lane_for_model
 from ..agent.front_responder import (
     QueueSentenceWatch,
     TwoLaneTiming,
@@ -63,6 +64,73 @@ If a live briefing is attached, use those facts and do not invent numbers.
 Use internal reasoning when useful, but provide only the concise answer rather than hidden reasoning."""
 
 OWNER_CHAT_MAX_TOKENS = 512
+
+log = logging.getLogger(__name__)
+
+# RFC-0218 S2: reasons that move the active persona. Stays never reach the stream.
+PERSONA_SWITCH_REASONS = frozenset({"intent", "explicit_name"})
+
+
+# Owner-chat stream event: the backend changed the active persona this turn.
+# Functional form because ``from`` is a Python keyword.
+PersonaSwitchedEvent = TypedDict(
+    "PersonaSwitchedEvent",
+    {
+        "type": Literal["persona_switched"],
+        "conversation_id": str,
+        "from": str,
+        "to": str,
+        "reason": Literal["intent", "explicit_name"],
+        "decision_source": str,
+        "confidence": float,
+    },
+)
+
+
+class PersonaSwitchFailedEvent(TypedDict):
+    """Owner-chat stream event: a switch was decided but the persona could not bind."""
+
+    type: Literal["persona_switch_failed"]
+    conversation_id: str
+    to: str
+    error: str
+    detail: str
+
+
+def apply_persona_switch(intent: Any, conversation_id: str) -> dict[str, Any] | None:
+    """Activate the decided persona through the one activation path.
+
+    Returns the stream event to emit, or None when the turn stays. A bind failure
+    (voice pack missing) keeps the previous persona and is reported, not hidden.
+    """
+    if intent is None or not intent.switch or intent.reason not in PERSONA_SWITCH_REASONS:
+        return None
+    from .named_persona import NamedPersonaBindError, apply_main_persona
+
+    try:
+        apply_main_persona(intent.to)
+    except NamedPersonaBindError as exc:
+        log.warning(
+            "persona_intent_switch: could not activate %s (%s): %s", intent.to, exc.code, exc.detail
+        )
+        failed: PersonaSwitchFailedEvent = {
+            "type": "persona_switch_failed",
+            "conversation_id": conversation_id,
+            "to": intent.to,
+            "error": exc.code,
+            "detail": exc.detail,
+        }
+        return dict(failed)
+    switched: PersonaSwitchedEvent = {
+        "type": "persona_switched",
+        "conversation_id": conversation_id,
+        "from": intent.current,
+        "to": intent.to,
+        "reason": intent.reason,
+        "decision_source": intent.decision_source,
+        "confidence": float(intent.confidence),
+    }
+    return dict(switched)
 
 
 def owner_chat_max_tokens(profile: Any | None = None) -> int:
@@ -371,6 +439,14 @@ async def stream_owner_chat(
         settings=settings,
         decision_tier=str(getattr(settings.decision, "tier", "") or "local"),
     )
+    # RFC-0218 S2: activate before any speech so every line this turn (switch
+    # line, front ack, worker reply) resolves to the new persona's voice. The
+    # switch line is fire-and-forget; the turn continues without confirmation.
+    persona_event = apply_persona_switch(turn.persona_intent, cid)
+    if persona_event is not None:
+        yield persona_event
+        if persona_event["type"] == "persona_switched":
+            schedule_persona_switch_announcement(persona_event["to"])
     stream_key = f"owner:{cid}"
     clear_stream_speak_state(stream_key)
     early_tts_ids: list[str] = []
