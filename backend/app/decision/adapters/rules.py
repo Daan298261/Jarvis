@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import time
+from functools import lru_cache
 from typing import Any
 
 from ..policy import local_complexity_tier
@@ -24,6 +25,104 @@ _OBVIOUS_HARM = re.compile(
     r"|cipher\s+/w"
     r")"
 )
+
+
+# --- RFC-0218 persona_intent_switch -------------------------------------------------
+# Intent cues keyed by RFC-0137 roster ids (backend/app/persona/named_persona.ROSTER).
+# This is not a second roster: ids are filtered against the live CATALOG and the
+# descriptions come from each row's role. Main assistants (anzu, umi) are never an
+# intent target; they are reached by explicit name only.
+PERSONA_STAY = "stay"
+_PERSONA_INTENT_CUES: dict[str, str] = {
+    "enki": r"\b(?:scripts?|code|coding|program(?:ming)?|function|bug|debug|refactor|compile|pytest|unit tests?|repo(?:sitory)?|git|commit|deploy|automat(?:e|ion)|python|typescript|javascript|regex|sql)\b",
+    "nabu": r"\b(?:research|look into|find out about|remember|recall|memory|knowledge base|summari[sz]e (?:this|the) (?:paper|article|study))\b",
+    "mestor": r"\b(?:plan(?:ning)?|mission|roadmap|itinerary|milestones?|operations plan)\b",
+    "veles": r"\b(?:red team|pentest|penetration test|exploit|threat intel(?:ligence)?|attack surface|adversar(?:y|ial))\b",
+    "themis": r"\b(?:blue team|defen[cs]e|audit(?:ing)?|compliance|policy review|harden(?:ing)?)\b",
+    "aegir": r"\b(?:video|audio|podcast|camera footage|media file|record(?:ing)? (?:a|the) (?:clip|call|track))\b",
+    "bragi": r"\b(?:poem|story|novel|manuscript|chapter|lyrics|dialogue|screenplay)\b",
+    "hermes": r"\b(?:browse|website|web page|email|e-mail|send (?:a )?message|api call|open (?:the )?url)\b",
+    "heimdall": r"\b(?:monitor(?:ing)?|alerts?|sensors?|keep an eye on)\b",
+    "eir": r"\b(?:wellbeing|well-being|routine|meditat\w*|sleep schedule|household|chores)\b",
+    "maia": r"\b(?:marketing|social media|instagram|tiktok|audience|campaign|followers)\b",
+    "vulcan": r"\b(?:hardware|server rack|infrastructure|gpu|wiring|3d print\w*|soldering)\b",
+}
+_PERSONA_CHAT = re.compile(
+    r"(?i)^\W*(?:hi|hello|hey|yo|thanks|thank you|cheers|bye|goodbye|ok(?:ay)?|cool|nice|great|"
+    r"good (?:morning|afternoon|evening|night)|how are you|how(?:'s| is) it going|what'?s up)\b"
+)
+
+
+def _persona_catalog() -> dict[str, Any]:
+    from ...persona.named_persona import CATALOG
+
+    return CATALOG
+
+
+def persona_intent_targets() -> tuple[str, ...]:
+    catalog = _persona_catalog()
+    return tuple(pid for pid in catalog if pid in _PERSONA_INTENT_CUES)
+
+
+def persona_intent_descriptions() -> dict[str, str]:
+    catalog = _persona_catalog()
+    return {pid: f"{catalog[pid].label}: {catalog[pid].role}" for pid in persona_intent_targets()}
+
+
+@lru_cache(maxsize=1)
+def _persona_name_patterns() -> tuple[dict[str, str], re.Pattern[str], re.Pattern[str]]:
+    from ...persona.named_persona import _ID_ALIASES
+
+    catalog = _persona_catalog()
+    names: dict[str, str] = {}
+    for pid, row in catalog.items():
+        names[pid.lower()] = pid
+        names[str(row.label).lower()] = pid
+    for alias, pid in _ID_ALIASES.items():
+        if pid in catalog:
+            names[alias.lower()] = pid
+    alt = "|".join(sorted((re.escape(n) for n in names), key=len, reverse=True))
+    vocative = re.compile(rf"(?i)^\W*(?:(?:hey|hi|ok|okay|yo)\s+)?({alt})\b\s*[,:!.;-]")
+    request = re.compile(
+        rf"(?i)\b(?:switch(?: over)? to|talk to|let me (?:talk|speak) to|hand (?:this|it) (?:over )?to|give (?:this|it) to)\s+({alt})\b"
+    )
+    return names, vocative, request
+
+
+def explicit_persona_name(user_message: str) -> str:
+    """Roster persona the owner addressed or asked for by name; '' if none.
+
+    May equal the current persona; the caller decides what that means.
+    """
+    names, vocative, request = _persona_name_patterns()
+    text = user_message or ""
+    match = vocative.match(text) or request.search(text)
+    return names.get(match.group(1).lower(), "") if match else ""
+
+
+def infer_rules_persona_intent(user_message: str, *, current_persona: str = "") -> tuple[str, float]:
+    """Deterministic intent→persona baseline. Returns (persona_id | 'stay', confidence)."""
+    text = (user_message or "").strip()
+    if not text:
+        return PERSONA_STAY, 0.9
+    scores: dict[str, int] = {}
+    for pid in persona_intent_targets():
+        hits = len(re.findall(_PERSONA_INTENT_CUES[pid], text, flags=re.IGNORECASE))
+        if hits:
+            scores[pid] = hits
+    if not scores:
+        return PERSONA_STAY, 0.9
+    if _PERSONA_CHAT.match(text) and len(text.split()) <= 6:
+        # Hysteresis: social/ack turns never flip persona.
+        return PERSONA_STAY, 0.9
+    best = max(scores.values())
+    leaders = [pid for pid, n in scores.items() if n == best]
+    if len(leaders) > 1:
+        return PERSONA_STAY, 0.6
+    pick = leaders[0]
+    if pick == (current_persona or "").strip().lower():
+        return PERSONA_STAY, 0.9
+    return pick, 0.85
 
 
 def available(*, privacy: str = "local_only", decision_class: str = "") -> tuple[bool, str]:
@@ -136,6 +235,14 @@ def decide(
                 if pick not in question.choices:
                     pick = question.choices[0] if question.choices else "keep_front"
                 answers[qid] = _answer_choice(qid, pick, 0.9)
+            elif qid == "persona_intent":
+                # Explicit name and lock are resolved before decide() in
+                # surfaces.persona_intent_precheck; this branch is the intent baseline only.
+                current = str(state.get("current_persona") or "")
+                pick, conf = infer_rules_persona_intent(prompt, current_persona=current)
+                if pick not in question.choices:
+                    pick, conf = PERSONA_STAY, 0.9
+                answers[qid] = _answer_choice(qid, pick, conf)
             elif qid in {"tool_select", "tool_shortlist"} or decision_class in {
                 "tool_selection",
                 "tool_shortlist",

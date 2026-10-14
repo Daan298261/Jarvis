@@ -398,6 +398,9 @@ async def test_stub_jev_on_connected_optional_is_source_jev(jarvis_env, monkeypa
             answers["request_route"] = {"type": "choice", "choice": DIRECT_REPLY, "confidence": 0.96}
         if "reply_shape" in questions:
             answers["reply_shape"] = {"type": "choice", "choice": "social", "confidence": 0.94}
+        if "persona_intent" in questions:
+            # RFC-0218: the persona question rides the same owner-turn decide().
+            answers["persona_intent"] = {"type": "choice", "choice": "stay", "confidence": 0.93}
         return 200, {"model": "jev-latest", "answers": answers}, ""
 
     set_http_post(jev_post, fixture=True)

@@ -8,10 +8,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from .reflex import decide
-from .types import Answer, DecisionResult, LatencyBreakdown, PrivacyMode, Question
+from .types import Answer, DecisionResult, DecisionSource, LatencyBreakdown, PrivacyMode, Question
 
 log = logging.getLogger("jarvis.decision.surfaces")
 
@@ -45,6 +46,139 @@ def route_persona_model(
         deadline_ms,
         privacy,
     )
+
+
+@dataclass(frozen=True)
+class PersonaIntentDecision:
+    """RFC-0218 S1: which persona should run this turn.
+
+    ``to`` equals ``current`` when the turn stays. ``reason`` is ``"explicit_name"``,
+    ``"intent"`` for a switch, else why it stayed (``"locked"``, ``"no_intent"``,
+    ``"below_floor"``, ``"already_active"``, ``"deadline_fallback"``).
+    ``"no_current_persona"`` has empty ``current``/``to``: no switch is possible.
+    """
+
+    current: str
+    to: str
+    reason: str
+    decision_source: DecisionSource
+    confidence: float
+    reflex: DecisionResult | None = None
+
+    @property
+    def switch(self) -> bool:
+        return self.to != self.current
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "from": self.current,
+            "to": self.to,
+            "switch": self.switch,
+            "reason": self.reason,
+            "decision_source": self.decision_source,
+            "confidence": round(float(self.confidence), 3),
+        }
+
+
+def persona_intent_question() -> Question:
+    from .adapters.rules import PERSONA_STAY
+    from ..persona.named_persona import CATALOG
+
+    ids = tuple(CATALOG)
+    return Question(
+        id="persona_intent",
+        type="choice",
+        prompt="Which ANZU persona should handle this turn? Choose stay unless a new task clearly fits a specialist.",
+        choices=(PERSONA_STAY, *ids),
+        descriptions=(
+            "stay on the current persona: chit-chat, thanks, acknowledgement, or no specialist fit",
+            *(f"{CATALOG[pid].label}: {CATALOG[pid].role}" for pid in ids),
+        ),
+    )
+
+
+def persona_intent_stay(current: str, *, reason: str, source: DecisionSource, confidence: float = 1.0,
+                        reflex: DecisionResult | None = None) -> PersonaIntentDecision:
+    return PersonaIntentDecision(current, current, reason, source, confidence, reflex)
+
+
+@dataclass(frozen=True)
+class PersonaIntentPrecheck:
+    """What RFC-0218 settles *before* the single owner-turn ``decide()``.
+
+    ``decision`` is final when set (no current persona, explicit name, lock);
+    otherwise ``question`` joins the owner-turn questions and
+    :func:`persona_intent_from_result` applies floor/stay afterwards.
+    """
+
+    current: str
+    addressed_current: bool = False
+    decision: PersonaIntentDecision | None = None
+
+    @property
+    def question(self) -> Question | None:
+        return None if self.decision is not None else persona_intent_question()
+
+
+def persona_intent_precheck(user_message: str, *, current_persona: str, locked: bool) -> PersonaIntentPrecheck:
+    """Precedence before decide(): explicit roster name > manual lock.
+
+    A manual pin is the owner's explicit selection with the lock setting on
+    (RFC-0218 terms), so ``locked`` is what holds the persona. ``pinned`` alone
+    (e.g. docked on the HUD) does not block intent; it is passed to providers as
+    context. An explicit name always wins. No I/O: safe inside the 50 ms window.
+    """
+    from .adapters.rules import explicit_persona_name
+    from ..persona.named_persona import CATALOG
+
+    current = (current_persona or "").strip().lower()
+    if current not in CATALOG:
+        # No (or unknown) current persona: there is nothing to switch *from*, so the
+        # turn cannot auto-switch. Reported, not defaulted: S2 activates nothing.
+        log.warning("persona_intent_switch: no valid current persona (%r); not switching", current_persona)
+        return PersonaIntentPrecheck("", decision=PersonaIntentDecision("", "", "no_current_persona", "rules", 1.0))
+    explicit = explicit_persona_name(user_message)
+    # Naming the persona that is already active is addressing it ("Anzu, write me a
+    # script" → enki), not a pin: intent still decides, and a stay reports
+    # "already_active" instead of "no_intent".
+    addressed_current = explicit == current
+    if explicit and not addressed_current:
+        return PersonaIntentPrecheck(current, decision=PersonaIntentDecision(current, explicit, "explicit_name", "rules", 1.0))
+    if locked:
+        return PersonaIntentPrecheck(current, decision=persona_intent_stay(current, reason="locked", source="rules"))
+    return PersonaIntentPrecheck(current, addressed_current=addressed_current)
+
+
+def persona_intent_from_result(
+    precheck: PersonaIntentPrecheck,
+    result: DecisionResult,
+    *,
+    floor: float,
+) -> PersonaIntentDecision:
+    """Floor/stay handling on the shared owner-turn ``decide()`` result."""
+    from .adapters.rules import PERSONA_STAY
+
+    if precheck.decision is not None:
+        return precheck.decision
+    current = precheck.current
+    if result.fallback_used and (
+        result.source == "deadline_fallback" and "deadline" in (result.fallback_reason or "").lower()
+    ):
+        return persona_intent_stay(current, reason="deadline_fallback", source="deadline_fallback",
+                                   confidence=0.0, reflex=result)
+    question = precheck.question
+    answer = result.answers.get(question.id)
+    if answer is None or answer.type != "choice" or answer.value not in question.choices:
+        return persona_intent_stay(current, reason="no_intent", source=result.source, reflex=result)
+    confidence = float(answer.confidence or 0.0)
+    pick = str(answer.value)
+    if pick in {PERSONA_STAY, current}:
+        return persona_intent_stay(current, reason="already_active" if precheck.addressed_current else "no_intent",
+                                   source=result.source, confidence=confidence, reflex=result)
+    if confidence < floor:
+        return persona_intent_stay(current, reason="below_floor", source=result.source,
+                                   confidence=confidence, reflex=result)
+    return PersonaIntentDecision(current, pick, "intent", result.source, confidence, result)
 
 
 NO_TOOL_DESCRIPTION = "no tool: greeting, small talk, opinion or a question answered from knowledge"
