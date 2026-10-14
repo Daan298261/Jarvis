@@ -53,7 +53,7 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
       await applyRuntimeProfile(hexstrikeProfile.id || hexstrikeProfile.name)
       await updatePresentation({ shell: "hud", requestedPresence: "humanoid" })
       overlay?.focusHexSuite()
-      setMessage("HexStrike · Daybreak suite active.")
+      setMessage("HexStrike selected. Press Start in Daybreak to run the suite.")
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not activate HexStrike suite.")
     } finally {
