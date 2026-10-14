@@ -117,6 +117,9 @@ jobs:
       - name: HexStrike granted-only autostart tests
         run: npm run test:hexstrike-autostart
 
+      - name: Persona morph hook tests (RFC-0218 S5)
+        run: npm run test:persona-morph-hook
+
   installer-compile:
     name: installer-compile
     runs-on: windows-latest
