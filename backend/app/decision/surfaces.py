@@ -88,6 +88,7 @@ def persona_intent_question() -> Question:
     return Question(
         id="persona_intent",
         type="choice",
+        decision_class="persona_intent_switch",
         prompt="Which ANZU persona should handle this turn? Choose stay unless a new task clearly fits a specialist.",
         choices=(PERSONA_STAY, *ids),
         descriptions=(

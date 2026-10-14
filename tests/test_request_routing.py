@@ -25,7 +25,7 @@ def _laya_route(kind: str, shape: str = "ack") -> DecisionResult:
 async def test_intake_uses_bounded_provider_before_returning_parser(monkeypatch):
     seen = []
 
-    def decide(state, questions, decision_class, deadline, privacy):
+    def decide(state, questions, decision_class, deadline, privacy, **_kw):
         seen.append((state, questions, decision_class, deadline, privacy))
         return _laya_route(MANAGED_TASK, "handoff")
 
@@ -42,7 +42,7 @@ async def test_intake_uses_bounded_provider_before_returning_parser(monkeypatch)
 async def test_encoder_cannot_drop_explicit_action(monkeypatch):
     monkeypatch.setattr(
         "app.decision.owner_turn.decide",
-        lambda *args: _laya_route(DIRECT_REPLY, "social"),
+        lambda *args, **_kw: _laya_route(DIRECT_REPLY, "social"),
     )
     result = await request_routing.evaluate_request_route("open steam", route_request("open steam"))
     assert result.route.kind == MANAGED_TASK

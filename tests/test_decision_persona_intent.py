@@ -36,34 +36,27 @@ def _warm_imports():
     _decide_sync("warm up", route_request("warm up"), "local", settings, None, "warm", ctx)
 
 
-@pytest.fixture(autouse=True)
-def frozen_reflex_clock(monkeypatch):
-    """Inject a frozen clock into Reflex so elapsed time reads 0 ms against the
-    unchanged 50 ms budget: semantics tests can't flip into deadline_fallback
-    under CI load. Budget/deadline behaviour has its own tests below."""
-    from types import SimpleNamespace
-
-    monkeypatch.setattr("app.decision.reflex.time", SimpleNamespace(perf_counter=lambda: 0.0))
-
-
-def _sync_turn(text: str, current: str, **kw):
-    """The owner-turn worker body, minus the outer wall-clock wait_for."""
-    from app.decision.owner_turn import _decide_sync
-
-    settings = AppSettings()
-    ctx = resolve_persona_context(PersonaTurnContext(current=current, **kw), settings)
-    return _decide_sync(text, route_request(text), "local", settings, None, "sync", ctx)
+def _frozen_clock() -> float:
+    """Injected clock: elapsed time reads 0 ms against the unchanged 50 ms budget."""
+    return 0.0
 
 
 async def _turn(text: str, current: str = "anzu", **kw):
-    # Semantics tests run the worker body under the frozen Reflex clock. The real
-    # wall-clock path (decide_owner_turn + wait_for) is covered by the budget,
-    # deadline and settings tests, which call decide_owner_turn directly.
-    return _sync_turn(text, current, **kw)
+    # Semantics tests: public decide_owner_turn with the frozen clock injected, so
+    # CI load can't flip a turn into deadline_fallback. Budget/deadline tests use
+    # _owner_turn (wall clock, real wait_for).
+    return await decide_owner_turn(
+        text,
+        baseline=route_request(text),
+        decision_tier="local",
+        settings=AppSettings(),
+        persona=PersonaTurnContext(current=current, **kw),
+        clock=_frozen_clock,
+    )
 
 
 async def _owner_turn(text: str, current: str = "anzu", **kw):
-    """Real path: decide_owner_turn with its 50 ms wait_for."""
+    """Real path: decide_owner_turn on the wall clock with its 50 ms wait_for."""
     return await decide_owner_turn(
         text,
         baseline=route_request(text),
@@ -81,17 +74,30 @@ async def test_one_decide_per_turn_carries_persona_question(monkeypatch):
     real = owner_turn.decide
 
     def spy(state, questions, decision_class, *a, **kw):
-        calls.append((decision_class, [q.id for q in questions]))
+        calls.append((decision_class, {q.id: q.decision_class for q in questions}))
         return real(state, questions, decision_class, *a, **kw)
 
     monkeypatch.setattr(owner_turn, "decide", spy)
     turn = await _turn("Anzu, write me a script")
-    assert len(calls) == 1
-    decision_class, qids = calls[0]
-    assert decision_class == "request_routing" and decision_class in REFLEX_DECISION_CLASSES
-    assert decision_class not in POLICY_HARDENED_CLASSES
-    assert qids == ["request_route", "reply_shape", "persona_intent"]
-    assert turn.persona_intent.reflex is turn.reflex
+    assert len(calls) == 1  # exactly one decide() for routing + persona
+    decision_class, qclasses = calls[0]
+    assert decision_class == "request_routing"
+    assert list(qclasses) == ["request_route", "reply_shape", "persona_intent"]
+    assert qclasses["persona_intent"] == "persona_intent_switch"
+    assert "persona_intent_switch" in REFLEX_DECISION_CLASSES
+    assert "persona_intent_switch" not in POLICY_HARDENED_CLASSES
+    assert turn.persona_intent.to == "enki" and turn.persona_intent.reflex is turn.reflex
+
+
+def test_unlisted_question_class_is_rejected():
+    from dataclasses import replace
+
+    from app.decision.reflex import decide
+    from app.decision.surfaces import persona_intent_question
+
+    bad = replace(persona_intent_question(), decision_class="not_a_class")
+    with pytest.raises(ValueError, match="unlisted decision_class"):
+        decide({"user_message": "hi"}, [bad], "request_routing", 50.0)
 
 
 @pytest.mark.asyncio
@@ -117,7 +123,7 @@ async def test_anzu_write_me_a_script_switches_to_enki():
     intent = turn.persona_intent
     assert intent is not None
     assert intent.current == "anzu"
-    assert intent.to == "enki", (intent.as_dict(), turn.reflex and turn.reflex.fallback_reason)
+    assert intent.to == "enki"
     assert intent.switch and intent.reason == "intent"
     assert intent.confidence >= 0.75
 
@@ -166,7 +172,10 @@ async def test_lock_read_from_settings(monkeypatch):
     settings = AppSettings()
     settings.named_personas.auto_switch_locked = True
     turn = await decide_owner_turn(
-        "write me a script", baseline=route_request("write me a script"), settings=settings
+        "write me a script",
+        baseline=route_request("write me a script"),
+        settings=settings,
+        clock=_frozen_clock,
     )
     assert turn.persona_intent.to == "anzu"
     assert turn.persona_intent.reason == "locked"
@@ -198,19 +207,21 @@ async def test_below_confidence_floor_stays(monkeypatch):
         baseline=route_request("write me a script"),
         settings=settings,
         persona=PersonaTurnContext(current="anzu", locked=False),
+        clock=_frozen_clock,
     )
     assert tuned.persona_intent.to == "enki"
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("persona_id", ["enki", "anzu", "bragi"])
-def test_same_persona_named_is_address_not_pin(persona_id):
+async def test_same_persona_named_is_address_not_pin(persona_id):
     assert OWNER_TURN_DEADLINE_MS == 50.0  # budget unchanged; only the clock is injected
     label = CATALOG[persona_id].label
-    chat = _sync_turn(f"{label}, thanks", current=persona_id)
+    chat = await _turn(f"{label}, thanks", current=persona_id)
     assert chat.persona_intent.to == persona_id
     assert chat.persona_intent.reason == "already_active"
     assert not chat.persona_intent.switch
-    task = _sync_turn(f"{label}, research the history of rome", current=persona_id)
+    task = await _turn(f"{label}, research the history of rome", current=persona_id)
     assert task.persona_intent.reason == "intent"
     assert task.persona_intent.to == ("nabu" if persona_id != "nabu" else persona_id)
 
@@ -218,7 +229,7 @@ def test_same_persona_named_is_address_not_pin(persona_id):
 @pytest.mark.asyncio
 async def test_same_persona_named_with_matching_intent_stays():
     turn = await _turn("Enki, write me a script", current="enki")
-    assert turn.persona_intent.to == "enki", (turn.persona_intent.as_dict(), turn.reflex and (turn.reflex.source, turn.reflex.fallback_reason, turn.reflex.answers.get("persona_intent")))
+    assert turn.persona_intent.to == "enki"
     assert turn.persona_intent.reason == "already_active"
 
 
@@ -237,7 +248,10 @@ async def test_no_current_persona_from_settings_store():
     settings = AppSettings()
     settings.named_personas.active_id = ""
     turn = await decide_owner_turn(
-        "write me a script", baseline=route_request("write me a script"), settings=settings
+        "write me a script",
+        baseline=route_request("write me a script"),
+        settings=settings,
+        clock=_frozen_clock,
     )
     assert turn.persona_intent.reason == "no_current_persona"
 
@@ -247,10 +261,13 @@ async def test_current_persona_read_from_settings_store():
     settings = AppSettings()
     settings.named_personas.active_id = "nabu"
     turn = await decide_owner_turn(
-        "write me a script", baseline=route_request("write me a script"), settings=settings
+        "write me a script",
+        baseline=route_request("write me a script"),
+        settings=settings,
+        clock=_frozen_clock,
     )
     assert turn.persona_intent.current == "nabu"
-    assert turn.persona_intent.to == "enki", (turn.persona_intent.as_dict(), turn.reflex and (turn.reflex.source, turn.reflex.fallback_reason, turn.reflex.answers.get("persona_intent")))
+    assert turn.persona_intent.to == "enki"
 
 
 @pytest.mark.asyncio
@@ -326,7 +343,10 @@ async def test_decision_path_never_loads_settings_and_slow_load_cannot_breach_de
     settings.named_personas.active_id = "anzu"
     started = time.perf_counter()
     turn = await decide_owner_turn(
-        "write me a script", baseline=route_request("write me a script"), settings=settings
+        "write me a script",
+        baseline=route_request("write me a script"),
+        settings=settings,
+        clock=_frozen_clock,
     )
     elapsed_ms = (time.perf_counter() - started) * 1000.0
     assert loads == []
@@ -344,7 +364,9 @@ async def test_missing_settings_is_reported_on_decision_not_defaulted(monkeypatc
 
     monkeypatch.setattr(config, "load_settings", must_not_load)
     with caplog.at_level("WARNING", logger="jarvis.decision.owner_turn"):
-        turn = await decide_owner_turn("write me a script", baseline=route_request("write me a script"))
+        turn = await decide_owner_turn(
+            "write me a script", baseline=route_request("write me a script"), clock=_frozen_clock
+        )
     assert turn.persona_intent.reason == "settings_unavailable"
     assert turn.persona_intent.to == "" and not turn.persona_intent.switch
     assert turn.route.kind == route_request("write me a script").kind
@@ -367,3 +389,45 @@ async def test_deadline_fallback_stays(monkeypatch):
     assert turn.persona_intent.to == "anzu"
     assert turn.persona_intent.reason == "deadline_fallback"
     assert turn.persona_intent.decision_source == "deadline_fallback"
+
+
+@pytest.mark.asyncio
+async def test_injected_clock_enforces_the_same_50ms_budget():
+    ticks = iter([0.0] + [1.0] * 1000)  # second read onward: 1 s after start
+
+    turn = await decide_owner_turn(
+        "write me a script",
+        baseline=route_request("write me a script"),
+        settings=AppSettings(),
+        persona=PersonaTurnContext(current="anzu"),
+        clock=lambda: next(ticks),
+    )
+    assert turn.persona_intent.reason == "deadline_fallback"
+    assert turn.persona_intent.to == "anzu"
+
+
+def test_every_production_caller_passes_settings():
+    """Fails if any backend/app call of the owner-turn entry points omits settings
+    (persona state would then report settings_unavailable on a live turn)."""
+    import ast
+    from pathlib import Path
+
+    entry_points = {"decide_owner_turn", "evaluate_request_route"}
+    app_root = Path(__file__).resolve().parents[1] / "backend" / "app"
+    found, missing = [], []
+    for path in app_root.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8-sig"))):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
+            if name not in entry_points:
+                continue
+            where = f"{path.relative_to(app_root)}:{node.lineno}"
+            found.append(where)
+            kw = {k.arg: k.value for k in node.keywords}
+            value = kw.get("settings")
+            if value is None or (isinstance(value, ast.Constant) and value.value is None):
+                missing.append(where)
+    assert len(found) >= 5  # request_routing + owner_chat + loop + 2x front_responder
+    assert missing == []
