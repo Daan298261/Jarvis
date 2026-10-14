@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -276,3 +278,25 @@ async def unload_model():
     from ..inference.status_monitor import STATUS_MONITOR
 
     return await STATUS_MONITOR.get_snapshot(settings, force_refresh=True)
+
+
+class DiscoverLocalBody(BaseModel):
+    deep: bool = False
+    import_new: bool = False
+    paths: list[str] | None = None
+
+
+@router.get("/discover-local")
+async def discover_local_models(deep: bool = False):
+    from ..inference.model_discovery import scan_local_ggufs
+    return await asyncio.to_thread(scan_local_ggufs, deep=deep)
+
+
+@router.post("/discover-local")
+async def discover_local_models_action(body: DiscoverLocalBody):
+    from ..inference.model_discovery import register_all_from_scan, register_discovered_paths, scan_local_ggufs
+    if body.paths:
+        return await asyncio.to_thread(register_discovered_paths, body.paths)
+    if body.import_new:
+        return await asyncio.to_thread(register_all_from_scan, deep=body.deep)
+    return await asyncio.to_thread(scan_local_ggufs, deep=body.deep)
