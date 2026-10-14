@@ -38,3 +38,7 @@ Android companion model, JNI, permissions, assistant services, settings; focused
 ## Out of scope
 Root access, exploits, public owner/model APIs, changing protected Architect specs,
 automatic Tailscale account enrollment, and stable promotion to main.
+
+## Recovery integration
+
+Recover the on-device assistant, opt-in accessibility tools, wake service, and authenticated phone tool/result endpoints against current development. Current pairing/network controls are retained; the older setup UI targeted a superseded connectivity API and is not reintroduced. Physical-phone and cellular acceptance remains separate.

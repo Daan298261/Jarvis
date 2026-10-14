@@ -117,7 +117,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     val state = mutable.asStateFlow()
     val preferPhoneLocal = MutableStateFlow(companionPrefs.getBoolean("prefer_phone_local", false))
     fun preferLocal(value: Boolean) { preferPhoneLocal.value = value; companionPrefs.edit().putBoolean("prefer_phone_local", value).apply() }
-    fun importPhoneModel(uri: Uri) = action { packManager.importGguf(uri); mutable.value = mutable.value.copy(localPackStatus = packManager.status()) }
+    fun importPhoneModel(uri: Uri) = importModel(uri)
     fun stopPhoneTask() { PhoneTools.stop(); packManager.requestCancel() }
     fun verifyRemoteConnection() = action {
         val connectivity = getApplication<Application>().getSystemService(ConnectivityManager::class.java)

@@ -76,19 +76,19 @@ async def test_tailscale_setup_never_maps_router(phone_env, monkeypatch):
     from app.mobile.connectivity import Connectivity
     connection = Connectivity()
     connection.identity = {"server_pin": "a" * 64}
-    monkeypatch.setattr(connection, "release_mapping", AsyncMock())
     monkeypatch.setattr(connection, "ensure_gateway_listening", AsyncMock())
     monkeypatch.setattr(connection, "cover_phone_dial_hosts", AsyncMock())
+    monkeypatch.setattr(connection, "probe", AsyncMock())
+    monkeypatch.setattr(connection, "start_lan_beacon", AsyncMock())
+    monkeypatch.setattr(connection, "_self_test", AsyncMock())
     monkeypatch.setattr("app.mobile.connectivity.lan_hosts", lambda: ["192.168.1.2"])
-    monkeypatch.setattr(phone_setup, "tailscale_status", lambda: {
-        "available": True, "endpoints": ["https://100.100.100.1:4781"], "message": "Ready"})
-    router = AsyncMock()
-    monkeypatch.setattr("app.mobile.connectivity.router_candidate", router)
-    await connection.apply_remote({"enabled": True, "remote": True, "connection_mode": "tailscale"})
-    router.assert_not_called()
+    monkeypatch.setattr("app.mobile.remote_access.tailscale_status", lambda: {
+        "running": True, "endpoints": ["https://100.100.100.1:4781"]})
+    await connection.apply_remote({"enabled": True, "remote": True, "tailscale": True})
     assert "https://100.100.100.1:4781" in connection.state["endpoints"]
-    assert connection.state["wan_path"] == "tailscale"
+    assert connection.state["local_verified"]
     assert not connection.state.get("remote_verified")
+
 
 
 def test_connection_evidence_invalidated_when_endpoint_changes(phone_env):

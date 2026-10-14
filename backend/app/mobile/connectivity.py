@@ -106,6 +106,9 @@ class Connectivity:
         cfg = self.config()
         payload["remote"] = bool(cfg.get("remote"))
         payload["tailscale_enabled"] = cfg.get("tailscale", True) is not False
+        evidence = self.state.get("phone_verification")
+        payload["phone_verified"] = bool(evidence and evidence.get("endpoint") in payload.get("endpoints", [])
+                                        and 0 <= time.time() - evidence.get("verified_at", 0) < 86400)
         return payload
 
     def config(self):

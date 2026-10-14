@@ -103,7 +103,8 @@ def _private_client(host: str) -> bool:
     except ValueError:
         return False
     # Loopback is deliberately not proof that the phone is on the desktop's LAN.
-    return bool(address.is_private and not address.is_loopback)
+    return bool(address.is_private and not address.is_loopback
+                and not (address.version == 6 and address in ipaddress.ip_network("fd7a:115c:a1e0::/48")))
 
 
 _REMOTE_CACHE: dict[str, float | bool] = {"at": 0.0, "value": False}
