@@ -10,7 +10,7 @@ export const HEXSTRIKE_DEFER_START_MESSAGE =
 /**
  * Real permission state comes from GET /api/permissions/cyber.hexstrike
  * (`status` is the evaluated decision: allow | ask | deny).
- * Only `allow` means the owner already granted the suite — safe to auto-start.
+ * Only `allow` means the owner already granted the suite - safe to auto-start.
  */
 export function hexStrikePermissionAllowsAutostart(
   status: string | null | undefined,
@@ -23,7 +23,7 @@ export async function readHexStrikePermissionGranted(): Promise<boolean> {
     const permission = await api<{ status?: string }>("/api/permissions/cyber.hexstrike")
     return hexStrikePermissionAllowsAutostart(permission.status)
   } catch {
-    // Probe failed — treat as not granted so we never park a prompt from select/restore.
+    // Probe failed - treat as not granted so we never park a prompt from select/restore.
     return false
   }
 }
