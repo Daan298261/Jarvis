@@ -5,7 +5,8 @@ import {
   selectLmStudioProfile,
   selectDiscoveredGguf,
   setSelectedRuntimeMode,
-  setSelectedRuntimeProfileId,`n  stopHexStrike,
+  setSelectedRuntimeProfileId,
+  stopHexStrike,
   type RuntimeProfile,
 } from "../api"
 import { isHexStrikeSuiteProfile } from "./hexstrikeSuite"
@@ -72,7 +73,7 @@ export async function applyRuntimeProfile(profileId: string): Promise<RuntimePro
   const profile = await getRuntimeProfile(id)
 
   if (isHexStrikeSuiteProfile(profile)) {
-    // Select the suite in the HUD only. Do not call /start here — that would
+    // Select the suite in the HUD only. Do not call /start here - that would
     // park cyber.hexstrike on profile restore / ModelSelector click before the
     // owner explicitly starts or operates HexStrike (RFC-0079 / RFC-0110).
     syncRuntimeSelection(id)
