@@ -110,6 +110,9 @@ class MainActivity : FragmentActivity() {
             val offgridPrefs = remember { context.getSharedPreferences("offgrid_ui", MODE_PRIVATE) }
             var offgridTab by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(offgridPrefs.getBoolean("show_tab", false)) }
             var confirmOffgrid by remember { mutableStateOf(false) }
+            androidx.activity.compose.BackHandler(enabled = tab == "Offgrid chat" || tab == "Assistant") {
+                tab = if (tab == "Offgrid chat") "Offgrid" else "More"
+            }
             val noticeStore = app.notices
             val notices by noticeStore.notices.collectAsStateWithLifecycle()
             val unreadNotices = notices.count { !it.read }
@@ -289,7 +292,7 @@ class MainActivity : FragmentActivity() {
                     NavigationBar(containerColor = Ink) {
                         listOf("Home" to Icons.Outlined.RadioButtonChecked, "Chat" to Icons.Outlined.ChatBubbleOutline,
                             "Tasks" to Icons.Outlined.Checklist, "Studio" to Icons.Outlined.AutoAwesome, "More" to Icons.Outlined.Tune).plus(if (offgridTab) listOf("Offgrid" to Icons.Outlined.ElectricalServices) else emptyList()).forEach { (label, icon) ->
-                            NavigationBarItem(selected = tab == label, onClick = { tab = label }, icon = {
+                            NavigationBarItem(selected = tab == label || (label == "Offgrid" && tab == "Offgrid chat"), onClick = { tab = label }, icon = {
                                 if (label == "Offgrid") androidx.compose.foundation.Image(
                                     androidx.compose.ui.res.painterResource(R.drawable.ic_offgrid_pylon), label, Modifier.size(24.dp))
                                 else Icon(icon, label)

@@ -299,7 +299,14 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
-    fun setForeground(value: Boolean) { foreground = value }
+    fun setForeground(value: Boolean) {
+        val resumed = value && !foreground
+        foreground = value
+        if (resumed) {
+            heartbeat.onNetworkChanged()
+            networkChanged.trySend(Unit)
+        }
+    }
     fun action(block: suspend () -> Unit) = viewModelScope.launch {
         mutable.value = mutable.value.copy(busy = true, error = null)
         try { block() } catch (e: kotlinx.coroutines.CancellationException) { throw e }
