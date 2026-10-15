@@ -58,9 +58,16 @@ class PlatformVoice(
     private fun onDeviceRecognizerAvailable(): Boolean =
         Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
 
+    @Suppress("DEPRECATION")
+    private fun externalRecognizer(): android.content.ComponentName? = context.packageManager
+        .queryIntentServices(Intent(android.speech.RecognitionService.SERVICE_INTERFACE), 0)
+        .firstOrNull { it.serviceInfo.packageName != context.packageName }?.serviceInfo?.let {
+            android.content.ComponentName(it.packageName, it.name)
+        }
+
     private fun recognizerCandidates(): List<PlatformRecognizerKind> = PlatformSttPlan.candidates(
         onDeviceAvailable = onDeviceRecognizerAvailable(),
-        defaultAvailable = SpeechRecognizer.isRecognitionAvailable(context),
+        defaultAvailable = externalRecognizer() != null,
     )
 
     fun startListening(onPartial: (String) -> Unit, onResult: (String) -> Unit, onError: (String) -> Unit) {
@@ -96,7 +103,7 @@ class PlatformVoice(
             // ON_DEVICE is only a candidate on API 31+ (onDeviceRecognizerAvailable); explicit guard for lint NewApi.
             PlatformRecognizerKind.ON_DEVICE -> if (Build.VERSION.SDK_INT >= 31) SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
                 else SpeechRecognizer.createSpeechRecognizer(context)
-            PlatformRecognizerKind.DEFAULT -> SpeechRecognizer.createSpeechRecognizer(context)
+            PlatformRecognizerKind.DEFAULT -> SpeechRecognizer.createSpeechRecognizer(context, externalRecognizer())
         }
         var heardSpeech = false
         fun stale() = current != session || recognizer !== next

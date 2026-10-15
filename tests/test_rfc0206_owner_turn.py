@@ -71,7 +71,7 @@ def test_loop_intake_calls_evaluate_request_route():
 async def test_decide_owner_turn_always_calls_decide(monkeypatch):
     seen = []
 
-    def spy(state, questions, decision_class, deadline, privacy):
+    def spy(state, questions, decision_class, deadline, privacy, **_kw):
         seen.append(
             {
                 "class": decision_class,
@@ -219,7 +219,7 @@ async def test_tool_and_app_floors_stay_managed():
 async def test_low_confidence_route_keeps_rules_baseline(monkeypatch):
     monkeypatch.setattr(
         "app.decision.owner_turn.decide",
-        lambda *args: DecisionResult(
+        lambda *args, **_kw: DecisionResult(
             answers={
                 "request_route": Answer("request_route", "choice", MANAGED_TASK, 0.2),
                 "reply_shape": Answer("reply_shape", "choice", "handoff", 0.9),
@@ -262,7 +262,7 @@ async def test_domain_questions_do_not_route_to_self_status(utterance):
 async def test_domain_veto_overrides_confident_provider_self_status(utterance, monkeypatch):
     monkeypatch.setattr(
         "app.decision.owner_turn.decide",
-        lambda *args: DecisionResult(
+        lambda *args, **_kw: DecisionResult(
             answers={
                 "request_route": Answer("request_route", "choice", DIRECT_REPLY, 0.95),
                 "reply_shape": Answer("reply_shape", "choice", "self_status", 0.95),
@@ -299,7 +299,7 @@ def test_what_are_you_matches_self_status_regex():
 async def test_confident_provider_self_status_is_kept(utterance, monkeypatch):
     monkeypatch.setattr(
         "app.decision.owner_turn.decide",
-        lambda *args: DecisionResult(
+        lambda *args, **_kw: DecisionResult(
             answers={
                 "request_route": Answer("request_route", "choice", DIRECT_REPLY, 0.95),
                 "reply_shape": Answer("reply_shape", "choice", "self_status", 0.95),

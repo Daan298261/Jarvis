@@ -57,7 +57,11 @@ export function ToolsPage() {
   return (
     <div>
       <h1>Tools</h1>
-      <p className="lede">Native tools can be enabled or disabled. Optional workers stay listed when they are not installed so Jarvis degrades instead of crashing. Click <strong>Install now</strong> to add a missing worker to this Python environment. Playwright remains the default browser backend.</p>
+      <p className="lede">
+        Native tools can be enabled or disabled. Optional workers stay listed when they are not installed so Jarvis degrades instead of crashing. Click <strong>Install now</strong> to add a missing worker to this Python environment. Playwright remains the default browser backend.{" "}
+        Primary creative tool: <strong>blackgrid_studio</strong> — open the{" "}
+        <a href="/studio/blackgrid" target="_blank" rel="noreferrer">BlackGrid workbench</a> (HR Endless Sampler + ComfyUI).
+      </p>
       <div className="card">
         {catalog.tools.map((tool) => (
           <div className="toggle" key={tool.name}>

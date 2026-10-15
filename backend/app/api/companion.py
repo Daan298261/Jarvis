@@ -91,6 +91,12 @@ class Message(BaseModel):
     attachments: list[uuid.UUID] = Field(default_factory=list, max_length=10)
 
 
+class QuickRoute(BaseModel):
+    text: str = Field(min_length=1, max_length=512)
+    engine: Literal["laya", "jev"]
+    allow_cloud: bool = False
+
+
 class Schedule(BaseModel):
     prompt: str = Field(min_length=1, max_length=32000)
     profile: str = "auto"
@@ -264,6 +270,12 @@ async def conversations(device=Device):
 @router.get("/conversations/{conversation_id}")
 async def conversation(conversation_id: uuid.UUID, device=Device):
     return await service.conversation_detail(str(conversation_id))
+
+
+@router.post("/quick-route")
+async def quick_route(body: QuickRoute, device=Device):
+    from ..mobile.quick_route import route_question
+    return await route_question(body.text, body.engine, body.allow_cloud)
 
 
 @router.post("/messages")
@@ -542,8 +554,23 @@ class Build(BaseModel):
 
 class ConnectionSetup(BaseModel):
     enabled: bool = True
-    # RFC-0215: None keeps the current setting; internet exposure (Tailscale) is only ever an explicit owner choice.
     remote: bool | None = None
+    connection_mode: Literal["lan", "public_forward", "tailscale"] | None = None
+    wan_method: Literal["auto", "upnp", "ssh_reverse", "gateway_ssh"] | None = None
+    ssh_host: str | None = Field(default=None, max_length=255)
+    ssh_port: int | None = Field(default=None, ge=1, le=65535)
+    ssh_user: str | None = Field(default=None, max_length=64)
+    ssh_identity_file: str | None = Field(default=None, max_length=1024)
+    ssh_password: str | None = Field(default=None, max_length=256)
+    gateway_host: str | None = Field(default=None, max_length=255)
+    gateway_port: int | None = Field(default=None, ge=1, le=65535)
+    gateway_user: str | None = Field(default=None, max_length=64)
+    gateway_identity_file: str | None = Field(default=None, max_length=1024)
+    gateway_profile: Literal["openwrt_uci"] | None = None
+    gateway_username: str | None = Field(default=None, max_length=64)
+    gateway_password: str | None = Field(default=None, max_length=256)
+    wan_public_host: str | None = Field(default=None, max_length=255)
+    router_approval_id: str | None = None
     tailscale: bool | None = None
 
 
@@ -551,8 +578,105 @@ class ConnectionSetup(BaseModel):
 async def connection_setup(body: ConnectionSetup):
     from ..mobile.connectivity import CONNECTIVITY
 
+    if body.gateway_host:
+        from ..mobile.phone_setup import require_router_approval
+        require_router_approval(body.router_approval_id or "", body.gateway_host)
+    extras = body.model_dump(exclude={"enabled", "remote", "tailscale", "router_approval_id"}, exclude_none=True)
     remote = False if not body.enabled else body.remote
+    if extras:
+        return await CONNECTIVITY.configure(body.enabled, remote, body.tailscale, extras=extras)
     return await CONNECTIVITY.configure(body.enabled, remote, body.tailscale)
+
+
+@owner_router.get("/phone-setup", dependencies=[Depends(require_owner_private_key_for_pairing)])
+async def phone_setup():
+    from ..mobile.phone_setup import tailscale_status, forwarding_instructions
+    from ..mobile.connectivity import preferred_lan_ipv4
+    return {"tailscale": await asyncio.to_thread(tailscale_status),
+            "instructions": forwarding_instructions(await asyncio.to_thread(preferred_lan_ipv4)),
+            "connection": CONNECTIVITY.snapshot()}
+
+
+class RouterApproval(BaseModel):
+    router: str = Field(max_length=64)
+    owned: bool = False
+    change_approved: bool = False
+    red_model_approved: bool = False
+
+
+@owner_router.post("/router-approval", dependencies=[Depends(require_owner_private_key)])
+def router_approval(body: RouterApproval):
+    from ..mobile.phone_setup import approve_router
+    return approve_router(body.router, body.owned, body.change_approved, body.red_model_approved)
+
+
+class RouterAdvice(BaseModel):
+    approval_id: uuid.UUID
+    router: str = Field(max_length=64)
+    question: str = Field(min_length=1, max_length=2000)
+    use_red_model: bool = False
+
+
+@owner_router.post("/router-advice", dependencies=[Depends(require_owner_private_key)])
+async def router_setup_advice(body: RouterAdvice):
+    from ..mobile.phone_setup import router_advice
+    return await router_advice(str(body.approval_id), body.router, body.question, body.use_red_model)
+
+
+@owner_router.delete("/router-approval/{approval_id}", dependencies=[Depends(require_owner_private_key)])
+async def revoke_router_approval(approval_id: uuid.UUID):
+    with database() as db:
+        approval = get(db, "router_setup_approval", str(approval_id))
+        if not approval:
+            raise HTTPException(404, "Approval not found")
+        approval["revoked"] = True
+        put(db, "router_setup_approval", str(approval_id), approval)
+    from ..mobile.phone_setup import cancel_router_advice
+    cancel_router_advice(str(approval_id))
+    return {"revoked": True}
+
+
+class RemoteCheck(BaseModel):
+    endpoint: str = Field(max_length=1024)
+    network: Literal["cellular", "other"] = "cellular"
+
+
+@router.post("/connection/verify")
+def verify_phone_connection(body: RemoteCheck, request: Request, device=Device):
+    from ..mobile.connectivity import origin
+    try:
+        endpoint = origin(body.endpoint)
+    except ValueError:
+        raise HTTPException(400, "Invalid endpoint")
+    snapshot = CONNECTIVITY.snapshot()
+    if endpoint not in snapshot.get("endpoints", []):
+        raise HTTPException(409, "Refresh the connection endpoints before verifying")
+    from ..mobile.remote_access import classify_endpoint
+    if classify_endpoint(endpoint) == "lan":
+        raise HTTPException(400, "Use a remote public or Tailscale endpoint with phone Wi-Fi off")
+    # This is authenticated phone-reported evidence, not an external internet probe.
+    evidence = {"device_id": device["id"], "endpoint": endpoint, "network": body.network,
+                "verified_at": time.time(), "source": "paired_phone", "client_ip": _client_ip(request)}
+    with database() as db:
+        put(db, "phone_connection", device["id"], evidence)
+    CONNECTIVITY.report(phone_verification=evidence)
+    return evidence
+
+
+class PhoneToolResult(BaseModel):
+    result: dict
+
+
+@router.get("/phone-tools")
+def phone_tool_pending(device=Device):
+    from ..mobile.phone_tools import pending
+    return {"commands": pending(device["id"])}
+
+
+@router.post("/phone-tools/{item_id}/result")
+def phone_tool_finish(item_id: uuid.UUID, body: PhoneToolResult, device=Device):
+    from ..mobile.phone_tools import finish
+    return finish(device["id"], str(item_id), body.result)
 
 
 @owner_router.get("/connection", dependencies=[Depends(require_owner_private_key_for_pairing)])

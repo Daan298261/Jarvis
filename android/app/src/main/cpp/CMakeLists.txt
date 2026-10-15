@@ -57,23 +57,27 @@ if(JARVIS_BUILD_VOICE_NATIVE)
             -DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
             -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=${_voice_jni}
             -DBUILD_SHARED_LIBS=OFF
-        BUILD_BYPRODUCTS
-            ${_voice_lib_dir}/libjarvis_whisper.so
-            ${_voice_lib_dir}/libjarvis_voice_tts.so
-            ${_voice_lib_dir}/libonnxruntime.so
-        BUILD_ALWAYS 1
-        INSTALL_COMMAND ${CMAKE_COMMAND} -E make_directory ${_voice_lib_dir}
+        INSTALL_COMMAND ""
+        USES_TERMINAL_CONFIGURE TRUE
+        USES_TERMINAL_BUILD TRUE
+    )
+    # ExternalProject's install stamp can survive a child-only runtime upgrade.
+    # Export after every child build so AGP observes changed imported libraries.
+    add_custom_target(jarvis_voice_native ALL
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${_voice_lib_dir}
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${_voice_jni}/libjarvis_whisper.so ${_voice_lib_dir}/libjarvis_whisper.so
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${_voice_jni}/libjarvis_voice_tts.so ${_voice_lib_dir}/libjarvis_voice_tts.so
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${_voice_jni}/libonnxruntime.so ${_voice_lib_dir}/libonnxruntime.so
-        USES_TERMINAL_CONFIGURE TRUE
-        USES_TERMINAL_BUILD TRUE
+        BYPRODUCTS
+            ${_voice_lib_dir}/libjarvis_whisper.so
+            ${_voice_lib_dir}/libjarvis_voice_tts.so
+            ${_voice_lib_dir}/libonnxruntime.so
+        DEPENDS jarvis_voice_native_ext
     )
-    add_custom_target(jarvis_voice_native ALL DEPENDS jarvis_voice_native_ext)
-    add_dependencies(jarvis_llama jarvis_voice_native_ext)
+    add_dependencies(jarvis_llama jarvis_voice_native)
     foreach(_voice_runtime jarvis_whisper jarvis_voice_tts onnxruntime)
         add_library(${_voice_runtime} SHARED IMPORTED)
         set_target_properties(${_voice_runtime} PROPERTIES

@@ -344,7 +344,8 @@ def client_may_lan_enroll(client_ip: str) -> bool:
         addr = ipaddress.ip_address(client_ip)
     except ValueError:
         return False
-    return bool(addr.is_private or addr.is_loopback)
+    return bool((addr.is_private or addr.is_loopback)
+                and not (addr.version == 6 and addr in ipaddress.ip_network("fd7a:115c:a1e0::/48")))
 
 
 def enroll_lan(encoded_key: str, name: str, *, client_ip: str = "") -> dict:
