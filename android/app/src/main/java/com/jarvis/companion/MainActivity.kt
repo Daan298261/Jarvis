@@ -16,6 +16,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -104,12 +106,18 @@ class MainActivity : FragmentActivity() {
             var showPostPairPackOffer by remember { mutableStateOf(false) }
             var showPostPairVoiceOffer by remember { mutableStateOf(false) }
             val callState by CurrentCall.state.collectAsStateWithLifecycle()
-            var tab by remember { mutableStateOf("Home") }
+            var tab by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("Home") }
+            val offgridPrefs = remember { context.getSharedPreferences("offgrid_ui", MODE_PRIVATE) }
+            var offgridTab by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(offgridPrefs.getBoolean("show_tab", false)) }
+            var confirmOffgrid by remember { mutableStateOf(false) }
+            androidx.activity.compose.BackHandler(enabled = tab == "Offgrid chat" || tab == "Assistant" || tab == "Memory") {
+                tab = if (tab == "Offgrid chat") "Offgrid" else if (tab == "Memory") "Chat" else "More"
+            }
             val noticeStore = app.notices
             val notices by noticeStore.notices.collectAsStateWithLifecycle()
             val unreadNotices = notices.count { !it.read }
             // Viewing the tab reads everything in it, including notices that arrive while it is open.
-            LaunchedEffect(tab, notices) { if (tab == NOTIFICATIONS_TAB) noticeStore.markAllRead() }
+            LaunchedEffect(tab, notices.filterNot { it.read }.map { it.id }) { if (tab == NOTIFICATIONS_TAB) noticeStore.markAllRead() }
             var pairingScanRequest by remember { mutableStateOf(false) }
             var draft by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
             var incomingCall by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
@@ -181,12 +189,14 @@ class MainActivity : FragmentActivity() {
             val postPairVoiceOffer = remember(showPostPairVoiceOffer, state.voiceSttStatus) { recommendedVoicePackOffer(model) }
             LaunchedEffect(latestIntent) {
                 val delivered = latestIntent ?: return@LaunchedEffect
+                if (delivered.component?.className?.endsWith("AssistantSettingsActivity") == true) tab = "Assistant"
                 delivered.getStringExtra("incoming_call")?.let { incomingCall = it }
-                if (delivered.action == Intent.ACTION_ASSIST || delivered.getBooleanExtra("anzu_assist", false)) {
+                if (delivered.action == Intent.ACTION_ASSIST || delivered.action == ANZU_VOICE_ASSIST_ACTION || delivered.getBooleanExtra("anzu_assist", false)) {
                     tab = "Chat"
-                    if (delivered.getBooleanExtra("anzu_voice", false) &&
-                        ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED &&
-                        !state.recording) model.toggleRecord()
+                    if ((delivered.action == ANZU_VOICE_ASSIST_ACTION || delivered.getBooleanExtra("anzu_voice", false)) && !state.recording) {
+                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) model.toggleRecord()
+                        else mic.launch(Manifest.permission.RECORD_AUDIO)
+                    }
                     delivered.removeExtra("anzu_assist"); delivered.removeExtra("anzu_voice")
                     delivered.action = null
                 }
@@ -216,6 +226,16 @@ class MainActivity : FragmentActivity() {
             }
             MaterialTheme(colorScheme = darkColorScheme(primary = Gold, background = Ink, surface = Panel, onSurface = Color(0xFFE7EDF5), secondary = Color(0xFF74DCCD))) {
                 PhoneActionApprovalDialog()
+                if (confirmOffgrid) AlertDialog(onDismissRequest = { confirmOffgrid = false },
+                    title = { Text("Offgrid") },
+                    text = { Text(if (offgridTab) "Remove the Offgrid tab? Downloaded maps and knowledge stay on this phone." else "Add an Offgrid tab with offline maps, local chat and knowledge for preparedness and travel?") },
+                    confirmButton = { TextButton(onClick = {
+                        offgridTab = !offgridTab
+                        offgridPrefs.edit().putBoolean("show_tab", offgridTab).apply()
+                        confirmOffgrid = false
+                        if (offgridTab) tab = "Offgrid"
+                    }) { Text(if (offgridTab) "Remove tab" else "Add tab") } },
+                    dismissButton = { TextButton(onClick = { confirmOffgrid = false; tab = "Offgrid" }) { Text("Open menu") } })
                 PostPairOfflinePackOfferDialog(
                     visible = showPostPairPackOffer && postPairPackOffer != null,
                     packLabel = postPairPackOffer?.label ?: "",
@@ -270,25 +290,21 @@ class MainActivity : FragmentActivity() {
                     dismissButton = { TextButton(onClick = { val id = incomingCall; incomingCall = null; model.action { if (id != null) model.api.json("/calls/$id/end", "POST") } }) { Text("Decline") } })
                 Scaffold(containerColor = Ink, bottomBar = {
                     NavigationBar(containerColor = Ink) {
-                        val visibleTabs = PhoneUiAvailability.tabs(state.connected, state.tasks.isNotEmpty() || state.codingDecisions.isNotEmpty())
+                        val visibleTabs = PhoneUiAvailability.tabs(state.connected, state.tasks.isNotEmpty() || state.codingDecisions.isNotEmpty(), offgridTab)
                         LaunchedEffect(visibleTabs, tab) {
-                            if (tab !in visibleTabs && tab != NOTIFICATIONS_TAB) tab = "Home"
+                            if (!PhoneUiAvailability.destinationAvailable(tab, visibleTabs)) tab = "Home"
                         }
                         listOf("Home" to Icons.Outlined.RadioButtonChecked, "Chat" to Icons.Outlined.ChatBubbleOutline,
-                            "Tasks" to Icons.Outlined.Checklist, "More" to Icons.Outlined.Tune).filter { it.first in visibleTabs }.forEach { (label, icon) ->
-                            NavigationBarItem(selected = tab == label, onClick = { tab = label }, icon = { Icon(icon, label) }, label = { Text(label) })
+                            "Tasks" to Icons.Outlined.Checklist, "More" to Icons.Outlined.Tune)
+                            .plus(if (offgridTab) listOf("Offgrid" to Icons.Outlined.ElectricalServices) else emptyList())
+                            .filter { it.first in visibleTabs }.forEach { (label, icon) ->
+                            NavigationBarItem(selected = tab == label || (label == "Offgrid" && tab == "Offgrid chat"), onClick = { tab = label }, icon = {
+                                if (label == "Offgrid") androidx.compose.foundation.Image(
+                                    androidx.compose.ui.res.painterResource(R.drawable.ic_offgrid_pylon), label, Modifier.size(24.dp))
+                                else Icon(icon, label)
+                            }, label = { Text(label, maxLines = 1) })
                         }
-                        val noticesLabel = stringResource(R.string.notices_tab)
-                        NavigationBarItem(
-                            selected = tab == NOTIFICATIONS_TAB,
-                            onClick = { tab = NOTIFICATIONS_TAB },
-                            icon = {
-                                BadgedBox(badge = { if (unreadNotices > 0) Badge { Text(if (unreadNotices > 99) "99+" else unreadNotices.toString()) } }) {
-                                    Icon(Icons.Outlined.Notifications, noticesLabel)
-                                }
-                            },
-                            label = { Text(noticesLabel, maxLines = 1) },
-                        )
+
                     }
                 }) { padding ->
                     Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp)) {
@@ -305,7 +321,7 @@ class MainActivity : FragmentActivity() {
                                     else -> Muted
                                 },
                             )
-                            HomeNoticeIndicator(unreadNotices) { tab = NOTIFICATIONS_TAB }
+                            HomeNoticeIndicator(unreadNotices, ongoing = notices.any { it.live }) { tab = NOTIFICATIONS_TAB }
                         }
                         // Status banners (desktop offline, errors, pending message, download failures) live in the
                         // Notifications tab now; Home only shows the unread marker in the header above.
@@ -428,29 +444,7 @@ class MainActivity : FragmentActivity() {
                                 }
                             }
                             "Chat" -> {
-                                offlineChatBanner(state.connected, paired, devicePack.status)?.let { bannerText ->
-                                    Card(
-                                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A2838)),
-                                    ) {
-                                        Column(Modifier.padding(12.dp)) {
-                                            Text("OFFLINE MODE", color = Gold, fontSize = 10.sp, letterSpacing = 1.sp)
-                                            Text(bannerText, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
-                                            if (devicePack.status == DevicePackStatus.DOWNLOADING && devicePack.downloadProgress != null) {
-                                                LinearProgressIndicator(
-                                                    progress = { devicePack.downloadProgress!!.coerceIn(0f, 1f) },
-                                                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                                state.voiceRouteBanner?.let { banner ->
-                                    Text(banner, color = Gold, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
-                                }
-                                if (state.onDeviceVoiceActive) {
-                                    Text("On-device voice", color = Gold, fontSize = 11.sp, modifier = Modifier.padding(bottom = 4.dp))
-                                }
+                                PhoneAnswerOptions(model) { tab = "Memory" }
                                 if (state.connected) ConversationPickers(state, model::selectModel, model::selectVoice)
                                 else Text(phoneModelStatus(state, devicePack), color = Muted, fontSize = 11.sp)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -523,7 +517,11 @@ class MainActivity : FragmentActivity() {
                                 }
                             }
                             "Studio" -> StudioScreen(model, state)
-                            "More" -> MoreScreen(model, state, deviceChrome, devicePack, accessLock, secureScreen, pickModelFile, pairingScanRequest) { pairingScanRequest = false }
+                            "Memory" -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) { PhoneMemorySettings(model) }
+                            "Assistant" -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) { AssistantSettings(model) }
+                            "Offgrid" -> OffgridScreen(state, onChat = { tab = "Offgrid chat" })
+                            "Offgrid chat" -> OffgridChatScreen(model, state)
+                            "More" -> MoreScreen(model, state, deviceChrome, devicePack, accessLock, secureScreen, pickModelFile, pairingScanRequest, onOffgrid = { confirmOffgrid = true }, onNotices = { tab = NOTIFICATIONS_TAB }) { pairingScanRequest = false }
                         }
                     }
                 }
@@ -1047,6 +1045,8 @@ private fun formatStorageBytes(bytes: Long): String {
     secureScreen: SecureScreen,
     pickModelFile: () -> Unit,
     openPairingScanner: Boolean = false,
+    onOffgrid: () -> Unit = {},
+    onNotices: () -> Unit = {},
     onPairingScannerConsumed: () -> Unit = {},
 ) {
     var endpoint by remember { mutableStateOf(model.api.endpoint) }
@@ -1196,13 +1196,17 @@ private fun formatStorageBytes(bytes: Long): String {
             else if (state.capabilities.optJSONObject("calls")?.optBoolean("push_configured") != true) Text(stringResource(R.string.push_needs_anzu_service), color = Muted, fontSize = 12.sp)
             }
         }
-
+        item { PhoneSettingsSection("Memory and speed", "Projects, saved instructions, and quick answers") { PhoneMemorySettings(model) } }
         item { PhoneSettingsSection("Notes", "Notes saved on this phone") { PhoneNotesSection(model, state) } }
         item { PhoneSettingsSection("Voice language", "Recognition language and speech output") { VoiceLanguageSettings(model, state) } }
         item { PhoneSettingsSection("Offline voice", "Download speech recognition and voice packs") { CompanionVoicePacksSection(model, state) } }
-        item { PhoneSettingsSection("Off-grid knowledge", "Offline maps and reference packs") { OffGridContentSection() } }
+        item { PhoneSettingsSection("Offgrid", "Offline maps, chat, and reference packs") {
+            OutlinedButton(onClick = onOffgrid) { Text("Configure Offgrid tab") }
+            OutlinedButton(onClick = onNotices) { Text("Notifications & connection status") }
+        } }
         item { PhoneSettingsSection("Downloads", "Manage downloaded models and content") { DownloadedContentSection(model) } }
         item { PhoneSettingsSection("Assistant and app control", "Voice activation and saved app permissions") { AssistantSettings(model) } }
+
         item {
             PhoneSettingsSection("Voice and appearance", "Persona, presence, and desktop voices", initiallyOpen = false) {
             Text("Voice & presence", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))

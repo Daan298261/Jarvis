@@ -17,7 +17,23 @@ class CompanionPackCatalogTest {
         assertFalse(pack.url.contains("/resolve/main/"))
         assertTrue(CompanionPackCatalog.isAbliteratedCandidate(pack))
         assertEquals(1, CompanionPackCatalog.builtIn.count { it.recommended })
-        assertEquals(6, CompanionPackCatalog.builtIn.size)
+        assertEquals(7, CompanionPackCatalog.builtIn.size)
+    }
+
+    @Test fun offgridRejectsInstructAndReplacedWeights() {
+        val q4 = CompanionPackCatalog.builtIn.first { it.id == CompanionPackCatalog.ABLITERATED_17B_ID }
+        assertTrue(CompanionPackCatalog.isVerifiedMinimalRefusal(q4))
+        assertFalse(CompanionPackCatalog.isVerifiedMinimalRefusal(q4.copy(sha256 = "f".repeat(64))))
+        assertFalse(CompanionPackCatalog.isVerifiedMinimalRefusal(CompanionPackCatalog.builtIn.first { it.id == CompanionPackCatalog.INSTRUCT_15B_ID }))
+    }
+
+    @Test fun lowMemoryPacksKeepBoundedContextOnLargePhones() {
+        assertEquals(2048, DeviceInferenceGuard.contextTokens(6000, 2048))
+        assertEquals(2048, DeviceInferenceGuard.contextTokens(6000, 1792))
+        val q3 = CompanionPackCatalog.builtIn.first { it.id == CompanionPackCatalog.ABLITERATED_17B_Q3_ID }
+        assertEquals(939_538_560L, q3.sizeBytes)
+        assertTrue(q3.minRamMb < 2048)
+        assertFalse(q3.url.contains("/main/"))
     }
 
     @Test

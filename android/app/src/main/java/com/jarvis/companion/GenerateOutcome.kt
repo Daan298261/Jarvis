@@ -20,18 +20,20 @@ internal suspend fun <T> withOfflineAnswerCleanup(
     clearPicked: () -> Unit,
     onStart: () -> Unit,
     onFinally: () -> Unit,
+    keepWarm: () -> Boolean = { false },
     block: suspend () -> T,
 ): Result<T> {
     onStart()
+    var success = false
     return try {
-        Result.success(block())
+        Result.success(block().also { success = true })
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
         Result.failure(e)
     } finally {
         clearPicked()
-        packManager.unload()
+        if (!success || !keepWarm()) packManager.unload()
         onFinally()
     }
 }

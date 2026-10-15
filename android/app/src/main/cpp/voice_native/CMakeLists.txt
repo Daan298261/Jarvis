@@ -31,9 +31,9 @@ target_link_options(jarvis_whisper PRIVATE -Wl,--exclude-libs,ALL)
 # Headers come from the AAR's headers/ directory (no raw.githubusercontent).
 # Do not also add the Gradle Java binding; that would ship libonnxruntime4j_jni.so
 # and a second libonnxruntime.so.
-set(ORT_VERSION "1.20.0")
-set(ORT_AAR_SHA256 "07a8f71ef890afed8c6087a56220e6d558a492804276ee2dd7cb7f6262242027")
-set(ORT_AAR_DIR "${CMAKE_CURRENT_BINARY_DIR}/ort-aar")
+set(ORT_VERSION "1.31.0")
+set(ORT_AAR_SHA256 "72683787a80d0608a3121b967d8e1239aef48286826661c953211626690540a7")
+set(ORT_AAR_DIR "${CMAKE_CURRENT_BINARY_DIR}/ort-aar-${ORT_VERSION}-${ORT_AAR_SHA256}")
 set(ORT_AAR_URL "https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/${ORT_VERSION}/onnxruntime-android-${ORT_VERSION}.aar")
 # One verified copy of the AAR is shared by every ABI and reused across builds
 # (it used to be re-downloaded per ABI per build, so a single dropped

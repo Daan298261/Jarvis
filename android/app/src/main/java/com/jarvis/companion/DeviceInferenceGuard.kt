@@ -16,7 +16,7 @@ object DeviceInferenceGuard {
     const val N_CTX_MAX = OfflinePromptPlanner.N_CTX_MAX
 
     fun contextTokens(availMb: Long, packMinRamMb: Int): Int {
-        if (availMb <= 0L) return N_CTX_MIN
+        if (availMb <= 0L || packMinRamMb <= 2048) return N_CTX_MIN
         val headroom = availMb - packMinRamMb
         return if (headroom >= 768L) N_CTX_MAX else N_CTX_MIN
     }

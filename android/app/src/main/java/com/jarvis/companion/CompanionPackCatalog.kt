@@ -25,6 +25,7 @@ data class CompanionPack(
 }
 
 object CompanionPackCatalog {
+    const val ABLITERATED_17B_Q3_ID = "qwen3-1.7b-abliterated-q3"
     const val ABLITERATED_17B_ID = "qwen3-1.7b-abliterated-q4"
     const val ABLITERATED_06B_ID = "qwen3-0.6b-abliterated-q4"
     /** Default offline pack (RFC-0204 §2.1): minimal-refusal Qwen3.5 2B, fits S20-class phones. */
@@ -50,6 +51,10 @@ object CompanionPackCatalog {
             "Qwen3-1.7B-abliterated.Q4_K_M.gguf", 1_107_409_024L, 2048,
             "6fb5977ef935e2a54c0bd5ec45e841d5ba4256b2223c25b4f707553abac8f448",
             "https://huggingface.co/mradermacher/Qwen3-1.7B-abliterated-GGUF/resolve/ef85d5f367b9b49842f0ab88faf07e35d6dfa505/Qwen3-1.7B-abliterated.Q4_K_M.gguf", true),
+        CompanionPack(ABLITERATED_17B_Q3_ID, "Qwen3 1.7B Abliterated — smaller download (Q3_K_M)",
+            "Qwen3-1.7B-abliterated.Q3_K_M.gguf", 939_538_560L, 1792,
+            "3968be1d143c0a1c333887b0cb7d62b9a3d41848eb941c620f38c379e06a1388",
+            "https://huggingface.co/mradermacher/Qwen3-1.7B-abliterated-GGUF/resolve/ef85d5f367b9b49842f0ab88faf07e35d6dfa505/Qwen3-1.7B-abliterated.Q3_K_M.gguf", false),
         CompanionPack(ABLITERATED_06B_ID, "Qwen3 0.6B Abliterated — low memory (Q4_K_M)",
             "Qwen3-0.6B-abliterated.Q4_K_M.gguf", 396_704_896L, 1024,
             "405ecd904c83015cabaf2f30a8ecb52b5d71711752a78a363f7abad5fa1b5c97",
@@ -125,6 +130,11 @@ object CompanionPackCatalog {
         return byId.values.sortedByDescending { it.recommended }
     }
 
+    /** Offgrid accepts only pinned minimal-refusal weights, including after a desktop catalog merge. */
+    fun isVerifiedMinimalRefusal(pack: CompanionPack): Boolean = builtIn.any {
+        it.id == pack.id && it.sha256 == pack.sha256 && isAbliteratedCandidate(it)
+    }
+
     fun isLegalAllowlistRow(pack: CompanionPack): Boolean =
         pack.url.isNotBlank() &&
             pack.sha256.length == 64 &&
@@ -145,6 +155,9 @@ object CompanionPackCatalog {
      * owner's selected 3B Instruct. Opt-in abliterated packs (recommended = false)
      * are never auto-loaded unless selected.
      */
+    fun fastInstalledPack(catalog: List<CompanionPack>, canLoad: (CompanionPack) -> Boolean): CompanionPack? =
+        catalog.filter { isVerifiedMinimalRefusal(it) && it.sizeBytes <= 1_200_000_000L }.sortedBy { it.sizeBytes }.firstOrNull(canLoad)
+
     fun resolveOfflinePack(
         catalog: List<CompanionPack>,
         selectedId: String,

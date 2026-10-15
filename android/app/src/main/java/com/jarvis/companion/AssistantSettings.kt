@@ -23,7 +23,11 @@ fun AssistantSettings(model: CompanionModel) {
     val wake by WakeAudioState.status.collectAsStateWithLifecycle()
     val activity by PhoneTools.activity.collectAsStateWithLifecycle()
     val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let(model::importPhoneModel) }
-    val assistant = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { }
+    val role = remember { context.getSystemService(RoleManager::class.java) }
+    var assistantHeld by remember { mutableStateOf(role.isRoleHeld(RoleManager.ROLE_ASSISTANT)) }
+    val assistant = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        assistantHeld = role.isRoleHeld(RoleManager.ROLE_ASSISTANT)
+    }
     val microphone = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) runCatching { context.startForegroundService(Intent(context, AnzuWakeService::class.java).setAction("enable")) }
             .onFailure { WakeAudioState.status.value = "Could not start wake listening: ${it.message}" }
@@ -47,7 +51,10 @@ fun AssistantSettings(model: CompanionModel) {
             if (role.isRoleAvailable(RoleManager.ROLE_ASSISTANT)) assistant.launch(role.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT))
             else assistant.launch(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS))
         }) { Text("Make ANZU the default assistant") }
-        Text("Use your system assistant gesture/button. Samsung side-key behavior depends on your One UI settings.")
+        Text(if (assistantHeld) "ANZU is your default digital assistant" else "ANZU is not your default digital assistant")
+        OutlinedButton(onClick = { assistant.launch(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) }) { Text("Digital assistant options") }
+        OutlinedButton(onClick = { context.startActivity(Intent(ANZU_VOICE_ASSIST_ACTION).setPackage(context.packageName)) }) { Text("Test assistant button") }
+        Text("On Samsung, choose ANZU in Digital assistant app, then select Digital assistant for the side button in Advanced features → Side button.")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { microphone.launch(Manifest.permission.RECORD_AUDIO) }) { Text("Enable Hey ANZU / Hey Anu") }
             OutlinedButton(onClick = { context.stopService(Intent(context, AnzuWakeService::class.java)) }) { Text("Stop listening") }

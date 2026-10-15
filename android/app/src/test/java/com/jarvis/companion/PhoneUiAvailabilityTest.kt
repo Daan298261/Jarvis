@@ -8,6 +8,14 @@ class PhoneUiAvailabilityTest {
         assertEquals(listOf("Home", "Chat", "More"), PhoneUiAvailability.tabs(false, false))
         assertFalse(PhoneUiAvailability.tabs(true, true).contains("Studio"))
     }
+    @Test fun newerSecondaryScreensAndOptionalPylonRemainReachable() {
+        val tabs = PhoneUiAvailability.tabs(true, true, true)
+        assertTrue(tabs.contains("Offgrid"))
+        assertTrue(tabs.size <= 5)
+        for (screen in listOf("Memory", "Assistant", "Offgrid", "Offgrid chat", "Notifications"))
+            assertTrue(screen, PhoneUiAvailability.destinationAvailable(screen, tabs))
+        assertFalse(PhoneUiAvailability.destinationAvailable("Studio", tabs))
+    }
     @Test fun cachedTasksRemainReadableButOfflineMutationsAreDisabled() {
         assertTrue(PhoneUiAvailability.tabs(false, true).contains("Tasks"))
         assertFalse(PhoneUiAvailability.desktopActionsEnabled(false, false))

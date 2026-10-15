@@ -5,8 +5,8 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 /** Unit-test double: same AES-GCM wire format as production, no Android Keystore. */
-internal class JvmAesOutboxQueueCrypto : OutboxQueueCrypto {
-    private val key = SecretKeySpec(ByteArray(32) { 0x5A }, "AES")
+internal class JvmAesOutboxQueueCrypto(seed: Int = 0x5A) : OutboxQueueCrypto {
+    private val key = SecretKeySpec(ByteArray(32) { seed.toByte() }, "AES")
 
     override fun encrypt(plain: ByteArray): ByteArray {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
