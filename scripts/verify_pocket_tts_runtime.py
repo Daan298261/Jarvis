@@ -10,8 +10,20 @@ import hashlib
 from pathlib import Path
 import re
 from urllib.request import urlopen
+from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def verify_apk_runtime(apk: Path) -> None:
+    cmake = (ROOT / "android/app/src/main/cpp/voice_native/CMakeLists.txt").read_text()
+    version = re.search(r'set\(ORT_VERSION "([^"]+)"\)', cmake).group(1)
+    with ZipFile(apk) as archive:
+        for abi in ("arm64-v8a", "x86_64"):
+            name = f"lib/{abi}/libonnxruntime.so"
+            if version.encode() + b"\0" not in archive.read(name):
+                raise RuntimeError(f"{apk}: {name} does not contain pinned runtime {version}")
+            print(f"{apk}: {abi}: packaged ONNX Runtime {version}")
 
 
 def verify(cache: Path) -> None:
@@ -47,4 +59,10 @@ def verify(cache: Path) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cache-dir", type=Path, default=ROOT / "android/app/build/pocket-validation")
-    verify(parser.parse_args().cache_dir)
+    parser.add_argument("--apk", type=Path, action="append", help="Check APK runtime versions instead of loading host graphs")
+    args = parser.parse_args()
+    if args.apk:
+        for apk in args.apk:
+            verify_apk_runtime(apk)
+    else:
+        verify(args.cache_dir)
