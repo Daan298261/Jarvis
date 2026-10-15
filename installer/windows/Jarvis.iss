@@ -900,6 +900,8 @@ begin
   ExtractTemporaryFile('manage-anzu-hosts.ps1');
 end;
 
+function StopAnzuAtSetupStartup: Boolean; forward;
+
 function InitializeSetup: Boolean;
 begin
   BootstrapSkipHeavy := False;
@@ -917,6 +919,14 @@ begin
       'ANZU ' + ExistingVersion + ' is already installed, but this installer contains older version {#MyAppVersion}.' + #13#10 + #13#10 +
       'Setup will stop to prevent an accidental downgrade. Use a newer installer or uninstall ANZU from Windows Settings first.',
       mbError, MB_OK);
+    Result := False;
+  end;
+  { Inno checks AppMutex immediately after InitializeSetup, before the wizard
+    and PrepareToInstall. Stop the tray/manager too, since it owns Local\ANZU. }
+  if Result and not StopAnzuAtSetupStartup then
+  begin
+    MsgBox('Setup could not stop all ANZU processes. Approve the administrator request to stop an elevated ANZU instance, then restart Setup.' + #13#10 +
+      'Process details: %TEMP%\Jarvis-installer-stop.log', mbError, MB_OK);
     Result := False;
   end;
 end;
@@ -1004,6 +1014,25 @@ begin
       ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
     Log('Elevated Jarvis force-stop finished with code ' + IntToStr(ResultCode));
   end;
+end;
+
+function StopAnzuAtSetupStartup: Boolean;
+var
+  Root: String;
+  AlternateRoot: String;
+begin
+  Root := ExistingInstallDir;
+  if Root = '' then
+    Root := ExpandConstant('{localappdata}\Jarvis');
+  Result := ForceStopJarvisUnder(Root);
+  if not Result then
+    Exit;
+  AlternateRoot := ExpandConstant('{localappdata}\ANZU');
+  if DirExists(AlternateRoot) and (CompareText(Root, AlternateRoot) <> 0) then
+    Result := ForceStopJarvisUnder(AlternateRoot);
+  AlternateRoot := ExpandConstant('{localappdata}\Jarvis');
+  if Result and DirExists(AlternateRoot) and (CompareText(Root, AlternateRoot) <> 0) then
+    Result := ForceStopJarvisUnder(AlternateRoot);
 end;
 
 function AnzuFilesStillLockedMessage: String;
