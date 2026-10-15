@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { api } from "../api"
 import { isWorkerInstalling, OptionalWorkerRow } from "../components/OptionalWorkerRow"
+import { ChromeConnectorSetup } from "../components/ChromeConnectorSetup"
 
 type Catalog = {
   tools: { name: string; description: string; enabled: boolean; risk: string }[]
@@ -58,10 +59,11 @@ export function ToolsPage() {
     <div>
       <h1>Tools</h1>
       <p className="lede">
-        Native tools can be enabled or disabled. Optional workers stay listed when they are not installed so Jarvis degrades instead of crashing. Click <strong>Install now</strong> to add a missing worker to this Python environment. Playwright remains the default browser backend.{" "}
+        Native tools can be enabled or disabled. Optional workers stay listed when they are not installed so ANZU degrades instead of crashing. Browser Use, UFO and Cua install into dedicated environments. Playwright remains the default browser backend.{" "}
         Primary creative tool: <strong>blackgrid_studio</strong> — open the{" "}
         <a href="/studio/blackgrid" target="_blank" rel="noreferrer">BlackGrid workbench</a> (HR Endless Sampler + ComfyUI).
       </p>
+      <ChromeConnectorSetup />
       <div className="card">
         {catalog.tools.map((tool) => (
           <div className="toggle" key={tool.name}>

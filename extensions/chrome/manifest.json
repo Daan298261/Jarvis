@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "ANZU Website Connector",
+  "version": "0.2.0",
+  "description": "Share a selected Chrome tab with your local ANZU assistant.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "nativeMessaging",
+    "declarativeNetRequest",
+    "webNavigation",
+    "downloads"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Share this tab with ANZU",
+    "default_popup": "popup.html"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoA8shv5JnfPFg6zDq11Ll0lylY7LP8Z754bcvn07EkKhg5VeB7fOn2y+TsXj5HTiAGDJ2OzbARkEUpBEwaZpfHZLxfAh05gA779ryLjDEPxEIqWGImTOj9NO5cjYOf8PjQpkDIfw3w1FERX8JApgMMootzIAr2SducEim/olXr5KI1p5jjve7Nd20lv/mQTN807DQtZMg3NFPIrOOb7yPws8t0sktb1tp5PMK/fZfal1X+wUXEMXwWEhYWTCs3WKD/Sbzkpd0rZfEin2tn9pLII3DgfhUqxu7ggfjN2X76mx8Y5l5k2cbkYSB3ip1mCwZT4MfDk12Y05Lcrpb3BjEQIDAQAB"
+}

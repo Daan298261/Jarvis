@@ -31,6 +31,9 @@ def _module_available(name: str) -> bool:
 def ufo_checkout_root() -> Path | None:
     """Microsoft UFO2 clone: JARVIS_UFO_ROOT, or data/modules/ufo[2]."""
     candidates: list[Path] = []
+    from .isolated_runtime import installed_worker_python, runtime_root
+    if installed_worker_python("ufo"):
+        candidates.append(runtime_root("ufo") / "checkout")
     env = (os.environ.get("JARVIS_UFO_ROOT") or "").strip()
     if env:
         candidates.append(Path(env))
@@ -55,6 +58,10 @@ def ufo_checkout_root() -> Path | None:
 
 def ufo_python(checkout: Path | None = None) -> str:
     root = checkout or ufo_checkout_root()
+    from .isolated_runtime import installed_worker_python, runtime_root
+    isolated = installed_worker_python("ufo")
+    if isolated and root == runtime_root("ufo") / "checkout":
+        return str(isolated)
     if root is not None:
         for rel in (Path(".venv") / "Scripts" / "python.exe", Path(".venv") / "bin" / "python"):
             candidate = root / rel
@@ -416,10 +423,7 @@ class UFOBackend(ComputerUseBackend):
             model = ""
         if not model:
             model = self._discover_local_model(base) or "Qwen3.5-9B"
-        env.setdefault("OPENAI_BASE_URL", base)
-        env.setdefault("OPENAI_API_BASE", base)
-        env.setdefault("OPENAI_API_KEY", env.get("OPENAI_API_KEY") or "local")
-        env.setdefault("JARVIS_UFO_API_MODEL", model)
+        env.update(OPENAI_BASE_URL=base, OPENAI_API_BASE=base, OPENAI_API_KEY=os.environ.get("JARVIS_LLM_API_KEY") or "local", JARVIS_UFO_API_MODEL=model)
         return env
 
     @staticmethod
@@ -513,10 +517,13 @@ class CuaBackend(ComputerUseBackend):
     id = "cua"
     name = "Cua"
     license_id = "MIT"
-    modules = ("cua", "computer", "agent_s", "agent_s2")
-    clis = ("cua",)
+    modules = ("cua_driver",)
+    clis = ()
 
     def detect_kind(self) -> str | None:
+        from .isolated_runtime import installed_worker_python
+        if installed_worker_python("cua"):
+            return "isolated:cua-driver"
         for name in self.modules:
             if _module_available(name):
                 return f"python-module:{name}"
@@ -578,6 +585,10 @@ class CuaBackend(ComputerUseBackend):
                     "Use the native desktop tool (UI Automation) instead."
                 ),
             )
+        if kind in {"isolated:cua-driver", "python-module:cua_driver"}:
+            from .isolated_runtime import run_isolated
+            from .local_llm import local_openai_base_url, local_openai_model
+            return await run_isolated("cua", {"goal": goal.strip(), "app": app, "base_url": local_openai_base_url(), "model": local_openai_model(), "api_key": os.environ.get("JARVIS_LLM_API_KEY") or "local"}, timeout=timeout_seconds or CUA_TIMEOUT_SECONDS, executable_override=sys.executable if kind == "python-module:cua_driver" else None)
         command = self.build_command(str(goal).strip(), app, kind)
         timeout = timeout_seconds or CUA_TIMEOUT_SECONDS
         try:

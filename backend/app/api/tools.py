@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from ..agent.acp import acp_status
@@ -22,6 +22,34 @@ class RouteBody(BaseModel):
     task_class: str | None = None
     files_hint: int = 0
     previous_failures: int = 0
+
+
+@router.get("/chrome-connector")
+async def chrome_connector_status():
+    from ..tools.chrome_connector import execute_connector
+    from ..tools.chrome_setup import setup_status
+    status = await execute_connector("chrome_status")
+    return {**setup_status(), **status.data}
+
+
+@router.post("/chrome-connector/setup")
+async def chrome_connector_setup(request: Request):
+    from ..auth import is_local_owner_host
+    if not request.client or not is_local_owner_host(request.client.host):
+        raise HTTPException(403, "Prepare the Chrome connector from this computer's ANZU portal")
+    import asyncio
+    from ..tools.chrome_setup import prepare_connector
+    try:
+        return await asyncio.to_thread(prepare_connector)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.get("/chrome-connector/package")
+async def chrome_connector_package():
+    import base64
+    from ..tools.chrome_setup import connector_package
+    return {"filename": "ANZU-Chrome-Connector.zip", "zip_base64": base64.b64encode(connector_package()).decode("ascii")}
 
 
 @router.get("")

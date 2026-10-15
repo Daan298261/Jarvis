@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -109,7 +111,7 @@ async def test_already_installed_worker_does_not_run_pip(monkeypatch):
     assert ran["count"] == 0
 
 
-def test_install_worker_uses_allowlisted_pip(monkeypatch):
+def test_install_worker_uses_allowlisted_pip(monkeypatch, tmp_path):
     commands: list[list[str]] = []
 
     class Probe:
@@ -134,14 +136,18 @@ def test_install_worker_uses_allowlisted_pip(monkeypatch):
             Probe.ready = True
         return 0, "Successfully installed browser-use"
 
+    from app.workers import isolated_runtime
+    monkeypatch.setattr(isolated_runtime, "runtime_root", lambda worker_id: tmp_path / worker_id)
     monkeypatch.setattr(install_mod, "_backend", lambda _wid: Probe())
     monkeypatch.setattr(install_mod, "_run", fake_run)
     monkeypatch.setattr(install_mod, "_playwright_chromium", lambda: None)
     install_mod._install_worker("browser-use")
     assert commands
-    pip = commands[0]
-    assert pip[:4] == [install_mod.sys.executable, "-m", "pip", "install"]
-    assert pip[-1] in {"browser-use[core]", "browser-use"}
+    pip_commands = [command for command in commands if command[1:4] == ["-m", "pip", "install"]]
+    assert commands[0][:3] == [install_mod.sys.executable, "-m", "venv"]
+    assert pip_commands
+    assert all(Path(command[0]).is_relative_to(tmp_path) for command in pip_commands)
+    assert any(command[-1] == "browser-use==0.13.11" for command in pip_commands)
     assert all("curl" not in part for cmd in commands for part in cmd)
     jobs = install_mod.snapshot_jobs()
     assert jobs["browser-use"]["status"] == "ready"
@@ -159,8 +165,10 @@ def test_ufo_install_clones_microsoft_repo_only(monkeypatch, tmp_path):
         def probe(self) -> dict:
             return {"id": "ufo", "available": Probe.ready, "status": "ready" if Probe.ready else "missing"}
 
-    dest = tmp_path / "microsoft-ufo"
-    dest.mkdir()
+    from app.workers import isolated_runtime
+    monkeypatch.setattr(isolated_runtime, "runtime_root", lambda worker_id: tmp_path / worker_id)
+    dest = tmp_path / "ufo" / "checkout"
+    dest.mkdir(parents=True)
     (dest / "requirements.txt").write_text("pywinauto\n", encoding="utf-8")
     (dest / ".git").mkdir()
 
@@ -181,9 +189,10 @@ def test_ufo_install_clones_microsoft_repo_only(monkeypatch, tmp_path):
         lambda url, _target: None if url == install_mod.UFO_GIT_URL else (_ for _ in ()).throw(AssertionError(url)),
     )
     install_mod._install_worker("ufo")
-    pip_cmds = [cmd for cmd in commands if cmd[:3] == [install_mod.sys.executable, "-m", "pip"]]
+    pip_cmds = [cmd for cmd in commands if cmd[1:3] == ["-m", "pip"]]
     assert pip_cmds
-    assert "-r" in pip_cmds[0]
+    assert all(Path(command[0]).is_relative_to(tmp_path) for command in pip_cmds)
+    assert any("-r" in command for command in pip_cmds)
 
 
 def test_clone_repo_rejects_unlisted_url(tmp_path):

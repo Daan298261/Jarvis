@@ -57,9 +57,7 @@ SPECS: dict[str, tuple[InstallAttempt, ...]] = {
         InstallAttempt(git_url=UFO_GIT_URL, git_dirname="microsoft-ufo", requirements=True),
     ),
     "cua": (
-        InstallAttempt(pip_packages=("cua",)),
-        InstallAttempt(pip_packages=("cua-computer", "cua-agent")),
-        InstallAttempt(pip_packages=("cua-cli",)),
+        InstallAttempt(pip_packages=("cua-driver==0.35.2",)),
     ),
     "open-interpreter": (InstallAttempt(pip_packages=("open-interpreter",)),),
     "openhands": (
@@ -313,6 +311,9 @@ def _install_attempt(worker_id: str, attempt: InstallAttempt) -> None:
 
 
 def _install_worker(worker_id: str) -> None:
+    if worker_id in {"browser-use", "ufo", "cua"}:
+        _install_isolated_worker(worker_id)
+        return
     attempts = SPECS.get(worker_id)
     if not attempts:
         raise KeyError(worker_id)
@@ -338,6 +339,65 @@ def _install_worker(worker_id: str) -> None:
             return
         errors.append("Packages installed but the worker is still not detectable")
     raise RuntimeError(" | ".join(errors) or f"Could not install {worker_id}")
+
+
+def _install_isolated_worker(worker_id: str) -> None:
+    import json
+    from .isolated_runtime import host_python, installed_worker_python, runtime_python, runtime_root
+
+    if installed_worker_python(worker_id):
+        _set_job(worker_id, status="ready", already_installed=True, detail="Dedicated environment verified")
+        return
+    root = runtime_root(worker_id)
+    root.mkdir(parents=True, exist_ok=True)
+    executable = runtime_python(worker_id)
+    logs = []
+    def command(args, **kwargs):
+        code, output = _run(args, **kwargs)
+        logs.append(output)
+        _write_install_log(worker_id, "\n\n".join(logs))
+        if code:
+            raise RuntimeError(f"{worker_id} setup failed (exit {code}): {_tail(output)}")
+    _set_job(worker_id, detail="Creating a dedicated Python environment…")
+    if not executable.is_file():
+        command([host_python(), "-m", "venv", str(root / "venv")])
+    _require_pypi()
+    command([str(executable), "-m", "pip", "install", "--upgrade", "pip"])
+    if worker_id == "ufo":
+        checkout = root / "checkout"
+        if checkout.exists() and not (checkout / ".git").is_dir():
+            raise RuntimeError("The UFO checkout folder already contains files without Git metadata; move them to a safe location before installing")
+        _set_job(worker_id, detail="Installing Microsoft UFO in its dedicated environment…")
+        _clone_repo(UFO_GIT_URL, checkout)
+        # Upstream's pandas 1.4 pin has no Python 3.11 wheels. Keep the adjustment
+        # local to this worker's requirements, never ANZU's package environment.
+        requirements = (checkout / "requirements.txt").read_text(encoding="utf-8")
+        requirements = requirements.replace("pandas==1.4.3", "pandas>=2.2,<3")
+        adapted = root / "requirements-anzu.txt"
+        adapted.write_text(requirements, encoding="utf-8")
+        from ..policy.network_http import require_http_url_allowed
+        require_http_url_allowed("https://download.pytorch.org/whl/cpu/", tool="web_fetch")
+        command([str(executable), "-m", "pip", "install", "torch", "--index-url", "https://download.pytorch.org/whl/cpu/"])
+        command([str(executable), "-m", "pip", "install", "-r", str(adapted)])
+        from .computer import UFOBackend
+        ufo = UFOBackend()
+        ufo._sync_local_llm_config(checkout, ufo._openai_env())
+        command([str(executable), "-m", "ufo", "--help"], cwd=checkout)
+    else:
+        package = "browser-use==0.13.11" if worker_id == "browser-use" else "cua-driver==0.35.2"
+        _set_job(worker_id, detail=f"Installing {package} in its dedicated environment…")
+        command([str(executable), "-m", "pip", "install", package])
+        module = "browser_use" if worker_id == "browser-use" else "cua_driver"
+        command([str(executable), "-c", f"import {module}; print('verified')"])
+        if worker_id == "browser-use":
+            from ..config import apply_playwright_browsers_path
+            apply_playwright_browsers_path()
+            from ..policy.network_http import require_http_url_allowed
+            require_http_url_allowed("https://cdn.playwright.dev/", tool="web_fetch")
+            command([str(executable), "-m", "pip", "install", "playwright"])
+            command([str(executable), "-m", "playwright", "install", "chromium"])
+    (root / "ready.json").write_text(json.dumps({"verified": True, "worker_id": worker_id, "python": str(executable)}), encoding="utf-8")
+    _set_job(worker_id, status="ready", error="", detail="Installed and import-verified in a dedicated environment; live task verification is separate")
 
 
 async def start_worker_install(worker_id: str) -> dict[str, Any]:
