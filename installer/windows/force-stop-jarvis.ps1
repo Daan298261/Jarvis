@@ -66,7 +66,6 @@ function Add-AncestorPids([int]$StartPid) {
     $current = $StartPid
     $guard = 0
     while ($current -gt 0 -and $guard -lt 32) {
-        [void]$script:ProtectedPids.Add($current)
         $row = $null
         try {
             $row = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId=$current" -ErrorAction SilentlyContinue |
@@ -78,7 +77,17 @@ function Add-AncestorPids([int]$StartPid) {
                     Select-Object -First 1
             } catch { }
         }
-        if (-not $row) { break }
+        if (-not $row) {
+            [void]$script:ProtectedPids.Add($current)
+            break
+        }
+        # Setup can be launched by ANZU itself. Killing that parent with
+        # Stop-Process does not terminate Setup, so do not exempt its mutex owner.
+        $anzuParent = ([string]$row.Name) -match '^(anzu|anzumanager|jarvis|jarvis-backend|anzu-backend)(\.exe)?$' -or
+            ([string]$row.CommandLine) -match 'uvicorn\s+app\.(manager\.main|main):app'
+        if ($current -eq $StartPid -or -not $anzuParent) {
+            [void]$script:ProtectedPids.Add($current)
+        }
         $parentId = 0
         try { $parentId = [int]$row.ParentProcessId } catch { break }
         if ($parentId -le 0 -or $script:ProtectedPids.Contains($parentId)) { break }

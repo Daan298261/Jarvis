@@ -6,12 +6,24 @@ if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
 # Load declarations only: never execute the production script's shutdown loop.
 $functions = $ast.FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst]}, $true)
 foreach ($fn in $functions) {
-    if ($fn.Name -notin @('Invoke-ForceStopSingleRoot','Add-AncestorPids')) {
+    if ($fn.Name -ne 'Invoke-ForceStopSingleRoot') {
         Invoke-Expression $fn.Extent.Text
     }
 }
 $script:ProtectedPids = New-Object 'System.Collections.Generic.HashSet[int]'
 $script:JarvisPythonPids = New-Object 'System.Collections.Generic.HashSet[int]'
+function Get-CimInstance {
+    param($ClassName,$Filter)
+    if ($Filter -eq 'ProcessId=910001') {
+        return [pscustomobject]@{ProcessId=910001;ParentProcessId=910002;Name='powershell.exe';CommandLine='force-stop-jarvis.ps1'}
+    }
+    if ($Filter -eq 'ProcessId=910002') {
+        return [pscustomobject]@{ProcessId=910002;ParentProcessId=0;Name='AnzuManager.exe';CommandLine=''}
+    }
+}
+Add-AncestorPids 910001
+if (-not $script:ProtectedPids.Contains(910001)) { throw 'Stop script was not protected' }
+if ($script:ProtectedPids.Contains(910002)) { throw 'ANZU launcher was incorrectly exempted from shutdown' }
 $IncludeTray = $true; $PreserveManager = $false; $StartupCleanup = $false
 $script:snapshot = @(
     [pscustomobject]@{ProcessId=900001;ParentProcessId=1;Name='AnzuManager.exe';ExecutablePath='C:\OtherInstall\desktop\AnzuManager.exe';CommandLine=''},
