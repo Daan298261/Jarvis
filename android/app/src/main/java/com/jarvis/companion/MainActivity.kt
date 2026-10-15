@@ -110,8 +110,8 @@ class MainActivity : FragmentActivity() {
             val offgridPrefs = remember { context.getSharedPreferences("offgrid_ui", MODE_PRIVATE) }
             var offgridTab by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(offgridPrefs.getBoolean("show_tab", false)) }
             var confirmOffgrid by remember { mutableStateOf(false) }
-            androidx.activity.compose.BackHandler(enabled = tab == "Offgrid chat" || tab == "Assistant") {
-                tab = if (tab == "Offgrid chat") "Offgrid" else "More"
+            androidx.activity.compose.BackHandler(enabled = tab == "Offgrid chat" || tab == "Assistant" || tab == "Memory") {
+                tab = if (tab == "Offgrid chat") "Offgrid" else if (tab == "Memory") "Chat" else "More"
             }
             val noticeStore = app.notices
             val notices by noticeStore.notices.collectAsStateWithLifecycle()
@@ -438,6 +438,7 @@ class MainActivity : FragmentActivity() {
                                 }
                             }
                             "Chat" -> {
+                                PhoneAnswerOptions(model) { tab = "Memory" }
                                 if (state.connected) ConversationPickers(state, model::selectModel, model::selectVoice)
                                 else Text(phoneModelStatus(state, devicePack), color = Muted, fontSize = 11.sp)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -510,6 +511,7 @@ class MainActivity : FragmentActivity() {
                                 }
                             }
                             "Studio" -> StudioScreen(model, state)
+                            "Memory" -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) { PhoneMemorySettings(model) }
                             "Assistant" -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) { AssistantSettings(model) }
                             "Offgrid" -> OffgridScreen(state, onChat = { tab = "Offgrid chat" })
                             "Offgrid chat" -> OffgridChatScreen(model, state)
@@ -1153,6 +1155,7 @@ private fun formatStorageBytes(bytes: Long): String {
             if (!state.connected) Text(CompanionMode.desktopOnlyNotice(DesktopFeature.NOTIFICATIONS), color = Muted, fontSize = 12.sp)
             else if (state.capabilities.optJSONObject("calls")?.optBoolean("push_configured") != true) Text(stringResource(R.string.push_needs_anzu_service), color = Muted, fontSize = 12.sp)
         }
+        item { PhoneMemorySettings(model) }
         item { CompanionModelsSection(deviceChrome, devicePack, state, pickModelFile) }
         item { PhoneNotesSection(model, state) }
         item { VoiceLanguageSettings(model, state) }

@@ -231,6 +231,15 @@ class JarvisApi(private val context: Context) {
         return RemoteEndpoints.tailscaleHint(endpoints, installed, vpn, onLan)
     }
 
+    /** Optional routing must never delay a normal answer behind endpoint failover/session negotiation. */
+    suspend fun quickRoute(text: String, engine: String, allowCloud: Boolean): JSONObject = withContext(Dispatchers.IO) {
+        check(deviceId.isNotEmpty() && token.isNotEmpty()) { "Desktop session unavailable" }
+        val body = JSONObject().put("text", text.take(512)).put("engine", engine).put("allow_cloud", allowCloud).toString().toByteArray()
+        val client = pinnedClient().newBuilder().callTimeout(600, TimeUnit.MILLISECONDS).connectTimeout(250, TimeUnit.MILLISECONDS).build()
+        val address = activeOrigin()
+        JSONObject(readOrigin(client.newCall(originRequest(address, "/quick-route", "POST", body, true, "application/json", null, emptyMap())), address).toString(Charsets.UTF_8))
+    }
+
     suspend fun json(path: String, method: String = "GET", body: JSONObject? = null): JSONObject =
         JSONObject(readWithSessionRecovery(path, method, body?.toString()?.toByteArray()).toString(Charsets.UTF_8))
     suspend fun array(path: String): JSONArray = JSONArray(readWithSessionRecovery(path).toString(Charsets.UTF_8))

@@ -236,8 +236,9 @@ class CompanionPackManager(
         return DeviceInferenceGuard.blockReason(app, pack) == null
     }
 
-    fun resolveOfflinePack(): CompanionPack? =
-        CompanionPackCatalog.resolveOfflinePack(catalog, selectedPackId(), ::packCanLoad)
+    fun resolveOfflinePack(preferFast: Boolean = false): CompanionPack? =
+        (if (preferFast) CompanionPackCatalog.fastInstalledPack(catalog, ::packCanLoad) else null)
+            ?: CompanionPackCatalog.resolveOfflinePack(catalog, selectedPackId(), ::packCanLoad)
 
     fun isPackReady(): Boolean {
         if (resolveOfflinePack() != null) return true
@@ -454,12 +455,14 @@ class CompanionPackManager(
         prompt: String,
         maxTokens: Int = DeviceInferenceGuard.BUDGET_CLEAR,
         requireMinimalRefusal: Boolean = false,
+        preferFast: Boolean = false,
+        memoryContext: String = "",
         history: List<org.json.JSONObject> = emptyList(),
         latest: String = "",
         pickedText: String? = null,
         onToken: (String) -> Unit,
     ): GenerateResult = withContext(llamaDispatcher) {
-        val pack = resolveOfflinePack() ?: selectedPack() ?: error("No pack selected")
+        val pack = resolveOfflinePack(preferFast) ?: selectedPack() ?: error("No pack selected")
         check(!requireMinimalRefusal || CompanionPackCatalog.isVerifiedMinimalRefusal(pack)) {
             "Offgrid requires a pinned Abliterated or Heretic model"
         }
@@ -490,6 +493,7 @@ class CompanionPackManager(
             }
             if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
             val promptBudget = OfflinePromptPlanner.promptTokenBudget(nCtx, maxTokens)
+            val memory = PhoneMemoryBudget.fit(memoryContext, engine::tokenize, minOf(256, promptBudget / 4))
             val plan = if (latest.isNotEmpty() || !pickedText.isNullOrBlank()) {
                 OfflinePromptPlanner.plan(
                     history = history,
@@ -497,6 +501,7 @@ class CompanionPackManager(
                     pickedText = pickedText,
                     tokenize = { engine.tokenize(it) },
                     promptBudget = promptBudget,
+                    memoryContext = memory,
                 )
             } else {
                 OfflinePromptPlanner.Plan(prompt = prompt, sectioned = false, history = history)
@@ -512,6 +517,7 @@ class CompanionPackManager(
                     plan.history,
                     latestText,
                     summaries,
+                    memory,
                 )
                 var reduceGuard = 0
                 while (engine.tokenize(finalPrompt) > promptBudget && summaries.size > 1 && reduceGuard++ < 4) {
@@ -526,9 +532,10 @@ class CompanionPackManager(
                         plan.history,
                         latestText,
                         summaries,
+                        memory,
                     )
                 }
-                finalPrompt
+                OfflinePromptPlanner.boundedFinal(plan.history, latestText, summaries, memory, engine::tokenize, promptBudget)
             } else {
                 plan.prompt
             }
@@ -578,6 +585,8 @@ class CompanionPackManager(
     fun requestCancel() {
         engine.requestCancel()
     }
+
+    suspend fun releaseIdle() = withContext(llamaDispatcher) { unload() }
 
     fun unload() {
         engine.unload()

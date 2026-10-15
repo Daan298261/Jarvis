@@ -155,6 +155,9 @@ object CompanionPackCatalog {
      * owner's selected 3B Instruct. Opt-in abliterated packs (recommended = false)
      * are never auto-loaded unless selected.
      */
+    fun fastInstalledPack(catalog: List<CompanionPack>, canLoad: (CompanionPack) -> Boolean): CompanionPack? =
+        catalog.filter { isVerifiedMinimalRefusal(it) && it.sizeBytes <= 1_200_000_000L }.sortedBy { it.sizeBytes }.firstOrNull(canLoad)
+
     fun resolveOfflinePack(
         catalog: List<CompanionPack>,
         selectedId: String,

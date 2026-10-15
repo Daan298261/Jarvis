@@ -41,23 +41,36 @@ class StoreRecoveryAndSyncTest {
     @Before
     fun clean() {
         dir.listFiles()?.forEach { it.delete() }
+        context.getSharedPreferences("phone_memory_storage", android.content.Context.MODE_PRIVATE).edit().clear().commit()
     }
 
     @Test
     fun unreadableConversationsAreMovedAsideAndStoreStartsFresh() {
         val good = LocalConversationStore(context, JvmAesOutboxQueueCrypto()) { 1L }
         good.append(good.create("old case chat"), JSONObject().put("role", "user").put("text", "old"))
+        good.close()
         val recovered = mutableListOf<File>()
         val broken = LocalConversationStore(context, LostKeyCrypto(), { 42L }) { recovered += it.copy; assertTrue(it.kept) }
 
         assertTrue(broken.conversations().isEmpty())
-        assertEquals(listOf("local-conversations.42.corrupt"), recovered.map { it.name })
-        assertTrue(File(dir, "local-conversations.42.corrupt").isFile)
+        assertEquals(listOf(PhoneMemoryStore.DB_NAME), recovered.map { it.name })
+        assertTrue(File(dir, PhoneMemoryStore.DB_NAME).isFile)
         // Later writes work instead of throwing on every send.
         val id = broken.create("fresh")
         broken.append(id, JSONObject().put("role", "user").put("text", "fresh"))
         assertEquals(listOf("fresh"), broken.messages(id).map { it.getString("text") })
         assertEquals(1, recovered.size)
+        assertTrue(recovered.any { it.name == PhoneMemoryStore.DB_NAME && it.isFile })
+    }
+
+    @Test fun unreadableLegacyHistoryIsKeptDuringMigration() {
+        File(dir, "local-conversations").writeBytes(JvmAesOutboxQueueCrypto().encrypt("{}".toByteArray()))
+        val recovered = mutableListOf<File>()
+        val store = LocalConversationStore(context, LostKeyCrypto(), { 42L }) { recovered += it.copy }
+        assertTrue(store.conversations().isEmpty())
+        assertEquals(listOf("local-conversations.42.corrupt"), recovered.map { it.name })
+        assertTrue(recovered.single().isFile)
+        store.close()
     }
 
     @Test

@@ -20,7 +20,7 @@ internal class AndroidKeystoreOutboxQueueCrypto(
 ) : OutboxQueueCrypto {
     private val keys = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
 
-    private fun key(): SecretKey {
+    private fun key(): SecretKey = synchronized(KEY_LOCK) {
         if (!keys.containsAlias(alias)) {
             KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
                 init(
@@ -31,8 +31,10 @@ internal class AndroidKeystoreOutboxQueueCrypto(
                 )
             }.generateKey()
         }
-        return keys.getKey(alias, null) as SecretKey
+        keys.getKey(alias, null) as SecretKey
     }
+
+    companion object { private val KEY_LOCK = Any() }
 
     override fun encrypt(plain: ByteArray): ByteArray {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
