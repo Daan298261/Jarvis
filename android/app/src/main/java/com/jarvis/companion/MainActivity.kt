@@ -290,8 +290,14 @@ class MainActivity : FragmentActivity() {
                     dismissButton = { TextButton(onClick = { val id = incomingCall; incomingCall = null; model.action { if (id != null) model.api.json("/calls/$id/end", "POST") } }) { Text("Decline") } })
                 Scaffold(containerColor = Ink, bottomBar = {
                     NavigationBar(containerColor = Ink) {
+                        val visibleTabs = PhoneUiAvailability.tabs(state.connected, state.tasks.isNotEmpty() || state.codingDecisions.isNotEmpty(), offgridTab)
+                        LaunchedEffect(visibleTabs, tab) {
+                            if (!PhoneUiAvailability.destinationAvailable(tab, visibleTabs)) tab = "Home"
+                        }
                         listOf("Home" to Icons.Outlined.RadioButtonChecked, "Chat" to Icons.Outlined.ChatBubbleOutline,
-                            "Tasks" to Icons.Outlined.Checklist, "Studio" to Icons.Outlined.AutoAwesome, "More" to Icons.Outlined.Tune).plus(if (offgridTab) listOf("Offgrid" to Icons.Outlined.ElectricalServices) else emptyList()).forEach { (label, icon) ->
+                            "Tasks" to Icons.Outlined.Checklist, "More" to Icons.Outlined.Tune)
+                            .plus(if (offgridTab) listOf("Offgrid" to Icons.Outlined.ElectricalServices) else emptyList())
+                            .filter { it.first in visibleTabs }.forEach { (label, icon) ->
                             NavigationBarItem(selected = tab == label || (label == "Offgrid" && tab == "Offgrid chat"), onClick = { tab = label }, icon = {
                                 if (label == "Offgrid") androidx.compose.foundation.Image(
                                     androidx.compose.ui.res.painterResource(R.drawable.ic_offgrid_pylon), label, Modifier.size(24.dp))
@@ -432,7 +438,7 @@ class MainActivity : FragmentActivity() {
                                         }
                                         OutlinedButton(onClick = {
                                             callPermission.launch(Manifest.permission.RECORD_AUDIO)
-                                        }, enabled = state.capabilities.optJSONObject("calls")?.optBoolean("available") == true) { Icon(Icons.Outlined.Call, "Start call") }
+                                        }, enabled = state.connected && !state.busy && state.capabilities.optJSONObject("calls")?.optBoolean("available") == true) { Icon(Icons.Outlined.Call, "Start call") }
                                     }
                                     TextButton(onClick = { tab = "Chat" }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Or write a message", color = Muted) }
                                 }
@@ -646,7 +652,7 @@ private fun inferenceStatus(state: CompanionState): String {
     val busy = state.busy
     Text("Models (on-device)", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
     Text(
-        "Without the ANZU desktop, ANZU answers on this phone with a downloaded model. You can also load a .gguf you copied to the phone; it is checked against the model's SHA-256 first.",
+        "Download a model to chat on this phone without your desktop. You can also import a compatible model file; ANZU verifies it before use.",
         color = Muted,
         fontSize = 12.sp,
         modifier = Modifier.padding(bottom = 8.dp),
@@ -981,6 +987,8 @@ private fun formatStorageBytes(bytes: Long): String {
 }
 
 @Composable private fun CodingDecisionCard(decision: JSONObject, model: CompanionModel) {
+    val current by model.state.collectAsStateWithLifecycle()
+    val canAct = PhoneUiAvailability.desktopActionsEnabled(current.connected, current.busy)
     var responding by remember { mutableStateOf(false) }
     var resolution by remember(decision.optString("id")) { mutableStateOf("") }
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFF242018))) {
@@ -988,7 +996,7 @@ private fun formatStorageBytes(bytes: Long): String {
             Text("CODING DECISION", color = Gold, fontSize = 10.sp)
             Text(decision.optString("title"), fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
             Text(decision.optString("detail"), color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
-            TextButton(onClick = { responding = true }) { Text("Respond") }
+            TextButton(onClick = { responding = true }, enabled = canAct) { Text("Respond") }
         }
     }
     if (responding) AlertDialog(
@@ -998,12 +1006,14 @@ private fun formatStorageBytes(bytes: Long): String {
         confirmButton = { TextButton(onClick = {
             responding = false
             model.resolveCodingDecision(decision.getString("id"), resolution.trim())
-        }, enabled = resolution.isNotBlank()) { Text("Resolve") } },
+        }, enabled = canAct && resolution.isNotBlank()) { Text("Resolve") } },
         dismissButton = { TextButton(onClick = { responding = false }) { Text("Cancel") } },
     )
 }
 
 @Composable private fun TaskCard(task: JSONObject, model: CompanionModel) {
+    val current by model.state.collectAsStateWithLifecycle()
+    val canAct = PhoneUiAvailability.desktopActionsEnabled(current.connected, current.busy)
     var expanded by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
         Text(task.optString("status").uppercase() + if (task.optBoolean("stale")) " · NO RECENT PROGRESS" else "", color = Gold, fontSize = 10.sp)
@@ -1014,13 +1024,13 @@ private fun formatStorageBytes(bytes: Long): String {
             Text("Approval required", color = Gold, modifier = Modifier.padding(top = 12.dp))
             Text(approval.optString("action"), fontSize = 12.sp)
             Row {
-                TextButton(onClick = { model.approve(task.getString("id"), approval.getString("token"), true) }) { Text("Approve this action") }
-                TextButton(onClick = { model.approve(task.getString("id"), approval.getString("token"), false) }) { Text("Reject") }
+                TextButton(onClick = { model.approve(task.getString("id"), approval.getString("token"), true) }, enabled = canAct) { Text("Approve this action") }
+                TextButton(onClick = { model.approve(task.getString("id"), approval.getString("token"), false) }, enabled = canAct) { Text("Reject") }
             }
         }
         Row {
             TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Less" else "Activity") }
-            if (task.optString("status") in listOf("queued", "running", "waiting")) TextButton(onClick = { model.cancel(task.getString("id")) }) { Text("Cancel") }
+            if (task.optString("status") in listOf("queued", "running", "waiting")) TextButton(onClick = { model.cancel(task.getString("id")) }, enabled = canAct) { Text("Cancel") }
         }
         if (expanded) { task.optJSONArray("events")?.objects()?.takeLast(8)?.forEach { Text(it.optString("title"), fontSize = 12.sp, modifier = Modifier.padding(vertical = 3.dp)) }; if (task.optString("result").isNotEmpty()) Text(task.optString("result"), fontSize = 13.sp) }
     } }
@@ -1043,6 +1053,7 @@ private fun formatStorageBytes(bytes: Long): String {
     var pin by remember { mutableStateOf(model.api.pin) }
     var pairingCode by remember { mutableStateOf(model.api.invitation) }
     var scannerOpen by remember { mutableStateOf(false) }
+    var manualPairing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var scanError by remember { mutableStateOf<String?>(null) }
     var schedulePrompt by remember { mutableStateOf("") }
     var whenText by remember { mutableStateOf(LocalDateTime.now().plusHours(1).withSecond(0).withNano(0).toString()) }
@@ -1065,10 +1076,19 @@ private fun formatStorageBytes(bytes: Long): String {
         }
     }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item { AppAccessSettings(accessLock) }
-        item { SecureScreenSettings(secureScreen) }
+        item { Text("Settings", style = MaterialTheme.typography.headlineMedium) }
+        item { PhoneSettingsSection("Phone model", "Download, import, or choose a local model", initiallyOpen = devicePack.status != DevicePackStatus.READY) {
+            CompanionModelsSection(deviceChrome, devicePack, state, pickModelFile)
+        } }
+        item { PhoneSettingsSection("Privacy and app lock", "Screenshots and access protection") {
+            AppAccessSettings(accessLock)
+            SecureScreenSettings(secureScreen)
+        } }
         item {
+            PhoneSettingsSection("Desktop connection", if (state.connected) "Connected to ANZU desktop" else "Scan a QR to pair your PC", initiallyOpen = model.api.deviceId.isEmpty()) {
             Text("Connection", fontSize = 25.sp, modifier = Modifier.padding(vertical = 12.dp))
+            TextButton(onClick = { manualPairing = !manualPairing }) { Text(if (manualPairing) "Hide manual setup" else "Enter connection details manually") }
+            if (manualPairing) {
             OutlinedTextField(endpoint, { endpoint = it }, label = { Text(stringResource(R.string.anzu_https_endpoint)) }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(pin, { pin = it }, label = { Text("Server fingerprint") }, modifier = Modifier.fillMaxWidth())
             if (model.api.deviceId.isEmpty()) OutlinedTextField(
@@ -1079,6 +1099,7 @@ private fun formatStorageBytes(bytes: Long): String {
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword),
                 modifier = Modifier.fillMaxWidth(),
             )
+            }
             if (model.api.deviceId.isEmpty()) {
                 Button(
                     onClick = { requestScanner() },
@@ -1088,11 +1109,12 @@ private fun formatStorageBytes(bytes: Long): String {
                 scanError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
             }
             Button(onClick = { model.pair(endpoint, pin, pairingCode) },
-                enabled = !state.busy && (model.api.deviceId.isNotEmpty() || CompanionCodeValidator.isComplete(pairingCode))) {
+                enabled = !state.busy && ((model.api.deviceId.isNotEmpty() && !manualPairing) || PhoneUiAvailability.manualPairingReady(endpoint, pin, pairingCode, paired = model.api.deviceId.isNotEmpty()))) {
                 Text(if (model.api.deviceId.isEmpty()) stringResource(R.string.pair_with_anzu) else "Connect / check approval")
             }
             Text("Phone fingerprint: ${model.api.fingerprint().chunked(8).joinToString(" ")}", color = Muted, fontSize = 11.sp)
             Text(stringResource(R.string.confirm_fingerprint_anzu_desktop), color = Muted, fontSize = 12.sp)
+            }
         }
 
         if (scannerOpen) item {
@@ -1124,6 +1146,21 @@ private fun formatStorageBytes(bytes: Long): String {
         }
 
         item {
+            PhoneSettingsSection("WhatsApp", "Desktop contact integration", initiallyOpen = false) {
+            var contactReady by remember { mutableStateOf(false) }
+            var contactStatus by remember { mutableStateOf("Connect your desktop and set up WhatsApp there first.") }
+            LaunchedEffect(state.connected) {
+                contactReady = false
+                if (state.connected) {
+                    runCatching { model.api.json("/whatsapp/contact") }
+                        .onSuccess { contact ->
+                            contactReady = contact.optBoolean("available")
+                            contactStatus = if (contactReady) "Your desktop WhatsApp contact is ready to save."
+                                else contact.optString("reason", "Set up WhatsApp on your desktop first.")
+                        }
+                        .onFailure { contactStatus = "Could not check the desktop WhatsApp contact. Reopen this section to retry." }
+                }
+            }
             Text("WhatsApp", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
             Text(
                 stringResource(R.string.whatsapp_save_anzu),
@@ -1142,33 +1179,36 @@ private fun formatStorageBytes(bytes: Long): String {
                     ) model.addJarvisWhatsAppContact()
                     else contactsPermission.launch(Manifest.permission.WRITE_CONTACTS)
                 },
-                enabled = state.connected && !state.busy,
+                enabled = state.connected && !state.busy && contactReady,
             ) { Text(stringResource(R.string.add_anzu_on_whatsapp)) }
+            Text(contactStatus, color = Muted, fontSize = 12.sp)
             if (!state.connected) Text(CompanionMode.desktopOnlyNotice(DesktopFeature.WHATSAPP), color = Muted, fontSize = 12.sp)
+            }
         }
 
         item {
+            PhoneSettingsSection("Notifications and calls", if (state.connected) "Desktop notifications and calls" else "Requires a desktop connection", initiallyOpen = false) {
             Text("Notifications & calls", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
             val device = state.capabilities.optJSONObject("device")
             Row(verticalAlignment = Alignment.CenterVertically) { Text("Task notifications", Modifier.weight(1f)); Switch(device?.optBoolean("notifications") == true, { model.preferences(it, device?.optBoolean("critical_calls") == true) }, enabled = state.connected) }
             Row(verticalAlignment = Alignment.CenterVertically) { Text("Calls for critical events", Modifier.weight(1f)); Switch(device?.optBoolean("critical_calls") == true, { model.preferences(device?.optBoolean("notifications") == true, it) }, enabled = state.connected) }
             if (!state.connected) Text(CompanionMode.desktopOnlyNotice(DesktopFeature.NOTIFICATIONS), color = Muted, fontSize = 12.sp)
             else if (state.capabilities.optJSONObject("calls")?.optBoolean("push_configured") != true) Text(stringResource(R.string.push_needs_anzu_service), color = Muted, fontSize = 12.sp)
+            }
         }
-        item { PhoneMemorySettings(model) }
-        item { CompanionModelsSection(deviceChrome, devicePack, state, pickModelFile) }
-        item { PhoneNotesSection(model, state) }
-        item { VoiceLanguageSettings(model, state) }
-        item { AssistantSettings(model) }
-        item { CompanionVoicePacksSection(model, state) }
-        item {
-            Text("Offgrid", fontSize = 20.sp)
-            Text("Maps, local chat and knowledge for preparedness and travel.", color = Muted)
+        item { PhoneSettingsSection("Memory and speed", "Projects, saved instructions, and quick answers") { PhoneMemorySettings(model) } }
+        item { PhoneSettingsSection("Notes", "Notes saved on this phone") { PhoneNotesSection(model, state) } }
+        item { PhoneSettingsSection("Voice language", "Recognition language and speech output") { VoiceLanguageSettings(model, state) } }
+        item { PhoneSettingsSection("Offline voice", "Download speech recognition and voice packs") { CompanionVoicePacksSection(model, state) } }
+        item { PhoneSettingsSection("Offgrid", "Offline maps, chat, and reference packs") {
             OutlinedButton(onClick = onOffgrid) { Text("Configure Offgrid tab") }
             OutlinedButton(onClick = onNotices) { Text("Notifications & connection status") }
-        }
-        item { DownloadedContentSection(model) }
+        } }
+        item { PhoneSettingsSection("Downloads", "Manage downloaded models and content") { DownloadedContentSection(model) } }
+        item { PhoneSettingsSection("Assistant and app control", "Voice activation and saved app permissions") { AssistantSettings(model) } }
+
         item {
+            PhoneSettingsSection("Voice and appearance", "Persona, presence, and desktop voices", initiallyOpen = false) {
             Text("Voice & presence", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
             Text("Presence", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1195,8 +1235,10 @@ private fun formatStorageBytes(bytes: Long): String {
             state.voiceRouteBanner?.let {
                 Text(it, color = Color(0xFFE8A87C), fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
             }
+            }
         }
         item {
+            PhoneSettingsSection("Desktop schedules", if (state.connected) "Create a desktop schedule" else "Connect your desktop to create a schedule", initiallyOpen = editingSchedule != null) {
             Text("Schedules", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
             OutlinedTextField(schedulePrompt, { schedulePrompt = it }, label = { Text(stringResource(R.string.what_should_anzu_do)) }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(whenText, { whenText = it }, label = { Text("Local date/time · YYYY-MM-DDTHH:MM") }, modifier = Modifier.fillMaxWidth())
@@ -1204,23 +1246,24 @@ private fun formatStorageBytes(bytes: Long): String {
             Button(onClick = { runCatching { LocalDateTime.parse(whenText).atZone(ZoneId.systemDefault()) }.onSuccess {
                 model.schedule(editingSchedule, schedulePrompt, it, recurrence)
                 editingSchedule = null
-            } }, enabled = state.connected && schedulePrompt.isNotBlank()) { Text(if (editingSchedule == null) stringResource(R.string.schedule_on_anzu) else "Save schedule") }
+            } }, enabled = PhoneUiAvailability.desktopActionsEnabled(state.connected, state.busy) && schedulePrompt.isNotBlank()) { Text(if (editingSchedule == null) stringResource(R.string.schedule_on_anzu) else "Save schedule") }
             if (!state.connected) Text(CompanionMode.desktopOnlyNotice(DesktopFeature.SCHEDULES), color = Muted, fontSize = 12.sp)
             if (editingSchedule != null) TextButton(onClick = { editingSchedule = null; schedulePrompt = "" }) { Text("Cancel editing") }
+            }
         }
         items(state.schedules) { schedule -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp)) {
             Text(schedule.optString("prompt"))
             val next = runCatching { java.time.Instant.ofEpochSecond(schedule.getLong("next_run")).atZone(ZoneId.systemDefault()).toLocalDateTime() }.getOrNull()
             Text("${schedule.optString("recurrence")} · ${if (schedule.optBoolean("enabled")) "scheduled" else "paused / complete"}${next?.let { " · $it" } ?: ""}", color = Muted)
             Row {
-                TextButton(onClick = {
+                TextButton(enabled = PhoneUiAvailability.desktopActionsEnabled(state.connected, state.busy), onClick = {
                     editingSchedule = schedule.getString("id")
                     schedulePrompt = schedule.optString("prompt")
                     recurrence = schedule.optString("recurrence", "once")
                     next?.let { whenText = it.withSecond(0).withNano(0).toString() }
                 }) { Text("Edit") }
-                if (schedule.optBoolean("enabled")) TextButton(onClick = { model.pauseSchedule(schedule.getString("id")) }) { Text("Pause") }
-                else TextButton(onClick = { model.resumeSchedule(schedule.getString("id")) }) { Text("Resume") }
+                if (schedule.optBoolean("enabled")) TextButton(onClick = { model.pauseSchedule(schedule.getString("id")) }, enabled = PhoneUiAvailability.desktopActionsEnabled(state.connected, state.busy)) { Text("Pause") }
+                else TextButton(onClick = { model.resumeSchedule(schedule.getString("id")) }, enabled = PhoneUiAvailability.desktopActionsEnabled(state.connected, state.busy)) { Text("Resume") }
             }
         } } }
         item { Text("Call history", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp)) }
