@@ -17,6 +17,11 @@ class LocalConversationStore(
     private val clock: () -> Long = System::currentTimeMillis,
     onRecovered: (StoreRecovery) -> Unit = {},
 ) {
+    private val memoryDelegate = lazy {
+        PhoneMemoryStore.recovering(context, crypto, clock, onRecovered).also { it.migrateLegacy(file.read()) }
+    }
+    val memory: PhoneMemoryStore get() = memoryDelegate.value
+    fun close() { if (memoryDelegate.isInitialized()) memoryDelegate.value.close() }
     private val file = EncryptedJsonFile(File(context.noBackupFilesDir, "local-conversations"), crypto, clock, onRecovered)
 
     /** Newest first; each item has id, title, updated_at, message_count and local=true. */
@@ -57,14 +62,19 @@ class LocalConversationStore(
             )
             root.put("conversations", trimConversations(items))
         }
+        memory.upsertChat(id, titleFor(firstText), desktopId = linkedDesktopId.orEmpty())
         return id
     }
 
     fun append(id: String, message: JSONObject) {
+        val archived = JSONObject(message.toString()).put("at", clock())
+        if (archived.optString("id").isBlank()) archived.put("id", "local-message-" + UUID.randomUUID().toString())
+        memory.upsertChat(id, titleFor(message.optString("text")))
+        memory.append(id, archived)
         file.update { root ->
             val conv = find(root, id) ?: error("Conversation $id is not on this phone")
             val messages = conv.optJSONArray("messages") ?: JSONArray()
-            messages.put(JSONObject(message.toString()).put("at", clock()))
+            messages.put(JSONObject(archived.toString()))
             while (messages.length() > MAX_MESSAGES) messages.remove(0)
             conv.put("messages", messages)
             conv.put("updated_at", clock())
@@ -78,10 +88,12 @@ class LocalConversationStore(
     fun linkDesktop(id: String, desktopConversationId: String): Boolean {
         var linked = false
         file.update { root -> find(root, id)?.let { it.put("desktop_conversation_id", desktopConversationId); linked = true } }
+        if (linked) memory.linkDesktop(id, desktopConversationId)
         return linked
     }
 
     fun delete(id: String) {
+        memory.deleteChat(id)
         file.update { root ->
             val items = root.optJSONArray("conversations") ?: JSONArray()
             val kept = JSONArray()

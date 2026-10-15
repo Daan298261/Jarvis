@@ -60,6 +60,12 @@ class OutboxQueue(
         }
     }
 
+    fun forgetConversation(id: String) {
+        file.update { root ->
+            root.put("items", JSONArray(root.optJSONArray("items")?.objects().orEmpty().filter { it.optString(OfflineSyncPlanner.CONVERSATION_KEY) != id }))
+        }
+    }
+
     fun clear() {
         file.delete()
     }

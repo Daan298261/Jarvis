@@ -57,7 +57,8 @@ class StoreRecoveryAndSyncTest {
         val id = broken.create("fresh")
         broken.append(id, JSONObject().put("role", "user").put("text", "fresh"))
         assertEquals(listOf("fresh"), broken.messages(id).map { it.getString("text") })
-        assertEquals(1, recovered.size)
+        assertEquals(2, recovered.size)
+        assertTrue(recovered.any { it.name == PhoneMemoryStore.DB_NAME && it.isFile })
     }
 
     @Test

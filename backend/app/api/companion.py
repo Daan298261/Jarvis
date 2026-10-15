@@ -91,6 +91,12 @@ class Message(BaseModel):
     attachments: list[uuid.UUID] = Field(default_factory=list, max_length=10)
 
 
+class QuickRoute(BaseModel):
+    text: str = Field(min_length=1, max_length=512)
+    engine: Literal["laya", "jev"]
+    allow_cloud: bool = False
+
+
 class Schedule(BaseModel):
     prompt: str = Field(min_length=1, max_length=32000)
     profile: str = "auto"
@@ -264,6 +270,12 @@ async def conversations(device=Device):
 @router.get("/conversations/{conversation_id}")
 async def conversation(conversation_id: uuid.UUID, device=Device):
     return await service.conversation_detail(str(conversation_id))
+
+
+@router.post("/quick-route")
+async def quick_route(body: QuickRoute, device=Device):
+    from ..mobile.quick_route import route_question
+    return await route_question(body.text, body.engine, body.allow_cloud)
 
 
 @router.post("/messages")

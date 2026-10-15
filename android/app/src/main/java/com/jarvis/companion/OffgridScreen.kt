@@ -41,6 +41,7 @@ fun OffgridChatScreen(model: CompanionModel, state: CompanionState) {
     var draft by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(Unit) { model.startOffgridConversation() }
     Column(Modifier.fillMaxSize()) {
+        PhoneAnswerOptions(model)
         Text("Offgrid chat", style = MaterialTheme.typography.headlineMedium)
         Text("Uses a verified Abliterated / Heretic model on this phone.", color = Muted)
         TextButton(onClick = model::startOffgridConversation, enabled = !state.busy) { Text("New conversation") }
