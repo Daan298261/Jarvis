@@ -57,6 +57,17 @@ class NoticeStoreTest {
         assertFalse(n.read); assertEquals(now, n.timeMillis); assertEquals("downloading companion model (40%)", n.body)
     }
 
+    @Test fun download_progress_keeps_read_state_and_position() {
+        val s = store()
+        s.syncLive(listOf(offline.copy(body = "downloading companion model (40%)")))
+        s.markAllRead()
+        now += 1000
+        s.syncLive(listOf(offline.copy(body = "downloading companion model (41%)")))
+        assertTrue(s.notices.value.single().read)
+        assertEquals(1_000_000L, s.notices.value.single().timeMillis)
+        assertEquals("downloading companion model (41%)", s.notices.value.single().body)
+    }
+
     @Test fun dismissed_live_stays_hidden_across_restart_until_it_changes_or_recurs() {
         store().apply { syncLive(listOf(offline)); dismiss(notices.value.single().id) }
         val restarted = store()
@@ -191,6 +202,13 @@ class NotificationsScreenTest {
         compose.setContent { NotificationsScreen(emptyList(), true, {}, {}, {}) }
         compose.onNodeWithText("No notifications", substring = true).assertExists()
         compose.onNodeWithText("Clear all").assertDoesNotExist()
+    }
+
+    @Test fun ongoing_notice_remains_accessible_after_reading() {
+        var clicked = false
+        compose.setContent { HomeNoticeIndicator(0, ongoing = true) { clicked = true } }
+        compose.onNodeWithTag("home_notice_indicator").performClick()
+        assertTrue(clicked)
     }
 
     @Test fun home_indicator_shows_count_and_hides_when_all_read() {

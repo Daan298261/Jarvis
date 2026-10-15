@@ -453,12 +453,16 @@ class CompanionPackManager(
     suspend fun generate(
         prompt: String,
         maxTokens: Int = DeviceInferenceGuard.BUDGET_CLEAR,
+        requireMinimalRefusal: Boolean = false,
         history: List<org.json.JSONObject> = emptyList(),
         latest: String = "",
         pickedText: String? = null,
         onToken: (String) -> Unit,
     ): GenerateResult = withContext(llamaDispatcher) {
         val pack = resolveOfflinePack() ?: selectedPack() ?: error("No pack selected")
+        check(!requireMinimalRefusal || CompanionPackCatalog.isVerifiedMinimalRefusal(pack)) {
+            "Offgrid requires a pinned Abliterated or Heretic model"
+        }
         DeviceInferenceGuard.blockReason(app, pack)?.let { error(it) }
         val path = packFile(pack)
         if (!path.isFile) error("Install the companion model pack first")

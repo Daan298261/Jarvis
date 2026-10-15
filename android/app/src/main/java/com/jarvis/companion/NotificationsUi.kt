@@ -1,6 +1,8 @@
 package com.jarvis.companion
 
 import android.text.format.DateUtils
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -75,17 +77,22 @@ private fun actionRes(action: NoticeAction): Int = when (action) {
 
 /** Small unread marker for the Home header: a dot plus count, nothing when everything is read. */
 @Composable
-fun HomeNoticeIndicator(unread: Int, onClick: () -> Unit) {
-    if (unread <= 0) return
+fun HomeNoticeIndicator(unread: Int, ongoing: Boolean = false, onClick: () -> Unit) {
+    if (unread <= 0 && !ongoing) return
     val description = pluralStringResource(R.plurals.notices_unread, unread, unread)
     Row(
         Modifier.testTag("home_notice_indicator").clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 4.dp)
             .semantics { contentDescription = description },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(8.dp).background(WarningColor, CircleShape))
+        val pulse = androidx.compose.animation.core.rememberInfiniteTransition(label = "Unread notice")
+        val alpha by pulse.animateFloat(
+            initialValue = 1f, targetValue = if (unread > 0) 0.4f else 1f,
+            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                androidx.compose.animation.core.tween(1000), androidx.compose.animation.core.RepeatMode.Reverse), label = "Notice pulse")
+        Box(Modifier.size(8.dp).background(WarningColor.copy(alpha = alpha), CircleShape))
         Spacer(Modifier.width(4.dp))
-        Text(if (unread > 99) "99+" else unread.toString(), fontSize = 11.sp, color = WarningColor)
+        Text(if (unread > 99) "99+" else if (unread > 0) unread.toString() else "", fontSize = 11.sp, color = WarningColor)
     }
 }
 
@@ -107,7 +114,7 @@ fun NotificationsScreen(
         if (notices.isEmpty()) {
             Text(stringResource(R.string.notices_empty), color = Muted, modifier = Modifier.padding(top = 24.dp))
         }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
+        LazyColumn(state = rememberLazyListState(), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
             items(notices, key = { it.id }) { notice ->
                 NoticeCard(notice, actionsEnabled, onAction = { action ->
                     if (action == NoticeAction.DISCARD_PENDING) confirmDiscard = true else onAction(action)

@@ -53,8 +53,8 @@ class JarvisApi(private val context: Context) {
     private val failedLock = Any()
     private var failedOrigins: List<Pair<String, Long>> = emptyList()
     @Volatile private var cachedClient: Pair<String, OkHttpClient>? = null
-    private var token = ""
-    private var expiresAt = 0L
+    @Volatile private var token = ""
+    @Volatile private var expiresAt = 0L
     private val sessionLock = Mutex()
     private val keys = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
     private val keyAlias = "jarvis-device-v1"
@@ -232,8 +232,11 @@ class JarvisApi(private val context: Context) {
     }
 
     suspend fun json(path: String, method: String = "GET", body: JSONObject? = null): JSONObject =
-        JSONObject(raw(path, method, body?.toString()?.toByteArray()).toString(Charsets.UTF_8))
-    suspend fun array(path: String): JSONArray = JSONArray(raw(path).toString(Charsets.UTF_8))
+        JSONObject(readWithSessionRecovery(path, method, body?.toString()?.toByteArray()).toString(Charsets.UTF_8))
+    suspend fun array(path: String): JSONArray = JSONArray(readWithSessionRecovery(path).toString(Charsets.UTF_8))
+
+    internal suspend fun readWithSessionRecovery(path: String, method: String = "GET", body: ByteArray? = null): ByteArray =
+        recoverExpiredRead(method) { raw(path, method, body) }
 
     suspend fun raw(
         path: String,
@@ -399,7 +402,7 @@ class JarvisApi(private val context: Context) {
         call.execute().use { response ->
             val result = response.body?.bytes() ?: ByteArray(0)
             if (!response.isSuccessful) {
-                if (response.code == 401) {
+                if (response.code == 401 && call.request().header("Authorization") == "Bearer $token") {
                     token = ""
                     expiresAt = 0
                 }
