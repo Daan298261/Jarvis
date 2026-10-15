@@ -44,12 +44,27 @@ _URL_ABLITERATED_4B = (
     "Qwen3.5-4B-abliterated.Q4_K_M.gguf"
 )
 
-RECOMMENDED_PACK_ID = "qwen3.5-2b-heretic-q4"
+RECOMMENDED_PACK_ID = "qwen3-1.7b-abliterated-q4"
 
 # Pinned allowlist — weights live under data/companion-packs/ (gitignored).
 COMPANION_PACK_CATALOG: list[dict[str, Any]] = [
+    {"id": RECOMMENDED_PACK_ID, "label": "Qwen3 1.7B Abliterated (Q4_K_M)",
+     "filename": "Qwen3-1.7B-abliterated.Q4_K_M.gguf", "size_bytes": 1_107_409_024,
+     "min_ram_mb": 2048, "context_tokens": 2048, "license": "apache-2.0", "recommended": True,
+     "sha256": "6fb5977ef935e2a54c0bd5ec45e841d5ba4256b2223c25b4f707553abac8f448",
+     "url": "https://huggingface.co/mradermacher/Qwen3-1.7B-abliterated-GGUF/resolve/ef85d5f367b9b49842f0ab88faf07e35d6dfa505/Qwen3-1.7B-abliterated.Q4_K_M.gguf"},
+    {"id": "qwen3-1.7b-abliterated-q3", "label": "Qwen3 1.7B Abliterated — smaller download (Q3_K_M)",
+     "filename": "Qwen3-1.7B-abliterated.Q3_K_M.gguf", "size_bytes": 939_538_560,
+     "min_ram_mb": 1792, "context_tokens": 2048, "license": "apache-2.0", "recommended": False,
+     "sha256": "3968be1d143c0a1c333887b0cb7d62b9a3d41848eb941c620f38c379e06a1388",
+     "url": "https://huggingface.co/mradermacher/Qwen3-1.7B-abliterated-GGUF/resolve/ef85d5f367b9b49842f0ab88faf07e35d6dfa505/Qwen3-1.7B-abliterated.Q3_K_M.gguf"},
+    {"id": "qwen3-0.6b-abliterated-q4", "label": "Qwen3 0.6B Abliterated — low memory (Q4_K_M)",
+     "filename": "Qwen3-0.6B-abliterated.Q4_K_M.gguf", "size_bytes": 396_704_896,
+     "min_ram_mb": 1024, "context_tokens": 4096, "license": "apache-2.0", "recommended": False,
+     "sha256": "405ecd904c83015cabaf2f30a8ecb52b5d71711752a78a363f7abad5fa1b5c97",
+     "url": "https://huggingface.co/mradermacher/Qwen3-0.6B-abliterated-GGUF/resolve/6447ed9befe9b70c34ed0af5f4706b9c11f6342a/Qwen3-0.6B-abliterated.Q4_K_M.gguf"},
     {
-        "id": RECOMMENDED_PACK_ID,
+        "id": "qwen3.5-2b-heretic-q4",
         "label": "Qwen3.5 2B Heretic — minimal refusals (Q4_K_M)",
         "filename": "Qwen3.5-2B-heretic-Q4_K_M.gguf",
         "size_bytes": 1_270_807_936,
@@ -58,7 +73,7 @@ COMPANION_PACK_CATALOG: list[dict[str, Any]] = [
         "sha256": "dad8a69dddcd64f2221dd06ae5c46baceb31ed9bd0dec330306d77762c377cf1",
         "url": _URL_HERETIC_2B,
         "license": "apache-2.0",
-        "recommended": True,
+        "recommended": False,
     },
     {
         "id": "qwen3.5-4b-abliterated-q4",

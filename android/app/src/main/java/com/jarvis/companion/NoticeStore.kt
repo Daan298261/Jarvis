@@ -23,7 +23,7 @@ data class LiveCondition(
     val body: String?,
     val actions: List<NoticeAction> = emptyList(),
 ) {
-    val signature: String get() = "${severity.name}|${body.orEmpty()}"
+    val signature: String get() = "${severity.name}|${body.orEmpty().replace(Regex("\\d+%"), "progress")}"
 }
 
 data class Notice(

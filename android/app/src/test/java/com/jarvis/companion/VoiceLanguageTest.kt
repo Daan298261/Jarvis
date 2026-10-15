@@ -72,9 +72,16 @@ class VoiceLanguageTest {
         assertEquals("nl-NL", VoiceLanguageSetting("en", sttLanguageOverride = "nl").recognizerLanguage)
     }
 
-    @Test fun fallback_notice_keeps_pack_error_visible() {
-        val n = OnDeviceTtsFallback.fallbackNotice("model crashed", "English")
-        assertTrue(n.contains("model crashed")); assertTrue(n.contains("English"))
+    @Test fun fallback_notice_explains_recovery_without_native_paths() {
+        val raw = "Load model /data/user/0/private/encoder.onnx failed: Unsupported model IR version: 13, max supported IR version: 10"
+        val notice = OnDeviceTtsFallback.fallbackNotice(raw, "English")
+        assertTrue(notice.contains("Update ANZU"))
+        assertTrue(notice.contains("English"))
+        assertFalse(notice.contains("/data/"))
+        assertFalse(notice.contains("encoder.onnx"))
+        assertTrue(notice.length < 180)
+        assertFalse(OnDeviceTtsFallback.failureNotice("native stack trace").contains("native stack"))
+        assertTrue(OnDeviceTtsFallback.failureNotice("Out of memory").contains("Close other apps"))
     }
 
     @Test fun pocket_pack_is_english_only_and_under_150_mb() {

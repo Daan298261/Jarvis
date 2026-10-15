@@ -41,6 +41,7 @@ class JarvisApi(private val context: Context) {
     var deviceId: String = prefs.getString("device", "") ?: ""
         private set
     val invitation: String get() = bootstrap.optString("invitation")
+    fun activeOrigin(): String = preferred.ifBlank { endpoint }
     val firebase: JSONObject? get() = bootstrap.optJSONObject("firebase")
     private var endpoints = runCatching {
         val supplied = JSONArray(prefs.getString("endpoints", null) ?: bootstrap.optJSONArray("endpoints")?.toString() ?: "[]")
@@ -52,8 +53,8 @@ class JarvisApi(private val context: Context) {
     private val failedLock = Any()
     private var failedOrigins: List<Pair<String, Long>> = emptyList()
     @Volatile private var cachedClient: Pair<String, OkHttpClient>? = null
-    private var token = ""
-    private var expiresAt = 0L
+    @Volatile private var token = ""
+    @Volatile private var expiresAt = 0L
     private val sessionLock = Mutex()
     private val keys = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
     private val keyAlias = "jarvis-device-v1"
@@ -230,9 +231,21 @@ class JarvisApi(private val context: Context) {
         return RemoteEndpoints.tailscaleHint(endpoints, installed, vpn, onLan)
     }
 
+    /** Optional routing must never delay a normal answer behind endpoint failover/session negotiation. */
+    suspend fun quickRoute(text: String, engine: String, allowCloud: Boolean): JSONObject = withContext(Dispatchers.IO) {
+        check(deviceId.isNotEmpty() && token.isNotEmpty()) { "Desktop session unavailable" }
+        val body = JSONObject().put("text", text.take(512)).put("engine", engine).put("allow_cloud", allowCloud).toString().toByteArray()
+        val client = pinnedClient().newBuilder().callTimeout(600, TimeUnit.MILLISECONDS).connectTimeout(250, TimeUnit.MILLISECONDS).build()
+        val address = activeOrigin()
+        JSONObject(readOrigin(client.newCall(originRequest(address, "/quick-route", "POST", body, true, "application/json", null, emptyMap())), address).toString(Charsets.UTF_8))
+    }
+
     suspend fun json(path: String, method: String = "GET", body: JSONObject? = null): JSONObject =
-        JSONObject(raw(path, method, body?.toString()?.toByteArray()).toString(Charsets.UTF_8))
-    suspend fun array(path: String): JSONArray = JSONArray(raw(path).toString(Charsets.UTF_8))
+        JSONObject(readWithSessionRecovery(path, method, body?.toString()?.toByteArray()).toString(Charsets.UTF_8))
+    suspend fun array(path: String): JSONArray = JSONArray(readWithSessionRecovery(path).toString(Charsets.UTF_8))
+
+    internal suspend fun readWithSessionRecovery(path: String, method: String = "GET", body: ByteArray? = null): ByteArray =
+        recoverExpiredRead(method) { raw(path, method, body) }
 
     suspend fun raw(
         path: String,
@@ -398,7 +411,7 @@ class JarvisApi(private val context: Context) {
         call.execute().use { response ->
             val result = response.body?.bytes() ?: ByteArray(0)
             if (!response.isSuccessful) {
-                if (response.code == 401) {
+                if (response.code == 401 && call.request().header("Authorization") == "Bearer $token") {
                     token = ""
                     expiresAt = 0
                 }

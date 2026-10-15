@@ -17,7 +17,7 @@ from . import __version__
 from .api import investigations
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
-from .api import advisor, agent_policy, agent_portability, agent_rooms, amazon_ads, approvals, auth, automation_breaker, autonomy, capability_lab, coding, companion, computer_use, context_repo, custom_presence, cyber_ato, decision, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, installer, integrations, license, lmstudio, lta, mcp, media, memory, mobile, model, modules, named_personas, owner_chat, packs, perception, perception_commentary, perception_identity, permissions, projects, queue, recovery, reversibility, runtime_profiles, security_agents, self_dev, session_personality, settings, setup, skill_forge, supermemory, swarm, system, tasks, tools, trajectories, vault, voice, voice_profiles, worker_environments, workflows, rea
+from .api import advisor, agent_policy, agent_portability, agent_rooms, amazon_ads, approvals, auth, automation_breaker, autonomy, blackgrid, capability_lab, coding, companion, computer_use, context_repo, custom_presence, cyber_ato, decision, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, installer, integrations, license, lmstudio, lta, mcp, media, memory, mobile, model, modules, named_personas, owner_chat, packs, perception, perception_commentary, perception_identity, permissions, projects, queue, recovery, reversibility, runtime_profiles, security_agents, self_dev, session_personality, settings, setup, skill_forge, supermemory, swarm, system, tasks, tools, trajectories, vault, voice, voice_profiles, worker_environments, workflows, rea
 from .auth import authenticate_request, authenticate_websocket
 from .guests.service import authenticate_guest_request, extract_guest_token_from_request
 from . import startup_health
@@ -102,6 +102,7 @@ app.include_router(computer_use.router)
 app.include_router(lmstudio.router)
 app.include_router(packs.router)
 app.include_router(modules.router)
+app.include_router(blackgrid.router)
 app.include_router(trajectories.router)
 app.include_router(skill_forge.router)
 app.include_router(agent_rooms.router)
@@ -325,6 +326,7 @@ async def startup() -> None:
     try:
         asyncio.create_task(_auto_start_supermemory_and_refresh_node(node.id))
         asyncio.create_task(_auto_start_crucix())
+        asyncio.create_task(_auto_start_blackgrid())
     except Exception:
         logging.debug("Supermemory auto-start scheduling skipped", exc_info=True)
     if current.inference.auto_load and not os.environ.get("JARVIS_SKIP_MODEL"):
@@ -427,6 +429,14 @@ async def _auto_start_crucix() -> None:
         logging.exception("Crucix auto-start failed")
 
 
+async def _auto_start_blackgrid() -> None:
+    try:
+        from .studio.blackgrid_runtime import auto_start as auto_start_blackgrid
+        await auto_start_blackgrid()
+    except Exception:
+        logging.exception("BlackGrid auto-start failed")
+
+
 @app.on_event("shutdown")
 async def shutdown() -> None:
     try:
@@ -482,6 +492,11 @@ async def shutdown() -> None:
         await dispose_database_engine()
     except Exception:
         logging.debug("Database engine dispose skipped", exc_info=True)
+    try:
+        from .studio.blackgrid_runtime import stop as shutdown_blackgrid
+        await shutdown_blackgrid()
+    except Exception:
+        logging.debug("BlackGrid shutdown skipped", exc_info=True)
 
 
 async def _autoload_model(current) -> None:

@@ -6,7 +6,7 @@ import org.json.JSONObject
  * Token budget, prompt batching, and map-reduce for on-device GGUF turns (RFC-0204).
  */
 object OfflinePromptPlanner {
-    const val N_BATCH = 512
+    const val N_BATCH = 128
     const val N_CTX_MIN = 2048
     const val N_CTX_MAX = 4096
     const val SECTIONED_NOTE =
@@ -78,11 +78,12 @@ object OfflinePromptPlanner {
         latest: String,
         tokenize: (String) -> Int,
         promptBudget: Int,
+        memoryContext: String = "",
     ): List<JSONObject> {
         val cap = (promptBudget / 2).coerceAtLeast(64)
         var kept = history
         fun overBudget(): Boolean =
-            tokenize(StandalonePrompt.build(kept, latest, pickedText = null)) > cap
+            tokenize(StandalonePrompt.build(kept, latest, pickedText = null, memoryContext = memoryContext)) > cap
         while (kept.size > 1 && overBudget()) {
             kept = kept.drop(1)
         }
@@ -103,9 +104,10 @@ object OfflinePromptPlanner {
         latest: String,
         tokenize: (String) -> Int,
         promptBudget: Int,
+        memoryContext: String = "",
     ): Pair<String, Boolean> {
         val cap = (promptBudget / 2).coerceAtLeast(64)
-        fun tokens(text: String) = tokenize(StandalonePrompt.build(emptyList(), text, pickedText = null))
+        fun tokens(text: String) = tokenize(StandalonePrompt.build(emptyList(), text, pickedText = null, memoryContext = memoryContext))
         if (latest.isEmpty() || tokens(latest) <= cap) return latest to false
         var lo = 0
         var hi = latest.length
@@ -167,10 +169,11 @@ object OfflinePromptPlanner {
         pickedText: String?,
         tokenize: (String) -> Int,
         promptBudget: Int,
+        memoryContext: String = "",
     ): Plan {
-        val (usedLatest, clipped) = clipLatestToHalfBudget(latest, tokenize, promptBudget)
-        val trimmed = trimHistory(history, usedLatest, tokenize, promptBudget)
-        val skeleton = StandalonePrompt.build(trimmed, usedLatest, pickedText = null)
+        val (usedLatest, clipped) = clipLatestToHalfBudget(latest, tokenize, promptBudget, memoryContext)
+        val trimmed = trimHistory(history, usedLatest, tokenize, promptBudget, memoryContext)
+        val skeleton = StandalonePrompt.build(trimmed, usedLatest, pickedText = null, memoryContext = memoryContext)
         val skeletonTokens = tokenize(skeleton)
         val picked = pickedText?.takeIf { it.isNotBlank() }
         if (picked == null) {
@@ -186,7 +189,7 @@ object OfflinePromptPlanner {
         val remaining = (promptBudget - skeletonTokens).coerceAtLeast(0)
         val pickedTokens = tokenize(picked)
         if (pickedTokens <= remaining && remaining > 0) {
-            val full = StandalonePrompt.build(trimmed, usedLatest, picked)
+            val full = StandalonePrompt.build(trimmed, usedLatest, picked, memoryContext)
             if (tokenize(full) <= promptBudget) {
                 return Plan(
                     prompt = full,
@@ -211,6 +214,21 @@ object OfflinePromptPlanner {
         )
     }
 
+    fun boundedFinal(history: List<JSONObject>, latest: String, summaries: List<String>, memory: String,
+        tokenize: (String) -> Int, budget: Int): String {
+        val usedLatest = clipLatestToHalfBudget(latest, tokenize, budget, memory).first
+        val kept = trimHistory(history, usedLatest, tokenize, budget, memory)
+        val source = summaries.joinToString("\n")
+        var lo = 0; var hi = source.length; var best = StandalonePrompt.build(kept, usedLatest, null, memory)
+        check(tokenize(best) <= budget) { "Phone instructions exceed the available context" }
+        while (lo <= hi) {
+            val mid = (lo + hi) ushr 1
+            val candidate = StandalonePrompt.build(kept, usedLatest, source.take(mid), memory)
+            if (tokenize(candidate) <= budget) { best = candidate; lo = mid + 1 } else hi = mid - 1
+        }
+        return best
+    }
+
     fun summarizeSectionPrompt(section: String): String =
         "You are ANZU on this phone. Summarize this section of owner-picked text in a few sentences. Keep facts. Do not answer a user question yet.\n\n$section\n\nsummary:"
 
@@ -218,8 +236,9 @@ object OfflinePromptPlanner {
         history: List<JSONObject>,
         latest: String,
         summaries: List<String>,
+        memoryContext: String = "",
     ): String {
         val combined = summaries.mapIndexed { i, s -> "Section ${i + 1}: $s" }.joinToString("\n")
-        return StandalonePrompt.build(history, latest, combined)
+        return StandalonePrompt.build(history, latest, combined, memoryContext)
     }
 }

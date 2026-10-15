@@ -58,6 +58,8 @@ class AppAccessLock(private val activity: FragmentActivity) {
 
     fun background() {
         unlocked = false
+        PhoneTools.appUnlocked = false
+        if (enabled) PhoneTools.stop()
         if (!credentialActivityOpen) {
             // A prompt dismissed after backgrounding cannot unlock the app later.
             pending = null
@@ -65,16 +67,17 @@ class AppAccessLock(private val activity: FragmentActivity) {
         }
     }
 
-    fun unlock() = authenticate { unlocked = true }
+    fun unlock() = authenticate { unlocked = true; PhoneTools.appUnlocked = true }
 
     fun changeProtection(required: Boolean) = authenticate {
         if (prefs.edit().putBoolean("required", required).commit()) {
             enabled = required
             unlocked = true
+            PhoneTools.appUnlocked = true
         } else error = "Could not save app protection. Please try again."
     }
 
-    fun lockNow() { unlocked = false }
+    fun lockNow() { unlocked = false; PhoneTools.appUnlocked = false; PhoneTools.stop() }
 
     private fun authenticate(action: () -> Unit) {
         if (pending != null) return

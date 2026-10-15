@@ -44,6 +44,8 @@ CLASS_TOOLS: dict[str, tuple[str, ...]] = {
 }
 
 CAPABILITY_ALIASES: dict[str, str] = {
+    "android": "mobile_apps",
+    "phone": "mobile_apps",
     "web": "web_fetch",
     "http": "web_fetch",
     "fetch": "web_fetch",

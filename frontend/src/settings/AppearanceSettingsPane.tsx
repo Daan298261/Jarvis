@@ -17,6 +17,7 @@ import {
   LEGACY_HUMANOID_AVATAR_ID,
   MYTHIC_LIVE_B_AVATAR_ID,
 } from "../presence/mythicPersonaVariant"
+import { PullLampThemeToggle } from "../vendor/shipnotes/PullLampThemeToggle"
 
 type AppearanceSettingsPaneProps = {
   settings: PresentationSettings
@@ -193,6 +194,24 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
 
       <CollapsibleSection title="Rendering and motion" storageKey="appearance-rendering">
       <label>
+        HUD orb (Ship Notes)
+        <select
+          disabled={busy}
+          value={settings.orbVisual}
+          onChange={(event) =>
+            apply(
+              { orbVisual: event.target.value as PresentationSettings["orbVisual"] },
+              "Ship Notes orbs load from /vendor/shipnotes (MIT). Voice orb reacts to TTS when connected.",
+            )
+          }
+        >
+          <option value="apex">Jarvis APEX orb (default)</option>
+          <option value="shipnotes_voice">Ship Notes voice orb</option>
+          <option value="shipnotes_signal">Ship Notes signal orb (status only)</option>
+        </select>
+      </label>
+
+      <label>
         Rendering
         <select
           disabled={busy}
@@ -242,6 +261,8 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
       </label>
 
       </CollapsibleSection>
+      <PullLampThemeToggle />
+
       {message && <p className="jarvis-presence-controls-message" role="status">{message}</p>}
     </div>
   )
