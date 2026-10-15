@@ -34,6 +34,7 @@ param(
 $ErrorActionPreference = "Continue"
 
 $JarvisBackendPorts = @(4780, 4781)
+if (-not $PreserveManager) { $JarvisBackendPorts += 4782 }
 
 $targets = @()
 if ($InstallRoots -and $InstallRoots.Count -gt 0) {
@@ -127,7 +128,7 @@ function Invoke-ForceStopSingleRoot {
             if ($script:ProtectedPids.Contains($procId)) { return $true }
         } catch { }
         $leaf = Get-ProcessNameLeaf ([string]$Proc.Name)
-        if ($leaf -eq "jarvissetup") { return $true }
+        if ($leaf -in @('jarvissetup', 'anzusetup')) { return $true }
         $cmd = [string]$Proc.CommandLine
         if ($cmd -match 'force-stop-jarvis\.ps1') { return $true }
         if ($cmd -match 'clean-reinstall-jarvis\.ps1') { return $true }
@@ -315,6 +316,12 @@ function Invoke-ForceStopSingleRoot {
     function Test-IsJarvisIdentityProcess {
         param($Proc, [string]$RootNorm, [array]$Bindings = @())
         if (Test-IsProtectedInstallerProcess $Proc) { return $false }
+        $leaf = Get-ProcessNameLeaf ([string]$Proc.Name)
+        $isManager = ($leaf -eq 'anzumanager') -or (([string]$Proc.CommandLine) -match 'uvicorn\s+app\.manager\.main:app')
+        if ($PreserveManager -and $isManager) { return $false }
+        # Branded images and the manager module identify ANZU even when launched
+        # from a second install or with a shared/elevated Python interpreter.
+        if ($isManager -or $leaf -in @('anzu', 'jarvis', 'jarvis-backend', 'anzu-backend')) { return $true }
         # A startup cleanup must never terminate a second launcher while it is
         # starting the backend. Full installer/uninstall stops still kill it.
         if ($StartupCleanup -and ([string]$Proc.CommandLine) -match 'start-jarvis\.ps1') { return $false }
@@ -492,6 +499,22 @@ function Invoke-ForceStopSingleRoot {
             }
         }
 
+        # Capture the complete owned process tree before stopping its parents.
+        # This includes WebView2 and subprocess workers whose command lines do
+        # not carry an install path. Never select an unrelated browser/runtime
+        # merely by its executable name, and never select Setup's ancestors.
+        do {
+            $addedChild = $false
+            foreach ($proc in $procs) {
+                $childId = [int]$proc.ProcessId
+                if ($killMap.ContainsKey($childId) -or (Test-IsProtectedInstallerProcess $proc)) { continue }
+                if ($killMap.ContainsKey([int]$proc.ParentProcessId)) {
+                    $killMap[$childId] = $proc
+                    $addedChild = $true
+                }
+            }
+        } while ($addedChild)
+
         $stranger = $false
         Test-JarvisOwnsPortBlocking $bindings $procs $RootNorm ([ref]$stranger)
         if ($stranger) {
@@ -546,13 +569,18 @@ function Invoke-ForceStopSingleRoot {
             [array]$Procs,
             [string]$RootNorm
         )
-        foreach ($p in $Procs) {
+        # Stop watchdogs/launchers before backends so they cannot respawn them.
+        $ordered = $Procs | Sort-Object @{Expression={
+            if (([string]$_.Name) -match '^AnzuManager(\.exe)?$' -or ([string]$_.CommandLine) -match 'app\.manager\.main:app|start-jarvis\.ps1|jarvis-tray\.ps1') { 0 } else { 1 }
+        }}
+        foreach ($p in $ordered) {
             $procId = 0
             $pname = [string]$p.Name
             try { $procId = [int]$p.ProcessId } catch { }
             if ($procId -le 0) { continue }
             if ($script:ProtectedPids.Contains($procId)) { continue }
             $reason = Get-KillReasonForProcess $p $RootNorm
+            Write-StopLog ("identified PID={0} parent={1} name={2} executable={3} reason={4}" -f $procId, $p.ParentProcessId, $pname, (Get-ProcExecutablePath $p), $reason)
             try {
                 Stop-Process -Id $procId -Force -ErrorAction Stop
                 Write-StopLog "force-kill PID=$procId name=$pname reason=$reason"
