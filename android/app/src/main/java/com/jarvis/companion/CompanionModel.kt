@@ -299,7 +299,14 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
-    fun setForeground(value: Boolean) { foreground = value }
+    fun setForeground(value: Boolean) {
+        val resumed = value && !foreground
+        foreground = value
+        if (resumed) {
+            heartbeat.onNetworkChanged()
+            networkChanged.trySend(Unit)
+        }
+    }
     fun action(block: suspend () -> Unit) = viewModelScope.launch {
         mutable.value = mutable.value.copy(busy = true, error = null)
         try { block() } catch (e: kotlinx.coroutines.CancellationException) { throw e }
@@ -566,6 +573,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         val wasOffline = !previous.leaderReachable
         mutable.value = mutable.value.copy(
             connected = true,
+            error = null,
             leaderReachable = true,
             activity = active?.optString("activity") ?: "Ready when you are",
             tasks = payload.tasks,
@@ -668,6 +676,20 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         if (mutable.value.leaderReachable) refresh()
         else if (id != null) error("That conversation lives on the ANZU desktop. It opens again when the desktop is reachable.")
     }
+    fun startOffgridConversation() {
+        if (mutable.value.busy) return
+        mutable.value = mutable.value.copy(conversationId = null, messages = emptyList(), error = null)
+    }
+    fun sendOffgrid(text: String) = action {
+        sendLock.lock()
+        try {
+            val pack = packManager.resolveOfflinePack() ?: error("Install an Abliterated or Heretic model in More → Models first")
+            check(CompanionPackCatalog.isVerifiedMinimalRefusal(pack)) {
+                "Offgrid chat needs a verified Abliterated or Heretic model. Choose one in More → Models."
+            }
+            if (text.isNotBlank()) sendOffline(text, allowPhoneTools = false)
+        } finally { sendLock.unlock() }
+    }
     fun send(text: String) = action { sendNow(text, fromVoice = false) }
     private suspend fun sendNow(text: String, fromVoice: Boolean = false) {
         if (text.isBlank()) return
@@ -697,7 +719,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         } finally { sendLock.unlock() }
     }
 
-    private suspend fun sendOffline(text: String, fromVoice: Boolean = false, pickedOverride: String? = null) {
+    private suspend fun sendOffline(text: String, fromVoice: Boolean = false, pickedOverride: String? = null, allowPhoneTools: Boolean = true) {
         val picked = pickedOverride ?: pickedTextForPrompt
         val decision = StandaloneMode.classify(
             text = text,
@@ -729,7 +751,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                 )
             },
         ) {
-            if (PhoneToolPermissions(getApplication()).enabled() && decision.intent !in setOf(StandaloneIntent.LOCAL_NOTE,
+            if (allowPhoneTools && PhoneToolPermissions(getApplication()).enabled() && decision.intent !in setOf(StandaloneIntent.LOCAL_NOTE,
                     StandaloneIntent.LOCAL_REMINDER, StandaloneIntent.REMINDER_NEEDS_TIME, StandaloneIntent.MEDIA_WAIT_DESKTOP)) {
                 phoneLocalAnswer(text, prior, picked)
             } else when (decision.intent) {
@@ -762,6 +784,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                     val result = packManager.generate(
                         prompt = StandalonePrompt.build(prior, text, picked),
                         maxTokens = budget,
+                        requireMinimalRefusal = !allowPhoneTools,
                         onToken = { chunk -> assistantText.append(chunk) },
                         history = prior,
                         latest = text,

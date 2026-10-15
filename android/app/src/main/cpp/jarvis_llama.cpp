@@ -63,6 +63,7 @@ Java_com_jarvis_companion_CompanionNativeBridge_nativeLoad(JNIEnv *env, jclass, 
 
     llama_backend_init();
     llama_model_params mparams = llama_model_default_params();
+    mparams.load_mode = LLAMA_LOAD_MODE_MMAP;
     g_model = llama_model_load_from_file(path.c_str(), mparams);
     if (!g_model) {
         return to_jstring(env, "error:Could not load GGUF model");
@@ -73,7 +74,8 @@ Java_com_jarvis_companion_CompanionNativeBridge_nativeLoad(JNIEnv *env, jclass, 
     if (n_ctx < 2048) n_ctx = 2048;
     if (n_ctx > 4096) n_ctx = 4096;
     cparams.n_ctx = n_ctx;
-    cparams.n_batch = 512;
+    cparams.n_batch = 128;
+    cparams.n_ubatch = 64;
     cparams.n_threads = 4;
     cparams.n_threads_batch = 4;
     g_ctx = llama_init_from_model(g_model, cparams);
@@ -153,7 +155,7 @@ Java_com_jarvis_companion_CompanionNativeBridge_nativeGenerate(JNIEnv *env, jcla
     tokens.resize((size_t)n);
 
     const int n_ctx = (int)llama_n_ctx(g_ctx);
-    const int n_batch = batchSize > 0 ? batchSize : 512;
+    const int n_batch = batchSize > 0 ? std::min(batchSize, 128) : 128;
     if (n >= n_ctx) {
         return to_jstring(env, "error:Prompt exceeds context");
     }

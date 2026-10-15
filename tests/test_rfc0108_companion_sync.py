@@ -67,6 +67,12 @@ async def test_model_pack_catalog_metadata_only(mobile_env):
     recommended = next(p for p in body["packs"] if p["recommended"])
     assert recommended["id"] == "qwen3-1.7b-abliterated-q4"
     assert sum(1 for p in body["packs"] if p["recommended"]) == 1
+    compact = next(p for p in body["packs"] if p["id"] == "qwen3-1.7b-abliterated-q3")
+    assert compact["size_bytes"] == 939_538_560
+    assert compact["sha256"] == "3968be1d143c0a1c333887b0cb7d62b9a3d41848eb941c620f38c379e06a1388"
+    assert compact["context_tokens"] == recommended["context_tokens"] == 2048
+    assert compact["min_ram_mb"] < recommended["min_ram_mb"]
+    assert "/resolve/ef85d5f367b9b49842f0ab88faf07e35d6dfa505/" in compact["url"]
     opt_in = next(p for p in body["packs"] if p["id"] == "qwen3.5-4b-abliterated-q4")
     assert opt_in["recommended"] is False and opt_in["min_ram_mb"] > recommended["min_ram_mb"]
     for pack in body["packs"]:

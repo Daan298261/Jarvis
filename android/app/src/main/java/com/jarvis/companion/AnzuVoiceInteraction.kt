@@ -7,6 +7,8 @@ import android.service.voice.VoiceInteractionService
 import android.service.voice.VoiceInteractionSession
 import android.service.voice.VoiceInteractionSessionService
 
+const val ANZU_VOICE_ASSIST_ACTION = "android.intent.action.VOICE_ASSIST"
+
 class AnzuVoiceInteractionService : VoiceInteractionService() {
     override fun onReady() { super.onReady(); current = this }
     override fun onShutdown() { current = null; super.onShutdown() }

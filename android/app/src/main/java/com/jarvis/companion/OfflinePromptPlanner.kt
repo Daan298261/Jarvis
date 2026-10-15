@@ -6,7 +6,7 @@ import org.json.JSONObject
  * Token budget, prompt batching, and map-reduce for on-device GGUF turns (RFC-0204).
  */
 object OfflinePromptPlanner {
-    const val N_BATCH = 512
+    const val N_BATCH = 128
     const val N_CTX_MIN = 2048
     const val N_CTX_MAX = 4096
     const val SECTIONED_NOTE =
