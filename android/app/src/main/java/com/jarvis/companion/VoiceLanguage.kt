@@ -132,8 +132,17 @@ object OnDeviceTtsFallback {
     fun remainingText(chunks: List<String>, played: Int): String =
         chunks.drop(played.coerceIn(0, chunks.size)).joinToString(" ").trim()
 
+    /** Native diagnostics belong in logs, never in a user notification. */
+    fun failureNotice(packError: String?): String = when {
+        packError?.contains("Unsupported model IR version", ignoreCase = true) == true ->
+            "Offline voice needs a newer ANZU app. Update ANZU, then retry in More → Voice."
+        packError?.contains("out of memory", ignoreCase = true) == true ->
+            "Not enough memory for offline voice. Close other apps and retry."
+        else -> "Offline voice could not start. Retry in More → Voice."
+    }
+
     fun fallbackNotice(packError: String?, languageLabel: String): String =
-        "Offline voice failed${packError?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: ""} — finishing on this phone's $languageLabel voice."
+        "${failureNotice(packError)} Using this phone's $languageLabel voice."
 
     fun shouldUsePlatform(remaining: String, platformSpeaksLanguage: Boolean): Boolean =
         remaining.isNotEmpty() && platformSpeaksLanguage

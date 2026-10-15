@@ -1,7 +1,7 @@
 name: Android companion
 on:
   pull_request:
-    paths: ['android/**', 'frontend/mobile-orb/**', 'frontend/src/vendor/apex-ui/**', 'frontend/vite.orb.config.ts', 'scripts/build_android.py', '.github/workflows/android-companion.yml']
+    paths: ['android/**', 'frontend/mobile-orb/**', 'frontend/src/vendor/apex-ui/**', 'frontend/vite.orb.config.ts', 'scripts/build_android.py', 'scripts/verify_pocket_tts_runtime.py', '.github/workflows/android-companion.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -51,6 +51,12 @@ jobs:
           path.write_text(json.dumps({"mode": "generic", "features": features}), encoding="utf-8")
           print(path, "written")
           PY
+      - name: Verify Pocket TTS model and runtime compatibility
+        run: |
+          ORT_VERSION=$(sed -n 's/^set(ORT_VERSION "\(.*\)")/\1/p' android/app/src/main/cpp/voice_native/CMakeLists.txt)
+          python3 -m venv /tmp/pocket-ort
+          /tmp/pocket-ort/bin/pip install "onnxruntime==$ORT_VERSION"
+          /tmp/pocket-ort/bin/python scripts/verify_pocket_tts_runtime.py
       - name: Assemble debug + release (generic companion)
         run: |
           bash gradlew \

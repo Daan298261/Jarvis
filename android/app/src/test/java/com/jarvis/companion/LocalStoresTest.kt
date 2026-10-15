@@ -22,6 +22,8 @@ class LocalStoresTest {
     fun clean() {
         File(context.noBackupFilesDir, "local-conversations").delete()
         File(context.noBackupFilesDir, "local-notes").delete()
+        context.getSharedPreferences("phone_memory_storage", android.content.Context.MODE_PRIVATE).edit().clear().commit()
+        listOf(PhoneMemoryStore.DB_NAME, PhoneMemoryStore.DB_NAME + "-wal", PhoneMemoryStore.DB_NAME + "-shm").forEach { File(context.noBackupFilesDir, it).delete() }
     }
 
     @Test
@@ -52,7 +54,7 @@ class LocalStoresTest {
         val store = LocalConversationStore(context, JvmAesOutboxQueueCrypto(), clock = { now })
         val id = store.create("case 4471 suspect address")
         store.append(id, StandaloneActions.chatMessage("u", "user", "case 4471 suspect address", StandaloneActions.ORIGIN_USER))
-        val raw = File(context.noBackupFilesDir, "local-conversations").readBytes().toString(Charsets.ISO_8859_1)
+        val raw = File(store.memory.readableDatabase.path).readBytes().toString(Charsets.ISO_8859_1)
         assertFalse(raw.contains("4471"))
     }
 
@@ -87,6 +89,8 @@ class LocalStoresTest {
         val messages = store.messages(id)
         assertEquals(LocalConversationStore.MAX_MESSAGES, messages.size)
         assertEquals("m5", messages.first().getString("text"))
+        assertEquals(LocalConversationStore.MAX_MESSAGES + 5, store.memory.summary(id)!!.getInt("message_count"))
+        assertEquals("m0", store.memory.messages(id).first().getString("text"))
     }
 
     @Test

@@ -8,9 +8,11 @@
 Recent chat buffers do not provide durable cross-chat recall. Phone context and RAM are limited; normal Q&A should prefer fast installed models.
 
 ## Decision
-Add an encrypted SQLite archive with chats, messages (chat ID, sender, project, timestamp), extractive summaries, project notes and owner-authored instructions. Preserve the existing recent-history store and migrate it idempotently into the archive. Index keyed hashes of words rather than plaintext content. Recall only relevant messages from the global/current project scope, retain provenance, distinguish historical text from owner instructions, and budget the complete final prompt with the real tokenizer. Provide inspect/delete/disable controls. Archive content is local; do not silently upload memory to desktop/cloud.
+Add an encrypted SQLite archive with chats, messages (chat ID, sender, project, timestamp), extractive summaries, project notes and owner-authored instructions. Migrate the existing recent-history file idempotently without modifying it; SQLite becomes authoritative, with bounded/paged UI reads and transactional row writes. Index keyed hashes of words rather than plaintext content. Recall only relevant messages from the global/current project scope, retain provenance, distinguish historical text from owner instructions, and budget the complete final prompt with the real tokenizer. Provide inspect/delete/disable controls. Archive content is local; do not silently upload memory to desktop/cloud.
 
 Offer Quick/Detailed answers; Quick prefers the smallest installed pinned minimal-refusal model and shorter output. No automatic weight downloads. Optional short-lived warm model residency releases on background/memory pressure. Jev and Laya are typed decision engines, not chat generators: optional paired-desktop routing uses real adapters, explicit Jev cloud consent plus existing owner entitlement/privacy gates, deadlines, and honest fallback labels. Offline uses local routing and text generation only.
+
+User follow-up: fix Pocket TTS IR 13 incompatibility by upgrading the hash-pinned native ONNX Runtime to 1.31.0, with version/hash-specific extraction to prevent stale headers/libraries. Validate all pinned Pocket graphs against the same runtime. Keep detailed exceptions in diagnostics and show concise recovery notifications.
 
 ## Acceptance
 - Full archive survives restarts, beyond the recent UI buffer; summaries and indices update transactionally; replay is idempotent.

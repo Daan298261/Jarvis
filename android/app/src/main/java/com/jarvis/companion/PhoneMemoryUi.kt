@@ -68,7 +68,7 @@ data class PhoneMemorySnapshot(
         Text("Memory & speed", style = MaterialTheme.typography.titleLarge)
         PhoneAnswerOptions(model)
         Text("Quick prefers the smallest installed Abliterated/Heretic model and shorter answers. Detailed keeps your model selection.", color = Muted)
-        OutlinedButton(onClick = model::installFastPhoneModel) { Text("Download fast 0.6B model · 397 MB") }
+        OutlinedButton(onClick = model::installFastPhoneModel, enabled = !state.busy) { Text("Download fast 0.6B model · 397 MB") }
         Row { Text("Keep phone model warm for 30 seconds", Modifier.weight(1f)); Switch(warm, model::keepModelWarm) }
         Text("Uses more RAM between replies. Released when ANZU goes into the background or Android reports memory pressure.", color = Muted)
         Text("Optional decision routing", style = MaterialTheme.typography.titleMedium)
@@ -99,10 +99,15 @@ data class PhoneMemorySnapshot(
         Button(onClick = { model.savePhoneMemory(snapshot.project.optString("name", "All chats"), notes, instructions) }, enabled = snapshot.loaded && !state.busy) { Text("Save memory") }
         Text("Saved chats and summaries", style = MaterialTheme.typography.titleMedium)
         OutlinedTextField(search, { search = it.take(200) }, label = { Text("Search this project's saved messages") }, modifier = Modifier.fillMaxWidth())
-        TextButton(onClick = { scope.launch {
-            runCatching { withContext(Dispatchers.IO) { model.phoneMemory.recall(search, snapshot.projectId, null, 8) } }
-                .onSuccess { hits = it }.onFailure { loadError = it.message.orEmpty() }
-        } }, enabled = search.isNotBlank()) { Text("Search") }
+        TextButton(onClick = {
+            val projectId = snapshot.projectId
+            val query = search
+            scope.launch {
+                runCatching { withContext(Dispatchers.IO) { model.phoneMemory.recall(query, projectId, null, 8) } }
+                    .onSuccess { if (snapshot.projectId == projectId) hits = it }
+                    .onFailure { if (snapshot.projectId == projectId) loadError = it.message.orEmpty() }
+            }
+        }, enabled = search.isNotBlank() && snapshot.loaded) { Text("Search") }
         hits.forEach { hit -> TextButton(onClick = { inspect = hit.optString("chat_id"); page = 0 }) { Text("${hit.optString("sender")}: ${hit.optString("text").take(120)}") } }
         snapshot.chats.take(30).forEach { chat -> Row {
             TextButton(onClick = { inspect = chat.getString("id"); page = 0 }, modifier = Modifier.weight(1f)) { Text("${chat.optString("title")} · ${chat.optInt("message_count")} messages") }

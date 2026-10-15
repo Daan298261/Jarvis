@@ -30,6 +30,7 @@ class PhoneMemoryStore(
         db.execSQL("CREATE TABLE summaries (chat_id TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE, payload BLOB NOT NULL, message_count INTEGER NOT NULL, updated_at INTEGER NOT NULL)")
         db.execSQL("CREATE TABLE message_terms (chat_id TEXT NOT NULL, message_id TEXT NOT NULL, token TEXT NOT NULL, PRIMARY KEY(chat_id,message_id,token), FOREIGN KEY(chat_id,message_id) REFERENCES messages(chat_id,id) ON DELETE CASCADE)")
         db.execSQL("CREATE INDEX term_lookup ON message_terms(token)")
+        db.execSQL("CREATE INDEX chat_updated ON chats(updated_at)")
         db.execSQL("CREATE INDEX chat_project ON chats(project_id,updated_at)")
         db.execSQL("CREATE INDEX chat_messages ON messages(chat_id,created_at)")
         db.insertOrThrow("meta", null, ContentValues().apply { put("id", "index_key"); put("value", crypto.encrypt(ByteArray(32).also { SecureRandom().nextBytes(it) })) })
@@ -95,6 +96,13 @@ class PhoneMemoryStore(
     @Synchronized fun summary(chatId: String): JSONObject? = readableDatabase.rawQuery("SELECT payload,message_count FROM summaries WHERE chat_id=?", arrayOf(chatId)).use { c ->
         if (c.moveToFirst()) JSONObject(open(c.getBlob(0))).put("message_count", c.getInt(1)) else null
     }
+    @Synchronized fun legacyImported(): Boolean = readableDatabase.rawQuery("SELECT id FROM meta WHERE id='legacy_imported'", null).use { it.moveToFirst() }
+    @Synchronized fun localChats(limit: Int): List<JSONObject> = readableDatabase.rawQuery(
+        "SELECT c.id,c.payload,c.updated_at,COALESCE(s.message_count,0) FROM chats c LEFT JOIN summaries s ON s.chat_id=c.id WHERE c.id LIKE 'local-%' ORDER BY c.updated_at DESC,c.rowid DESC LIMIT ?", arrayOf(limit.coerceIn(1,200).toString())
+    ).use { c -> buildList { while (c.moveToNext()) add(JSONObject(open(c.getBlob(1))).put("id", c.getString(0)).put("updated_at", c.getLong(2)).put("message_count", c.getInt(3)).put("local", true)) } }
+    @Synchronized fun recentMessages(chatId: String, limit: Int): List<JSONObject> = readableDatabase.rawQuery(
+        "SELECT payload FROM messages WHERE chat_id=? ORDER BY created_at DESC,rowid DESC LIMIT ?", arrayOf(chatId, limit.coerceIn(1,500).toString())
+    ).use { c -> buildList { while (c.moveToNext()) add(JSONObject(open(c.getBlob(0)))) }.asReversed() }
     @Synchronized fun messages(chatId: String, limit: Int = 100, offset: Int = 0): List<JSONObject> = readableDatabase.rawQuery(
         "SELECT payload FROM messages WHERE chat_id=? ORDER BY created_at,rowid LIMIT ? OFFSET ?", arrayOf(chatId, limit.coerceIn(1, 500).toString(), offset.coerceAtLeast(0).toString())
     ).use { c -> buildList { while (c.moveToNext()) add(JSONObject(open(c.getBlob(0)))) } }
@@ -174,7 +182,7 @@ class PhoneMemoryStore(
     companion object {
         const val DB_NAME = "phone-memory.sqlite"
         /** Rotation never renames/deletes an archive or its WAL, so unreadable content remains recoverable. */
-        fun recovering(context: Context, crypto: OutboxQueueCrypto, clock: () -> Long = System::currentTimeMillis,
+        @Synchronized fun recovering(context: Context, crypto: OutboxQueueCrypto, clock: () -> Long = System::currentTimeMillis,
             onRecovered: (StoreRecovery) -> Unit = {}): PhoneMemoryStore {
             val prefs = context.getSharedPreferences("phone_memory_storage", Context.MODE_PRIVATE)
             val filename = prefs.getString("active_file", DB_NAME) ?: DB_NAME

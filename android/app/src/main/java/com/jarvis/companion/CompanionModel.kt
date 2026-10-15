@@ -1606,6 +1606,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             onError = { error ->
                 // RFC-0216 S4: pack synthesis failed — finish the reply with the phone's voice in the
                 // chosen language if it has one; otherwise surface the error (no wrong-accent fallback).
+                android.util.Log.w("AnzuVoice", "Offline voice synthesis failed", error)
                 val run = onDeviceRun
                 val rest = OnDeviceTtsFallback.remainingText(run.chunks, run.played)
                 val platformOk = platformVoice.ttsReady && platformVoice.supportsLanguage(voiceLanguage)
@@ -1619,7 +1620,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                     }
                 } else {
                     mutable.value = mutable.value.copy(
-                        error = error.message,
+                        error = OnDeviceTtsFallback.failureNotice(error.message),
                         activity = "Ready when you are",
                         onDeviceVoiceActive = false,
                     )

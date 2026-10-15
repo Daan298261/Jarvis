@@ -1,16 +1,11 @@
 package com.jarvis.companion
 
 import android.content.Context
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
-/**
- * Conversations held on this phone (Black Grid mode, RFC-0204 §1.1).
- * They survive app restarts and stay readable with no desktop and no internet.
- * Turns that should reach the desktop also go through [OutboxQueue]; this store is the phone's own history.
- */
+/** SQLite is authoritative; only the recent UI page is bounded. The old encrypted file is preserved. */
 class LocalConversationStore(
     context: Context,
     crypto: OutboxQueueCrypto = AndroidKeystoreOutboxQueueCrypto("anzu-local-conversations-v1"),
@@ -18,99 +13,39 @@ class LocalConversationStore(
     onRecovered: (StoreRecovery) -> Unit = {},
 ) {
     private val memoryDelegate = lazy {
-        PhoneMemoryStore.recovering(context, crypto, clock, onRecovered).also { it.migrateLegacy(file.read()) }
+        val db = PhoneMemoryStore.recovering(context, crypto, clock, onRecovered)
+        val prefs = context.getSharedPreferences("phone_memory_storage", Context.MODE_PRIVATE)
+        if (!db.legacyImported()) {
+            val source = if (prefs.getBoolean("legacy_imported", false)) JSONObject() else
+                EncryptedJsonFile(File(context.noBackupFilesDir, "local-conversations"), crypto, clock, onRecovered).read()
+            db.migrateLegacy(source)
+        }
+        check(prefs.edit().putBoolean("legacy_imported", true).commit()) { "Cannot save chat migration checkpoint" }
+        db
     }
     val memory: PhoneMemoryStore get() = memoryDelegate.value
     fun close() { if (memoryDelegate.isInitialized()) memoryDelegate.value.close() }
-    private val file = EncryptedJsonFile(File(context.noBackupFilesDir, "local-conversations"), crypto, clock, onRecovered)
-
-    /** Newest first; each item has id, title, updated_at, message_count and local=true. */
-    fun conversations(): List<JSONObject> {
-        val items = file.read().optJSONArray("conversations") ?: JSONArray()
-        return items.objects()
-            .sortedByDescending { it.optLong("updated_at") }
-            .map { conv ->
-                JSONObject()
-                    .put("id", conv.optString("id"))
-                    .put("title", conv.optString("title"))
-                    .put("updated_at", conv.optLong("updated_at"))
-                    .put("message_count", conv.optJSONArray("messages")?.length() ?: 0)
-                    .put("local", true)
-            }
-    }
-
-    fun messages(id: String): List<JSONObject> =
-        find(file.read(), id)?.optJSONArray("messages")?.objects() ?: emptyList()
-
-    fun exists(id: String): Boolean = find(file.read(), id) != null
-
-    /**
-     * Starts a conversation titled from its first message and returns its id. [linkedDesktopId] is the
-     * desktop conversation it continues, so offline turns sync back into that thread.
-     */
+    fun conversations(): List<JSONObject> = memory.localChats(MAX_CONVERSATIONS)
+    fun messages(id: String): List<JSONObject> = memory.recentMessages(id, MAX_MESSAGES)
+    fun exists(id: String): Boolean = memory.chat(id) != null
     fun create(firstText: String, linkedDesktopId: String? = null): String {
         val id = LOCAL_PREFIX + UUID.randomUUID().toString()
-        file.update { root ->
-            val items = root.optJSONArray("conversations") ?: JSONArray()
-            items.put(
-                JSONObject()
-                    .put("id", id)
-                    .put("title", titleFor(firstText))
-                    .put("updated_at", clock())
-                    .put("desktop_conversation_id", linkedDesktopId?.takeUnless { isLocal(it) } ?: "")
-                    .put("messages", JSONArray()),
-            )
-            root.put("conversations", trimConversations(items))
-        }
-        memory.upsertChat(id, titleFor(firstText), desktopId = linkedDesktopId.orEmpty())
+        memory.upsertChat(id, titleFor(firstText), desktopId = linkedDesktopId?.takeUnless { isLocal(it) }.orEmpty())
         return id
     }
-
     fun append(id: String, message: JSONObject) {
+        check(memory.chat(id) != null) { "Conversation $id is not on this phone" }
         val archived = JSONObject(message.toString()).put("at", clock())
         if (archived.optString("id").isBlank()) archived.put("id", "local-message-" + UUID.randomUUID().toString())
-        memory.upsertChat(id, titleFor(message.optString("text")))
         memory.append(id, archived)
-        file.update { root ->
-            val conv = find(root, id) ?: error("Conversation $id is not on this phone")
-            val messages = conv.optJSONArray("messages") ?: JSONArray()
-            messages.put(JSONObject(archived.toString()))
-            while (messages.length() > MAX_MESSAGES) messages.remove(0)
-            conv.put("messages", messages)
-            conv.put("updated_at", clock())
-        }
     }
-
-    fun linkedDesktopId(id: String): String? =
-        find(file.read(), id)?.optString("desktop_conversation_id")?.takeIf { it.isNotBlank() }
-
-    /** Returns false when [id] is not (or no longer) on this phone. */
+    fun linkedDesktopId(id: String): String? = memory.chat(id)?.optString("desktop_conversation_id")?.takeIf { it.isNotBlank() }
     fun linkDesktop(id: String, desktopConversationId: String): Boolean {
-        var linked = false
-        file.update { root -> find(root, id)?.let { it.put("desktop_conversation_id", desktopConversationId); linked = true } }
-        if (linked) memory.linkDesktop(id, desktopConversationId)
-        return linked
+        if (!exists(id)) return false
+        memory.linkDesktop(id, desktopConversationId)
+        return true
     }
-
-    fun delete(id: String) {
-        memory.deleteChat(id)
-        file.update { root ->
-            val items = root.optJSONArray("conversations") ?: JSONArray()
-            val kept = JSONArray()
-            items.objects().filter { it.optString("id") != id }.forEach { kept.put(it) }
-            root.put("conversations", kept)
-        }
-    }
-
-    private fun find(root: JSONObject, id: String): JSONObject? =
-        root.optJSONArray("conversations")?.objects()?.firstOrNull { it.optString("id") == id }
-
-    private fun trimConversations(items: JSONArray): JSONArray {
-        if (items.length() <= MAX_CONVERSATIONS) return items
-        val kept = JSONArray()
-        items.objects().sortedByDescending { it.optLong("updated_at") }.take(MAX_CONVERSATIONS).forEach { kept.put(it) }
-        return kept
-    }
+    fun delete(id: String) { memory.deleteChat(id) }
 
     companion object {
         const val LOCAL_PREFIX = "local-"
