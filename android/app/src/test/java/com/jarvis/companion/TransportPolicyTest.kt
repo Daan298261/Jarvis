@@ -216,4 +216,25 @@ class TransportPolicyTest {
         val tailscale = "https://vrpc.tail1.ts.net:4781"
         assertEquals(listOf(tailscale, live), TransportPolicy.absorbMatchingLanOrigin(listOf(stale, tailscale), pin, live, pin))
     }
+
+    @Test fun prefersHomeLanIpOverVpnAmongRfc1918() {
+        val vpn = "https://10.2.0.2:4781"
+        val hyperv = "https://172.30.208.1:4781"
+        val home = "https://192.168.1.212:4781"
+        val ordered = TransportPolicy.orderedForReachability(listOf(vpn, hyperv, home))
+        assertEquals(home, ordered[0])
+        assertEquals(vpn, ordered.last())
+        val locals = listOf("192.168.1.148/24")
+        val dial = TransportPolicy.dialOrder(vpn, listOf(vpn, hyperv, home), locals)
+        assertEquals(home, dial[0])
+        assertTrue(vpn in dial)
+        assertTrue(hyperv in dial)
+        assertEquals(1500L, TransportPolicy.connectTimeoutMs(dial.size))
+    }
+
+    @Test fun lanCandidateRankOrdersHomeBeforeVpn() {
+        assertTrue(TransportPolicy.lanCandidateRank("https://192.168.1.212:4781") < TransportPolicy.lanCandidateRank("https://10.2.0.2:4781"))
+        assertTrue(TransportPolicy.lanCandidateRank("https://192.168.1.212:4781") < TransportPolicy.lanCandidateRank("https://172.30.208.1:4781"))
+    }
 }
+

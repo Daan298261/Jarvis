@@ -358,6 +358,7 @@ class _Core:
         monkeypatch.setattr(main, "_core_healthy", self.is_healthy)
         monkeypatch.setattr(main, "STOP_HEALTH_WAIT_SECONDS", 1.0)
         monkeypatch.setattr(main, "START_HEALTH_WAIT_SECONDS", 1.0)
+        monkeypatch.setattr(main, "_managed_process_running", lambda: False)
         main.SUPERVISOR.state.launch_pending_until = 0.0
         main.SUPERVISOR.state.control_in_flight = None
 

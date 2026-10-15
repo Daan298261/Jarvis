@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.os.StatFs
 import android.util.Log
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
@@ -142,10 +143,57 @@ class CompanionPackManager(
     }
 
     fun updateCatalog(leader: JSONObject?) {
-        catalog = CompanionPackCatalog.merge(leader)
+        catalog = CompanionPackCatalog.merge(leader) + importedPacks()
     }
 
     fun catalogJson(): List<JSONObject> = catalog.map { it.toJson() }
+
+    private fun importedPacks(): List<CompanionPack> = runCatching {
+        org.json.JSONArray(prefs.getString("imports", "[]")).objects().map {
+            CompanionPack(it.getString("id"), it.getString("label"), it.getString("filename"),
+                it.getLong("size_bytes"), it.getInt("min_ram_mb"), it.getString("sha256"), "", false)
+        }
+    }.getOrDefault(emptyList())
+
+    init { catalog = catalog + importedPacks() }
+
+    suspend fun importGguf(uri: android.net.Uri) = withContext(Dispatchers.IO) {
+        val id = "import-" + java.util.UUID.randomUUID().toString()
+        val target = File(packDir, "$id.gguf")
+        try {
+            app.contentResolver.openInputStream(uri)?.use { input ->
+                val header = ByteArray(4)
+                require(input.read(header) == 4 && header.contentEquals(byteArrayOf(71, 71, 85, 70))) { "Choose a GGUF model file" }
+                target.outputStream().use { output ->
+                    output.write(header)
+                    val buffer = ByteArray(65536)
+                    var size = 4L
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        size += count
+                        require(size <= 4L * 1024 * 1024 * 1024) { "Choose a phone-sized GGUF (up to 4 GiB)" }
+                        output.write(buffer, 0, count)
+                    }
+                }
+            } ?: error("Cannot read selected file")
+            val digest = defaultFileSha256(target)
+            val ram = ((target.length() / (1024 * 1024)) + 768).toInt().coerceAtLeast(1024)
+            val pack = CompanionPack(id, "Imported GGUF (${target.length() / (1024 * 1024)} MiB)", target.name,
+                target.length(), ram, digest, "", false)
+            val imports = importedPacks() + pack
+            val array = org.json.JSONArray()
+            imports.forEach { array.put(it.toJson()) }
+            check(prefs.edit().putString("imports", array.toString()).commit()) { "Could not save imported model" }
+            catalog = catalog.filterNot { it.id.startsWith("import-") } + imports
+            digestCache.remember(target, digest)
+            selectPack(id)
+            refreshStatus()
+        } catch (error: Exception) {
+            target.delete()
+            throw error
+        }
+    }
 
     fun status(): String = statusRef.get()
 
@@ -188,8 +236,9 @@ class CompanionPackManager(
         return DeviceInferenceGuard.blockReason(app, pack) == null
     }
 
-    fun resolveOfflinePack(): CompanionPack? =
-        CompanionPackCatalog.resolveOfflinePack(catalog, selectedPackId(), ::packCanLoad)
+    fun resolveOfflinePack(preferFast: Boolean = false): CompanionPack? =
+        (if (preferFast) CompanionPackCatalog.fastInstalledPack(catalog, ::packCanLoad) else null)
+            ?: CompanionPackCatalog.resolveOfflinePack(catalog, selectedPackId(), ::packCanLoad)
 
     fun isPackReady(): Boolean {
         if (resolveOfflinePack() != null) return true
@@ -405,19 +454,30 @@ class CompanionPackManager(
     suspend fun generate(
         prompt: String,
         maxTokens: Int = DeviceInferenceGuard.BUDGET_CLEAR,
+        requireMinimalRefusal: Boolean = false,
+        preferFast: Boolean = false,
+        memoryContext: String = "",
         history: List<org.json.JSONObject> = emptyList(),
         latest: String = "",
         pickedText: String? = null,
         onToken: (String) -> Unit,
     ): GenerateResult = withContext(llamaDispatcher) {
-        val pack = resolveOfflinePack() ?: selectedPack() ?: error("No pack selected")
+        val pack = resolveOfflinePack(preferFast) ?: selectedPack() ?: error("No pack selected")
+        check(!requireMinimalRefusal || CompanionPackCatalog.isVerifiedMinimalRefusal(pack)) {
+            "Offgrid requires a pinned Abliterated or Heretic model"
+        }
         DeviceInferenceGuard.blockReason(app, pack)?.let { error(it) }
         val path = packFile(pack)
         if (!path.isFile) error("Install the companion model pack first")
         statusRef.set(CompanionPackStatus.RUNNING)
         val nCtx = DeviceInferenceGuard.contextTokens(app, pack)
         val parentJob = coroutineContext[Job]!!
-        val cancelWatch = launch(Dispatchers.Default) {
+        // Started UNDISPATCHED on Unconfined: the watcher is already suspended in
+        // awaitCancellation() before the engine runs, and cancel() resumes it inline on the
+        // cancelling thread. A Default-dispatched watcher could be cancelled before it ever ran
+        // (its finally then never fires) or wait behind a busy pool, leaving native decode
+        // running after the user pressed stop.
+        val cancelWatch = launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
             try {
                 awaitCancellation()
             } finally {
@@ -433,6 +493,7 @@ class CompanionPackManager(
             }
             if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
             val promptBudget = OfflinePromptPlanner.promptTokenBudget(nCtx, maxTokens)
+            val memory = PhoneMemoryBudget.fit(memoryContext, engine::tokenize, minOf(256, promptBudget / 4))
             val plan = if (latest.isNotEmpty() || !pickedText.isNullOrBlank()) {
                 OfflinePromptPlanner.plan(
                     history = history,
@@ -440,6 +501,7 @@ class CompanionPackManager(
                     pickedText = pickedText,
                     tokenize = { engine.tokenize(it) },
                     promptBudget = promptBudget,
+                    memoryContext = memory,
                 )
             } else {
                 OfflinePromptPlanner.Plan(prompt = prompt, sectioned = false, history = history)
@@ -455,6 +517,7 @@ class CompanionPackManager(
                     plan.history,
                     latestText,
                     summaries,
+                    memory,
                 )
                 var reduceGuard = 0
                 while (engine.tokenize(finalPrompt) > promptBudget && summaries.size > 1 && reduceGuard++ < 4) {
@@ -469,9 +532,10 @@ class CompanionPackManager(
                         plan.history,
                         latestText,
                         summaries,
+                        memory,
                     )
                 }
-                finalPrompt
+                OfflinePromptPlanner.boundedFinal(plan.history, latestText, summaries, memory, engine::tokenize, promptBudget)
             } else {
                 plan.prompt
             }
@@ -521,6 +585,8 @@ class CompanionPackManager(
     fun requestCancel() {
         engine.requestCancel()
     }
+
+    suspend fun releaseIdle() = withContext(llamaDispatcher) { unload() }
 
     fun unload() {
         engine.unload()

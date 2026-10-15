@@ -4642,7 +4642,44 @@ export type CompanionStudioCapabilities = {
   available: boolean
   detail?: string
   contract_version?: number
-  operations?: string[]
+  operations?: string[] | Record<string, boolean>
+  workbench_path?: string
+  creative_tools?: { id: string; label: string; workbench_path?: string; open_url?: string }[]
+}
+
+export type BlackGridModule = {
+  id: string
+  name: string
+  provider: string
+  enabled: boolean
+  installed: boolean
+  running: boolean
+  healthy: boolean
+  install_status: string
+  install_error?: string
+  comfy_ui_url: string
+  portal_workbench_url?: string
+}
+
+export type BlackGridStatus = {
+  module: BlackGridModule
+  capabilities: CompanionStudioCapabilities
+}
+
+export type BlackGridJob = {
+  id: string
+  prompt_id?: string
+  status: string
+  prompt_excerpt?: string
+  chunk_frames?: number
+  created_at?: string
+}
+
+export type BlackGridOutput = {
+  path: string
+  name: string
+  size_bytes: number
+  modified_at?: string
 }
 
 export type CompanionPairingApiResult =
@@ -4650,9 +4687,9 @@ export type CompanionPairingApiResult =
   | { available: false; reason: "not_found" | "error" | "unreachable" | "unhealthy"; message?: string }
 
 /** Core is up but not ready (critical startup step failed) or answering 5xx. */
-async function coreReportsUnhealthy(): Promise<{ unhealthy: boolean; detail: string }> {
+async function coreReportsUnhealthy(signal?: AbortSignal): Promise<{ unhealthy: boolean; detail: string }> {
   try {
-    const response = await fetch(jarvisApiUrl("/api/health"), { cache: "no-store" })
+    const response = await fetch(jarvisApiUrl("/api/health"), { cache: "no-store", signal })
     if (!response.ok) return { unhealthy: true, detail: `health check returned HTTP ${response.status}` }
     const body = (await response.json()) as { ok?: boolean; startup?: { failed_steps?: { step: string; critical?: boolean }[] } }
     if (body.ok === false) {
@@ -4660,7 +4697,8 @@ async function coreReportsUnhealthy(): Promise<{ unhealthy: boolean; detail: str
       return { unhealthy: true, detail: steps.length ? `startup failed: ${steps.join(", ")}` : "core reports not ready" }
     }
     return { unhealthy: false, detail: "" }
-  } catch {
+  } catch (error) {
+    if (signal?.aborted) throw error
     return { unhealthy: true, detail: "health check failed" }
   }
 }
@@ -4669,15 +4707,17 @@ async function companionPairingRequest(
   path: string,
   init?: RequestInit,
 ): Promise<CompanionPairingApiResult> {
+  const controller = new AbortController()
+  const deadline = globalThis.setTimeout(() => controller.abort(), 30000)
   try {
     const headers = authHeaders({ "Content-Type": "application/json", ...(init?.headers as Record<string, string> || {}) })
-    const response = await fetch(jarvisApiUrl(path), { ...init, headers })
+    const response = await fetch(jarvisApiUrl(path), { ...init, headers, signal: controller.signal })
     if (response.status === 404) {
       return { available: false, reason: "not_found" }
     }
     if (!response.ok) {
       if (response.status >= 500) {
-        const health = await coreReportsUnhealthy()
+        const health = await coreReportsUnhealthy(controller.signal)
         if (health.unhealthy) {
           return { available: false, reason: "unhealthy", message: `ANZU backend is running but unhealthy (${health.detail}).` }
         }
@@ -4704,8 +4744,13 @@ async function companionPairingRequest(
     }
     return { available: true, pairing }
   } catch (err) {
-    // fetch() only throws when the backend cannot be reached at all.
+    if (controller.signal.aborted) {
+      return { available: false, reason: "error", message: "QR creation timed out. Check that ANZU is running, then try again." }
+    }
+    // Other fetch errors indicate the backend cannot be reached.
     return { available: false, reason: "unreachable", message: `ANZU backend is not reachable (${String(err)}).` }
+  } finally {
+    globalThis.clearTimeout(deadline)
   }
 }
 

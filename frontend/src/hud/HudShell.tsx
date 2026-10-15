@@ -14,6 +14,7 @@ import { PortalNav } from "../components/PortalNav"
 import { HudHealthRail } from "./HudHealthRail"
 import { HudLocalStatus } from "./HudLocalStatus"
 import { HudModelSelector } from "./HudModelSelector"
+import { RunningModels } from "./RunningModels"
 import { HudOpsRail } from "./HudOpsRail"
 import type { UiMode } from "./uiMode"
 import { HudOverlayProvider, useHudOverlay } from "./hudOverlayContext"
@@ -393,6 +394,7 @@ function HudShellInner({
 
   return (
     <div className={`hud-app${skyOpen ? " hud-sky" : ""}${galaxyEffective ? " hud-galaxy" : ""}`}>
+      {location.pathname !== "/model" && <RunningModels />}
       {!isChat && <HudStarfield mode={skyOpen ? "sky" : "cluster"} pulseKey={pulseKey} galaxy={galaxyEffective} />}
       <HudTopChrome
         version={version}

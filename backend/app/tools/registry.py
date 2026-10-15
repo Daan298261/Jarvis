@@ -30,6 +30,7 @@ from .external_ingest import ExternalIngestTool
 from .internal_references import InternalReferencesTool
 from .web_fetch import WebFetchTool
 from .mobile_call import MobileCallTool
+from .mobile_apps import MobileAppsTool
 from .hexstrike_defensive import HexStrikeDefensiveTool
 from .hexstrike_operator import HexStrikeOperatorTool
 from .lta_folder import LtaProtectedFolderTool
@@ -37,6 +38,7 @@ from .rea_investigate import ReaInvestigateTool
 from .chat_projects import ChatProjectsTool
 from .vault_memory import VaultMemoryTool
 from .intelligence import IntelligenceTool
+from .blackgrid_studio import BlackGridStudioTool
 from .dcc_tools import BlenderTool, FreecadTool, OpenScadTool
 
 
@@ -83,6 +85,7 @@ class ToolRegistry:
             CuaTool(),
             ReflexComputerUseTool(),
             MobileCallTool(),
+            MobileAppsTool(),
             HexStrikeDefensiveTool(getter),
             HexStrikeOperatorTool(getter),
             LtaProtectedFolderTool(getter),
@@ -93,6 +96,7 @@ class ToolRegistry:
             BlenderTool(getter),
             OpenScadTool(getter),
             FreecadTool(getter),
+            BlackGridStudioTool(),
         ]
         self.tools = {tool.name: tool for tool in items}
 

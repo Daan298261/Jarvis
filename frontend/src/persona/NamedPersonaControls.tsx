@@ -15,10 +15,7 @@ import { SpecialistShapeMark } from "./SpecialistShapeMark"
 import { PersonaVisualSliders } from "./PersonaVisualSliders"
 import { updatePresentation, usePresentationSettings } from "../presence/presentationSettings"
 import {
-  MYTHIC_LIVING_AVATAR_ID,
-  MYTHIC_LIVE_B_AVATAR_ID,
-  MYTHIC_PORTRAIT_A_AVATAR_ID,
-  usesMythicLiveVariantB,
+  MYTHIC_AVATAR_CHOICES,
 } from "../presence/mythicPersonaVariant"
 import "./named-persona.css"
 
@@ -127,39 +124,15 @@ export function NamedPersonaControls() {
         </select>
       </label>
       <div className="named-persona-render-variants" role="group" aria-label="Mythic avatar version">
-        <button
-          type="button"
-          className={!usesMythicLiveVariantB(presentation.avatarId) ? "active" : ""}
-          aria-pressed={!usesMythicLiveVariantB(presentation.avatarId)}
-          disabled={busy}
-          onClick={() => void run(() => updatePresentation({
-            shell: "hud",
-            requestedPresence: "particle_bust",
-            avatarId: MYTHIC_PORTRAIT_A_AVATAR_ID,
-          }))}
-        >
-          A · portrait cloud
-        </button>
-        <button
-          type="button"
-          className={presentation.avatarId === MYTHIC_LIVE_B_AVATAR_ID ? "active" : ""}
-          aria-pressed={presentation.avatarId === MYTHIC_LIVE_B_AVATAR_ID}
-          disabled={busy}
-          onClick={() => void run(() => updatePresentation({
-            shell: "hud",
-            requestedPresence: "particle_bust",
-            avatarId: MYTHIC_LIVE_B_AVATAR_ID,
-          }))}
-        >
-          B · live gaze
-        </button>
-        <button type="button" disabled={busy}
-          className={presentation.avatarId === MYTHIC_LIVING_AVATAR_ID ? "active" : ""}
-          aria-pressed={presentation.avatarId === MYTHIC_LIVING_AVATAR_ID}
-          onClick={() => void run(() => updatePresentation({ shell: "hud", requestedPresence: "particle_bust", avatarId: MYTHIC_LIVING_AVATAR_ID }))}
-        >
-          Living body · Anzu / Nabu
-        </button>
+        {MYTHIC_AVATAR_CHOICES.map(choice => (
+          <button key={choice.id} type="button" disabled={busy}
+            className={presentation.avatarId === choice.id ? "active" : ""}
+            aria-pressed={presentation.avatarId === choice.id}
+            onClick={() => void run(() => updatePresentation({
+              shell: "hud", requestedPresence: "particle_bust", avatarId: choice.id,
+            }))}
+          >{choice.label}</button>
+        ))}
       </div>
       <div className="named-persona-roster" role="group" aria-label="Named persona avatars">
         {options.map((persona) => {

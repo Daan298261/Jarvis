@@ -102,8 +102,10 @@ def _private_client(host: str) -> bool:
         address = ipaddress.ip_address(host)
     except ValueError:
         return False
-    # Loopback is deliberately not proof that the phone is on the desktop's LAN.
-    return bool(address.is_private and not address.is_loopback)
+    # Relay tunnels terminate on this process over loopback, so loopback is
+    # deliberately not proof that the phone is on the desktop's LAN.
+    return bool(address.is_private and not address.is_loopback
+                and not (address.version == 6 and address in ipaddress.ip_network("fd7a:115c:a1e0::/48")))
 
 
 _REMOTE_CACHE: dict[str, float | bool] = {"at": 0.0, "value": False}
@@ -134,12 +136,12 @@ def _remote_enabled() -> bool:
     return bool(_REMOTE_CACHE["value"])
 
 
-def client_allowed(host: str, remote_enabled: bool, self_test_token: str = "") -> bool:
+def client_allowed(host: str, remote_enabled: bool, self_test_token: str = "", *, public_forward: bool = False) -> bool:
     """RFC-0215 gate: LAN clients always; Tailscale clients only with remote access on.
 
     Loopback is never a free pass (any local process could proxy for an outsider);
     only the desktop's own probes, carrying the per-boot secret, get through.
-    Public-internet clients are refused outright: off-LAN access is Tailscale only.
+    Public clients are refused unless the owner explicitly selected public forwarding.
     """
     try:
         address = ipaddress.ip_address(host)
@@ -151,7 +153,15 @@ def client_allowed(host: str, remote_enabled: bool, self_test_token: str = "") -
 
     if is_tailscale_host(str(address)):
         return remote_enabled
-    return _is_lan_ip(address)
+    return _is_lan_ip(address) or bool(remote_enabled and public_forward and address.is_global)
+
+
+def _public_forward_enabled() -> bool:
+    from .connectivity import CONNECTIVITY
+    try:
+        return CONNECTIVITY.config().get("connection_mode") == "public_forward"
+    except Exception:
+        return False
 
 
 def server_proof(nonce: str) -> dict[str, str]:
@@ -193,7 +203,7 @@ def gateway_app(upstream: str = "http://127.0.0.1:4780"):
         if not _companion_path_allowed(path):
             return JSONResponse({"detail": "Route unavailable on mobile gateway"}, 404)
         client_host = request.client.host if request.client else ""
-        if not client_allowed(client_host, _remote_enabled(), request.headers.get(SELF_TEST_HEADER, "")):
+        if not client_allowed(client_host, _remote_enabled(), request.headers.get(SELF_TEST_HEADER, ""), public_forward=_public_forward_enabled()):
             return JSONResponse({"detail": "Remote access is off on ANZU; turn it on in the pairing panel."}, 403)
         if path in {"api/companion/lan-beacon", "api/companion/lan-enroll"} and not _private_client(client_host):
             return JSONResponse({"detail": "LAN pairing is only available on the same local network as Jarvis."}, 403)
@@ -245,7 +255,7 @@ def gateway_app(upstream: str = "http://127.0.0.1:4780"):
             await websocket.close(code=1008)
             return
         ws_host = websocket.client.host if websocket.client else ""
-        if not client_allowed(ws_host, _remote_enabled(), websocket.headers.get(SELF_TEST_HEADER, "")):
+        if not client_allowed(ws_host, _remote_enabled(), websocket.headers.get(SELF_TEST_HEADER, ""), public_forward=_public_forward_enabled()):
             await websocket.close(code=1008)
             return
         headers = [

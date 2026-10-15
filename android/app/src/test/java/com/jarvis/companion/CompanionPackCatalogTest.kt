@@ -7,17 +7,33 @@ import org.junit.Test
 
 class CompanionPackCatalogTest {
     @Test
-    fun builtInRecommendedPackIsPinnedHereticDefault() {
+    fun builtInRecommendedPackIsPinnedLowMemoryDefault() {
         val pack = CompanionPackCatalog.builtIn.first { it.recommended }
-        assertEquals(CompanionPackCatalog.HERETIC_2B_ID, pack.id)
-        assertEquals(CompanionPackCatalog.HERETIC_2B_ID, CompanionPackCatalog.builtIn.first().id)
-        assertEquals("dad8a69dddcd64f2221dd06ae5c46baceb31ed9bd0dec330306d77762c377cf1", pack.sha256)
-        assertEquals(1_270_807_936L, pack.sizeBytes)
-        assertTrue(pack.url.startsWith("https://huggingface.co/jordanwoodson/Qwen3.5-2B-heretic-GGUF/resolve/"))
+        assertEquals(CompanionPackCatalog.ABLITERATED_17B_ID, pack.id)
+        assertEquals(CompanionPackCatalog.ABLITERATED_17B_ID, CompanionPackCatalog.builtIn.first().id)
+        assertEquals("6fb5977ef935e2a54c0bd5ec45e841d5ba4256b2223c25b4f707553abac8f448", pack.sha256)
+        assertEquals(1_107_409_024L, pack.sizeBytes)
+        assertTrue(pack.url.startsWith("https://huggingface.co/mradermacher/Qwen3-1.7B-abliterated-GGUF/resolve/"))
         assertFalse(pack.url.contains("/resolve/main/"))
         assertTrue(CompanionPackCatalog.isAbliteratedCandidate(pack))
         assertEquals(1, CompanionPackCatalog.builtIn.count { it.recommended })
-        assertEquals(4, CompanionPackCatalog.builtIn.size)
+        assertEquals(7, CompanionPackCatalog.builtIn.size)
+    }
+
+    @Test fun offgridRejectsInstructAndReplacedWeights() {
+        val q4 = CompanionPackCatalog.builtIn.first { it.id == CompanionPackCatalog.ABLITERATED_17B_ID }
+        assertTrue(CompanionPackCatalog.isVerifiedMinimalRefusal(q4))
+        assertFalse(CompanionPackCatalog.isVerifiedMinimalRefusal(q4.copy(sha256 = "f".repeat(64))))
+        assertFalse(CompanionPackCatalog.isVerifiedMinimalRefusal(CompanionPackCatalog.builtIn.first { it.id == CompanionPackCatalog.INSTRUCT_15B_ID }))
+    }
+
+    @Test fun lowMemoryPacksKeepBoundedContextOnLargePhones() {
+        assertEquals(2048, DeviceInferenceGuard.contextTokens(6000, 2048))
+        assertEquals(2048, DeviceInferenceGuard.contextTokens(6000, 1792))
+        val q3 = CompanionPackCatalog.builtIn.first { it.id == CompanionPackCatalog.ABLITERATED_17B_Q3_ID }
+        assertEquals(939_538_560L, q3.sizeBytes)
+        assertTrue(q3.minRamMb < 2048)
+        assertFalse(q3.url.contains("/main/"))
     }
 
     @Test

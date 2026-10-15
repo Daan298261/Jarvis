@@ -8,6 +8,8 @@ import kotlinx.coroutines.launch
 class JarvisApp : Application() {
     lateinit var api: JarvisApi
     val deviceModelChrome = CompanionDeviceModelChrome()
+    /** Every in-app notice (connection, downloads, errors) for the Notifications tab. */
+    val notices: NoticeStore by lazy { NoticeStore(getSharedPreferences(NoticeStore.PREFS, MODE_PRIVATE)) }
     override fun onCreate() {
         super.onCreate()
         api = JarvisApi(this)

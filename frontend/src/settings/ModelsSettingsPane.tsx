@@ -1,3 +1,4 @@
+import { LocalModelDiscovery } from "./LocalModelDiscovery"
 import { CollapsibleSection } from "../components/CollapsibleSection"
 import { Link } from "react-router-dom"
 import { DecisionTierSettings } from "./DecisionTierSettings"
@@ -180,6 +181,7 @@ export function ModelsSettingsPane({
         </label>
       </CollapsibleSection>
 
+      <LocalModelDiscovery />
       <DecisionTierSettings save={save} setMsg={setMsg} />
 
       <CollapsibleSection className="card grid settings-pane-card" storageKey="ModelsSettingsPane-Model-profile-amp-vision" title={<span>Model profile &amp; vision</span>}>

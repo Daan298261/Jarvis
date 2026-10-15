@@ -19,8 +19,11 @@ from .companion_security import GUARD
 from .gateway import gateway_app, identity_covers, server_identity
 from .lan_beacon import LanBeaconServer, public_beacon_payload
 from .store import database, get, put
+from .port_forward_access import PortForwardMixin
 
 PORT = 4781
+PAIRING_LOCK_TIMEOUT_SECONDS = 3
+PAIRING_GATEWAY_TIMEOUT_SECONDS = 25
 log = logging.getLogger(__name__)
 
 
@@ -46,9 +49,10 @@ def dial_host(value: str) -> str:
 
 def lan_hosts():
     from ..api.mobile import _lan_hosts
-    from .wan_forward import is_rfc1918_ipv4
+    from .wan_forward import is_rfc1918_ipv4, order_lan_hosts
 
-    return [host for host in _lan_hosts() if is_rfc1918_ipv4(host)]
+    hosts = [host for host in _lan_hosts() if is_rfc1918_ipv4(host)]
+    return order_lan_hosts(hosts)
 
 
 def preferred_lan_ipv4(gateway: str = "") -> str:
@@ -81,11 +85,17 @@ class EmbeddedServer(uvicorn.Server):
         yield
 
 
-class Connectivity:
+class Connectivity(PortForwardMixin):
     def __init__(self):
         self.lock = asyncio.Lock()
         self.server = None
         self.server_task = None
+        self.router = None
+        self.marker = ""
+        self.public_ip = None
+        self.natpmp_gateway = None
+        self.ssh_gateway = None
+        self.pcp_nonce = None
         self.identity = None
         self.remote_prepared = False
         self.state = {
@@ -104,6 +114,13 @@ class Connectivity:
         cfg = self.config()
         payload["remote"] = bool(cfg.get("remote"))
         payload["tailscale_enabled"] = cfg.get("tailscale", True) is not False
+        if cfg.get("connection_mode") == "public_forward":
+            from .wan_forward import redact_wan_config
+            payload["wan"] = redact_wan_config(cfg)
+        payload["connection_mode"] = cfg.get("connection_mode", "tailscale" if cfg.get("remote") else "lan")
+        evidence = self.state.get("phone_verification")
+        payload["phone_verified"] = bool(evidence and evidence.get("endpoint") in payload.get("endpoints", [])
+                                        and time.time() - evidence.get("verified_at", 0) < 86400)
         return payload
 
     def config(self):
@@ -127,18 +144,25 @@ class Connectivity:
                 put(db, "network", "config", stored)
             return stored
 
-    async def configure(self, enabled: bool, remote: bool | None, tailscale: bool | None = None):
+    async def configure(self, enabled: bool, remote: bool | None, tailscale: bool | None = None, extras: dict | None = None):
         if self.lock.locked():
             raise HTTPException(409, "Connection setup is already running")
         async with self.lock:
             config = self.config()
+            was_mode = config.get("connection_mode", "tailscale" if config.get("remote") else "lan")
+            if isinstance(tailscale, dict):
+                extras, tailscale = tailscale, None
+            if extras:
+                config.update(extras)
+            config.setdefault("marker", "Jarvis-" + __import__("uuid").uuid4().hex)
             was_remote = bool(config.get("remote"))
             config.update(enabled=enabled)
             if remote is not None:
                 config.update(remote=bool(remote), remote_explicit=True)
             if tailscale is not None:
                 config["tailscale"] = bool(tailscale)
-            if bool(config.get("remote")) != was_remote:
+            new_mode = config.get("connection_mode", "tailscale" if config.get("remote") else "lan")
+            if bool(config.get("remote")) != was_remote or (bool(config.get("remote")) and new_mode != was_mode):
                 # Codes minted for LAN-only use may live 60 minutes; any change of exposure burns them.
                 from .identity import invalidate_unclaimed_pairing_codes
 
@@ -154,28 +178,43 @@ class Connectivity:
             await self.apply_remote(config)
         return self.snapshot()
 
+    def _pairing_ready(self, snapshot):
+        return bool(self.config().get("enabled") and snapshot.get("local_verified")
+                    and snapshot.get("endpoints") and snapshot.get("server_pin")
+                    and self.server_task and not self.server_task.done())
+
     async def prepare_pairing(self):
-        """Owner pair intent prepares LAN ingress without device discovery or WAN setup."""
+        """Reuse ready LAN ingress without waiting for unrelated remote discovery."""
         if GUARD.cooldown_active():
             raise HTTPException(409, "Pairing is paused during the security cooldown")
-        async with self.lock:
+        snapshot = self.snapshot()
+        if self._pairing_ready(snapshot):
+            return snapshot
+        try:
+            await asyncio.wait_for(self.lock.acquire(), timeout=PAIRING_LOCK_TIMEOUT_SECONDS)
+        except TimeoutError as exc:
+            raise HTTPException(409, "The companion gateway is still starting. Try creating the QR again in a few seconds.") from exc
+        try:
             if GUARD.cooldown_active():
                 raise HTTPException(409, "Pairing is paused during the security cooldown")
             snapshot = self.snapshot()
-            if (self.config().get("enabled") and snapshot.get("local_verified")
-                    and snapshot.get("endpoints") and snapshot.get("server_pin")
-                    and self.server_task and not self.server_task.done()):
+            if self._pairing_ready(snapshot):
                 return snapshot
             config = self.config()
             if not config.get("enabled"):
                 config.update(enabled=True, remote=False)
                 with database() as db:
                     put(db, "network", "config", config)
-            await self.ensure_gateway_listening()
+            try:
+                await asyncio.wait_for(self.ensure_gateway_listening(), timeout=PAIRING_GATEWAY_TIMEOUT_SECONDS)
+            except TimeoutError as exc:
+                raise HTTPException(504, "The companion gateway did not become ready in time. Try creating the QR again.") from exc
             snapshot = self.snapshot()
             if not snapshot.get("endpoints") or not snapshot.get("server_pin"):
                 raise HTTPException(409, "Connect this desktop to Wi-Fi or Ethernet, then generate the pairing QR again")
             return snapshot
+        finally:
+            self.lock.release()
 
     async def stop_gateway(self, beacons: bool = True):
         if beacons:
@@ -211,6 +250,7 @@ class Connectivity:
             pass
 
     async def on_security_cooldown(self):
+        await self.release_mapping()
         await self.stop_gateway()
         self.report(
             state="cooldown",
@@ -374,6 +414,11 @@ class Connectivity:
 
     async def apply_remote(self, config):
         """Advertise LAN endpoints, plus Tailscale when the owner switched remote access on."""
+        if config.get("connection_mode") == "public_forward" and config.get("remote"):
+            await self.apply_public_forward(config)
+            await self._self_test(config, list(self.state.get("endpoints") or []))
+            return
+        await self.release_mapping()
         self.remote_prepared = False
         hosts = await asyncio.to_thread(lan_hosts)
         endpoints = self._lan_endpoints(hosts)
@@ -408,7 +453,7 @@ class Connectivity:
     async def _self_test(self, config, endpoints: list[str]) -> None:
         from .remote_access import exposure_summary, ordered_entries, self_test
 
-        entries = ordered_entries(endpoints)
+        entries = ordered_entries(endpoints, allow_public=config.get("connection_mode") == "public_forward" and bool(config.get("remote")))
         identity = self.identity
 
         async def _probe(url: str):
@@ -474,16 +519,22 @@ class Connectivity:
                                 self.report(state="failed", activity=str(exc)[:300])
                         config = self.config()
                         if config["enabled"] and self.state.get("state") != "cooldown":
-                            if self.state.get("state") != "ready" or not self.remote_prepared:
-                                await self.apply_remote(config)
-                            else:
-                                try:
-                                    await self._refresh_endpoints()
-                                except Exception as exc:
-                                    log.warning("Companion endpoint refresh failed: %s", exc)
+                            try:
+                                if self.state.get("state") != "ready" or not self.remote_prepared:
                                     await self.apply_remote(config)
+                                elif config.get("connection_mode") == "public_forward" and config.get("remote"):
+                                    if time.time() >= self.state.get("next_renewal_at", 0):
+                                        await self._renew_wan_mapping(config)
+                                    else:
+                                        await self._refresh_lan_dial_endpoints()
+                                else:
+                                    await self._refresh_endpoints()
+                            except Exception as exc:
+                                log.warning("Companion endpoint refresh failed: %s", exc)
+                                await self.apply_remote(config)
                 await asyncio.sleep(30)
         finally:
+            await self.release_mapping()
             await self.stop_gateway()
 
 

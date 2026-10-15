@@ -2,6 +2,7 @@ package com.jarvis.companion
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.net.URI
@@ -11,6 +12,7 @@ data class LanHost(
     val endpoint: String,
     val serverPin: String,
     val name: String = AnzuBranding.DISPLAY_NAME,
+    val endpoints: List<String> = emptyList(),
 )
 
 object LanBeacon {
@@ -37,13 +39,22 @@ object LanBeacon {
             val host = URI(endpoint).host ?: return@runCatching null
             if (host == "127.0.0.1" || host.equals("localhost", ignoreCase = true)) return@runCatching null
             val name = payload["name"]?.jsonPrimitive?.content.orEmpty().ifBlank { AnzuBranding.DISPLAY_NAME }.take(80)
-            LanHost(endpoint, pin, name)
+            val listed = payload["endpoints"]?.jsonArray?.mapNotNull { element ->
+                runCatching { TransportPolicy.origin(element.jsonPrimitive.content) }.getOrNull()
+            }.orEmpty()
+            val ordered = TransportPolicy.orderedForReachability(listed + endpoint)
+            val locals = TransportPolicy.localIpv4Addresses()
+            val dial = TransportPolicy.dialOrder(null, ordered, locals)
+            val primary = dial.firstOrNull() ?: ordered.firstOrNull() ?: endpoint
+            LanHost(primary, pin, name, dial.ifEmpty { ordered.ifEmpty { listOf(endpoint) } })
         }.getOrNull()
     }
 
     fun encode(host: LanHost): ByteArray {
         val escapedName = host.name.replace("\\", "\\\\").replace("\"", "\\\"")
-        val body = """{"service":"$SERVICE","version":1,"https":"${host.endpoint}","server_pin":"${host.serverPin}","name":"$escapedName","lan_pair":true}"""
+        val endpoints = TransportPolicy.orderedForReachability(host.endpoints + host.endpoint).take(8)
+        val endpointsJson = endpoints.joinToString(",", prefix = "[", postfix = "]") { "\"$it\"" }
+        val body = """{"service":"$SERVICE","version":1,"https":"${host.endpoint}","endpoints":$endpointsJson,"server_pin":"${host.serverPin}","name":"$escapedName","lan_pair":true}"""
         return "$MAGIC\n$body".toByteArray(StandardCharsets.UTF_8)
     }
 }

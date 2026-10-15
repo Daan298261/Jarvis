@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from dataclasses import dataclass, field
-from typing import Any
+import time
+from dataclasses import dataclass, field, replace
+from typing import Any, Callable
 from uuid import uuid4
 
 from ..agent.planning import (
@@ -24,7 +25,13 @@ from ..agent.planning import (
     simple_file_control,
 )
 from .reflex import decide
-from .surfaces import privacy_for_tier
+from .surfaces import (
+    PersonaIntentDecision,
+    persona_intent_from_result,
+    persona_intent_precheck,
+    persona_intent_stay,
+    privacy_for_tier,
+)
 from .types import Answer, DecisionResult, LatencyBreakdown, Question
 
 log = logging.getLogger("jarvis.decision.owner_turn")
@@ -145,6 +152,8 @@ class OwnerTurnDecision:
     reflex: DecisionResult | None = None
     snapshot_covers: bool = False
     meta: dict[str, Any] = field(default_factory=dict)
+    # RFC-0218 S1: persona_intent_switch result for this turn (stay or switch).
+    persona_intent: PersonaIntentDecision | None = None
 
 
 def extract_literal_candidate(user_message: str) -> str:
@@ -394,7 +403,11 @@ def _decide_sync(
     settings: Any | None,
     inference_state: Any | None,
     request_id: str,
+    persona: "PersonaTurnContext",
+    clock: Callable[[], float] = time.perf_counter,
 ) -> OwnerTurnDecision:
+    """One ``decide()`` per turn. ``persona`` is already resolved by
+    :func:`resolve_persona_context`; nothing here reads config or disk."""
     literal = extract_literal_candidate(user_message)
     tier = _resolved_tier(decision_tier, settings)
     state = {
@@ -404,19 +417,85 @@ def _decide_sync(
         "literal_candidate": literal,
         "decision_tier": tier,
     }
+    questions = list(OWNER_TURN_QUESTIONS)
+    precheck = None
+    if persona.unavailable_reason:
+        intent: PersonaIntentDecision | None = PersonaIntentDecision(
+            "", "", persona.unavailable_reason, "rules", 1.0
+        )
+    else:
+        intent = None
+        precheck = persona_intent_precheck(user_message, current_persona=persona.current or "", locked=bool(persona.locked))
+        if precheck.question is not None:
+            questions.append(precheck.question)
+            state["current_persona"] = precheck.current
+            state["pinned"] = bool(persona.pinned)
     result = decide(
         state,
-        OWNER_TURN_QUESTIONS,
+        questions,
         "request_routing",
         OWNER_TURN_DEADLINE_MS,
         privacy_for_tier(tier),
+        clock=clock,
     )
-    return _apply_floors(
+    turn = _apply_floors(
         user_message=user_message,
         baseline=baseline,
         literal=literal,
         result=result,
     )
+    if intent is None:
+        intent = persona_intent_from_result(precheck, result, floor=persona.floor)
+    return replace(turn, persona_intent=intent)
+
+
+SETTINGS_UNAVAILABLE = "settings_unavailable"
+
+
+@dataclass(frozen=True)
+class PersonaTurnContext:
+    """Persona state for RFC-0218. Caller may preset ``current``/``locked``;
+    :func:`resolve_persona_context` fills the rest before the deadline window."""
+
+    current: str | None = None
+    locked: bool | None = None
+    pinned: bool = False
+    floor: float | None = None
+    unavailable_reason: str = ""
+
+
+def resolve_persona_context(
+    persona: PersonaTurnContext | None,
+    settings: Any | None,
+) -> PersonaTurnContext:
+    """Resolve persona state from the caller's settings *before* the 50 ms window.
+
+    The decision lane never calls ``load_settings()``: every owner-turn caller
+    already holds its settings object. Without one the persona cannot be
+    resolved; that is logged as a warning and surfaces on the turn as
+    ``persona_intent.reason == "settings_unavailable"`` — never a silent default.
+    """
+    ctx = persona or PersonaTurnContext()
+    if settings is None:
+        log.warning("persona context: no settings supplied; persona_intent_switch not evaluated")
+        return replace(ctx, unavailable_reason=SETTINGS_UNAVAILABLE)
+    store = settings.named_personas
+    return replace(
+        ctx,
+        current=(ctx.current if ctx.current is not None else store.active_id or "").strip().lower(),
+        locked=bool(ctx.locked if ctx.locked is not None else store.auto_switch_locked),
+        floor=float(settings.decision.persona_intent_confidence_floor),
+    )
+
+
+def _with_deadline_persona(turn: OwnerTurnDecision, persona: PersonaTurnContext) -> OwnerTurnDecision:
+    if persona.unavailable_reason:
+        intent = PersonaIntentDecision("", "", persona.unavailable_reason, "rules", 1.0)
+    else:
+        intent = persona_intent_stay(
+            persona.current or "", reason="deadline_fallback", source="deadline_fallback", confidence=0.0
+        )
+    return replace(turn, persona_intent=intent)
 
 
 def rules_front_action(user_message: str, *, baseline: RequestRoute | None = None) -> str:
@@ -442,33 +521,49 @@ async def decide_owner_turn(
     decision_tier: str = "",
     settings: Any | None = None,
     inference_state: Any | None = None,
+    persona: PersonaTurnContext | None = None,
+    clock: Callable[[], float] | None = None,
 ) -> OwnerTurnDecision:
     """Mandatory System-One entry for owner chat and agent-loop intake.
 
     Always calls ``decide()`` with a 50 ms wall-clock cap. A timeout becomes an
     audited ``deadline_fallback`` to the rules classifier — never a skipped call.
-    """
-    import time
 
+    RFC-0218 S1: the same single ``decide()`` answers ``persona_intent_switch`` on
+    ``OwnerTurnDecision.persona_intent`` (deadline fallback = stay); S2 consumes it.
+
+    ``clock`` injects the time source the 50 ms budget is measured on. Default
+    (``None``) is the wall clock with a hard ``wait_for`` cancel. With an injected
+    clock the same 50 ms budget is enforced on that clock instead (inside Reflex
+    and after the worker), which makes deadline behaviour deterministic in tests.
+    """
     text = user_message or ""
     resolved_baseline = baseline or route_request(text)
-    started = time.perf_counter()
+    # Persona state resolves here, outside the deadline window (#637 review).
+    persona_ctx = resolve_persona_context(persona, settings)
+    now = clock or time.perf_counter
+    started = now()
     request_id = uuid4().hex
     try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(
-                _decide_sync,
-                text,
-                resolved_baseline,
-                decision_tier,
-                settings,
-                inference_state,
-                request_id,
-            ),
-            timeout=OWNER_TURN_DEADLINE_S,
+        worker = asyncio.to_thread(
+            _decide_sync,
+            text,
+            resolved_baseline,
+            decision_tier,
+            settings,
+            inference_state,
+            request_id,
+            persona_ctx,
+            now,
         )
+        if clock is None:
+            return await asyncio.wait_for(worker, timeout=OWNER_TURN_DEADLINE_S)
+        turn = await worker
+        if (now() - started) * 1000.0 > OWNER_TURN_DEADLINE_MS:
+            raise TimeoutError
+        return turn
     except TimeoutError:
-        spent = (time.perf_counter() - started) * 1000.0
+        spent = (now() - started) * 1000.0
         log.info("Owner-turn reflex exceeded 50 ms; using rules deadline fallback")
         literal = extract_literal_candidate(text)
         tier = _resolved_tier(decision_tier, settings)
@@ -481,14 +576,17 @@ async def decide_owner_turn(
             spent_ms=spent,
             request_id=request_id,
         )
-        return _apply_floors(
-            user_message=text,
-            baseline=resolved_baseline,
-            literal=literal,
-            result=result,
+        return _with_deadline_persona(
+            _apply_floors(
+                user_message=text,
+                baseline=resolved_baseline,
+                literal=literal,
+                result=result,
+            ),
+            persona_ctx,
         )
     except Exception:
-        spent = (time.perf_counter() - started) * 1000.0
+        spent = (now() - started) * 1000.0
         log.warning("Owner-turn reflex unavailable; using rules deadline fallback", exc_info=True)
         literal = extract_literal_candidate(text)
         tier = _resolved_tier(decision_tier, settings)
@@ -501,9 +599,12 @@ async def decide_owner_turn(
             spent_ms=spent,
             request_id=request_id,
         )
-        return _apply_floors(
-            user_message=text,
-            baseline=resolved_baseline,
-            literal=literal,
-            result=result,
+        return _with_deadline_persona(
+            _apply_floors(
+                user_message=text,
+                baseline=resolved_baseline,
+                literal=literal,
+                result=result,
+            ),
+            persona_ctx,
         )

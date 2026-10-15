@@ -10,7 +10,7 @@ import json
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 from . import audit, cache, metrics, quartermaster
@@ -207,6 +207,7 @@ def decide(
     *,
     use_cache: bool = True,
     request_id: str | None = None,
+    clock: Callable[[], float] = time.perf_counter,
 ) -> DecisionResult:
     """
     Provider-neutral Reflex entrypoint.
@@ -215,7 +216,7 @@ def decide(
     the question to Jev (if allowed) then the generative/model lane. Deterministic
     rules run only for hard safety (policy deny/approval, technical-speak fence).
     """
-    started = time.perf_counter()
+    started = clock()
     raw_state = dict(state or {})
     owner_request_id = raw_state.pop("_owner_turn_request_id", None)
     rid = request_id or owner_request_id or uuid4().hex
@@ -228,6 +229,9 @@ def decide(
     if dclass not in REFLEX_DECISION_CLASSES:
         log.warning("Reflex decide() called with unlisted decision_class %r", dclass)
     qlist = normalize_questions(questions)
+    for q in qlist:
+        if q.decision_class and q.decision_class not in REFLEX_DECISION_CLASSES:
+            raise ValueError(f"question {q.id!r} has unlisted decision_class {q.decision_class!r}")
     projection = compact_state(raw_state)
 
     # Hard safety only: policy deny/approval and the technical-speak fence.
@@ -267,7 +271,7 @@ def decide(
 
     last_error = ""
     for provider in order:
-        remaining = deadline - (time.perf_counter() - started) * 1000.0
+        remaining = deadline - (clock() - started) * 1000.0
         if remaining <= 1.0:
             result = _deadline_fallback(
                 state=projection,
@@ -275,7 +279,7 @@ def decide(
                 decision_class=dclass,
                 reason=f"deadline exceeded before {provider}",
                 request_id=rid,
-                spent_ms=(time.perf_counter() - started) * 1000.0,
+                spent_ms=(clock() - started) * 1000.0,
             )
             metrics.record(result)
             audit.record_event("reflex_deadline_fallback", result.as_dict())
@@ -319,7 +323,7 @@ def decide(
             quartermaster.record_outcome(
                 dclass,
                 provider,
-                latency_ms=(time.perf_counter() - started) * 1000.0,
+                latency_ms=(clock() - started) * 1000.0,
                 quality=0.0,
             )
             result = _deadline_fallback(
@@ -328,7 +332,7 @@ def decide(
                 decision_class=dclass,
                 reason=str(exc),
                 request_id=rid,
-                spent_ms=(time.perf_counter() - started) * 1000.0,
+                spent_ms=(clock() - started) * 1000.0,
             )
             metrics.record(result)
             audit.record_event("reflex_deadline_fallback", result.as_dict())
@@ -338,7 +342,7 @@ def decide(
             quartermaster.record_outcome(
                 dclass,
                 provider,
-                latency_ms=(time.perf_counter() - started) * 1000.0,
+                latency_ms=(clock() - started) * 1000.0,
                 quality=0.0,
             )
             audit.record_event(
@@ -354,7 +358,7 @@ def decide(
             continue
 
         result.request_id = rid
-        result.latency.total_ms = (time.perf_counter() - started) * 1000.0
+        result.latency.total_ms = (clock() - started) * 1000.0
         missing = _enforce_bounds(result, qlist)
         if missing:
             last_error = f"{provider} returned out-of-domain or missing answers for: {', '.join(missing)}"
@@ -429,7 +433,7 @@ def decide(
         return guarded
 
     # Exhausted providers → generative, then rules deadline fallback.
-    remaining = deadline - (time.perf_counter() - started) * 1000.0
+    remaining = deadline - (clock() - started) * 1000.0
     if remaining > 1.0:
         try:
             gen = generative.decide(
@@ -441,7 +445,7 @@ def decide(
             gen.request_id = rid
             gen.fallback_reason = gen.fallback_reason or last_error or "no typed provider"
             gen.fallback_source = "generative"
-            gen.latency.total_ms = (time.perf_counter() - started) * 1000.0
+            gen.latency.total_ms = (clock() - started) * 1000.0
             guarded = _apply_policy_guard(state=projection, decision_class=dclass, result=gen)
             metrics.record(guarded)
             audit.record_event("reflex_decision", guarded.as_dict())
@@ -455,7 +459,7 @@ def decide(
         decision_class=dclass,
         reason=last_error or "all providers failed",
         request_id=rid,
-        spent_ms=(time.perf_counter() - started) * 1000.0,
+        spent_ms=(clock() - started) * 1000.0,
     )
     metrics.record(result)
     audit.record_event("reflex_deadline_fallback", result.as_dict())
