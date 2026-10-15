@@ -800,7 +800,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         val fast = if (quick && state.attachmentIds.isEmpty() && PhoneQuickMode.isQuestion(text)) CompanionPackCatalog.fastInstalledPack(packManager.catalog(), packManager::packCanLoad) else null
         val routing = CompanionRouting.decide(
             leaderReachable = state.leaderReachable && !preferPhoneLocal.value && fast == null,
-            packStatus = state.localPackStatus,
+            packStatus = if (fast != null) CompanionPackStatus.READY else state.localPackStatus,
             resourceBlocked = DeviceInferenceGuard.blockReason(getApplication(), packManager.resolveOfflinePack(quick) ?: packManager.selectedPack() ?: CompanionPackCatalog.builtIn.first()),
             hasStalePendingOnlineOutbox = state.pendingMessage,
         )
