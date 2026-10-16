@@ -11,6 +11,8 @@ The owner reports slow startup, lost model selections, unreliable autoload and u
 
 Preserve the exact successful runtime selection including custom GGUF and context. Reuse only matching endpoint/model/configuration; honor forced reloads. Restore the saved selection at startup without rewriting it during temporary fallback. External discovery remains informational and never stops another application's server automatically. Move blocking hardware and persona preparation off the event loop. Lazy-load secondary pages with a local loading/error boundary that keeps navigation available. Prevent stale discovery polling from replacing a successful choice.
 
+Settings saves merge the writer's changed fields into the latest file under a write lock. The inference section stays an atomic selection so concurrent model switches cannot mix endpoints and weights; unrelated appearance/persona saves cannot reset that selection.
+
 ## Acceptance criteria
 
 - Saved built-in and custom model choices survive restart and temporary fallback.

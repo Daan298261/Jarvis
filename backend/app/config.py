@@ -4,10 +4,14 @@ import json
 import os
 import shutil
 import tempfile
+import threading
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+
+_SETTINGS_WRITE_LOCK = threading.RLock()
 
 
 def repo_root() -> Path:
@@ -471,6 +475,7 @@ class DecisionSettings(BaseModel):
 
 
 class AppSettings(BaseModel):
+    _saved_snapshot: dict[str, Any] | None = PrivateAttr(default=None)
     bind_host: str = "127.0.0.1"
     bind_port: int = 4780
     lan_access: bool = False
@@ -529,6 +534,7 @@ def load_settings() -> AppSettings:
         payload = json.loads(default_config_path().read_text(encoding="utf-8"))
     if settings_path().exists():
         payload = _deep_merge(payload, json.loads(settings_path().read_text(encoding="utf-8")))
+    saved_payload = deepcopy(payload)
 
     # Undo the former slow front-lane defaults without changing customized
     # worker context budgets. The acknowledgement lane is not a second worker.
@@ -566,6 +572,10 @@ def load_settings() -> AppSettings:
         payload["bind_port"] = int(port)
     payload["allowed_directories"] = sanitize_allowed_directories(payload.get("allowed_directories"))
     settings = AppSettings.model_validate(payload)
+    # Include schema defaults in the baseline, while retaining legacy values
+    # so normalizations are still persisted on the next save.
+    settings._saved_snapshot = _deep_merge(settings.model_dump(), saved_payload)
+    settings._saved_snapshot["inference"] = settings.inference.model_dump()
     try:
         from .presence.custom_ui import normalize_custom_presence
 
@@ -575,6 +585,23 @@ def load_settings() -> AppSettings:
     return settings
 
 
+def _merge_settings_changes(current: Any, before: Any, after: Any) -> Any:
+    """Apply this writer's changes without reverting another writer's fields."""
+    if before == after:
+        return deepcopy(current)
+    if isinstance(before, dict) and isinstance(after, dict):
+        result = deepcopy(current) if isinstance(current, dict) else {}
+        for key in before.keys() - after.keys():
+            result.pop(key, None)
+        for key, value in after.items():
+            if key not in before:
+                result[key] = deepcopy(value)
+            elif value != before[key]:
+                result[key] = _merge_settings_changes(result.get(key), before[key], value)
+        return result
+    return deepcopy(after)
+
+
 def save_settings(settings: AppSettings) -> None:
     dump = settings.model_dump()
     dump.pop("auth_token", None)
@@ -582,18 +609,29 @@ def save_settings(settings: AppSettings) -> None:
     settings.allowed_directories = list(dump["allowed_directories"])
 
     def _write() -> None:
-        path = settings_path()
-        # Background preparation and UI saves may overlap. Readers must always
-        # see a complete settings file, including across an interrupted write.
-        temporary = None
-        try:
-            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, suffix=".tmp", delete=False) as stream:
-                temporary = Path(stream.name)
-                json.dump(dump, stream, indent=2)
-            temporary.replace(path)
-        finally:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
+        with _SETTINGS_WRITE_LOCK:
+            path = settings_path()
+            merged = dump
+            if settings._saved_snapshot is not None and path.exists():
+                try:
+                    current = json.loads(path.read_text(encoding="utf-8"))
+                    merged = _merge_settings_changes(current, settings._saved_snapshot, dump)
+                    # Endpoint, model, GGUF and context form one selection. A
+                    # model switch owns this whole group; unrelated UI saves do not.
+                    if dump["inference"] != settings._saved_snapshot.get("inference"):
+                        merged["inference"] = deepcopy(dump["inference"])
+                except (OSError, ValueError):
+                    pass
+            # Readers always see a complete file, including interrupted writes.
+            temporary = None
+            try:
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, suffix=".tmp", delete=False) as stream:
+                    temporary = Path(stream.name)
+                    json.dump(merged, stream, indent=2)
+                temporary.replace(path)
+            finally:
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
 
     try:
         from .recovery.hooks import wrap_settings_save
@@ -601,6 +639,7 @@ def save_settings(settings: AppSettings) -> None:
         wrap_settings_save(_write)
     except Exception:
         _write()
+    settings._saved_snapshot = deepcopy(dump)
 
 
 LOCAL_NETWORK_SCOPE = "<local-network-shares>"

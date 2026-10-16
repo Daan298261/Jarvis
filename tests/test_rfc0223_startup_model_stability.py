@@ -175,3 +175,58 @@ async def test_model_catalog_scan_keeps_api_event_loop_available(monkeypatch):
     finally:
         release.set()
         await task
+
+
+@pytest.mark.parametrize("model_first", [True, False])
+def test_slow_model_selection_and_ui_save_preserve_each_others_changes(tmp_path, monkeypatch, model_first):
+    from app import config
+    monkeypatch.setattr(config, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "default_config_path", lambda: tmp_path / "no-default.json")
+    config.save_settings(AppSettings())
+    model_choice = config.load_settings().model_copy(deep=True)
+    appearance = config.load_settings()
+    model_choice.inference.remote_model = "saved-choice"
+    appearance.presentation.performance_preset = "efficient"
+    for writer in ([model_choice, appearance] if model_first else [appearance, model_choice]):
+        config.save_settings(writer)
+    model_choice.inference.context_size = 8192
+    config.save_settings(model_choice)
+    restored = config.load_settings()
+    assert restored.inference.remote_model == "saved-choice"
+    assert restored.presentation.performance_preset == "efficient"
+    assert restored.inference.context_size == 8192
+
+
+def test_legacy_settings_defaults_do_not_replace_a_concurrent_custom_model(tmp_path, monkeypatch):
+    import json
+    from app import config
+    monkeypatch.setattr(config, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "default_config_path", lambda: tmp_path / "no-default.json")
+    config.settings_path().write_text(json.dumps({"inference": {"auto_load": True}}))
+    selected = config.load_settings()
+    appearance = config.load_settings()
+    selected.inference.gguf_path = str(tmp_path / "owner.gguf")
+    config.save_settings(selected)
+    appearance.presentation.performance_preset = "efficient"
+    config.save_settings(appearance)
+    assert config.load_settings().inference.gguf_path == selected.inference.gguf_path
+
+
+def test_model_switches_persist_a_coherent_selection(tmp_path, monkeypatch):
+    from app import config
+    monkeypatch.setattr(config, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "default_config_path", lambda: tmp_path / "no-default.json")
+    config.save_settings(AppSettings())
+    remote = config.load_settings()
+    local = config.load_settings()
+    remote.inference.backend = "lmstudio"
+    remote.inference.port = 1234
+    remote.inference.remote_model = "external-choice"
+    config.save_settings(remote)
+    local.inference.gguf_path = str(tmp_path / "owner.gguf")
+    config.save_settings(local)
+    restored = config.load_settings()
+    assert restored.inference.backend == "llama.cpp"
+    assert restored.inference.port == 8088
+    assert restored.inference.remote_model == ""
+    assert restored.inference.gguf_path == local.inference.gguf_path
