@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from app.inference.backends import LlamaCppBackend
 from app.inference.profiles import (
     PRIMARY_GGUF_REPO,
