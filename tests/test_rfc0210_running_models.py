@@ -24,7 +24,8 @@ async def test_unrelated_or_failed_servers_are_not_models(monkeypatch, status, b
     assert await rm.probe(1234) is None
 
 
-async def test_valid_server_uses_metadata_only(monkeypatch):
+@pytest.mark.parametrize("port", [1235, 11434])
+async def test_valid_server_uses_metadata_only(monkeypatch, port):
     paths = []
     def handle(request):
         paths.append(request.url.path)
@@ -32,7 +33,7 @@ async def test_valid_server_uses_metadata_only(monkeypatch):
         assert "authorization" not in request.headers
         return httpx.Response(200, json={"data": [{"id": "qwen-coder"}]}) if request.url.path == "/v1/models" else httpx.Response(404)
     mock_http(monkeypatch, handle)
-    assert (await rm.probe(1235))["models"] == ["qwen-coder"]
+    assert (await rm.probe(port))["models"] == ["qwen-coder"]
     assert "/v1/chat/completions" not in paths
 
 

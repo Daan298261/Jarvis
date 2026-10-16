@@ -72,10 +72,6 @@ async def probe(port: int, *, api_key: str = "") -> dict | None:
                 if isinstance(body, dict) and isinstance(body.get("models"), list):
                     names = parse_models_payload("/api/ps", body)
                     return {"port": port, "backend": "ollama", "models": names, "busy": None} if names else None
-                if port == 11434:
-                    # Without native loaded inventory Ollama's OpenAI endpoint
-                    # lists downloads, which generated the repeated boot offers.
-                    return None
                 response = await client.get(base + "/v1/models")
                 if not response.is_success:
                     return None
