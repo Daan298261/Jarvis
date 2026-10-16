@@ -267,6 +267,7 @@ async def test_background_reconnect_requires_existing_owner_choice(service, monk
     runtime, settings, manager = service
     await runtime.scan()
     row = runtime.rows[0]
+    settings.inference.auto_load = True
     row["choice"] = "use" if approved else None
     settings.inference.backend = "remote"
     settings.inference.port = row["port"]
@@ -303,7 +304,7 @@ async def test_new_offer_is_announced_once_on_front_voice_lane(service, monkeypa
     assert publish.call_args.kwargs["lane"] == "front"
 
 
-async def test_startup_waits_for_owner_choice_before_loading_worker(service, monkeypatch):
+async def test_startup_loads_saved_model_without_waiting_for_discovery(service, monkeypatch):
     runtime, settings, manager = service
     from app import main
     monkeypatch.setattr(rm, "RUNNING_MODELS", runtime)
@@ -311,4 +312,4 @@ async def test_startup_waits_for_owner_choice_before_loading_worker(service, mon
     load = AsyncMock()
     monkeypatch.setattr(manager, "load", load)
     await main._autoload_model(settings)
-    load.assert_not_called()
+    load.assert_awaited_once_with(settings, context_size=settings.inference.context_size)

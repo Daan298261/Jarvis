@@ -10,7 +10,7 @@ import { CustomPresencePanel } from "../presence/CustomPresencePanel"
 import { PresenceModePreview } from "../presence/PresenceModePreview"
 import { updatePresentation } from "../presence/presentationSettings"
 import type { PresentationSettings } from "../presence/presenceTypes"
-import { MUSCULAR_HUMANOID_AVATAR_ID } from "../presence/renderers/HumanoidPresence"
+import { MUSCULAR_HUMANOID_AVATAR_ID } from "../presence/renderers/humanoidRuntime"
 import {
   MYTHIC_LIVING_AVATAR_ID,
   MYTHIC_AVATAR_CHOICES,

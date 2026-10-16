@@ -89,6 +89,7 @@ class LiveAgentSuiteBody(BaseModel):
 async def model_status():
     settings = load_settings()
     snapshot = await MANAGER.snapshot(settings)
+    profiles = await asyncio.to_thread(available_profiles)
     snapshot["profiles"] = [
         {
             "name": p.name,
@@ -99,7 +100,7 @@ async def model_status():
             "description": p.description,
             "escalation_only": p.name == "expert",
         }
-        for p in available_profiles()
+        for p in profiles
     ]
     snapshot["outcomes"] = await task_outcome_stats()
     snapshot["benchmarks"] = await list_benchmarks(limit=12)
@@ -261,6 +262,7 @@ async def load_model(body: LoadBody | None = None):
         raise HTTPException(status_code=500, detail=str(exc)[:500])
     if body and body.profile:
         settings.inference.profile = body.profile
+        settings.inference.gguf_path = ""
         save_settings(settings)
     rebind_owner_conversations_after_hotswap(
         int(MANAGER.state.context_size or target_context),

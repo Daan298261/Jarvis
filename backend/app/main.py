@@ -134,6 +134,13 @@ app.include_router(perception_commentary.router)
 app.include_router(perception_identity.router)
 app.include_router(companion_calls_router)
 mobile_runtime = MobileRuntime()
+_startup_tasks: set[asyncio.Task] = set()
+
+
+def _start_optional_step(name, fn) -> None:
+    task = asyncio.create_task(startup_health.run_step(name, fn), name=f"startup-{name}")
+    _startup_tasks.add(task)
+    task.add_done_callback(_startup_tasks.discard)
 
 frontend_dist = repo_root() / "frontend" / "dist"
 
@@ -209,12 +216,14 @@ async def startup() -> None:
         await reconcile_execution_on_startup()
     except Exception:
         logging.debug("Execution lease reconcile skipped", exc_info=True)
-    async def _register_node() -> None:
+    async def _register_node():
         node = await register_localhost_node()
         await bind_workers_to_node(node.id)
         await register_localhost_capabilities(node.id)
+        await _auto_start_supermemory_and_refresh_node(node.id)
+        return node
 
-    await startup_health.run_step("localhost_node", _register_node)
+    _start_optional_step("localhost_node", _register_node)
     try:
         from .decision.laya import runtime as laya_runtime
 
@@ -274,9 +283,11 @@ async def startup() -> None:
         apply_playwright_browsers_path()
     except Exception:
         logging.debug("Extra-drive cache dest apply on startup skipped", exc_info=True)
-    await startup_health.run_step(
+    _start_optional_step(
         "hardware_snapshot",
-        lambda: Path(repo_root() / "data" / "hardware.json").write_text(json.dumps(hardware_dict(), indent=2), encoding="utf-8"),
+        lambda: asyncio.to_thread(
+            lambda: Path(repo_root() / "data" / "hardware.json").write_text(json.dumps(hardware_dict(), indent=2), encoding="utf-8")
+        ),
     )
     try:
         from .licensing.clock_log import record_clock_sample
@@ -285,10 +296,7 @@ async def startup() -> None:
     except Exception:
         logging.debug("UTC clock log sample skipped", exc_info=True)
     if current.mcp_servers:
-        try:
-            await MCP.refresh(current.mcp_servers)
-        except Exception:
-            logging.exception("MCP refresh failed")
+        _start_optional_step("mcp", lambda: MCP.refresh(current.mcp_servers))
     if current.rea.enabled:
         try:
             from .security.rea_mcp import register_rea_mcp
@@ -324,7 +332,6 @@ async def startup() -> None:
     except Exception:
         logging.debug("Vault bind on startup skipped", exc_info=True)
     try:
-        asyncio.create_task(_auto_start_supermemory_and_refresh_node(node.id))
         asyncio.create_task(_auto_start_crucix())
         asyncio.create_task(_auto_start_blackgrid())
     except Exception:
@@ -376,11 +383,13 @@ async def startup() -> None:
     if not os.environ.get("PYTEST_CURRENT_TEST"):
         try:
             from .persona.named_persona import reapply_stored_main_persona
-
-            reapply_stored_main_persona()
             from .presence.custom_ui import reapply_stored_custom_presence
 
-            reapply_stored_custom_presence()
+            def _restore_presence():
+                reapply_stored_main_persona()
+                reapply_stored_custom_presence()
+
+            _start_optional_step("presence", lambda: asyncio.to_thread(_restore_presence))
         except Exception:
             logging.debug("Named persona reapply skipped", exc_info=True)
     asyncio.create_task(_maybe_launch_greeting(app.state.startup_id))
@@ -439,6 +448,10 @@ async def _auto_start_blackgrid() -> None:
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
+    tasks = list(_startup_tasks)
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
     try:
         from .inference.front_runtime import FRONT_RUNTIME
 
@@ -500,18 +513,21 @@ async def shutdown() -> None:
 
 
 async def _autoload_model(current) -> None:
-    if current.inference.backend in {"llama.cpp", "local"}:
-        from .inference.running_models import RUNNING_MODELS
-
-        try:
-            inventory = await RUNNING_MODELS.scan()
-            if any(not row["choice"] for row in inventory["servers"]):
-                logging.info("Worker auto-load waiting for the owner's running-model choice")
-                return
-        except Exception:
-            logging.exception("Running model discovery failed before auto-load")
+    # Discovery offers are independent of the saved boot choice. New servers
+    # must neither take it over nor leave autoload waiting for a modal choice.
     try:
-        await MANAGER.load(current, preferred_startup_profile(current.inference.profile))
+        if current.inference.backend in {"lmstudio", "lm-studio", "lm_studio"}:
+            from .inference.lmstudio_server import ensure_local_lmstudio, is_loopback_host
+
+            if is_loopback_host(current.inference.host):
+                boot = await ensure_local_lmstudio(
+                    host=current.inference.host, port=current.inference.port,
+                    model=current.inference.remote_model,
+                    context_size=current.inference.context_size,
+                )
+                if not boot.get("ok"):
+                    raise RuntimeError(boot.get("detail") or "The selected LM Studio model did not load")
+        await MANAGER.load(current, context_size=current.inference.context_size)
     except Exception:
         fallback = local_lmstudio_fallback_settings(current)
         if fallback is None:
@@ -523,10 +539,8 @@ async def _autoload_model(current) -> None:
         except Exception:
             logging.exception("LM Studio was unavailable and local fallback failed")
             return
-        fallback.inference.profile = profile
-        save_settings(fallback)
         logging.warning(
-            "LM Studio was unavailable at startup; switched to Jarvis-managed local profile %s",
+            "LM Studio was unavailable at startup; temporarily using local profile %s; saved selection retained",
             profile,
         )
 

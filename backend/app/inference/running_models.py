@@ -72,6 +72,10 @@ async def probe(port: int, *, api_key: str = "") -> dict | None:
                 if isinstance(body, dict) and isinstance(body.get("models"), list):
                     names = parse_models_payload("/api/ps", body)
                     return {"port": port, "backend": "ollama", "models": names, "busy": None} if names else None
+                if port == 11434:
+                    # Without native loaded inventory Ollama's OpenAI endpoint
+                    # lists downloads, which generated the repeated boot offers.
+                    return None
                 response = await client.get(base + "/v1/models")
                 if not response.is_success:
                     return None
@@ -205,7 +209,12 @@ class RunningModels:
                     rows.append({
                         **result, "id": identifier, "model": model, "process": process,
                         "base_url": f'http://127.0.0.1:{result["port"]}/v1',
-                        "choice": choices.get(identifier),
+                        "choice": choices.get(identifier) or (
+                            "use" if settings.inference.backend not in {"llama.cpp", "local"}
+                            and settings.inference.host in {"127.0.0.1", "localhost"}
+                            and settings.inference.port == result["port"]
+                            and settings.inference.remote_model == model else None
+                        ),
                         "can_stop": result["backend"] == "ollama" or model in result.get("instance_ids", [])
                                     or bool(process and process["name"] in LLAMA_NAMES),
                         "active": MANAGER.state.loaded and MANAGER.state.port == result["port"]
@@ -237,7 +246,7 @@ class RunningModels:
                 await asyncio.to_thread(self._save, choices)
                 row["choice"] = "leave"
                 # Startup waits for this owner choice instead of competing for VRAM.
-                if not MANAGER.state.loaded and settings.inference.auto_load:
+                if not MANAGER.state.loaded and not MANAGER.state.loading and settings.inference.auto_load:
                     await MANAGER.load(settings)
                 return self.snapshot()
             async with MANAGER._request_lease.exclusive() as acquired:
@@ -327,7 +336,7 @@ class RunningModels:
                                  and r["port"] == settings.inference.port
                                  and r["model"] == settings.inference.remote_model
                                  and settings.inference.host in {"127.0.0.1", "localhost"}), None)
-                if selected and not selected.get("busy") and not MANAGER.state.loaded and not MANAGER.state.loading:
+                if settings.inference.auto_load and selected and not selected.get("busy") and not MANAGER.state.loaded and not MANAGER.state.loading:
                     async with MANAGER._request_lease.exclusive() as acquired:
                         if acquired:
                             await MANAGER.load(settings)

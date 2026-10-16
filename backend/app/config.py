@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any, Literal
 
@@ -68,6 +69,7 @@ class InferenceSettings(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8088
     profile: str = "fast"
+    gguf_path: str = ""
     context_size: int = 16384
     flash_attn: str = "auto"
     fit: bool = True
@@ -580,7 +582,18 @@ def save_settings(settings: AppSettings) -> None:
     settings.allowed_directories = list(dump["allowed_directories"])
 
     def _write() -> None:
-        settings_path().write_text(json.dumps(dump, indent=2), encoding="utf-8")
+        path = settings_path()
+        # Background preparation and UI saves may overlap. Readers must always
+        # see a complete settings file, including across an interrupted write.
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, suffix=".tmp", delete=False) as stream:
+                temporary = Path(stream.name)
+                json.dump(dump, stream, indent=2)
+            temporary.replace(path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
     try:
         from .recovery.hooks import wrap_settings_save
