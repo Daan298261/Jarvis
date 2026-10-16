@@ -1,9 +1,13 @@
 import { Component, Suspense, type ReactNode } from "react"
 
-class PageErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+class PageErrorBoundary extends Component<{ children: ReactNode; pageKey: string }, { failed: boolean }> {
   state = { failed: false }
 
   static getDerivedStateFromError() { return { failed: true } }
+
+  componentDidUpdate(previous: Readonly<{ children: ReactNode; pageKey: string }>) {
+    if (previous.pageKey !== this.props.pageKey && this.state.failed) this.setState({ failed: false })
+  }
 
   render() {
     if (this.state.failed) return <section className="card" role="alert">
@@ -15,7 +19,7 @@ class PageErrorBoundary extends Component<{ children: ReactNode }, { failed: boo
 }
 
 export function PageBoundary({ children, pageKey }: { children: ReactNode; pageKey: string }) {
-  return <PageErrorBoundary key={pageKey}>
+  return <PageErrorBoundary pageKey={pageKey}>
     <Suspense fallback={<p role="status" aria-live="polite">Opening page…</p>}>
       {children}
     </Suspense>
