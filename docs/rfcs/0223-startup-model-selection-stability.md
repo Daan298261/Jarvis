@@ -21,6 +21,7 @@ Settings saves merge the writer's changed fields into the latest file under a wr
 - Startup hardware/persona probes do not block API requests.
 - Secondary page code loads on demand; failed chunks expose retry while navigation stays usable.
 - Focused regression tests, frontend build/lint, and a Windows build are checked; live acceptance limitations are recorded separately.
+- Installer source globs exclude build outputs relative to each source root; output slices, duplicate model/sidecar staging, Rust caches and vendor-only issuer code cannot enter the customer payload through those globs.
 
 ## Likely files
 
