@@ -40,10 +40,12 @@ from .profiles import PROFILES, ModelProfile, profile_gguf, resolve_profile
 _log = logging.getLogger(__name__)
 
 FRONT_PROFILE_2B = "front_2b"
+FRONT_PROFILE_08B = "front_08b"
 FRONT_PROFILE_4B = "front_4b"
-FRONT_PROFILES = (FRONT_PROFILE_2B, FRONT_PROFILE_4B)
+FRONT_PROFILES = (FRONT_PROFILE_08B, FRONT_PROFILE_2B, FRONT_PROFILE_4B)
 # Used only when the GGUF is not on disk yet. Real size wins once the file exists.
 _WEIGHT_FALLBACK_MIB = {
+    FRONT_PROFILE_08B: 640,
     FRONT_PROFILE_2B: 1536,
     FRONT_PROFILE_4B: 2806,
 }
@@ -475,7 +477,7 @@ class FrontRuntime:
             remote_error = ""
             if (app.front_responder.placement or "local") == "remote":
                 remote_ok, remote_error = await self.probe_remote(app)
-            decision = self.decide(app, remote_ok=remote_ok, remote_error=remote_error)
+            decision = await asyncio.to_thread(self.decide, app, remote_ok=remote_ok, remote_error=remote_error)
             if decision.mode == "remote":
                 self._attach_provider(app, decision)
                 self._decision = decision
@@ -529,6 +531,7 @@ class FrontRuntime:
             decision.reason = "server_or_weights_missing: " + "; ".join(missing)[:500]
             _log.warning("front runtime fallback: %s", decision.reason)
             return decision
+        self._backend = backend
         try:
             ready = await backend.start(
                 profile,
@@ -544,7 +547,11 @@ class FrontRuntime:
                 prompt_cache=bool(decision.prompt_cache),
                 log_name=_LOG_NAME,
             )
+        except asyncio.CancelledError:
+            await self._stop_backend()
+            raise
         except Exception as exc:
+            await self._stop_backend()
             decision.mode = "fallback"
             decision.healthy = False
             decision.reason = f"start_failed: {exc}"[:500]
@@ -556,7 +563,7 @@ class FrontRuntime:
             decision.reason = "start_failed: health check timed out"
             _log.warning("front runtime fallback: %s", decision.reason)
             try:
-                await backend.stop()
+                await self._stop_backend()
             except Exception:
                 pass
             return decision
@@ -579,7 +586,9 @@ class FrontRuntime:
         provider = self._provider
         if provider is None or not hasattr(provider, "chat_stream"):
             return
-        messages = [ChatMessage(role="user", content="Hi")]
+        from ..agent.front_responder import small_context_envelope
+        # Warm the actual stable front prefix, not an unrelated one-word prompt.
+        messages = small_context_envelope("Hi", action_hint="final_basic")
         try:
             async with asyncio.timeout(8):
                 async for _delta in provider.chat_stream(

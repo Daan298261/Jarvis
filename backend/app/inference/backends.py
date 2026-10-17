@@ -184,7 +184,7 @@ async def probe_remote_server(
                 except Exception as exc:
                     last_error = str(exc)
                     continue
-                if response.status_code >= 500:
+                if not response.is_success:
                     last_error = f"{path} returned {response.status_code}"
                     continue
                 if health_path is None:

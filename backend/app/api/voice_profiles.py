@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 @router.get("")
-async def list_voice_profiles():
+def list_voice_profiles():
     active_id = get_active_voice_profile_id()
     catalog = get_catalog()
     profiles = catalog.list_profiles(active_id)
@@ -35,7 +35,7 @@ async def list_voice_profiles():
 
 
 @router.get("/active")
-async def get_active_voice_profile_endpoint():
+def get_active_voice_profile_endpoint():
     active_id = get_active_voice_profile_id()
     catalog = get_catalog()
     items = catalog.list_profiles(active_id)

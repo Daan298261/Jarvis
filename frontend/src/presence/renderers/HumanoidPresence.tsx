@@ -18,7 +18,8 @@ import "./humanoid-presence.css"
 // behavior stable; the README-era broad-shouldered figure is opt-in.
 const CURRENT_HUMANOID_ARTWORK = "/presence/jarvis-original/humanoid.webp"
 const MUSCULAR_HUMANOID_ARTWORK = "/presence/jarvis-original/humanoid-muscular.png"
-export const MUSCULAR_HUMANOID_AVATAR_ID = "humanoid_muscular"
+import { MUSCULAR_HUMANOID_AVATAR_ID } from "./humanoidRuntime"
+export { MUSCULAR_HUMANOID_AVATAR_ID } from "./humanoidRuntime"
 
 type HumanoidPresenceProps = {
   snapshot: PresenceSnapshot

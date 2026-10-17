@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { api } from "../api"
 
 type Server = {
@@ -16,27 +16,43 @@ export function RunningModels({ showAll = false }: { showAll?: boolean }) {
   const [inventory, setInventory] = useState<Inventory | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
+  const revision = useRef(0)
+  const working = useRef(false)
   useEffect(() => {
     let mounted = true
-    const refresh = () => api<Inventory>("/api/model/running").then(value => {
-      if (mounted) setInventory(value)
-    }).catch(() => { /* The HUD health rail reports core availability. */ })
+    const controller = new AbortController()
+    let timer: number | undefined
+    const refresh = async () => {
+      const started = revision.current
+      try {
+        if (!working.current) {
+          const value = await api<Inventory>("/api/model/running", { signal: controller.signal })
+          if (mounted && started === revision.current && !working.current) setInventory(value)
+        }
+      } catch { /* The HUD health rail reports core availability. */ }
+      if (mounted) timer = window.setTimeout(refresh, 5000)
+    }
     void refresh()
-    const timer = window.setInterval(refresh, 5000)
-    return () => { mounted = false; window.clearInterval(timer) }
+    return () => { mounted = false; controller.abort(); window.clearTimeout(timer) }
   }, [])
 
   async function scan() {
+    if (working.current) return
+    working.current = true
+    revision.current += 1
     setBusy(true)
     setError("")
     try { setInventory(await api<Inventory>("/api/model/running/scan", { method: "POST" })) }
     catch (err) { setError(err instanceof Error ? err.message : String(err)) }
-    finally { setBusy(false) }
+    finally { working.current = false; setBusy(false) }
   }
 
   async function choose(row: Server, action: "use" | "leave" | "stop" | "replace") {
     const confirm = action === "stop" || action === "replace"
     if (confirm && !window.confirm(`Stop ${row.model}? Other apps may be using this server.${action === "replace" ? " ANZU will then load its own model." : ""}`)) return
+    if (working.current) return
+    working.current = true
+    revision.current += 1
     setBusy(true)
     setError("")
     try {
@@ -44,13 +60,14 @@ export function RunningModels({ showAll = false }: { showAll?: boolean }) {
         method: "POST", body: JSON.stringify({ action, confirm }),
       }))
     } catch (err) { setError(err instanceof Error ? err.message : String(err)) }
-    finally { setBusy(false) }
+    finally { working.current = false; setBusy(false) }
   }
 
   const rows = inventory?.servers.filter(row => showAll || !row.choice) ?? []
   if (!showAll && !rows.length && !error) return null
   return <section className={showAll ? "card" : "running-model-offer"} aria-label="Available local models">
-    <strong>Available local models</strong>
+    <details open={showAll || undefined}>
+    <summary>Available local models{!showAll && ` (${rows.length})`}</summary>
     <p>Choose whether ANZU should use another model server or keep its own model.</p>
     {showAll && <button disabled={busy} onClick={scan}>{busy ? "Working…" : "Scan running servers"}</button>}
     {showAll && inventory?.checked_at && !rows.length && <p>No other local model servers found.</p>}
@@ -66,5 +83,6 @@ export function RunningModels({ showAll = false }: { showAll?: boolean }) {
       {!row.can_stop && <small>Stop this server in its own app before loading ANZU’s model.</small>}
     </div>)}
     {(error || inventory?.error) && <p role="alert">{error || inventory?.error}</p>}
+    </details>
   </section>
 }
