@@ -305,3 +305,35 @@ async def test_removing_task_removes_its_saved_plan_and_prompt_results(jarvis_en
     async with SessionLocal() as session:
         assert await session.get(TaskPromptPlan, task_id) is None
         assert not list((await session.scalars(select(TaskPromptStep).where(TaskPromptStep.task_id == task_id))).all())
+
+
+async def test_resume_keeps_current_prompt_effect_history_but_drops_completed_phase(jarvis_env):
+    from app.providers.base import ChatMessage
+    workflow = await prepare(await make_task(), planner_for("Inspect", "Build"))
+    history = [ChatMessage(role="user", content=workflow.prompt()),
+               ChatMessage(role="assistant", content="Created C:/artifact.txt"),
+               ChatMessage(role="tool", content="File created", tool_call_id="write1")]
+    assert workflow.owns_history(history)
+    await workflow.finish_current("Artifact created")
+    assert not workflow.owns_history(history)
+    current = [ChatMessage(role="user", content=workflow.prompt())]
+    assert workflow.owns_history(current)
+    # Content from a different task cannot make an old conversation current.
+    current[0].content = current[0].content.replace(workflow.task_id, "another-task")
+    assert not workflow.owns_history(current)
+
+
+async def test_model_can_read_exact_prior_results_only_for_its_current_task(jarvis_env):
+    from app.tools.read_ingress import ReadIngressTool
+    workflow = await prepare(await make_task("own-task"), planner_for("Inspect"))
+    await workflow.finish_current("X" * 4500 + "EXACT ARTIFACT: C:/owner/result.txt")
+    foreign = await prepare(await make_task("foreign-task"), planner_for("Inspect"))
+    await foreign.finish_current("OTHER OWNER DATA")
+    tool = ReadIngressTool()
+    result = await tool.execute(_task_id="own-task", prompt_step=1, offset=4500, limit=9000)
+    assert result.success and "EXACT ARTIFACT" in result.output
+    assert "OTHER OWNER DATA" not in result.output
+    assert result.data["has_more"] is False
+    assert not (await tool.execute(prompt_step=1, offset=0)).success
+    assert not (await tool.execute(_task_id="own-task", prompt_step=2, offset=0)).success
+    assert not (await tool.execute(_task_id="missing-task", prompt_step=1, offset=0)).success

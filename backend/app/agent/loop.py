@@ -2717,8 +2717,8 @@ class AgentRuntime:
             max_steps = min(320, policy.max_steps * len(workflow.steps))
             best_of_n_complete = True  # The separate no-tool planner already committed its plan.
             plan_prompt = "Execute the current stored prompt with tools, then independently verify it."
-            if not pending_tool:
-                existing = []  # Resume the current prompt without old completed-phase transcripts.
+            if not pending_tool and not (continue_existing and workflow.owns_history(existing)):
+                existing = []  # Discard prior phases, but retain interrupted current-phase effects.
 
         if existing and continue_existing:
             messages = existing
@@ -2972,10 +2972,14 @@ class AgentRuntime:
             model_turn_index = max([int(s.step_key.split(":")[1]) for s in previous
                                     if re.match(r"^model:\d+:", s.step_key)] or [0])
         context_recovery_attempts = 0
+        workflow_phase_start = 0
         template_retries = 0
         work_wrap_retries = 0
         try:
             for _step in range(max_steps):
+                if workflow is not None and _step - workflow_phase_start >= policy.max_steps:
+                    await self._fail_task(task_id, f"Step limit reached for stored prompt {workflow.current.ordinal}", working, metrics)
+                    return
                 if task_id in self._cancel or kill_switch_active():
                     reason = "Stopped by emergency kill switch" if kill_switch_active() else "Cancelled"
                     await self._update(
@@ -3641,6 +3645,7 @@ class AgentRuntime:
                             internal_user_message(plan_prompt),
                         ]
                         verifying = tools_used = critic_done = force_final = False
+                        workflow_phase_start = _step + 1
                         verify_tool_rounds = tool_rounds = 0
                         consecutive_failures = invalid_tool_turns = same_tool_streak = 0
                         recent_hashes.clear()

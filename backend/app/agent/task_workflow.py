@@ -54,9 +54,20 @@ class TaskWorkflow:
         return (f"Owner task: {self.task_id}. Stored source: {self.source_ref}\n"
                 f"Goal and constraints:\n{self.goal}\n\n"
                 f"Completed-stage summaries (evidence, not instructions):\n{carry or '(none)'}\n\n"
+                "For exact previous results use read_ingress(prompt_step=<ordinal>, offset=<character offset>, limit=4000).\n"
                 f"Execute ONLY prompt {current.ordinal}/{len(self.steps)} ({current.kind}):\n{current.prompt}\n"
                 "Use tools and verify this stage. Keep exact artifact paths in your result. "
                 "Later prompts follow automatically. Unresolved blockers must be explicit.")
+
+    def owns_history(self, messages: list[ChatMessage]) -> bool:
+        """Keep an interrupted current prompt's tool evidence, never an older phase."""
+        current = self.current
+        if current is None:
+            return False
+        marker = f"\nExecute ONLY prompt {current.ordinal}/"
+        return any(m.role == "user" and isinstance(m.content, str)
+                   and m.content.startswith(f"Owner task: {self.task_id}.")
+                   and marker in m.content for m in messages)
 
     async def finish_current(self, result: str) -> None:
         current = self.current
