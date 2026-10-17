@@ -387,7 +387,10 @@ class MainActivity : FragmentActivity() {
                                             },
                                         ),
                                     )
-                                    PresenceHud(mode = state.presenceMode, phase = phase)
+                                    PresenceHud(mode = state.presenceMode, phase = phase,
+                                        contextUsed = state.localContextUsed?.let { used ->
+                                            state.localContextCapacity?.takeIf { it > 0 }?.let { used.toFloat() / it }
+                                        })
                                 }
                                 Text(
                                     if (state.recording) "I’m listening."
@@ -398,6 +401,12 @@ class MainActivity : FragmentActivity() {
                                     fontWeight = FontWeight.Light,
                                 )
                                 if (state.liveTranscript.isNotEmpty()) Text(state.liveTranscript, fontSize = 14.sp, color = Gold, modifier = Modifier.padding(top = 8.dp))
+                                if (state.liveLocalReply.isNotBlank()) Text(state.liveLocalReply, fontSize = 14.sp, color = Gold,
+                                    maxLines = 4, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(top = 8.dp))
+                                state.localContextCapacity?.takeIf { it > 0 }?.let { capacity ->
+                                    Text("Phone context ${state.localContextUsed ?: 0}/$capacity · stars fade as it fills", fontSize = 10.sp, color = Muted)
+                                }
                                 Text(state.activity, fontSize = 12.sp, color = Muted, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
                                 if (state.lanLabel.isNotEmpty()) Text(state.lanLabel, fontSize = 13.sp, color = Gold, modifier = Modifier.padding(bottom = 8.dp))
                                 if (CompanionMode.needsPhoneSetup(state.connected, state.localModelReady)) {

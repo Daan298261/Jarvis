@@ -460,102 +460,121 @@ class CompanionPackManager(
         history: List<org.json.JSONObject> = emptyList(),
         latest: String = "",
         pickedText: String? = null,
+        onProgress: (String) -> Unit = {},
+        onContextUsage: (Int, Int) -> Unit = { _, _ -> },
         onToken: (String) -> Unit,
-    ): GenerateResult = withContext(llamaDispatcher) {
-        val pack = resolveOfflinePack(preferFast) ?: selectedPack() ?: error("No pack selected")
-        check(!requireMinimalRefusal || CompanionPackCatalog.isVerifiedMinimalRefusal(pack)) {
-            "Offgrid requires a pinned Abliterated or Heretic model"
-        }
-        DeviceInferenceGuard.blockReason(app, pack)?.let { error(it) }
-        val path = packFile(pack)
-        if (!path.isFile) error("Install the companion model pack first")
-        statusRef.set(CompanionPackStatus.RUNNING)
-        val nCtx = DeviceInferenceGuard.contextTokens(app, pack)
-        val parentJob = coroutineContext[Job]!!
-        // Started UNDISPATCHED on Unconfined: the watcher is already suspended in
-        // awaitCancellation() before the engine runs, and cancel() resumes it inline on the
-        // cancelling thread. A Default-dispatched watcher could be cancelled before it ever ran
-        // (its finally then never fires) or wait behind a busy pool, leaving native decode
-        // running after the user pressed stop.
-        val cancelWatch = launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+    ): GenerateResult {
+        val received = android.os.SystemClock.elapsedRealtime()
+        return withContext(llamaDispatcher) {
+            val pack = resolveOfflinePack(preferFast) ?: selectedPack() ?: error("No pack selected")
+            check(!requireMinimalRefusal || CompanionPackCatalog.isVerifiedMinimalRefusal(pack)) {
+                "Offgrid requires a pinned Abliterated or Heretic model"
+            }
+            DeviceInferenceGuard.blockReason(app, pack)?.let { error(it) }
+            val path = packFile(pack)
+            if (!path.isFile) error("Install the companion model pack first")
+            statusRef.set(CompanionPackStatus.RUNNING)
+            val nCtx = DeviceInferenceGuard.contextTokens(app, pack)
+            val parentJob = coroutineContext[Job]!!
+            // Started UNDISPATCHED on Unconfined: the watcher is already suspended in
+            // awaitCancellation() before the engine runs, and cancel() resumes it inline on the
+            // cancelling thread. A Default-dispatched watcher could be cancelled before it ever ran
+            // (its finally then never fires) or wait behind a busy pool, leaving native decode
+            // running after the user pressed stop.
+            val cancelWatch = launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+                try {
+                    awaitCancellation()
+                } finally {
+                    if (parentJob.isCancelled) engine.requestCancel()
+                }
+            }
             try {
-                awaitCancellation()
-            } finally {
-                if (parentJob.isCancelled) engine.requestCancel()
-            }
-        }
-        try {
-            val loadError = engine.load(path.absolutePath, nCtx)
-            if (loadError != null) {
-                statusRef.set(CompanionPackStatus.ERROR)
-                errorRef.set(loadError)
-                error(loadError)
-            }
-            if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
-            val promptBudget = OfflinePromptPlanner.promptTokenBudget(nCtx, maxTokens)
-            val memory = PhoneMemoryBudget.fit(memoryContext, engine::tokenize, minOf(256, promptBudget / 4))
-            val plan = if (latest.isNotEmpty() || !pickedText.isNullOrBlank()) {
-                OfflinePromptPlanner.plan(
-                    history = history,
-                    latest = latest.ifBlank { prompt },
-                    pickedText = pickedText,
-                    tokenize = { engine.tokenize(it) },
-                    promptBudget = promptBudget,
-                    memoryContext = memory,
-                )
-            } else {
-                OfflinePromptPlanner.Plan(prompt = prompt, sectioned = false, history = history)
-            }
-            val sectioned = plan.sectioned
-            val latestText = plan.latest.ifBlank { latest.ifBlank { prompt } }
-            val toRun = if (plan.sectioned && plan.sections.isNotEmpty()) {
-                var summaries = summarizeSections(
-                    sections = plan.sections,
-                    maxTokens = maxTokens.coerceAtMost(plan.summaryMaxTokens),
-                )
-                var finalPrompt = OfflinePromptPlanner.finalPromptFromSummaries(
-                    plan.history,
-                    latestText,
-                    summaries,
-                    memory,
-                )
-                var reduceGuard = 0
-                while (engine.tokenize(finalPrompt) > promptBudget && summaries.size > 1 && reduceGuard++ < 4) {
-                    val merged = OfflinePromptPlanner.mergeAdjacent(summaries)
-                    val cap = OfflinePromptPlanner.sectionSummaryMaxTokens(
-                        promptBudget,
-                        plan.skeletonTokens,
-                        merged.size,
+                val started = android.os.SystemClock.elapsedRealtime()
+                onProgress("Loading model on this phone")
+                val loadError = engine.load(path.absolutePath, nCtx)
+                if (loadError != null) {
+                    statusRef.set(CompanionPackStatus.ERROR)
+                    errorRef.set(loadError)
+                    error(loadError)
+                }
+                if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
+                val loaded = android.os.SystemClock.elapsedRealtime()
+                onProgress("Preparing conversation")
+                val promptBudget = OfflinePromptPlanner.promptTokenBudget(nCtx, maxTokens)
+                val memory = PhoneMemoryBudget.fit(memoryContext, engine::tokenize, minOf(256, promptBudget / 4))
+                val plan = if (latest.isNotEmpty() || !pickedText.isNullOrBlank()) {
+                    OfflinePromptPlanner.plan(
+                        history = history,
+                        latest = latest.ifBlank { prompt },
+                        pickedText = pickedText,
+                        tokenize = { engine.tokenize(it) },
+                        promptBudget = promptBudget,
+                        memoryContext = memory,
                     )
-                    summaries = summarizeSections(merged, maxTokens.coerceAtMost(cap))
-                    finalPrompt = OfflinePromptPlanner.finalPromptFromSummaries(
+                } else {
+                    OfflinePromptPlanner.Plan(prompt = prompt, sectioned = false, history = history)
+                }
+                val sectioned = plan.sectioned
+                val latestText = plan.latest.ifBlank { latest.ifBlank { prompt } }
+                val toRun = if (plan.sectioned && plan.sections.isNotEmpty()) {
+                    onProgress("Reading selected text in sections")
+                    var summaries = summarizeSections(
+                        sections = plan.sections,
+                        maxTokens = maxTokens.coerceAtMost(plan.summaryMaxTokens),
+                    )
+                    var finalPrompt = OfflinePromptPlanner.finalPromptFromSummaries(
                         plan.history,
                         latestText,
                         summaries,
                         memory,
                     )
+                    var reduceGuard = 0
+                    while (engine.tokenize(finalPrompt) > promptBudget && summaries.size > 1 && reduceGuard++ < 4) {
+                        val merged = OfflinePromptPlanner.mergeAdjacent(summaries)
+                        val cap = OfflinePromptPlanner.sectionSummaryMaxTokens(
+                            promptBudget,
+                            plan.skeletonTokens,
+                            merged.size,
+                        )
+                        summaries = summarizeSections(merged, maxTokens.coerceAtMost(cap))
+                        finalPrompt = OfflinePromptPlanner.finalPromptFromSummaries(
+                            plan.history,
+                            latestText,
+                            summaries,
+                            memory,
+                        )
+                    }
+                    OfflinePromptPlanner.boundedFinal(plan.history, latestText, summaries, memory, engine::tokenize, promptBudget)
+                } else {
+                    plan.prompt
                 }
-                OfflinePromptPlanner.boundedFinal(plan.history, latestText, summaries, memory, engine::tokenize, promptBudget)
-            } else {
-                plan.prompt
+                if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
+                var produced = false
+                var firstTokenMs: Long? = null
+                onProgress("Reading context")
+                engine.beginPass()
+                val outcome = engine.generate(toRun, maxTokens) { chunk ->
+                    if (!produced) {
+                        firstTokenMs = android.os.SystemClock.elapsedRealtime() - started
+                        onProgress("Writing reply")
+                    }
+                    produced = true
+                    engine.contextUsage()?.let { (used, capacity) -> onContextUsage(used, capacity) }
+                    onToken(chunk)
+                }
+                engine.contextUsage()?.let { (used, capacity) -> onContextUsage(used, capacity) }
+                Log.i(TAG, "local_reply model=${pack.id} queue_ms=${started - received} load_ms=${loaded - started} first_token_ms=${firstTokenMs?.plus(started - received)} total_ms=${android.os.SystemClock.elapsedRealtime() - received}")
+                if (outcome.cancelled) throw CancellationException("generate cancelled")
+                if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
+                statusRef.set(CompanionPackStatus.READY)
+                outcome.error?.let { failGenerate(it) }
+                if (!produced && !outcome.truncated) {
+                    failGenerate("On-device model returned no tokens")
+                }
+                GenerateResult(truncated = outcome.truncated, sectioned = sectioned, clipped = plan.clipped)
+            } finally {
+                cancelWatch.cancel()
             }
-            if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
-            var produced = false
-            engine.beginPass()
-            val outcome = engine.generate(toRun, maxTokens) { chunk ->
-                produced = true
-                onToken(chunk)
-            }
-            if (outcome.cancelled) throw CancellationException("generate cancelled")
-            if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
-            statusRef.set(CompanionPackStatus.READY)
-            outcome.error?.let { failGenerate(it) }
-            if (!produced && !outcome.truncated) {
-                failGenerate("On-device model returned no tokens")
-            }
-            GenerateResult(truncated = outcome.truncated, sectioned = sectioned, clipped = plan.clipped)
-        } finally {
-            cancelWatch.cancel()
         }
     }
 
@@ -585,6 +604,8 @@ class CompanionPackManager(
     fun requestCancel() {
         engine.requestCancel()
     }
+
+    fun currentContextUsage(): Pair<Int, Int>? = engine.contextUsage()
 
     suspend fun releaseIdle() = withContext(llamaDispatcher) { unload() }
 
