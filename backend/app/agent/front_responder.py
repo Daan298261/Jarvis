@@ -299,7 +299,7 @@ def _fall_through_failed_self_status(
     rejected: bool,
 ) -> tuple[str, str]:
     """A failed self-status front must not become a canned terminal answer."""
-    if (reply_shape or "").strip() != "self_status":
+    if (reply_shape or "").strip() not in {"self_status", "basic_qa"}:
         return action, text
     if rejected or not (text or "").strip():
         return "ack_continue", ""
@@ -409,7 +409,7 @@ def fallback_text_for_action(
         return SAFE_CLARIFY
     if action == "silent_skip":
         return ""
-    if shape == "self_status":
+    if shape in {"self_status", "basic_qa"}:
         # Never a canned holding line. A failed self-status front falls through
         # to the worker (see _fall_through_failed_self_status).
         return ""

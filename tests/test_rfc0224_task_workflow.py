@@ -337,3 +337,28 @@ async def test_model_can_read_exact_prior_results_only_for_its_current_task(jarv
     assert not (await tool.execute(prompt_step=1, offset=0)).success
     assert not (await tool.execute(_task_id="own-task", prompt_step=2, offset=0)).success
     assert not (await tool.execute(_task_id="missing-task", prompt_step=1, offset=0)).success
+
+
+@pytest.mark.parametrize("text", ["What is RAM?", "What is the difference between RAM and storage? One sentence.", "How does a rainbow form?"])
+async def test_basic_questions_finish_on_front_without_worker(text):
+    from app.agent.front_responder import generate_front_reply, terminal_front_completes_turn
+    class Fast:
+        async def chat_stream(self, messages, **kwargs):
+            yield "RAM holds temporary working data."
+    result = await generate_front_reply(text, settings=AppSettings(), provider=Fast())
+    assert result.action == "final_basic"
+    assert terminal_front_completes_turn(result.action)
+    assert not result.skipped
+
+
+@pytest.mark.parametrize("text", ["What is my current RAM usage?", "What is the safest medicine dose?", "What is the latest price?", "How do I invest my pension?", "Run the filesystem tool"])
+def test_live_personal_high_stakes_and_actions_keep_worker(text):
+    from app.decision.owner_turn import infer_rules_reply_shape
+    assert infer_rules_reply_shape(text) != "basic_qa"
+
+
+async def test_missing_basic_question_provider_never_completes_with_fake_greeting():
+    from app.agent.front_responder import generate_front_reply, worker_required
+    result = await generate_front_reply("What is RAM?", settings=AppSettings(), provider=object())
+    assert worker_required(result.action)
+    assert result.text == ""
