@@ -291,3 +291,17 @@ async def test_cancelled_front_start_releases_only_owned_backend(monkeypatch):
     with pytest.raises(asyncio.CancelledError): await task
     assert stopped == [True]
     assert runtime._backend is None
+
+
+async def test_removing_task_removes_its_saved_plan_and_prompt_results(jarvis_env):
+    from sqlalchemy import select
+    from app.db.models import TaskPromptPlan, TaskPromptStep
+    task_id = await make_task()
+    await prepare(task_id, planner_for("Inspect", "Build"))
+    async with SessionLocal() as session:
+        task = await session.get(Task, task_id)
+        await session.delete(task)
+        await session.commit()
+    async with SessionLocal() as session:
+        assert await session.get(TaskPromptPlan, task_id) is None
+        assert not list((await session.scalars(select(TaskPromptStep).where(TaskPromptStep.task_id == task_id))).all())

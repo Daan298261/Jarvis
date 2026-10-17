@@ -59,6 +59,8 @@ class Task(Base):
     events: Mapped[list["TaskEvent"]] = relationship(back_populates="task", cascade="all, delete-orphan")
     tool_calls: Mapped[list["ToolCallRecord"]] = relationship(back_populates="task", cascade="all, delete-orphan")
     checkpoints: Mapped[list["Checkpoint"]] = relationship(back_populates="task", cascade="all, delete-orphan")
+    prompt_plans: Mapped[list["TaskPromptPlan"]] = relationship(back_populates="task", cascade="all, delete-orphan")
+    prompt_steps: Mapped[list["TaskPromptStep"]] = relationship(back_populates="task", cascade="all, delete-orphan")
 
 
 class TaskPromptPlan(Base):
@@ -67,6 +69,7 @@ class TaskPromptPlan(Base):
     goal: Mapped[str] = mapped_column(Text)
     source_ref: Mapped[str] = mapped_column(Text)
     followups_json: Mapped[str] = mapped_column(Text, default="[]")
+    task: Mapped["Task"] = relationship(back_populates="prompt_plans")
 
 
 class TaskPromptStep(Base):
@@ -82,6 +85,7 @@ class TaskPromptStep(Base):
     status: Mapped[str] = mapped_column(String(32), default="pending")
     result: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    task: Mapped["Task"] = relationship(back_populates="prompt_steps")
 
 
 class TaskEvent(Base):
