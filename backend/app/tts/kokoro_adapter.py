@@ -201,11 +201,16 @@ class KokoroAdapter:
                     config=str(config_path),
                     model=str(weights_path),
                 ).eval()
-            pipeline = KPipeline(
-                lang_code=lang,
-                repo_id=KOKORO_HF_REPO,
-                model=self._model,
-            )
+            try:
+                pipeline = KPipeline(
+                    lang_code=lang,
+                    repo_id=KOKORO_HF_REPO,
+                    model=self._model,
+                )
+            except SystemExit as exc:
+                # spaCy's CLI exits if a dynamically loaded language package
+                # is absent. A missing optional voice must not exit the API.
+                raise RuntimeError("Kokoro English pipeline unavailable; install en_core_web_sm") from exc
             self._pipelines[lang] = pipeline
             return pipeline
 

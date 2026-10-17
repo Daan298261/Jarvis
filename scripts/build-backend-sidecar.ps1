@@ -33,6 +33,14 @@ if (-not $py) { throw "Python not found. Create .venv or install Python 3.11+." 
 & $py -m pip install -r (Join-Path $Root "backend\requirements.txt")
 & $py -m pip install "pyinstaller>=6.0"
 
+# Misaki loads this pipeline dynamically. A Python import-only voice check
+# misses it, and spaCy's attempted runtime installer cannot run when frozen.
+& $py -c "import en_core_web_sm"
+if ($LASTEXITCODE -ne 0) {
+    & $py -m spacy download en_core_web_sm
+    if ($LASTEXITCODE -ne 0) { throw "Cannot prepare the English model required by Kokoro" }
+}
+
 $work = Join-Path $env:TEMP "jarvis-pyinstaller"
 New-Item -ItemType Directory -Force -Path $OutDir, $work | Out-Null
 
@@ -73,6 +81,8 @@ $env:PYTHONPATH = $backendImportPath + [IO.Path]::PathSeparator + $env:PYTHONPAT
     --collect-data language_tags `
     --collect-all espeakng_loader `
     --collect-all misaki `
+    --collect-all en_core_web_sm `
+    --collect-all pocket_tts `
     --collect-all phonemizer `
     --collect-submodules app `
     --collect-all app `
@@ -92,7 +102,7 @@ if (-not (Test-Path $exe)) {
 # degraded header. Fail the build instead of discovering that on the desktop.
 & $exe --verify-frozen-imports
 if ($LASTEXITCODE -ne 0) {
-    throw "Frozen backend cannot import kokoro/soundfile. The desktop voice would stay degraded."
+    throw "Frozen default voice stack is incomplete (Kokoro, soundfile or the English model)."
 }
 
 # RFC-0217: ship the connector and a stdlib native host; consumers need no Python.

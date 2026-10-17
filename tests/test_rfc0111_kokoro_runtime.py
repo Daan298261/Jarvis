@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import asyncio
 from pathlib import Path
 from types import ModuleType
 
@@ -10,6 +11,49 @@ import pytest
 from app.tts.engines import kokoro_weights_ready
 from app.tts.kokoro_adapter import KokoroAdapter
 from app.tts.runtime_state import TtsRuntimeState
+
+
+def test_voice_pipeline_system_exit_becomes_runtime_failure(tmp_path, monkeypatch):
+    _stage_runtime(tmp_path)
+    _install_fake_kokoro(monkeypatch, {})
+    def exit_pipeline(**kwargs):
+        raise SystemExit(1)
+    monkeypatch.setattr(sys.modules['kokoro'], 'KPipeline', exit_pipeline)
+    with pytest.raises(RuntimeError, match='en_core_web_sm'):
+        KokoroAdapter(tmp_path).get_pipeline('a')
+
+
+def test_optional_warmup_system_exit_does_not_stop_event_loop(monkeypatch):
+    from app.tts import warm_start
+    def exit_warmup():
+        raise SystemExit('optional dependency missing')
+    monkeypatch.setattr(warm_start, '_warmup_sync', exit_warmup)
+    monkeypatch.setattr(warm_start, '_scheduled', False)
+    monkeypatch.setattr(warm_start, '_last_report', {})
+    async def run():
+        warm_start.schedule_tts_warm_start()
+        for _ in range(100):
+            if warm_start.last_warm_report().get('warmup_error'):
+                return
+            await asyncio.sleep(.01)
+        raise AssertionError('Warmup did not report its optional dependency failure')
+    asyncio.run(run())
+    assert 'optional dependency missing' in warm_start.last_warm_report()['warmup_error']
+
+
+def test_frozen_voice_check_rejects_missing_language_resources(monkeypatch, capsys):
+    from jarvis_sidecar import _verify_frozen_imports
+    monkeypatch.setitem(sys.modules, 'kokoro', ModuleType('kokoro'))
+    monkeypatch.setitem(sys.modules, 'soundfile', ModuleType('soundfile'))
+    fake_spacy = ModuleType('spacy')
+    def missing_model(name):
+        raise OSError('language model missing')
+    fake_spacy.load = missing_model
+    monkeypatch.setitem(sys.modules, 'spacy', fake_spacy)
+    with pytest.raises(SystemExit) as exc:
+        _verify_frozen_imports()
+    assert exc.value.code == 1
+    assert 'spaCy English pipeline' in capsys.readouterr().err
 
 
 def _stage_runtime(root: Path, *voices: str) -> None:

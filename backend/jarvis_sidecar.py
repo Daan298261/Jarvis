@@ -29,10 +29,18 @@ def _verify_frozen_imports() -> None:
             __import__(name)
         except Exception as exc:
             missing.append(f"{name}: {exc}")
+    try:
+        import spacy
+
+        # Exercise dynamic model discovery, metadata and weights, rather than
+        # merely importing the speech wrapper successfully.
+        spacy.load("en_core_web_sm")
+    except (Exception, SystemExit) as exc:
+        missing.append(f"spaCy English pipeline: {exc}")
     if missing:
         print("Frozen import check failed: " + "; ".join(missing), file=sys.stderr)
         raise SystemExit(1)
-    print("Frozen import check ok: kokoro, soundfile")
+    print("Frozen import check ok: kokoro, soundfile, spaCy English pipeline")
 
 
 def main() -> None:

@@ -24,6 +24,7 @@ Settings saves merge the writer's changed fields into the latest file under a wr
 - Installer source globs exclude build outputs relative to each source root; output slices, duplicate model/sidecar staging, Rust caches and vendor-only issuer code cannot enter the customer payload through those globs.
 - A failed installer shutdown returns failure even after waiting for a polite stop, so elevation retry can run instead of reporting success while protected processes remain.
 - LAN discovery responds only to phone probes, avoiding announcement echo loops. Connectivity/route checks and UI status/catalog probes run off the API event loop; beacon replies are bounded and cancelled on shutdown.
+- The frozen voice stack includes its dynamically loaded spaCy English model and verifies the actual language pipeline at build time. Optional warmup and voice dependency failures cannot terminate the core API.
 
 ## Likely files
 
