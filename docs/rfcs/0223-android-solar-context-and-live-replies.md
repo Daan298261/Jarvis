@@ -1,7 +1,9 @@
 # RFC-0223: Android solar context and live replies
 
-**Status:** accepted  
-**Author:** Codex, requested by Daan  
+**Status:** accepted
+
+**Author:** Codex, requested by Daan
+
 **Date:** 2026-10-17
 
 ## Problem
@@ -29,3 +31,11 @@ Android PresenceHud, SolarSystemVisual, CompanionModel, CompanionPackManager, Lo
 ## Out of scope
 
 Desktop inference, model downloads, voice synthesis redesign, and changing phone tool permissions.
+
+## Validation (2026-10-17)
+
+- Android: 321 tests passed; debug APK assembled; both arm64-v8a and x86_64 native libraries compiled and present. Lint: zero errors, 48 warnings.
+- Inspected rendered screenshots at 0%, 50%, and 100% context; sun, planets, rings and glow remain present as stars disappear.
+- Full Python suite was attempted and interrupted after remaining at 20% in async database fixture setup; no backend source changed in this ticket. This is not a full backend test pass.
+- No physical phone connected. Live Qwen 1.7B first-token timings, warm-cache speedup, motion on the handset, and installation remain unverified. Native logs report prompt/reused-token counts; app logs report queue, load, first-token and total milliseconds without prompt text.
+- Prefix reuse helps successive phone-tool passes and opted-in warm follow-up replies. Existing 30-second warm-residency preference and pressure/background release behavior remain unchanged.
