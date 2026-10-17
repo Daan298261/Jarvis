@@ -74,6 +74,7 @@ data class CompanionState(
     val offlineQueueDepth: Int = 0,
     val offlineAnswering: Boolean = false,
     val liveLocalReply: String = "",
+    val modelDownloads: Map<String, ModelDownloadState> = emptyMap(),
     val lanStatus: String = "idle",
     val lanLabel: String = "",
     val pendingApproval: Boolean = false,
@@ -185,12 +186,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         mutable.value = mutable.value.copy(localConversations = withContext(Dispatchers.IO) { localConversations.conversations() })
         refreshPhoneMemory()
     }
-    fun installFastPhoneModel() = action {
-        val pack = CompanionPackCatalog.builtIn.first { it.id == CompanionPackCatalog.ABLITERATED_06B_ID }
-        packManager.downloadPack(pack) { progress -> mutable.value = mutable.value.copy(activity = "Downloading fast phone model · $progress%", localPackProgress = progress) }
-        packManager.refreshStatus()
-        mutable.value = mutable.value.copy(localPackStatus = packManager.status(), localPackError = packManager.lastError(), activity = "Fast phone model ready")
-    }
+    fun installFastPhoneModel() = downloadModelPack(CompanionPackCatalog.ABLITERATED_06B_ID)
     private val desktopThreadIds by lazy { PhoneDesktopThreadIds(companionPrefs, localConversations) }
     var voiceLanguage by androidx.compose.runtime.mutableStateOf(VoiceLanguagePrefs.load(app))
         private set
@@ -237,6 +233,14 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             }
             override fun selectPack(packId: String) {
                 selectCompanionPack(packId)
+            }
+            override fun downloadPack(packId: String) { downloadModelPack(packId) }
+            override fun cancelDownload(packId: String) { packManager.cancelDownload(packId) }
+        }
+        viewModelScope.launch {
+            packManager.downloads.collect { downloads ->
+                mutable.update { it.copy(modelDownloads = downloads, localPackStatus = packManager.status(),
+                    localPackProgress = packManager.downloadProgress(), localPackError = packManager.lastError()) }
             }
         }
         viewModelScope.launch {
@@ -473,16 +477,24 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    fun downloadCompanionPack() = action {
-        packManager.downloadSelected { progress ->
-            mutable.value = mutable.value.copy(localPackProgress = progress, localPackStatus = CompanionPackStatus.DOWNLOADING)
+    fun downloadCompanionPack() = downloadModelPack(packManager.selectedPackId())
+
+    fun downloadModelPack(packId: String) = viewModelScope.launch {
+        if (packId in packManager.downloadingPackIds()) return@launch
+        val pack = packManager.catalog().firstOrNull { it.id == packId } ?: return@launch
+        try {
+            packManager.downloadPack(pack)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w(TAG, "Model download failed: ${error.message}")
+        } finally {
+            mutable.update { it.copy(modelDownloads = packManager.downloads.value, localPackStatus = packManager.status(),
+                localPackProgress = packManager.downloadProgress(), localPackError = packManager.lastError()) }
         }
-        mutable.value = mutable.value.copy(
-            localPackStatus = packManager.status(),
-            localPackError = packManager.lastError(),
-            localPackProgress = packManager.downloadProgress(),
-        )
     }
+
+    fun cancelModelDownload(packId: String) = packManager.cancelDownload(packId)
 
     fun deleteCompanionPack() = action {
         packManager.deleteSelected()
@@ -493,8 +505,11 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    fun selectCompanionPack(id: String) {
+    fun selectCompanionPack(id: String) = action {
         packManager.selectPack(id)
+        packManager.refreshStatus()
+        mutable.update { it.copy(localPackStatus = packManager.status(), localPackError = packManager.lastError()) }
+        DevicePackChromePublisher.publish(this@CompanionModel, deviceModelChrome, mutable.value)
     }
 
     fun refreshVoicePackStatus() = action {

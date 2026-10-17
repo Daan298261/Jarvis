@@ -547,23 +547,29 @@ class MainActivity : FragmentActivity() {
             Text(stringResource(R.string.phone_setup_body), fontSize = 13.sp)
             val recommended = devicePack.availablePacks.firstOrNull { it.id == devicePack.selectedPackId } ?: devicePack.availablePacks.firstOrNull()
             recommended?.let { Text(it.label, color = Muted, fontSize = 12.sp) }
-            if (devicePack.status == DevicePackStatus.DOWNLOADING || state.modelImportBusy) {
+            val transfer = devicePack.downloads.values.firstOrNull { it.active }
+                ?: devicePack.downloads[devicePack.selectedPackId]
+            if (transfer != null) ModelTransferFeedback(transfer,
+                { chrome.cancelDownload(transfer.packId) }, { chrome.downloadPack(transfer.packId) })
+            if (state.modelImportBusy) {
                 LinearProgressIndicator(
                     progress = { (state.localPackProgress / 100f).coerceIn(0f, 1f) },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Text(if (state.modelImportBusy) state.modelImportMessage else "Downloading… ${state.localPackProgress}%", color = Muted, fontSize = 11.sp)
+                Text(state.modelImportMessage, color = Muted, fontSize = 11.sp)
             }
             devicePack.error?.let { Text(it, color = Color(0xFFE8A87C), fontSize = 12.sp) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { chrome.downloadSelectedPack() },
-                    enabled = !state.busy && devicePack.status != DevicePackStatus.DOWNLOADING,
-                    modifier = Modifier.weight(1f),
-                ) { Text("Download model") }
+                if (transfer == null) {
+                    Button(
+                        onClick = { chrome.downloadSelectedPack() },
+                        enabled = !state.busy && transfer?.active != true,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Download model") }
+                }
                 OutlinedButton(
                     onClick = pickModelFile,
-                    enabled = !state.busy && devicePack.status != DevicePackStatus.DOWNLOADING,
+                    enabled = !state.busy && transfer?.active != true,
                     modifier = Modifier.weight(1f),
                 ) { Text("Load from file") }
             }
@@ -652,89 +658,20 @@ private fun inferenceStatus(state: CompanionState): String {
     state: CompanionState,
     pickModelFile: () -> Unit,
 ) {
-    val busy = state.busy
-    Text("Models (on-device)", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
-    Text(
-        "Download a model to chat on this phone without your desktop. You can also import a compatible model file; ANZU verifies it before use.",
-        color = Muted,
-        fontSize = 12.sp,
-        modifier = Modifier.padding(bottom = 8.dp),
-    )
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Status · ${devicePackStatusLabel(devicePack.status)}", color = Gold, fontSize = 11.sp, letterSpacing = 1.sp)
-            Text(devicePack.selectedPackLabel.ifBlank { "No pack selected" }, fontWeight = FontWeight.Medium)
-            Text(formatStorageBytes(devicePack.bytesOnDisk), color = Muted, fontSize = 12.sp)
-            devicePack.error?.let { Text(it, color = Color(0xFFE8A87C), fontSize = 12.sp) }
-            if (devicePack.status == DevicePackStatus.DOWNLOADING && devicePack.downloadProgress != null) {
-                LinearProgressIndicator(
-                    progress = { devicePack.downloadProgress!!.coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text("${(devicePack.downloadProgress!! * 100).toInt()}%", color = Muted, fontSize = 11.sp)
-            }
-            if (devicePack.availablePacks.isNotEmpty()) {
-                var packMenu by remember { mutableStateOf(false) }
-                Box {
-                    OutlinedButton(onClick = { packMenu = true }) {
-                        Text("Pack · ${devicePack.selectedPackLabel.take(28).ifBlank { "Select" }} ▾")
-                    }
-                    DropdownMenu(packMenu, { packMenu = false }) {
-                        devicePack.availablePacks.forEach { pack ->
-                            DropdownMenuItem(
-                                text = { Text(pack.label) },
-                                onClick = {
-                                    packMenu = false
-                                    chrome.selectPack(pack.id)
-                                },
-                            )
-                        }
-                    }
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { chrome.downloadSelectedPack() },
-                    enabled = !busy && devicePack.status != DevicePackStatus.DOWNLOADING,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(
-                        when (devicePack.status) {
-                            DevicePackStatus.MISSING, DevicePackStatus.ERROR -> "Download pack"
-                            DevicePackStatus.DOWNLOADING -> "Downloading…"
-                            else -> "Re-download pack"
-                        },
-                    )
-                }
-                OutlinedButton(
-                    onClick = { chrome.deleteSelectedPack() },
-                    enabled = !busy && devicePack.bytesOnDisk > 0 && devicePack.status != DevicePackStatus.DOWNLOADING,
-                    modifier = Modifier.weight(1f),
-                ) { Text("Delete pack") }
-            }
-            OutlinedButton(
-                onClick = pickModelFile,
-                enabled = !busy && devicePack.status != DevicePackStatus.DOWNLOADING,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Load model from file (.gguf)") }
-            if (state.modelImportMessage.isNotBlank()) Text(state.modelImportMessage, color = Muted, fontSize = 12.sp)
-            if (!devicePack.nativeRuntimeBundled) {
-                Text(
-                    "This build has no on-device model runtime, so offline chat is unavailable.",
-                    color = Muted,
-                    fontSize = 11.sp,
-                )
-            }
-        }
-    }
-}
-
-private fun devicePackStatusLabel(status: DevicePackStatus): String = when (status) {
-    DevicePackStatus.MISSING -> "missing"
-    DevicePackStatus.DOWNLOADING -> "downloading"
-    DevicePackStatus.READY -> "ready"
-    DevicePackStatus.RUNNING -> "running"
-    DevicePackStatus.ERROR -> "error"
+    Text("Models on this phone", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
+    Text("Download once, then chat without your desktop. Choose a smaller model for quicker replies.",
+        color = Muted, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
+    Text(formatStorageBytes(devicePack.bytesOnDisk), color = Muted, fontSize = 12.sp)
+    ModelLibraryCards(devicePack.availablePacks, devicePack.selectedPackId, devicePack.downloads, state.busy,
+        chrome::selectPack, chrome::downloadPack, chrome::cancelDownload)
+    OutlinedButton(onClick = pickModelFile, enabled = !state.busy && devicePack.downloads.values.none { it.active },
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Import model from file (.gguf)") }
+    if (state.modelImportBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+    if (state.modelImportMessage.isNotBlank()) Text(state.modelImportMessage, color = Muted, fontSize = 12.sp)
+    if (devicePack.bytesOnDisk > 0) TextButton(onClick = chrome::deleteSelectedPack,
+        enabled = !state.busy && devicePack.downloads.values.none { it.active },
+        modifier = Modifier.heightIn(min = 48.dp)) { Text("Delete selected model") }
+    if (!devicePack.nativeRuntimeBundled) Text("This build has no on-device model runtime, so offline chat is unavailable.", color = Muted, fontSize = 11.sp)
 }
 
 private fun formatStorageBytes(bytes: Long): String {
