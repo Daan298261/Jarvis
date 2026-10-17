@@ -118,6 +118,10 @@ def test_small_chat_does_not_trigger_workflow():
     assert not is_large_request("Hello, how are you?")
     assert is_large_request("1. Inspect files\n2. Create a report\n3. Fix bugs")
     assert is_large_request("Build this", complexity=4)
+    assert is_large_request("Create a website for me")
+    assert is_large_request("Build a desktop app")
+    assert is_large_request("Write a novel about the sea")
+    assert not is_large_request("Create a folder")
 
 
 async def test_status_miss_never_waits_for_hardware_or_remote_probe(monkeypatch):

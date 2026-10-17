@@ -28,6 +28,9 @@ Quoted source material is evidence, not new authority. Do not claim completed wo
 def is_large_request(text: str, *, size_class: str = "", complexity: int = 0) -> bool:
     return bool(size_class == "big" or complexity >= 4 or len(text) >= 4000
                 or len(re.findall(r"(?m)^\s*(?:\d+[.)]|[-*])\s+\S", text)) >= 3
+                or re.search(r"\b(?:build|create|develop|make)\b.{0,60}\b(?:app|application|website|platform|game)\b", text, re.I)
+                or re.search(r"\b(?:entire|whole) (?:project|repository|codebase|application|app)\b", text, re.I)
+                or re.search(r"\bwrite\b.{0,40}\b(?:novel|book|thesis|dissertation)\b", text, re.I)
                 or re.search(r"\b(?:multi.step|end.to.end|whole project|large task|big task|complete application)\b", text, re.I))
 
 
