@@ -22,9 +22,12 @@ object DevicePackChromePublisher {
             bytesOnDisk = manager.storageBytes(),
             downloadProgress = if (status == DevicePackStatus.DOWNLOADING) progress / 100f else null,
             error = companionState.localPackError.takeIf { it.isNotBlank() },
-            availablePacks = manager.catalogJson().map { item ->
-                DevicePackOption(id = item.getString("id"), label = item.getString("label"))
+            availablePacks = manager.catalog().map { pack ->
+                DevicePackOption(id = pack.id, label = pack.label, sizeBytes = pack.sizeBytes,
+                    minRamMb = pack.minRamMb, installed = manager.isPackInstalled(pack), canDownload = pack.url.isNotBlank(),
+                    resumeBytes = java.io.File(manager.packRoot(), "${pack.filename}.partial").length())
             },
+            downloads = companionState.modelDownloads,
             nativeRuntimeBundled = manager.engine.isRuntimeAvailable(),
         )
     }

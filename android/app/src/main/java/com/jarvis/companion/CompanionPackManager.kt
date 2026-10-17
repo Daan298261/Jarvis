@@ -10,7 +10,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -132,6 +136,15 @@ class CompanionPackManager(
     private var catalog: List<CompanionPack> = CompanionPackCatalog.builtIn
     private val llamaDispatcher = Dispatchers.IO.limitedParallelism(1)
     private val activeDownloads: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    private val downloadStates = MutableStateFlow<Map<String, ModelDownloadState>>(emptyMap())
+    val downloads = downloadStates.asStateFlow()
+    private val downloadJobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
+    fun cancelDownload(packId: String) { downloadJobs[packId]?.cancel() }
+
+    private fun publishDownload(pack: CompanionPack, change: (ModelDownloadState) -> ModelDownloadState) {
+        downloadStates.update { states -> states + (pack.id to change(states[pack.id]
+            ?: ModelDownloadState(pack.id, pack.label, totalBytes = pack.sizeBytes))) }
+    }
 
     /** Pack ids with a download running (from any screen). */
     fun downloadingPackIds(): Set<String> = activeDownloads.toSet()
@@ -223,6 +236,7 @@ class CompanionPackManager(
         engine.unload()
         digestCache.invalidate(file)
         if (file.exists() && !file.delete()) error("Could not delete $name")
+        catalog.firstOrNull { it.filename == name }?.let { pack -> downloadStates.update { it - pack.id } }
         refreshStatus()
         progressRef.set(0)
     }
@@ -230,10 +244,14 @@ class CompanionPackManager(
     fun packFile(pack: CompanionPack): File = File(packDir, pack.filename)
 
     fun packCanLoad(pack: CompanionPack): Boolean {
+        return isPackInstalled(pack) && DeviceInferenceGuard.blockReason(app, pack) == null
+    }
+
+    fun isPackInstalled(pack: CompanionPack): Boolean {
         val file = packFile(pack)
         if (!file.isFile || file.length() == 0L) return false
         if (pack.sha256.isNotBlank() && !digestCache.matchesExpected(file, pack.sha256)) return false
-        return DeviceInferenceGuard.blockReason(app, pack) == null
+        return true
     }
 
     fun resolveOfflinePack(preferFast: Boolean = false): CompanionPack? =
@@ -296,12 +314,22 @@ class CompanionPackManager(
      */
     suspend fun downloadPack(pack: CompanionPack, onProgress: (Int) -> Unit = {}) {
         check(activeDownloads.add(pack.id)) { "${pack.label} is already downloading" }
+        coroutineContext[Job]?.let { downloadJobs[pack.id] = it }
+        publishDownload(pack) { ModelDownloadState(pack.id, pack.label, totalBytes = pack.sizeBytes) }
         try {
             downloadPackInternal(pack, onProgress)
+            publishDownload(pack) { it.copy(stage = ModelDownloadStage.READY, receivedBytes = packFile(pack).length(), bytesPerSecond = 0, detail = "") }
+        } catch (error: Throwable) {
+            val paused = error is CancellationException
+            val partialBytes = File(packDir, "${pack.filename}.partial").length()
+            publishDownload(pack) { it.copy(stage = if (paused) ModelDownloadStage.PAUSED else ModelDownloadStage.ERROR,
+                receivedBytes = partialBytes, bytesPerSecond = 0, detail = if (paused) "" else error.message ?: "Try again to resume the download.") }
+            throw error
         } finally {
+            downloadJobs.remove(pack.id)
             activeDownloads.remove(pack.id)
             // refreshStatus skips while the selected pack is still downloading elsewhere.
-            if (pack.id != selectedPackId()) withContext(kotlinx.coroutines.NonCancellable) { refreshStatus() }
+            withContext(kotlinx.coroutines.NonCancellable) { refreshStatus() }
         }
     }
 
@@ -330,6 +358,8 @@ class CompanionPackManager(
                 onRetry = { attempt, error ->
                     Log.w(TAG, "Pack download attempt $attempt failed, resuming: ${error.message}")
                     errorRef.set("Connection dropped — resuming download (attempt ${attempt + 1} of ${PackDownloadPlan.DOWNLOAD_ATTEMPTS})")
+                    publishDownload(pack) { it.copy(stage = ModelDownloadStage.RETRYING, bytesPerSecond = 0,
+                        detail = "Attempt ${attempt + 1} of ${PackDownloadPlan.DOWNLOAD_ATTEMPTS}") }
                 },
             ) {
                 downloadOnce(pack, partial, onProgress)
@@ -340,6 +370,7 @@ class CompanionPackManager(
             throw error
         }
         errorRef.set("")
+        publishDownload(pack) { it.copy(stage = ModelDownloadStage.VERIFYING, bytesPerSecond = 0, detail = "Checking the file before it becomes available.") }
         if (pack.sha256.isNotBlank()) {
             val digest = digestCache.digestOf(partial)
             if (!digest.equals(pack.sha256, ignoreCase = true)) {
@@ -350,6 +381,7 @@ class CompanionPackManager(
                 error("Download checksum mismatch")
             }
         }
+        coroutineContext.ensureActive()
         PackDownloadPlan.replaceWithVerified(partial, target)
         digestCache.invalidate(partial)
         if (pack.sha256.isNotBlank()) digestCache.remember(target, pack.sha256)
@@ -363,30 +395,55 @@ class CompanionPackManager(
         var offset = PackDownloadPlan.resumeFrom(partial.length(), pack.sizeBytes)
         val builder = Request.Builder().url(pack.url).get()
         if (offset > 0L) builder.header("Range", "bytes=$offset-")
-        client.newCall(builder.build()).execute().use { response ->
-            // 5xx/429 are transient on the CDN: surface them as IOException so they retry.
-            if (response.code >= 500 || response.code == 429) throw java.io.IOException("Download server returned ${response.code}")
-            if (!response.isSuccessful) error("Download failed (${response.code})")
-            val append = PackDownloadPlan.appendToPartial(offset, response.code)
-            if (!append) offset = 0L
-            val body = response.body ?: throw java.io.IOException("Empty download body")
-            val total = (offset + body.contentLength()).coerceAtLeast(pack.sizeBytes).coerceAtLeast(1L)
-            body.byteStream().use { input ->
-                java.io.FileOutputStream(partial, append).use { output ->
-                    val buffer = ByteArray(65536)
-                    var readTotal = offset
-                    while (true) {
-                        if (!coroutineContext.isActive) throw CancellationException("download cancelled; partial kept for resume")
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        output.write(buffer, 0, count)
-                        readTotal += count
-                        val pct = ((readTotal * 100) / total).toInt().coerceIn(0, 100)
-                        progressRef.set(pct)
-                        onProgress(pct)
+        publishDownload(pack) { it.copy(stage = ModelDownloadStage.CONNECTING, receivedBytes = offset, bytesPerSecond = 0) }
+        val call = client.newCall(builder.build())
+        val parentJob = coroutineContext[Job]!!
+        val cancelWatch = kotlinx.coroutines.CoroutineScope(coroutineContext).launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+            try { awaitCancellation() } finally { if (parentJob.isCancelled) call.cancel() }
+        }
+        try {
+            call.execute().use { response ->
+                // 5xx/429 are transient on the CDN: surface them as IOException so they retry.
+                if (response.code >= 500 || response.code == 429) throw java.io.IOException("Download server returned ${response.code}")
+                if (!response.isSuccessful) error("Download failed (${response.code})")
+                val append = PackDownloadPlan.appendToPartial(offset, response.code)
+                if (!append) offset = 0L
+                val body = response.body ?: throw java.io.IOException("Empty download body")
+                val total = (if (body.contentLength() >= 0) offset + body.contentLength() else 0L).coerceAtLeast(pack.sizeBytes)
+                body.byteStream().use { input ->
+                    java.io.FileOutputStream(partial, append).use { output ->
+                        val buffer = ByteArray(65536)
+                        var readTotal = offset
+                        var sampleAt = android.os.SystemClock.elapsedRealtime()
+                        var sampleBytes = readTotal
+                        var previousPercent = -1
+                        while (true) {
+                            if (!coroutineContext.isActive) throw CancellationException("download cancelled; partial kept for resume")
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            output.write(buffer, 0, count)
+                            readTotal += count
+                            val pct = if (total > 0) ((readTotal * 100) / total).toInt().coerceIn(0, 100) else 0
+                            val now = android.os.SystemClock.elapsedRealtime()
+                            if (pct != previousPercent || now - sampleAt >= 250 || (total > 0 && readTotal >= total)) {
+                                val elapsed = (now - sampleAt).coerceAtLeast(1)
+                                publishDownload(pack) { it.copy(stage = ModelDownloadStage.DOWNLOADING, receivedBytes = readTotal,
+                                    totalBytes = total, bytesPerSecond = (readTotal - sampleBytes) * 1000 / elapsed, detail = "") }
+                                sampleAt = now
+                                sampleBytes = readTotal
+                                previousPercent = pct
+                                progressRef.set(pct)
+                                onProgress(pct)
+                            }
+                        }
                     }
                 }
             }
+        } catch (error: java.io.IOException) {
+            if (!parentJob.isActive) throw CancellationException("Download paused", error)
+            throw error
+        } finally {
+            cancelWatch.cancel()
         }
         if (pack.sizeBytes > 0L && partial.length() < pack.sizeBytes) {
             throw java.io.IOException("Download ended early at ${partial.length()} of ${pack.sizeBytes} bytes")
@@ -445,6 +502,7 @@ class CompanionPackManager(
             val file = packFile(pack)
             digestCache.invalidate(file)
             file.delete()
+            downloadStates.update { it - pack.id }
         }
         statusRef.set(CompanionPackStatus.MISSING)
         errorRef.set("")
