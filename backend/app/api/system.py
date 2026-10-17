@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter
 
 from ..agent.acp import acp_status
@@ -25,7 +27,7 @@ async def system_self_check():
 
 
 @router.get("/elevation")
-async def system_elevation():
+def system_elevation():
     return elevation_snapshot()
 
 
@@ -38,11 +40,18 @@ async def system_elevation_prompt():
 @router.get("")
 async def system_info():
     settings = load_settings()
-    hardware = hardware_dict()
     model = await MANAGER.snapshot(settings)
+    details = await asyncio.to_thread(_system_details, settings)
+    details["model"] = model
+    details["swarm"] = await swarm_snapshot()
+    return details
+
+
+def _system_details(settings):
+    # Capability checks include optional voice-server network probes. Keep these
+    # synchronous integrations off the API event loop, including warm reads.
     return {
-        "hardware": hardware,
-        "model": model,
+        "hardware": hardware_dict(),
         "bind_host": settings.bind_host,
         "bind_port": settings.bind_port,
         "lan_access": settings.lan_access,
@@ -52,5 +61,4 @@ async def system_info():
         "capabilities": capability_snapshot(),
         "jarvis_mcp": jarvis_mcp_manifest(),
         "cursor_acp": acp_status(),
-        "swarm": await swarm_snapshot(),
     }

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from app.inference.backends import LlamaCppBackend
 from app.inference.profiles import (
     PRIMARY_GGUF_REPO,
@@ -116,21 +118,22 @@ def test_profile_gguf_lives_under_family_directory():
     assert "Qwen3.5-9B-abliterated-GGUF" in str(path)
 
 
-def test_unloaded_snapshot_uses_profile_context():
+@pytest.mark.parametrize("chosen,context", [("fast", 8192), ("balanced", 32768)])
+def test_unloaded_snapshot_uses_profile_context(chosen, context):
     import asyncio
 
     from app.config import AppSettings
     from app.inference.manager import InferenceManager
 
     mgr = InferenceManager()
-    settings = AppSettings()
+    settings = AppSettings(inference={"profile": chosen})
 
     async def _run():
         snap = await mgr.snapshot(settings)
         assert snap["loaded"] is False
         assert snap["family"] == "9b-abliterated"
-        assert snap["thinking_mode"] == "selective"
-        assert snap["context_size"] == 32768
+        assert snap["thinking_mode"] == PROFILES[chosen].thinking_mode
+        assert snap["context_size"] == context
         assert snap["vision"] is False
         assert {p["name"] for p in snap["profiles"]} == EXPECTED_PROFILES
 

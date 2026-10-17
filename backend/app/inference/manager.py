@@ -83,6 +83,7 @@ class InferenceState:
     host: str = "127.0.0.1"
     port: int = 8088
     context_size: int = 16384
+    requested_context_size: int = 0
     server_n_ctx: int = 0
     gpu_layers: str = "fit"
     flash_attn: str = "auto"
@@ -258,6 +259,7 @@ class InferenceManager:
         self._lock = asyncio.Lock()
         self._request_lease = RequestLease()
         self.provider: OpenAICompatProvider | None = None
+        self._loaded_profile: ModelProfile | None = None
 
     def _active_profile(
         self,
@@ -269,9 +271,11 @@ class InferenceManager:
     ) -> ModelProfile:
         return _profile_from_gguf_or_name(
             settings,
-            profile_name or self.state.profile,
-            gguf_path=gguf_path,
-            stored_gguf=self.state.gguf_path,
+            profile_name or settings.inference.profile,
+            gguf_path=gguf_path if gguf_path is not None else (
+                settings.inference.gguf_path if profile_name is None else None
+            ),
+            stored_gguf=settings.inference.gguf_path,
             context_size=context_size,
         )
 
@@ -707,8 +711,12 @@ class InferenceManager:
         vision: bool | None = None,
         gguf_path: str | None = None,
     ) -> InferenceState:
+        if profile_name is None:
+            profile_name = settings.inference.profile
+            if gguf_path is None:
+                gguf_path = settings.inference.gguf_path or None
         async with self._lock:
-            profile = self._active_profile(
+            profile = await asyncio.to_thread(self._active_profile,
                 settings,
                 profile_name,
                 gguf_path=gguf_path,
@@ -721,9 +729,10 @@ class InferenceManager:
                 and self.backend
                 and self.state.loaded
                 and self.state.profile == profile.name
-                and self.state.model_path == str(model)
+                and self.state.model_path == (str(model) if backend.requires_local_files else "")
                 and self.backend.name == backend.name
-                and int(self.state.context_size or 0) >= int(profile.context_size or 0)
+                and self._same_endpoint(settings)
+                and int((self.state.context_size if backend.manages_process else self.state.requested_context_size) or 0) >= int(profile.context_size or 0)
                 and (not vision or self.state.vision_loaded)
             )
             if same:
@@ -733,8 +742,18 @@ class InferenceManager:
                 profile.name,
                 context_size=context_size or profile.context_size,
                 vision=vision,
+                force=force,
                 gguf_path=gguf_path if gguf_path is not None else (profile.absolute_path or None),
             )
+
+    def _same_endpoint(self, settings: AppSettings) -> bool:
+        return bool(
+            self.state.host == settings.inference.host
+            and self.state.port == settings.inference.port
+            and self.state.remote_model == self.provider_model(settings, self.state.advertised_models)
+            and self.backend
+            and self.backend.settings.inference.api_key == settings.inference.api_key
+        )
 
     async def ensure_runtime(
         self,
@@ -827,7 +846,31 @@ class InferenceManager:
         force: bool = False,
         gguf_path: str | None = None,
     ) -> InferenceState:
-        profile = self._active_profile(
+        try:
+            return await self._load_impl(
+                settings, profile_name, context_size=context_size, vision=vision,
+                force=force, gguf_path=gguf_path,
+            )
+        except (Exception, asyncio.CancelledError) as exc:
+            if self.state.loading:
+                self.state.loading = False
+                self.state.loaded = False
+                self.provider = None
+                self.state.last_error = str(exc) or "Model loading was cancelled"
+                self._invalidate_status_cache()
+            raise
+
+    async def _load_impl(
+        self,
+        settings: AppSettings,
+        profile_name: str | None,
+        *,
+        context_size: int | None,
+        vision: bool | None,
+        force: bool = False,
+        gguf_path: str | None = None,
+    ) -> InferenceState:
+        profile = await asyncio.to_thread(self._active_profile,
             settings,
             profile_name,
             gguf_path=gguf_path,
@@ -854,15 +897,19 @@ class InferenceManager:
             and self.backend
             and self.state.loaded
             and self.state.profile == profile.name
-            and self.state.model_path == str(model)
+            and self.state.model_path == (str(model) if backend.requires_local_files else "")
             and self.backend.name == backend.name
-            and (self.state.context_size or 0) >= want_context
+            and self._same_endpoint(settings)
+            and ((self.state.context_size if backend.manages_process else self.state.requested_context_size) or 0) >= want_context
             and (not want_vision or self.state.vision_loaded)
         )
         if reusable:
             return self.state
 
         self._apply_profile_state(settings, profile, backend, model, want_context, want_vision)
+        self.state.loading = True
+        self.state.loaded = False
+        self.state.last_error = ""
 
         probe_timeout = 8.0 if not backend.manages_process else 6.0
         probe = await probe_remote_server(
@@ -918,6 +965,7 @@ class InferenceManager:
         self.state.pid = backend.pid
         if not ready:
             self.state.loading = False
+            self.provider = None
             self.state.last_error = f"{backend.name} did not become ready"
             detail = (
                 f". See {logs_dir() / 'llama-server.log'}"
@@ -946,6 +994,7 @@ class InferenceManager:
         context_size: int,
         vision: bool,
     ) -> None:
+        self._loaded_profile = profile
         self.state.profile = profile.name
         self.state.quant = profile.quant
         self.state.model_path = str(model) if backend.requires_local_files else ""
@@ -958,6 +1007,7 @@ class InferenceManager:
         self.state.host = settings.inference.host
         self.state.port = settings.inference.port
         self.state.context_size = int(context_size or profile.context_size)
+        self.state.requested_context_size = int(context_size or profile.context_size)
         self.state.backend = backend.name
         self.state.manages_process = backend.manages_process
         self.state.family = profile.family
@@ -1116,7 +1166,7 @@ class InferenceManager:
     def live_state_overlay(self) -> dict[str, Any]:
         """Cheap in-memory fields for status-cache readers (no GPU/HTTP probes)."""
         settings = load_settings()
-        profile = self._active_profile(settings)
+        profile = self._loaded_profile or PROFILES.get(settings.inference.profile, PROFILES["fast"])
         active_model = None
         if self.state.loaded:
             active_model = (
@@ -1241,7 +1291,7 @@ class InferenceManager:
         healthy = False
         if self.provider:
             healthy = await self.provider.health()
-        return self._assemble_snapshot(settings, healthy=healthy)
+        return await asyncio.to_thread(self._assemble_snapshot, settings, healthy=healthy)
 
     async def snapshot(self, settings: AppSettings, *, live: bool = False) -> dict[str, Any]:
         """Status readers prefer the cached monitor snapshot unless ``live=True``.
