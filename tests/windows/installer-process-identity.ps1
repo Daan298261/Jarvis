@@ -56,3 +56,40 @@ foreach ($managerId in @(900001,900002,900003,900004)) {
     if ($managerId -in $ids) { throw "PreserveManager selected manager process $managerId" }
 }
 'PASS: alternate-install manager, shared Python backend, owned descendants, installer and unrelated-process exclusions, PreserveManager'
+
+# Execute the production shutdown function with fake process/port probes. A
+# failed stop must return a single integer, without WaitForExit's Boolean output.
+$rootFn = $functions | Where-Object Name -eq 'Invoke-ForceStopSingleRoot'
+$rootText = $rootFn.Extent.Text
+$replacements = @{
+    'Get-JarvisKillTargets' = 'param($RootNorm,$ScanFailed,$Stranger,$TcpFailed) return [pscustomobject]@{ProcessId=900001;Name="AnzuManager.exe"}'
+    'Test-AnyJarvisPortStillBlocked' = 'param($Procs,$RootNorm,$Stranger,$TcpFailed) return $true'
+}
+$nested = $rootFn.FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst]}, $true)
+foreach ($fn in ($nested | Sort-Object {$_.Extent.StartOffset} -Descending)) {
+    if ($replacements.ContainsKey($fn.Name)) {
+        $offset = $fn.Extent.StartOffset - $rootFn.Extent.StartOffset
+        $rootText = $rootText.Remove($offset, $fn.Extent.Text.Length).Insert($offset, ('function '+$fn.Name+' { '+$replacements[$fn.Name]+' }'))
+    }
+}
+Invoke-Expression $rootText
+function Get-CimOrWmiProcesses { return [pscustomobject]@{ProcessId=900001} }
+function Start-Process {
+    param($FilePath,$ArgumentList,$WindowStyle,[switch]$PassThru)
+    $fake = [pscustomobject]@{HasExited=$true;ExitCode=0}
+    $fake | Add-Member ScriptMethod WaitForExit {param($Milliseconds) return $script:fakeWaitResult}
+    return $fake
+}
+$testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+New-Item -ItemType Directory $testRoot | Out-Null
+$script:DurableStopLog = Join-Path $testRoot 'durable.log'
+try {
+    Set-Content (Join-Path $testRoot 'stop-jarvis.ps1') '# fake polite stop; never executed'
+    foreach ($script:fakeWaitResult in @($false,$true)) {
+        $result = @(Invoke-ForceStopSingleRoot -Root $testRoot -LogPath (Join-Path $testRoot 'stop.log') -MaxWaitSeconds 0 -IncludeTray $true -CheckOnly $false)
+        if ($result.Count -ne 1 -or $result[0] -ne 1) { throw "Failed shutdown leaked output or reported success: $result" }
+    }
+} finally {
+    Remove-Item -LiteralPath $testRoot -Recurse -Force
+}
+'PASS: failed shutdown retains its failure code after either polite wait result'
