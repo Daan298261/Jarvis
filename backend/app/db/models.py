@@ -61,6 +61,29 @@ class Task(Base):
     checkpoints: Mapped[list["Checkpoint"]] = relationship(back_populates="task", cascade="all, delete-orphan")
 
 
+class TaskPromptPlan(Base):
+    __tablename__ = "task_prompt_plans"
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"), primary_key=True)
+    goal: Mapped[str] = mapped_column(Text)
+    source_ref: Mapped[str] = mapped_column(Text)
+    followups_json: Mapped[str] = mapped_column(Text, default="[]")
+
+
+class TaskPromptStep(Base):
+    """RFC-0224 ordered, durable prompts within one authorized task."""
+
+    __tablename__ = "task_prompt_steps"
+    __table_args__ = (UniqueConstraint("task_id", "ordinal", name="uq_task_prompt_ordinal"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"), index=True)
+    ordinal: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(32), default="work")
+    prompt: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    result: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class TaskEvent(Base):
     __tablename__ = "task_events"
 

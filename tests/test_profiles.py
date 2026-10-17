@@ -21,6 +21,7 @@ EXPECTED_PROFILES = {
     "ornith_9b",
     "ornith_35b",
     "front_2b",
+    "front_08b",
     "front_4b",
 }
 

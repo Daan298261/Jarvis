@@ -284,6 +284,8 @@ async def get_task(task_id: str):
             }
             for e in events
         ]
+        from ..agent.task_workflow import workflow_payload
+        payload["prompt_steps"] = await workflow_payload(task_id)
         return payload
 
 
@@ -299,7 +301,10 @@ async def get_task_observability(task_id: str):
         children = (
             await session.execute(select(DelegatedWorker).where(DelegatedWorker.parent_task_id == task_id))
         ).scalars().all()
-        return observability_export(task, list(events), children=list(children))
+        payload = observability_export(task, list(events), children=list(children))
+        from ..agent.task_workflow import workflow_payload
+        payload["prompt_steps"] = await workflow_payload(task_id)
+        return payload
 
 
 @router.post("/{task_id}/continue")

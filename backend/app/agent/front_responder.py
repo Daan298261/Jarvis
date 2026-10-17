@@ -698,14 +698,14 @@ def small_context_envelope(
     reply_shape: str = "",
 ) -> list[ChatMessage]:
     hint = action_hint if action_hint in FRONT_ACTIONS else "ack_continue"
-    messages = [
-        ChatMessage(role="system", content=front_system_prompt()),
-        ChatMessage(role="system", content=f"Hint front_action: {hint}. Keep the reply spoken-ready."),
-    ]
+    # Qwen's shipped Jinja template rejects a second system message. Keep one
+    # leading system block or every front request fails and falls to the worker.
+    system = front_system_prompt() + f"\n\nHint front_action: {hint}. Keep the reply spoken-ready."
     if (reply_shape or "").strip() == "self_status" and snapshot:
         from .self_knowledge import snapshot_prompt_addendum
 
-        messages.append(ChatMessage(role="system", content=snapshot_prompt_addendum(snapshot)))
+        system += "\n\n" + snapshot_prompt_addendum(snapshot)
+    messages = [ChatMessage(role="system", content=system)]
     keep = max(0, int(context_turns or 0))
     prior = [
         message
