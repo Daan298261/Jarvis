@@ -90,6 +90,9 @@ try {
         if ($result.Count -ne 1 -or $result[0] -ne 1) { throw "Failed shutdown leaked output or reported success: $result" }
     }
 } finally {
+    $resolvedTestRoot = [System.IO.Path]::GetFullPath($testRoot)
+    $expectedParent = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\')
+    if ((Split-Path -Parent $resolvedTestRoot).TrimEnd('\') -ne $expectedParent) { throw 'Unexpected test cleanup path' }
     Remove-Item -LiteralPath $testRoot -Recurse -Force
 }
 'PASS: failed shutdown retains its failure code after either polite wait result'
