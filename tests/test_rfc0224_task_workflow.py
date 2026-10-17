@@ -366,3 +366,15 @@ async def test_missing_basic_question_provider_never_completes_with_fake_greetin
     result = await generate_front_reply("What is RAM?", settings=AppSettings(), provider=object())
     assert worker_required(result.action)
     assert result.text == ""
+
+
+async def test_native_local_planner_objects_keep_constraints_and_verification(jarvis_env):
+    task_id = await make_task()
+    native = {"goal":"Create report", "constraints":["Do not publish", "Workspace only"],
+              "steps":[{"step_number":1, "action":"Create report.txt", "deliverable":"Plain text report",
+                        "verification":"Read the file and verify its contents"}]}
+    workflow = await prepare(task_id, AsyncMock(return_value=ChatResult(content=json.dumps(native))))
+    assert "Do not publish" in workflow.goal and "Workspace only" in workflow.goal
+    assert "Read the file and verify its contents" in workflow.current.prompt
+    assert "Plain text report" in workflow.current.prompt
+    assert len(await workflow_payload(task_id)) == 4
