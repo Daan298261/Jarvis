@@ -378,3 +378,46 @@ async def test_native_local_planner_objects_keep_constraints_and_verification(ja
     assert "Read the file and verify its contents" in workflow.current.prompt
     assert "Plain text report" in workflow.current.prompt
     assert len(await workflow_payload(task_id)) == 4
+
+
+async def test_legacy_large_task_continuation_keeps_history_without_replanning(jarvis_env, monkeypatch):
+    from app.agent.loop import AGENT
+    from app.agent.compaction import serialize_messages
+    from app.providers.base import ChatMessage
+    target = jarvis_env["tmp"] / "legacy.txt"
+    target.write_text("ALREADY CREATED")
+    original_mtime = target.stat().st_mtime_ns
+    task_id = await make_task("legacy-large-task")
+    history = [ChatMessage(role="system", content="Existing authorized task; the file already exists."),
+               ChatMessage(role="user", content=f"Original end-to-end report at {target}"),
+               ChatMessage(role="assistant", content="The file has already been created; inspect it next.")]
+    async with SessionLocal() as session:
+        task = await session.get(Task, task_id)
+        task.prompt = f"Complete the end-to-end report at {target}; preserve existing contents."
+        task.task_class = "filesystem"; task.profile = "fast"; task.autonomy = "autonomous"
+        task.conversation_json = serialize_messages(history)
+        await session.commit()
+    planner = AsyncMock(side_effect=AssertionError("Legacy effects must not be replanned"))
+    monkeypatch.setattr("app.agent.task_workflow.prepare_workflow", planner)
+    monkeypatch.setattr("app.agent.loop.record_trajectory", AsyncMock())
+    monkeypatch.setattr("app.agent.loop.publish_owner_text", AsyncMock(return_value={}))
+    class Provider:
+        name = "scripted"
+        def __init__(self): self.calls = []
+        async def health(self): return True
+        async def chat(self, messages, tools=None, **kwargs):
+            self.calls.append(list(messages))
+            if len(self.calls) in (1, 3) and tools:
+                return ChatResult(tool_calls=[{"id":f"legacy-read-{len(self.calls)}", "type":"function",
+                    "function":{"name":"filesystem", "arguments":json.dumps({"action":"read", "path":str(target)})}}])
+            return ChatResult(content="Existing contents inspected and verified.")
+    provider = Provider()
+    jarvis_env["manager"].provider = provider
+    jarvis_env["settings"].front_responder.enabled = False
+    await asyncio.wait_for(AGENT._run(task_id, continue_existing=True), 35)
+    planner.assert_not_awaited()
+    assert target.stat().st_mtime_ns == original_mtime
+    assert any("file has already been created" in str(m.content) for m in provider.calls[0])
+    assert await workflow_payload(task_id) == []
+    async with SessionLocal() as session:
+        assert (await session.get(Task, task_id)).status == "completed"

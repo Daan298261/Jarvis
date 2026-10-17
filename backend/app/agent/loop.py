@@ -2681,7 +2681,9 @@ class AgentRuntime:
             except Exception as exc:
                 await self._fail_task(task_id, str(exc), working, metrics)
                 return
-        if workflow is None and is_large_request(
+        # Existing jobs from before prompt workflows keep their committed tool
+        # history. Retrofitting a new plan would replay already completed work.
+        if workflow is None and not continue_existing and is_large_request(
             prompt, size_class=working.ingress_size_class,
             complexity=working.ingress_complexity_hint,
         ):
