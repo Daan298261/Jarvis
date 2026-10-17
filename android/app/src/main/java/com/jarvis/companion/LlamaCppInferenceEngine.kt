@@ -44,6 +44,12 @@ class LlamaCppInferenceEngine : LocalInferenceEngine {
     override fun requestCancel() {
         if (isRuntimeAvailable()) CompanionNativeBridge.nativeGenerateCancel()
     }
+
+    override fun contextUsage(): Pair<Int, Int>? {
+        if (!isRuntimeAvailable()) return null
+        val counts = CompanionNativeBridge.nativeContextUsage()
+        return if (counts.size == 2 && counts[1] > 0) counts[0] to counts[1] else null
+    }
 }
 
 interface NativeTokenListener { fun onToken(token: String) }
@@ -64,5 +70,6 @@ object CompanionNativeBridge {
     external fun nativeTokenize(text: String): Int
     external fun nativeGenerate(prompt: String, maxTokens: Int, batchSize: Int, listener: NativeTokenListener): String
     external fun nativeGenerateCancel()
+    external fun nativeContextUsage(): IntArray
     external fun nativeUnload()
 }

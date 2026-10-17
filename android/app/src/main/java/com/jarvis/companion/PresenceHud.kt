@@ -13,9 +13,16 @@ import android.provider.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -47,6 +54,7 @@ fun PresenceHud(
     mode: String,
     phase: PresencePhase,
     audioLevel: Float = 0f,
+    contextUsed: Float? = null,
 ) {
     val humanoid = PresenceVisual.normalizePresenceMode(mode) == "humanoid"
     val particles = remember(humanoid) {
@@ -67,7 +75,26 @@ fun PresenceHud(
     )
     val activity = PresenceVisual.effectiveActivity(phase, audioLevel)
     val amplitude = PresenceVisual.motionAmplitude(phase, reducedMotion)
-    Canvas(Modifier.fillMaxWidth().height(340.dp)) {
+    var seconds by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(reducedMotion) {
+        if (!reducedMotion) {
+            var previous = 0L
+            while (true) withFrameNanos { now ->
+                if (previous != 0L) seconds += (now - previous).coerceAtMost(100_000_000L) / 1_000_000_000f
+                previous = now
+            }
+        }
+    }
+    val contextLabel = contextUsed?.let { "Phone context ${(it.coerceIn(0f, 1f) * 100).toInt()} percent used" }
+        ?: "Phone context usage unavailable"
+    Canvas(Modifier.fillMaxWidth().height(340.dp).semantics {
+        contentDescription = if (humanoid) "ANZU presence. $contextLabel" else
+            "Solar system: Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, Neptune. $contextLabel"
+    }) {
+        if (!humanoid) {
+            drawSolarSystem(seconds, phase, contextUsed, reducedMotion)
+            return@Canvas
+        }
         drawHud(
             particles = particles,
             humanoid = humanoid,
@@ -78,6 +105,40 @@ fun PresenceHud(
             reducedMotion = reducedMotion,
         )
     }
+}
+
+private fun DrawScope.drawSolarSystem(seconds: Float, phase: PresencePhase, contextUsed: Float?, reducedMotion: Boolean) {
+    val center = Offset(size.width / 2f, size.height / 2f)
+    val scale = min(size.width, size.height) * .40f
+    val thinking = phase == PresencePhase.THINKING || phase == PresencePhase.WORKING
+    val pulse = if (reducedMotion) 1f else 1f + sin(seconds * if (thinking) 3.2f else .9f) * if (thinking) .10f else .025f
+    for (star in SolarSystemVisual.stars) {
+        val twinkle = if (reducedMotion) .7f else .55f + .45f * sin(seconds * 1.1f + star.phase)
+        val alpha = SolarSystemVisual.starAlpha(star.rank, contextUsed) * (.25f + twinkle * .65f)
+        if (alpha > 0f) drawCircle(Color(0xFFD9EDFF).copy(alpha = alpha), star.radius * density,
+            Offset(star.x * size.width, star.y * size.height))
+    }
+    drawCircle(Brush.radialGradient(listOf(HudCyan.copy(alpha = .22f * pulse), Color.Transparent), center, scale * 1.5f),
+        scale * 1.5f, center)
+    for ((index, planet) in SolarSystemVisual.planets.withIndex()) {
+        val radius = planet.orbit * scale
+        drawCircle(HudCyan.copy(alpha = if (thinking) .20f * pulse else .12f), radius * pulse, center,
+            style = Stroke(width = 1.dp.toPx()))
+        val (x, y) = SolarSystemVisual.position(planet, index, seconds)
+        val at = Offset(center.x + x * scale * pulse, center.y + y * scale * pulse)
+        val r = planet.radius * scale
+        val color = Color(planet.color)
+        drawCircle(Brush.radialGradient(listOf(color.copy(alpha = .35f), Color.Transparent), at, r * 2.4f), r * 2.4f, at)
+        if (planet.name == "Saturn") drawOval(Color(0xFFDFCD9D).copy(alpha = .75f),
+            topLeft = Offset(at.x - r * 1.9f, at.y - r * .65f), size = Size(r * 3.8f, r * 1.3f), style = Stroke(1.4.dp.toPx()))
+        drawCircle(Brush.radialGradient(listOf(color, color.copy(red = color.red * .45f, green = color.green * .45f, blue = color.blue * .45f)),
+            Offset(at.x - r * .3f, at.y - r * .3f), r * 1.6f), r, at)
+        if (planet.name == "Earth") drawCircle(Color(0xFF83C890), r * .35f, Offset(at.x + r * .2f, at.y - r * .2f))
+        if (planet.name == "Jupiter") drawLine(Color(0xFF9D725B), Offset(at.x - r * .8f, at.y + r * .2f), Offset(at.x + r * .8f, at.y + r * .2f), r * .24f)
+    }
+    val sun = scale * .054f * pulse
+    drawCircle(Brush.radialGradient(listOf(HudGold.copy(alpha = .85f), HudGold.copy(alpha = .16f), Color.Transparent), center, sun * 5f), sun * 5f, center)
+    drawCircle(Brush.radialGradient(listOf(Color(0xFFFFF1BC), HudGold), center, sun), sun, center)
 }
 
 /** Back-compat overload used by older call sites; maps connected+phase string → [PresencePhase]. */
