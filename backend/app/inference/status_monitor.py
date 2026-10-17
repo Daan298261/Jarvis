@@ -179,6 +179,12 @@ class ModelStatusMonitor:
 
         # A cache miss must not synchronously enumerate hardware/model files.
         base = MANAGER.live_state_overlay()
+        base.update({
+            "host": settings.inference.host,
+            "port": settings.inference.port,
+            "base_url": MANAGER.base_url(settings),
+            "api_key_configured": bool((settings.inference.api_key or "").strip()),
+        })
         base["healthy"] = False
         if error:
             base["last_error"] = error

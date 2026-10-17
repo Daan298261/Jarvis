@@ -421,3 +421,22 @@ async def test_legacy_large_task_continuation_keeps_history_without_replanning(j
     assert await workflow_payload(task_id) == []
     async with SessionLocal() as session:
         assert (await session.get(Task, task_id)).status == "completed"
+
+
+async def test_unprobed_status_keeps_endpoint_fields_without_exposing_credentials(monkeypatch):
+    from app.inference.status_monitor import ModelStatusMonitor
+    monitor = ModelStatusMonitor()
+    gate = asyncio.Event()
+    async def slow(settings): await gate.wait()
+    monkeypatch.setattr("app.inference.manager.MANAGER.live_snapshot", slow)
+    monkeypatch.setattr("app.inference.manager.MANAGER.live_state_overlay", lambda: {"loaded":False})
+    settings = AppSettings(inference={"backend":"remote", "host":"192.168.1.50", "port":11434, "api_key":"test-only-placeholder"})
+    try:
+        snapshot = await asyncio.wait_for(monitor.get_snapshot(settings), .2)
+        assert snapshot["base_url"] == "http://192.168.1.50:11434/v1"
+        assert snapshot["host"] == "192.168.1.50" and snapshot["port"] == 11434
+        assert snapshot["api_key_configured"] is True
+        assert "test-only-placeholder" not in json.dumps(snapshot)
+        assert snapshot["healthy"] is False
+    finally:
+        monitor.stop()
