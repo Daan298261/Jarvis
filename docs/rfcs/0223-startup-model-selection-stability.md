@@ -23,6 +23,7 @@ Settings saves merge the writer's changed fields into the latest file under a wr
 - Focused regression tests, frontend build/lint, and a Windows build are checked; live acceptance limitations are recorded separately.
 - Installer source globs exclude build outputs relative to each source root; output slices, duplicate model/sidecar staging, Rust caches and vendor-only issuer code cannot enter the customer payload through those globs.
 - A failed installer shutdown returns failure even after waiting for a polite stop, so elevation retry can run instead of reporting success while protected processes remain.
+- LAN discovery responds only to phone probes, avoiding announcement echo loops. Connectivity/route checks and UI status/catalog probes run off the API event loop; beacon replies are bounded and cancelled on shutdown.
 
 ## Likely files
 
