@@ -45,6 +45,7 @@ def test_frozen_voice_check_rejects_missing_language_resources(monkeypatch, caps
     from jarvis_sidecar import _verify_frozen_imports
     monkeypatch.setitem(sys.modules, 'kokoro', ModuleType('kokoro'))
     monkeypatch.setitem(sys.modules, 'soundfile', ModuleType('soundfile'))
+    monkeypatch.setitem(sys.modules, 'pocket_tts', ModuleType('pocket_tts'))
     fake_spacy = ModuleType('spacy')
     def missing_model(name):
         raise OSError('language model missing')

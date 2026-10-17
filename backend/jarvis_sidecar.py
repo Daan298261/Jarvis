@@ -24,7 +24,7 @@ def _resolve_root() -> Path:
 def _verify_frozen_imports() -> None:
     """Fail the sidecar build when the default voice stack was not collected."""
     missing: list[str] = []
-    for name in ("kokoro", "soundfile"):
+    for name in ("kokoro", "soundfile", "pocket_tts"):
         try:
             __import__(name)
         except Exception as exc:
@@ -40,7 +40,7 @@ def _verify_frozen_imports() -> None:
     if missing:
         print("Frozen import check failed: " + "; ".join(missing), file=sys.stderr)
         raise SystemExit(1)
-    print("Frozen import check ok: kokoro, soundfile, spaCy English pipeline")
+    print("Frozen import check ok: kokoro, soundfile, pocket_tts, spaCy English pipeline")
 
 
 def main() -> None:

@@ -40,6 +40,11 @@ if ($LASTEXITCODE -ne 0) {
     & $py -m spacy download en_core_web_sm
     if ($LASTEXITCODE -ne 0) { throw "Cannot prepare the English model required by Kokoro" }
 }
+& $py -c "import pocket_tts"
+if ($LASTEXITCODE -ne 0) {
+    & $py -m pip install "pocket-tts==3.3.0"
+    if ($LASTEXITCODE -ne 0) { throw "Cannot prepare Pocket TTS for the frozen backend" }
+}
 
 $work = Join-Path $env:TEMP "jarvis-pyinstaller"
 New-Item -ItemType Directory -Force -Path $OutDir, $work | Out-Null
