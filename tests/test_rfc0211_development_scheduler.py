@@ -369,3 +369,67 @@ async def test_native_ollama_stream_honours_the_shared_stall_contract():
     provider = _native_provider(_SlowNdjson([{"message": {"content": "a"}}, {"message": {"content": "b"}, "done": True}], stall_s=0))
     assert [c async for c in provider.chat_stream([ChatMessage("user", "hi")])] == ["a", "b"]
     await provider.close()
+
+
+# --- Model check failures reach the owner as a clear reason, never a bare 500 (D1 on #670) ---
+
+def _ollama(monkeypatch, handler):
+    """Route the scheduler's Ollama client through ``handler`` (an httpx MockTransport handler)."""
+    real = httpx.AsyncClient
+    monkeypatch.setattr(ds.httpx, "AsyncClient", lambda **kwargs: real(transport=httpx.MockTransport(handler), **kwargs))
+
+
+def _ollama_down(request):
+    raise httpx.ConnectError("connection refused", request=request)
+
+
+def _model_missing(request):
+    return httpx.Response(404, json={"error": f"model '{json.loads(request.content)['model']}' not found"})
+
+
+async def _queued(scheduler, monkeypatch):
+    async def scan():
+        return scheduler.public()
+    monkeypatch.setattr(scheduler, "scan", scan)
+    await scheduler.import_drive("ticket", "RFC fix", "Implement one fix")
+    queued = scheduler.public()["items"][0]
+    await scheduler.select(queued["id"], queued["revision"], True)
+
+
+MODEL_CHECK_CASES = [
+    pytest.param(_ollama_down, "is not reachable", id="ollama-down"),
+    pytest.param(_model_missing, "anzu-coder-27b:latest is not installed in Ollama", id="default-model-missing"),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("handler", "reason"), MODEL_CHECK_CASES)
+async def test_run_endpoint_answers_409_with_reason_when_models_unavailable(scheduler, monkeypatch, handler, reason):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.api import self_dev
+
+    _ollama(monkeypatch, handler)
+    await _queued(scheduler, monkeypatch)
+    monkeypatch.setattr(self_dev, "DEVELOPMENT", scheduler)
+    app = FastAPI()
+    app.include_router(self_dev.router)
+    response = await asyncio.to_thread(lambda: TestClient(app).post("/api/self-dev/scheduler/run"))
+    assert response.status_code == 409
+    assert reason in response.json()["detail"]
+    assert scheduler.public()["runs"] == []  # nothing launched
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("handler", "reason"), MODEL_CHECK_CASES)
+async def test_chat_tool_run_returns_tool_error_when_models_unavailable(scheduler, monkeypatch, handler, reason):
+    from app.tools.self_development import SelfDevelopmentTool
+
+    _ollama(monkeypatch, handler)
+    await _queued(scheduler, monkeypatch)
+    monkeypatch.setattr(ds, "DEVELOPMENT", scheduler)
+    monkeypatch.delenv("ANZU_DEVELOPMENT_MISSION", raising=False)
+    result = await SelfDevelopmentTool().execute(action="run")
+    assert result.success is False
+    assert reason in result.error
+    assert scheduler.public()["runs"] == []

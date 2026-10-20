@@ -102,15 +102,37 @@ def repo_items(config: DevelopmentConfig):
     return out
 
 
+class ModelCheckError(ValueError):
+    """Ollama is unreachable or a configured model is missing; the message is safe to show the owner.
+
+    A ``ValueError`` so the scheduler API answers 409 and the chat tool returns a tool error
+    instead of an unhandled 500.
+    """
+
+
 async def model_capabilities(config: DevelopmentConfig):
     result = {}
+    base = config.ollama_url.rstrip("/")
     async with httpx.AsyncClient(timeout=15) as client:
         for role, model, required in (("coder", config.coder_model, {"tools"}), ("vision", config.vision_model, {"vision", "tools"})):
-            response = await client.post(config.ollama_url.rstrip("/") + "/api/show", json={"model": model})
-            response.raise_for_status()
-            capabilities = set(response.json().get("capabilities", []))
+            try:
+                response = await client.post(base + "/api/show", json={"model": model})
+            except httpx.HTTPError as exc:
+                raise ModelCheckError(
+                    f"Ollama at {base} is not reachable ({type(exc).__name__}); start Ollama or fix the Ollama URL"
+                ) from exc
+            if response.status_code == 404:
+                raise ModelCheckError(
+                    f"The {role} model {model} is not installed in Ollama at {base}; run `ollama pull {model}` or choose another model"
+                )
+            if response.is_error:
+                raise ModelCheckError(f"Ollama at {base} could not describe the {role} model {model} (HTTP {response.status_code})")
+            try:
+                capabilities = set(response.json().get("capabilities", []))
+            except ValueError as exc:
+                raise ModelCheckError(f"Ollama at {base} returned an unreadable answer for the {role} model {model}") from exc
             if not required <= capabilities:
-                raise ValueError(f"{role} model {model} lacks {', '.join(sorted(required - capabilities))}")
+                raise ModelCheckError(f"{role} model {model} lacks {', '.join(sorted(required - capabilities))}")
             result[role] = {"model": model, "capabilities": sorted(capabilities)}
     return result
 
