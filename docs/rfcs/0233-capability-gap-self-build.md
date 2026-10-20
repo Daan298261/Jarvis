@@ -4,7 +4,7 @@
 **Priority:** P1 (Taco ask, relayed by Chief of Staff 2026-10-20; queued after RFC-0231)
 **Author:** Jarvis Architect
 **Date:** 2026-10-20
-**Traced on:** `development` @ `11b264a7`. Open PRs pinned: #585 (RFC-0211) @ `f412dad`, #652 (RFC-0225) @ `916cf25`, #663 (RFC-0218 delivery fix) @ `c5db314`, #664 (RFC-0232) @ `5cdd01f`, #665 (RFC-0231) @ `9084e7c`. Drafts #648 @ `b942bcd` and #649 @ `edb4685` touch none of the files this RFC edits for gap detection or registration (checked: no hunk in `tools/capability.py`, `tools/exposure.py`, `tools/registry.py`, `agent/tooling.py`, `policy/approval_grant.py`, `packs/`, `skills/`), so nothing is ported from them.
+**Traced on:** `development` @ `a44da353` (re-traced after #648 `d214b6d`, #649 `ee786dc`, #657 `d85c9d4`, #660 `90a0010` and #667 `a44da35` landed; every file:line below is on that head). Open PRs read: #585 (RFC-0211) @ `f412dad`, #652 (RFC-0225) @ `60573c6`, #664 (RFC-0232) @ `1542881`, #665 (RFC-0231) @ `deab158`, #666 (RFC-0230) @ `99aef63`. Of the landed PRs only #649 (RFC-0224 durable prompt steps) touches what this RFC builds on: `agent/task_workflow.py` (new), `TaskPromptPlan` / `TaskPromptStep` in `db/models.py:66-88`, `prompt_steps` in `api/tasks.py:287-288`, and the workflow hooks in `agent/loop.py:2344-2348`, `:2672-2722`, `:3639-3660`. #648/#649 shifted `loop.py`, `owner_turn.py`, `config.py`, `api/tasks.py` and `main.py` line numbers; all are re-cited. None of them has a hunk in `tools/capability.py`, `tools/exposure.py`, `tools/registry.py`, `agent/tooling.py`, `policy/approval_grant.py`, `packs/` or `skills/`.
 
 **Owner ask (intent as relayed):** when ANZU gets a request it can't fulfil because a tool or capability is missing, it notices the gap, proposes building or installing that capability, and builds it only after Taco explicitly approves.
 
@@ -21,13 +21,14 @@
 **Extends (do not rewrite):**
 - [RFC-0171](0171-system-one-reflex-lane-jev-laya-priority.md) / [RFC-0206](0206-jev-laya-every-turn-arbitration.md): one decide per owner turn, 50 ms deadline, rules fallback.
 - [RFC-0218](0218-persona-surfaces-and-intent-switch.md) S1: the rider-question pattern on that decide.
-- [RFC-0231](0231-large-prompt-pipeline.md) (#665): child tasks through `AgentRuntime.create_task` with a keyword-only marker, `task_workflow.seed_workflow`, the terminal hook next to `advance_intake_chain`, `resolve_target` / `preload`, startup recovery.
+- [RFC-0224](0224-responsive-conversation-and-durable-task-prompts.md) (#649, landed `ee786dc`): the durable prompt-step engine in `agent/task_workflow.py` (`TaskWorkflow` L41, `load_workflow` L101, `prepare_workflow` L115, `workflow_payload` L172), used unchanged.
+- [RFC-0231](0231-large-prompt-pipeline.md) (#665): child tasks through `AgentRuntime.create_task` with a keyword-only marker, `task_workflow.seed_workflow` (0231-S2, appended to the landed `task_workflow.py` after `workflow_payload`), the terminal hook next to `advance_intake_chain`, `resolve_target` / `preload`, startup recovery.
 - [RFC-0225](0225-local-engine-coexistence-and-resilient-api.md) (#652) S3: `engine_coexistence.owner_line(...)`, the only owner-line channel.
 - [RFC-0031](0031-reversibility-first-action-gates.md): `policy/approval_grant.py`, the unforgeable human grant store.
 - [RFC-0007](0007-domain-workspace-packs.md): `packs/manager.py` install / rollback / uninstall with the recovery journal.
 - [RFC-0026](0026-execution-phase-and-verifier-observability.md) / [RFC-0029](0029-transactional-durable-execution.md): durable tasks.
 
-**Reconciles with (in flight):** RFC-0211 / #585 (scheduler, `resource_hold`, Away Mode), RFC-0232 / #664 (FFS/APK path routing owns its turns), RFC-0230 (content unknown at time of writing; its slices go first on every shared file).
+**Reconciles with (in flight):** RFC-0211 / #585 (scheduler, `resource_hold`, Away Mode), RFC-0232 / #664 (path + RE-intent turns route to reverse engineering), RFC-0230 / [#666](0230-pc-first-response-latency.md) (PC first-response latency; its slices go first on `loop.py`, `owner_turn.py` and `main.py`).
 
 **Astra boundary:** persona, WebGL, presence, morph and appearance are out of scope. This RFC emits no persona events and edits no persona or presence file.
 
@@ -42,19 +43,19 @@ Verified on `development` @ `11b264a7`.
 1. **A missing capability is a silent dead end.**
    - The model's escape hatch is `request_capability` (`tools/capability.py:9-64`). When it names something that isn't a registered tool, `ToolExposure.grant` returns `Unknown capability … Known: …` (`tools/exposure.py:150-156`), and the loop's `apply_capability_request` returns the observation "No new tools were added. … Unknown capabilities: …" (`agent/tooling.py:57-90`). The model then improvises (usually a terminal or Python attempt) or gives up. The owner is never told what was missing and is never offered a way to get it.
    - Calling a tool that doesn't exist ends in `Unknown tool {name}` (`tools/registry.py:182-184`), also invisible to the owner.
-2. **The decide never asks "can ANZU do this at all?"** `OWNER_TURN_QUESTIONS` (`decision/owner_turn.py:46-72`) has `request_route` and `reply_shape`. RFC-0218 adds the persona rider (`_decide_sync`, L399-449), RFC-0231 adds the large-prompt riders. Nothing compares the request against the capabilities ANZU actually has.
+2. **The decide never asks "can ANZU do this at all?"** `OWNER_TURN_QUESTIONS` (`decision/owner_turn.py:46-73`) has `request_route` and `reply_shape`. RFC-0218 adds the persona rider (`_decide_sync`, L419-469), RFC-0231 adds the large-prompt riders. Nothing compares the request against the capabilities ANZU actually has.
 3. **The tool registry is static.** `ToolRegistry._init_tools` builds a fixed list (`tools/registry.py:59-101`). `NATIVE_TOOLS` is a fixed tuple (`tools/exposure.py:97`), and `ensure_named_tool` refuses anything outside it except `mcp_*` (L172-182). There is no path to add a tool at runtime other than an owner-configured MCP server, which runs unsandboxed (`tools/mcp_runtime.py:89 prepare_stdio_launch`).
 4. **Pieces exist, but nothing joins them:**
    - **Grants:** `policy/approval_grant.py` (RFC-0031) gives trusted-channel grants (`TRUSTED_CHANNELS`, L22) with a pending store, expiry (L181-209) and `decide_approval_request` (L212-339). It also allows `always` (L236-237, L386-407), which must never apply to installing or running new code. Its audit is capped at 500 rows (`_MAX_AUDIT`, L30, trimmed in `_save` L78-83), which is not an evidence-grade log.
    - **Packs:** `packs/manager.py` (RFC-0007) installs, rolls back and uninstalls packs with a recovery journal (`install_pack` L336-394, `rollback_pack` L471-513, `uninstall_pack` L516-547), and `tool` is already a resource type (`packs/schema.py:10-21`). No tool is ever installed through it.
    - **Skill Forge:** `skills/` (RFC-0173) turns verified traces into skills: "No automatic publication" (`skills/approval.py:1`), effective permissions = declaration ∩ profile ∩ task ∩ node (`skills/permissions.py:1`). Skills compose existing tools. They can't supply a missing binary.
-   - **Downloads:** `policy/network_http.gated_download_to` (L180) re-checks permissions on every redirect hop. `runtime_install.py` downloads llama.cpp from a pinned tag (L40-43) and has `_sha256` (L235). `modules/catalog_download.py` only clones allowlisted GitHub URLs (L25, L205-222).
+   - **Downloads:** `policy/network_http.gated_download_to` (L180) re-checks permissions on every redirect hop. `runtime_install.py` downloads llama.cpp from a pinned tag (L40-43) and has `_sha256` (L243). `modules/catalog_download.py` only clones allowlisted GitHub URLs (L25, L205-222).
    - **Sandbox:** `agent/local_harness.sandbox_available()` (L148) probes for Docker. `reflex_loop/sandbox.py` describes itself as "Minimal in-ticket sandbox posture … not a full port" (L1). Neither runs untrusted code.
    - **Evidence roots:** LE-gated folders (`modules/catalog_download.le_gated_roots`, L141-163), REA investigation roots (`security/rea_paths.configured_investigation_roots`, L55-72) and successful LTA extract dirs (`rea_paths.succeeded_lta_extract_dirs`, L100). No common "evidence path" notion protects them from a new tool.
 5. **Anything running as the owner on this PC can approve.**
    - Loopback requests skip auth (`auth.is_auth_required_for_request`, `auth.py:163-191`: `is_local_owner_host` → no key).
    - `POST /api/auth/desktop-session` hands the owner key to any loopback caller (`api/auth.py:62-72`).
-   - So the model's own `terminal`, `python`, `web_fetch`, browser or computer-use tools could post `grant_mode=allow_once` to `/api/tasks/{id}/continue` (`api/tasks.py:305-321`) or click an Approve button. For ordinary RFC-0031 confirmations that risk is already accepted. For "install and run new code" it is not acceptable.
+   - So the model's own `terminal`, `python`, `web_fetch`, browser or computer-use tools could post `grant_mode=allow_once` to `/api/tasks/{id}/continue` (`api/tasks.py:310-338`) or click an Approve button. For ordinary RFC-0031 confirmations that risk is already accepted. For "install and run new code" it is not acceptable.
 
 ## Decision
 
@@ -114,12 +115,14 @@ owner turn ─► decide_owner_turn (one decide, rider capability_gap)          
 
 `ALLOWED_SOURCE_HOSTS` (module constant in `catalog.py`) is exactly those hosts plus the GitHub release-asset redirect hosts (`objects.githubusercontent.com`, `release-assets.githubusercontent.com`), and only as a **redirect hop** from a `github.com/<project>/releases/download/` URL. The two runtime entries are never offered on their own. They are listed as a dependency inside any ask that needs them (§3.1).
 
-**Capability index (in memory, never read on the decide path).** `capability_build/index.py::CAPABILITY_INDEX` holds `{id: available, version}` and the compiled trigger regexes. It is rebuilt at startup (`main.py`, after the tool-registry step at L241) and after every install, rollback or uninstall. `available` means installed, registered, and integrity OK (§5.4).
+**Capability index (in memory, never read on the decide path).** `capability_build/index.py::CAPABILITY_INDEX` holds `{id: available, version}` and the compiled trigger regexes. S1 builds it at module import from `catalog.json` (every entry unavailable, since nothing can be installed before S4). S4 adds `index.rebuild()` at startup (`main.py`, right after the `tool_registry` step at L250) and after every install, rollback or uninstall. `available` means installed, registered, and integrity OK (§5.4).
 
-**Precheck (rules, sync, under 1 ms)** in `_decide_sync` (`owner_turn.py:399-449`), next to the persona precheck (L428-433) and RFC-0231's large precheck. It produces candidates only when **all** of these hold:
+**Precheck (rules, sync, under 1 ms)** in `_decide_sync` (`owner_turn.py:419-469`), next to the persona precheck (L442-452), after RFC-0232-S2's RE early return at the top of `_decide_sync` and after RFC-0231-S1's large-prompt precheck (the `owner_turn.py` order is 0230-S5 → 0232-S2 → 0231-S1 → 0233-S1). It produces candidates only when **all** of these hold:
 - `settings.capability_build.enabled` is true;
 - `security_role == ""`;
-- RFC-0232's `planning.ffs_or_apk_investigation(prompt)` did **not** match. That path belongs to the RE tool, which exists.
+- the turn did **not** take RFC-0232's RE early return. The routing precedence shared by #664 and #665 is, verbatim:
+  > A turn whose prompt contains an absolute filesystem path together with RE intent (RFC-0232's narrowed dump/extraction detection) routes to reverse engineering and is never split by RFC-0231; a path with a plain or coding question routes normally.
+  "RE intent" is exactly `ffs_or_apk_investigation(latest_user_utterance(prompt))` returning non-`None` (RFC-0232 rules 1-3, narrowed in its D2 round 2). Only that match skips the gap rider, because the RE tool already exists. A path on its own never skips it: `C:\code\etl what does the extraction step do?` has a path and the word `extraction`, but RFC-0232's narrowed rule returns `None`, so the turn routes normally **and gets the gap check** (`test_path_with_coding_question_still_gets_gap_check`, S1). The precheck does not call `ffs_or_apk_investigation` again; it sits after 0232-S2's early return, so it can't disagree with it.
 - at least one floor rule below fires.
 
 Without candidates no rider is appended and the decision is unchanged byte for byte.
@@ -138,7 +141,7 @@ Without candidates no rider is appended and the decision is unchanged byte for b
 - G2 and G3 (explicit) can't be lowered to `none`.
 - The deadline fallback (`_deadline_rules_result`, `OWNER_TURN_DEADLINE_MS = 50`, L39) is the rules answer.
 
-**Output:** a new field `OwnerTurnDecision.capability_gap: CapabilityGapIntent | None` (next to `persona_intent`, L156), with fields:
+**Output:** a new field `OwnerTurnDecision.capability_gap: CapabilityGapIntent | None` (next to `persona_intent`, L157), with fields:
 - `verdict` (`none` | `gap`);
 - `capability_id` (catalog id, or `""` for build);
 - `kind`;
@@ -149,7 +152,7 @@ Without candidates no rider is appended and the decision is unchanged byte for b
 
 `request_routing` passes it through unchanged. There is still exactly one decide per owner turn.
 
-**Runtime trigger (S3).** `request_capability` gains an optional string argument `missing` ("describe the ability you lack when no listed tool fits"). This is an add-only schema field in `tools/capability.py:18-31`. In the loop's `request_capability` branch (`agent/loop.py:3377`), when `apply_capability_request` reports unknown names, `capability_build.proposals.runtime_gap(task_id, unknown, missing)` runs:
+**Runtime trigger (S3).** `request_capability` gains an optional string argument `missing` ("describe the ability you lack when no listed tool fits"). This is an add-only schema field in `tools/capability.py:18-31`. In the loop's `request_capability` branch (`agent/loop.py:3462`), when `apply_capability_request` reports unknown names, `capability_build.proposals.runtime_gap(task_id, unknown, missing)` runs:
 - an alias or trigger hit on an unavailable catalog entry gives an install proposal;
 - otherwise, when `settings.capability_build.allow_build` is on and the build-eligibility rules pass (§5.6), a build proposal;
 - otherwise no proposal. The observation tells the model "Not something ANZU can add safely: <reason>", and the task gets one parent event with the same text, so the owner can see why.
@@ -194,7 +197,7 @@ The existing observation lines from `tooling.py:83-89` are kept unchanged. The p
 
 #### 3.1 What the owner sees and hears
 
-The asking task goes to `status="waiting"` with `waiting_for_confirmation=True`, the same mechanism as the existing tool pause (`loop.py:3341-3367`). It gets:
+The asking task goes to `status="waiting"` with `waiting_for_confirmation=True`, the same mechanism as the existing tool pause (`loop.py:3426-3452`). It gets:
 - `confirmation_payload = {"kind": "capability_build", "gate": "install" | "build" | "register", "proposal_id", "pending_approval_id", "title", "version", "source": {"url", "host", "project", "sha256", "size_bytes", "license"}, "deps": [...], "permissions": {...}, "sandbox": "sealed", "expires_at", "code": {"sha256", "files", "lines", "tests_passed"} (register gate only)}`.
 - **No `spoken_prompt` key.** `PermissionPrompt` would otherwise speak it (`PermissionPrompt.tsx:115-130`) and the line would be spoken twice. **No `pending_id` key**, so the RFC-0110 modal store is not involved (`OwnerChatTranscript.tsx:107-108`).
 - A parked RFC-0031 request: `park_approval_request(action_id=action_id_for("capability_build", gate, f"{capability_id}@{version}#{sha256}", task_id=…), tool_name="capability_build", ttl_seconds=settings.capability_build.ask_ttl_s, …)` (`approval_grant.py:94-153`). The target string binds the grant to the exact artifact hash.
@@ -218,11 +221,11 @@ The asking task goes to `status="waiting"` with `waiting_for_confirmation=True`,
 
 #### 3.2 Decision rules (normative)
 
-- **Only a human button decides.** The decision arrives on the existing `POST /api/tasks/{id}/continue` (`api/tasks.py:305-321`), with `grant_mode` `"allow_once"` or `"deny"` and a new optional `origin_channel` field on `ContinueBody` (L46). The field takes `"ui"` (default) or `"mobile"`, and must be in `TRUSTED_CHANNELS`. `confirm_task` (`loop.py:590-730`) gets one branch, taken first when `payload.kind == "capability_build"`:
+- **Only a human button decides.** The decision arrives on the existing `POST /api/tasks/{id}/continue` (`api/tasks.py:310-338`), with `grant_mode` `"allow_once"` or `"deny"` and a new optional `origin_channel` field on `ContinueBody` (L46). The field takes `"ui"` (default) or `"mobile"`, and must be in `TRUSTED_CHANNELS`. `confirm_task` (`loop.py:592-731`) gets one branch, taken first when `payload.kind == "capability_build"`:
   - `grant_mode` in `{"always", "allow_session"}` → HTTP 400 "This can only be approved once." Nothing changes.
   - `"allow_once"` → `decide_approval_request(pending, decision="allow_once", origin_channel=…, actor="owner", session_id=task_id)`.
   - `"deny"` → the same call with `decision="deny"`.
-  - The existing `expected_payload` binding (`loop.py:603-611`) is required on this branch, so a stale card can't approve a replacement.
+  - The existing `expected_payload` binding (`loop.py:604-613`) is required on this branch, so a stale card can't approve a replacement.
 - **No `always`, anywhere.** `approval_grant.py` gets `ONCE_ONLY_TOOLS = frozenset({"capability_build"})`. `decide_approval_request` raises `PermissionError` for `always` on those tools, so the RFC-0031 API path `POST /api/reversibility/pending/{id}/decide` (`api/reversibility.py:88-113`) can't create one either.
 - **No voice approval in v1.** An STT mishear must never authorize running new code. The spoken line says "on screen", and the card has no microphone. Saying "yes" in chat is an ordinary follow-up message, and a test proves it does not approve.
 - **No silent auto-approve path.**
@@ -248,7 +251,7 @@ Nothing is downloaded, executed or registered before the matching grant exists. 
 
 #### 3.4 Approval window: ANZU can't approve itself
 
-While any capability ask is open, `capability_build.window.approval_window_open()` is true, and the marker file `data/capabilities/approval_window.json` exists (so other processes, such as #585's `development_worker`, can honour it once it lands).
+While any capability ask is open, `capability_build.window.approval_window_open()` is true, and the marker file `data/capabilities/approval_window.json` exists, so another ANZU process can honour it (§3.4.1).
 
 In the window, the tool loop **waits** before executing any tool in `WINDOW_HELD_TOOLS`:
 - `terminal`, `python`, `open_interpreter`, `code_worker`;
@@ -256,9 +259,27 @@ In the window, the tool loop **waits** before executing any tool in `WINDOW_HELD
 - `desktop`, `cua`, `ufo`, `reflex_computer_use`, `apps`, `mobile_apps`, `hexstrike_operator`;
 - `docker`, `mcp_call` and every `mcp_*`.
 
-The wait is `await window.wait_closed()` in `_run`, right before the side-effect decision (`loop.py:3297`). The task gets one event, "Paused while you decide about a new capability", and `current_action` is set to the same text.
+The wait is `await window.wait_closed()` in `_run`, right before the side-effect decision (`loop.py:3382`). The task gets one event, "Paused while you decide about a new capability", and `current_action` is set to the same text.
 
 These are the only tools that could reach the loopback API or click the card, so ANZU can't approve its own ask. Filesystem reads and the other tools continue. The longest pause is the ask TTL (default 15 min). A test runs a second task that tries `web_fetch` against `/api/tasks/{id}/continue` during an open ask and proves the call only runs after the ask is decided by the test's simulated owner click.
+
+#### 3.4.1 The #585 development worker honours the window (concrete obligation)
+
+#585 (RFC-0211, head `f412dad`) runs missions in a separate process, `backend/app/agent/development_worker.py`. Its `execute(control)` builds its own `AGENT` and calls `AGENT.create_task(...)` (#585 `development_worker.py:166`, `create_task` at L210), so its tool loop is the same `_run`. But in that process the in-memory window flag is always false, and `data_dir()` may not be the owner's (`execute` already reads the owner's `data/STOP_JARVIS` through `mission["owner_root"]`, L213). Without a bind, a mission's `terminal` or `browser` call could reach the owner's loopback API while a capability ask is open.
+
+One function closes it: `capability_build.window.bind_worker_process(owner_root: Path)`. It:
+- points `approval_window_open()` and `wait_closed()` at `owner_root / "data/capabilities/approval_window.json"`, so the 0233-S3 wait in `_run` (before `_side_effect_decision`, `loop.py:3382`) holds that process's `WINDOW_HELD_TOOLS` too;
+- disables proposals in that process: `proposals.runtime_gap` returns the visible observation "Capabilities can't be added from a development mission" and creates no proposal, because the worker's task stream has no owner client to hear or approve an ask.
+
+**Who adds the call.** Whichever of 0233-S3 and #585 lands **second** adds exactly one line to `development_worker.execute`, before `AGENT.create_task`: `bind_worker_process(Path(mission["owner_root"]))`. It also adds the #585-side test below. The obligation can't be parked, because a 0233 guard test fails the full suite until the line exists:
+
+| Side | Test (file :: name) | Asserts |
+| --- | --- | --- |
+| 0233-S3 (always ships with S3) | `tests/test_rfc0233_approval_gate.py::test_worker_process_honours_owner_marker` | after `bind_worker_process(tmp_owner)`, with the marker written under `tmp_owner/data/capabilities/`, a held tool (`web_fetch`) waits until the marker is removed; `runtime_gap` returns the "development mission" observation and writes no `capability_proposals` row |
+| 0233-S3 (guard, always ships with S3) | `tests/test_rfc0233_approval_gate.py::test_development_worker_binds_capability_window` | static (AST) check: if `backend/app/agent/development_worker.py` exists, `execute` calls `bind_worker_process` with `mission["owner_root"]` before its first `AGENT.create_task` call; if the file doesn't exist, the test asserts that and passes (not a skip) |
+| second lander (#585 or 0233-S3) | `tests/test_rfc0211_development_scheduler.py::test_development_worker_binds_capability_window_before_task` | runs `development_worker.execute` against a `tmp_path` control dir with a minimal `mission.json`, monkeypatched `MANAGER.load` / `init_db` / providers (the fixture style of #585's `test_launch_keeps_owner_model_and_uses_trusted_code`, L277), a fake `bind_worker_process` and a fake `AGENT.create_task`; the bind is called once with `Path(mission["owner_root"])`, before `create_task` |
+
+So if 0233-S3 lands first, #585's CI ("Run full backend suite") is red until #585 adds the line and its test. If #585 lands first, S3's own guard is red until S3 adds them. `backend/app/agent/development_worker.py` is in 0233-S3's file list for that case.
 
 ### 4. Security posture (S2)
 
@@ -274,7 +295,7 @@ These are the only tools that could reach the loopback API or click the card, so
 - ACL grants, only on ANZU-owned dirs:
   - read+execute for the container SID on `data/capabilities/installed/<id>/<version>/` and `data/capabilities/runtime/`;
   - modify on `data/capabilities/runs/<run_id>/out/` only.
-- `data/` itself (`config.data_dir`, `config.py:19-22`), `settings.json`, `private_key.sec` (`auth.py:16-17`) and the owner's profile are never ACL'd, so the container can't read them.
+- `data/` itself (`config.data_dir`, `config.py:24-27`), `settings.json`, `private_key.sec` (`auth.py:16-17`) and the owner's profile are never ACL'd, so the container can't read them.
 - A Job Object with:
   - `KILL_ON_JOB_CLOSE`;
   - `ACTIVE_PROCESS_LIMIT=32`;
@@ -329,7 +350,7 @@ Rules:
 #### 4.5 Secrets isolation
 
 - **Environment:** the sandboxed process gets only `SystemRoot`, `TEMP`/`TMP` (pointing at its out dir), `PATH` (its install and runtime dirs only), `ANZU_INPUT_HANDLES` and `ANZU_OUT`. No `JARVIS_*`, no `*_KEY`, `*_TOKEN` or `*_SECRET`, no proxy variables, and no inherited environment. A test enumerates the child's environment.
-- **Files:** the AppContainer can't read `data/`, so `settings.json` (`api_key` and others, `config.py:82, 121, 153`) and `private_key.sec` are out of reach. Docker mounts nothing but the dirs above.
+- **Files:** the AppContainer can't read `data/`, so `settings.json` (`api_key` and others, `config.py:88, 127, 159`) and `private_key.sec` are out of reach. Docker mounts nothing but the dirs above.
 - **Clipboard:** blocked by the job UI limits.
 - **Build-time:** a build child's prompt holds only the spec and synthetic fixtures. Before the register gate, the built tree is scanned with Skill Forge's secret regex (`skills/eligibility._SECRET_VALUE_RE`, L61). A hit fails the build ("the code contains something that looks like a secret").
 
@@ -385,13 +406,13 @@ AGENT.create_task(child_prompt, request_id=uuid5(NS, f"capability:{proposal.id}"
 - the route is fixed to MANAGED with **no decide**;
 - no persona block, no large branch, no gap rider, no generic ack;
 - the title is "Installing {title}" or "Building {title}";
-- the request id is stable, so a re-dispatch after a crash reuses the child (`loop.py:492-499`).
+- the request id is stable, so a re-dispatch after a crash reuses the child (`loop.py:494-501`).
 
-The kill switch check at `create_task` entry (`loop.py:485-489`) applies unchanged.
+The kill switch check at `create_task` entry (`loop.py:488-492`) applies unchanged.
 
 #### 5.2 Install child (no model)
 
-`_run` sees `capability_build` on the task and runs `capability_build.installer.run(proposal, publish)` instead of the model loop, the same deterministic pre-model branch shape as RFC-0232 S3. The steps are seeded with `task_workflow.seed_workflow` (RFC-0231 S2) as `fetch`, `verify`, `unpack`, `self_test`, `register`, so the existing prompt-steps UI shows progress without new UI. Each step:
+`_run` sees `capability_build` on the task and runs `capability_build.installer.run(proposal, publish)` instead of the model loop, the same deterministic pre-model branch shape as RFC-0232 S3. The steps are seeded with `task_workflow.seed_workflow` (RFC-0231 S2, on the landed #649 engine) as `fetch`, `verify`, `unpack`, `self_test`, `register`, so the landed prompt-steps payload (`api/tasks.py:287-288`, `workflow_payload` at `task_workflow.py:172`) and `TaskActivity.tsx` show progress without new UI. Seeded children never auto-plan: `load_workflow` (`task_workflow.py:101`) returns the seeded rows, so `_run` never reaches the `prepare_workflow` planner call (`loop.py:2686-2701`), and `is_large_request` (`task_workflow.py:31`) is never consulted for them. Each step:
 1. calls `require_grant`;
 2. does its work;
 3. writes an audit row;
@@ -422,14 +443,14 @@ The kill switch check at `create_task` entry (`loop.py:485-489`) applies unchang
 
 #### 5.5 Resume the asking task
 
-`capability_build.queue.on_child_terminal(child_id, status)` is called from `_update`'s terminal block, next to `advance_intake_chain` (`loop.py:~799`) and RFC-0231's `on_child_terminal`.
+`capability_build.queue.on_child_terminal(child_id, status)` is called from `_update`'s terminal block, next to `advance_intake_chain` (`loop.py:813`) and RFC-0231's `on_child_terminal`.
 - **Decide-time ask** (the asking task never ran its model): `_start_runner(_run(task, continue_existing=False))`, with `cap_<id>` added to `exposed_tools` when installed.
-- **Runtime ask** (paused inside `request_capability`): `_run(task, continue_existing=True, pending_tool=payload)`, where `payload` carries a synthetic observation for the paused call (the `loop.py:2871-2880` path):
+- **Runtime ask** (paused inside `request_capability`): `_run(task, continue_existing=True, pending_tool=payload)`, where `payload` carries a synthetic observation for the paused call (the `loop.py:2944-2953` path):
   - "cap_<id> is now available. Use it."
   - or "The owner did not approve <title>; continue without it and say what you could not do."
   - or "Installing <title> failed: <reason>."
 - **Denied or timed-out asks** resume the same way, with the "without it" observation. The final result therefore states what couldn't be done (North Star §8).
-- **Cancel:** `AGENT.cancel(asking)` (`loop.py:732-737`) also cancels an open ask (status `cancelled`, pending row denied with actor `owner-cancel`) and the build child. `on_parent_cancel` is called from `cancel`, next to RFC-0231's hook.
+- **Cancel:** `AGENT.cancel(asking)` (`loop.py:733-738`) also cancels an open ask (status `cancelled`, pending row denied with actor `owner-cancel`) and the build child. `on_parent_cancel` is called from `cancel`, next to RFC-0231's hook.
 
 #### 5.6 Build eligibility (rules, deterministic)
 
@@ -453,7 +474,7 @@ In `main.py`, after RFC-0231's `recover_on_startup` call:
 
 - When one turn has both `large_prompt == "large"` and a gap: the large ack goes first (RFC-0231 §2), then the gap ask on the **parent**. `large_prompt_queue.dispatch_next` (0231-S5) does not dispatch part 1 while `capability_build.queue.blocking(parent)` is true. It shows the parent event "Waiting for your decision on {title}". When the ask resolves, dispatch continues, and each child's exposed tools include `cap_<id>` if it was installed.
 - Part children never run the gap rider (they have no decide). A runtime gap inside a part asks on that part's own task stream, and the parent shows "Part n is waiting for your decision on {title}".
-- RFC-0232's path + question router has precedence: the precheck skips the rider when it matches (§1).
+- RFC-0232's precedence rule applies verbatim (§1): a path with RE intent routes to reverse engineering and gets no gap rider; a path with a plain or coding question routes normally and gets the gap check like any other turn.
 
 ### 6. Settings (S1 adds the block; owned in `config.py`)
 
@@ -465,7 +486,7 @@ class CapabilityBuildSettings(BaseModel):
     evidence_roots: list[str] = Field(default_factory=list)
 ```
 
-- `AppSettings.capability_build` is added next to `decision` (`config.py:450-512`) and RFC-0231's `large_prompts`, and exposed on the existing settings GET and PUT.
+- `AppSettings.capability_build` is added next to `decision` (`DecisionSettings` at `config.py:456`, field `AppSettings.decision` at L512) and RFC-0231's `large_prompts`, and exposed on the existing settings GET and PUT.
 - There is deliberately **no** auto-approve, allow-always or trusted-source setting.
 - `enabled=false` restores today's behaviour exactly: no rider, the same `request_capability` observation, no new events. A test proves the decision and `create_task` are byte-identical in that case.
 
@@ -492,7 +513,7 @@ Touched live UI: the task transcript (HUD and classic), Phone, the Tools page, t
 | --- | --- | --- |
 | `OwnerChatTranscript` confirm area (`:198-200`) | **Yes.** Every existing payload kind still renders `PermissionPrompt` with the same props. The new branch is taken only for `kind === "capability_build"`, a kind no backend emits today. | `<CapabilityPrompt …/>` for that kind |
 | `PermissionPrompt.tsx` | **Yes, file not edited** | — |
-| RFC-0110 modal (`PendingApprovalHost`, `App.tsx:145-148`) | **Yes, not edited.** Capability payloads carry no `pending_id`, so the modal never sees them. | — |
+| RFC-0110 modal (`PendingApprovalHost`, `App.tsx:147-150`) | **Yes, not edited.** Capability payloads carry no `pending_id`, so the modal never sees them. | — |
 | Phone confirm (`Phone.tsx:256`) | **Yes.** Same rule as the transcript. | the same conditional |
 | `useTaskSpeech` / `chat_tts` | **Yes, unchanged** | The ask is an ordinary `chat_tts` with title "New capability" (≠ "Speak reply") |
 | RFC-0225 `EngineNotices` chip | **Yes, unchanged** | The ask appears as an `engine_notice` titled "New capability"; RFC-0225's controller renders any title |
@@ -519,8 +540,8 @@ Every function named here ships complete, with tests. Not allowed:
 
 | With | Rule |
 | --- | --- |
-| **RFC-0211 / #585** (scheduler, `resource_hold`, Away Mode) | Build children are persisted `Task` rows before dispatch, so #585's upcoming-task list shows them when it lands, with no second queue. Build-kind children use the coder model, so while #585's `DevelopmentConfig.resource_hold` (`development_scheduler.py:28`, checked at L279-280 and L405) names Ollama, `start_build` defers with the event "Waiting for the scheduler's model hold" (the same rule as RFC-0231 §Reconciliation). Install children use no model and are not held. Away Mode's standing authorization never approves a capability (§3.2). #585's `development_worker` process must honour the approval-window marker file (§3.4): a one-line check before its own tool calls, made by whichever of 0233-S3 and #585 lands second. #585 also edits `tools/registry.py` (+2) and `tools/exposure.py` (+1), which is ordered in the chain below. |
-| **RFC-0231 / #665** | Self-build children are ordinary `AgentRuntime.create_task` tasks with a keyword-only marker, exactly like `pipeline_section`. They reuse `seed_workflow` (0231-S2), the terminal-hook placement, `resolve_target`/`preload`/rewarm hold (0231-S4) for build kind, and the startup-recovery pattern (0231-S5). One hook goes into `large_prompt_queue.dispatch_next` (§5.8). There is no second pipeline. |
+| **RFC-0211 / #585** (scheduler, `resource_hold`, Away Mode) | Build children are persisted `Task` rows before dispatch, so #585's upcoming-task list shows them when it lands, with no second queue. Build-kind children use the coder model, so while #585's `DevelopmentConfig.resource_hold` (`development_scheduler.py:28`, checked at L279-280 and L405) names Ollama, `start_build` defers with the event "Waiting for the scheduler's model hold" (the same rule as RFC-0231 §Reconciliation). Install children use no model and are not held. Away Mode's standing authorization never approves a capability (§3.2). #585's `development_worker` process honours the approval window through `bind_worker_process` (§3.4.1). Whichever of 0233-S3 and #585 lands second adds the line and `tests/test_rfc0211_development_scheduler.py::test_development_worker_binds_capability_window_before_task`; 0233-S3's guard `test_development_worker_binds_capability_window` enforces it. #585 also edits `tools/registry.py` (+2) and `tools/exposure.py` (+1), which is ordered in the chain below. |
+| **RFC-0231 / #665** | Self-build children are ordinary `AgentRuntime.create_task` tasks with a keyword-only marker, exactly like `pipeline_section`. They reuse `seed_workflow` (0231-S2, on the landed #649 engine), the terminal-hook placement, `resolve_target`/`preload`/rewarm hold (0231-S4) for build kind, and the startup-recovery pattern (0231-S5). One hook goes into `large_prompt_queue.dispatch_next` (§5.8). There is no second pipeline. |
 | **Decision lane** (`decision/*`) | One decide per owner turn, with one extra rider on `tool_selection`. The 50 ms deadline is unchanged, rules are the fallback, and the provider can't lower an explicit request. `decision/types.py`, `reflex.py` and `surfaces.py` are not edited. |
 | **Tool registry** (`tools/registry.py`, `tools/exposure.py`, `tools/capability.py`, `agent/tooling.py`) | Existing tools, `NATIVE_TOOLS` and `_init_tools` are unchanged. Capabilities are added through two add-only registry methods and a `cap_` exposure rule. `request_capability` keeps its contract and gains the optional `missing` field. |
 | **RFC-0031** (`policy/approval_grant.py`) | The only grant store. Additions: `ONCE_ONLY_TOOLS`, and the requirement that the capability branch passes `expected_payload`. The evidence-grade audit is a separate append-only file (§4.6). |
@@ -528,9 +549,9 @@ Every function named here ships complete, with tests. Not allowed:
 | **RFC-0173 Skill Forge** / RFC-0105 skill packs (`agent/skill_packs.py`) | Different layer: skills compose registered tools, and SKILL.md packs register module connector skills (`skill_packs.register_module_pack`, L36). Once `cap_<id>` is registered, Skill Forge can extract skills that use it under its own approval (`skills/approval.py`). Skill Forge never installs a capability, and this RFC never publishes a skill. |
 | **MCP** (`tools/mcp_runtime.py`) | Not a capability kind: MCP servers run unsandboxed with network. Owner-configured MCP stays exactly as it is. |
 | **RFC-0225 S3** | The ask, outcome and failure lines go through `owner_line(..., title="New capability")`. RFC-0225's static title test (`test_rfc0225_and_rfc0228_lines_use_default_title`) scans only RFC-0225/0228 modules, so this caller doesn't collide with it. |
-| **RFC-0232 / #664** | Its path + question router takes precedence: no gap rider on those turns. The RE tool and REA are capabilities that already exist and are never proposed. Built tools admit inputs through the same `resolve_allowed_path`. #661's allow-list-first gate in RE prepare is untouched. |
-| **RFC-0230** (in flight) | Content unknown at time of writing. Its slices go **first** on every shared file below, and 0233 tickets rebase onto them. |
-| **Drafts #648 / #649** | No overlapping hunks (see header). Nothing is ported, and nothing waits on them. |
+| **RFC-0232 / #664** | The shared precedence rule applies verbatim: "A turn whose prompt contains an absolute filesystem path together with RE intent (RFC-0232's narrowed dump/extraction detection) routes to reverse engineering and is never split by RFC-0231; a path with a plain or coding question routes normally." Only the RE-intent match (0232-S2's early return in `_decide_sync`) skips the gap rider; a path alone never does. The RE tool and REA are capabilities that already exist and are never proposed. Built tools admit inputs through the same `resolve_allowed_path`. #661's allow-list-first gate in RE prepare is untouched. |
+| **RFC-0230 / #666** (@ `99aef63`) | Overlapping files, checked against #666's file list: `agent/loop.py` (0230-S0 latency marks, S2 first-sentence wiring, S3 `prewarm_worker` in `create_task`), `decision/owner_turn.py` (0230-S5 reflex executor) and `main.py` (0230-S0 router line, S5 async Laya restore). 0230 does not edit `config.py`, `api/tasks.py`, `db/models.py`, `api/settings.py`, `rules.py`, `request_routing.py`, `tools/*`, `policy/*` or any frontend file this RFC edits. 0230's slices go first on the three shared files. 0230-S5 runs `_decide_sync` on a dedicated one-worker reflex executor (#666 §S5); the gap precheck is sync, reads no disk and adds no await, so it fits inside that executor's 50 ms deadline unchanged. 0230-S0's `TurnTrace` marks in `create_task` are kept; the 0233 decide-time ask is published after `decide_done`. Note: #666's own table (L239, L241) still lists RFC-0231 before RFC-0232; this RFC follows the CoS ruling (0230 → 0232 → 0231). |
+| **#648 / #649 (landed)** | #649's prompt-step engine is reused unchanged (`task_workflow.py`, `TaskPromptStep`, `prompt_steps` in `get_task`); 0233 adds no workflow code and edits no #649 function. `tests/test_rfc0224_task_workflow.py` is not edited. #648 touches none of 0233's files beyond line shifts. |
 
 ---
 
@@ -538,7 +559,7 @@ Every function named here ships complete, with tests. Not allowed:
 
 ### S1: Catalog, capability index, gap rider
 
-**Model:** Grok 4.5 · **Depends:** RFC-0231 S1 (merge order on `owner_turn.py` / `rules.py`), RFC-0232 S2 (provides `planning.ffs_or_apk_investigation`, which the precheck calls)
+**Model:** Grok 4.5 · **Depends:** RFC-0232 S2 (the RE early return in `_decide_sync` that the precheck sits after) and RFC-0231 S1 (last prior owner of `owner_turn.py` / `rules.py`; order 0230-S5 → 0232-S2 → 0231-S1 → 0233-S1)
 
 | File | Change |
 | --- | --- |
@@ -566,7 +587,8 @@ Tests (CI: `pytest` job, step "Run full backend suite", plus the new step):
 - `test_provider_switches_only_at_075`;
 - `test_deadline_fallback_is_rules`;
 - `test_one_decide_per_turn`;
-- `test_ffs_path_question_never_gets_rider` (uses RFC-0232's fixture prompts);
+- `test_path_plus_re_intent_never_gets_rider` (RFC-0232's positive prompts, e.g. `D:\cases\x\ffs which accounts are on the phone? Install ffmpeg first.` → route `reverse engineering`, `capability_gap is None`, no `capability_gap` question in the decide call);
+- `test_path_with_coding_question_still_gets_gap_check`: `C:\code\etl what does the extraction step do?` → `ffs_or_apk_investigation` returns `None`, the turn routes normally, and the gap precheck runs (spy called once, not skipped); the same prompt with " Install ffmpeg first." appended → `capability_gap.verdict == "gap"`, `capability_id == "ffmpeg"`, `trigger == "explicit"` (also parametrized with RFC-0232's other named negatives `C:\Users\taco\proj ffs why does the build fail?` and `C:\code\app what does the dump() function do?`);
 - `test_security_role_excluded`;
 - `test_disabled_is_byte_identical`;
 - `test_precheck_reads_no_disk` (patches `open` / `Path.read_text` to raise during `_decide_sync`);
@@ -613,7 +635,7 @@ Tests:
 
 ### S3: Proposals, the owner approval gate, approval window, runtime trigger
 
-**Model:** Grok 4.6 · **Depends:** S1, S2, RFC-0225 S3 (`owner_line`), RFC-0231 S5 (`loop.py` order), RFC-0232 S4 (`loop.py` order)
+**Model:** Grok 4.6 · **Depends:** S1, S2, RFC-0225 S3 (`owner_line`), RFC-0231 S5 (last prior `loop.py` owner; order 0230 → 0232 → 0231 → 0233)
 
 | File | Change |
 | --- | --- |
@@ -623,7 +645,9 @@ Tests:
 | `backend/app/capability_build/window.py` (new) | `approval_window_open`, `wait_closed`, marker file |
 | `backend/app/capability_build/eligibility.py` (new) | build eligibility (§5.6) |
 | `backend/app/policy/approval_grant.py` | `ONCE_ONLY_TOOLS`; refuse `always` for them |
-| `backend/app/agent/loop.py` | the decide-time ask in `create_task` (after RFC-0231's large branch); the `confirm_task` capability branch; the window wait before `_side_effect_decision` (L3297); the runtime trigger in the `request_capability` branch (L3377) |
+| `backend/app/agent/loop.py` | the decide-time ask in `create_task` (after RFC-0231's large branch); the `confirm_task` capability branch; the window wait before `_side_effect_decision` (L3382); the runtime trigger in the `request_capability` branch (L3462) |
+| `backend/app/agent/development_worker.py` (only if #585 landed first) | one line in `execute` before `AGENT.create_task`: `bind_worker_process(Path(mission["owner_root"]))` (§3.4.1) |
+| `tests/test_rfc0211_development_scheduler.py` (only if #585 landed first) | add `test_development_worker_binds_capability_window_before_task` (§3.4.1) |
 | `backend/app/api/tasks.py` | `ContinueBody.origin_channel` (validated against `TRUSTED_CHANNELS`) |
 | `backend/app/tools/capability.py` | optional `missing` field and its description |
 | `backend/app/agent/tooling.py` | return the unknown names in structured form for the loop (observation text unchanged) |
@@ -649,6 +673,8 @@ Tests:
 - `test_away_mode_does_not_approve`;
 - `test_window_holds_listed_tools_and_releases` (a second task's `web_fetch` to `/continue` runs only after the simulated owner click);
 - `test_window_marker_file_lifecycle`;
+- `test_worker_process_honours_owner_marker` (§3.4.1);
+- `test_development_worker_binds_capability_window` (§3.4.1 guard);
 - `test_runtime_unknown_capability_creates_install_proposal`;
 - `test_runtime_unbuildable_gives_visible_reason`;
 - `test_throttle_and_24h_dedupe_explicit_bypasses`;
@@ -670,7 +696,7 @@ Tests:
 | `backend/app/agent/large_prompt_queue.py` | `dispatch_next` waits on `capability_build.queue.blocking(parent)` (§5.8) |
 | `backend/app/api/capabilities.py` (new) | the endpoints in §7 |
 | `backend/app/api/tasks.py` | `capability` object in `get_task` (L256): open proposal summary |
-| `backend/app/main.py` | router registration; startup `recover_on_startup` after RFC-0231's |
+| `backend/app/main.py` | router registration; `index.rebuild()` after the `tool_registry` step (L250); startup `recover_on_startup` after RFC-0231's |
 | `tests/fixtures/rfc0233/` (new) | a fixture catalog: a 2 KB zip holding a `selftest` script, its real sha256 and size, and a local HTTP server fixture that serves it |
 | `tests/test_rfc0233_install_lifecycle.py` (new) | below |
 
@@ -764,31 +790,34 @@ Tests (`frontend/capabilities-panel.test.mjs`):
 
 ## Ownership chains (handoff order on shared files)
 
-Every listed RFC-0230 slice goes **first** on any file it claims, then RFC-0231, then RFC-0232, then 0233.
+Order on `loop.py` and `owner_turn.py` follows the CoS ruling (2026-10-20): **RFC-0230 (#666) → RFC-0232 (#664) → RFC-0231 (#665) → RFC-0233**. The other rows follow the next-owner rows in #666 @ `99aef63` §9, #664 @ `1542881` §Handoff order and #665 @ `deab158` §Ownership chains, with 0233 appended last. A later slice merges `development` into its branch (merge commit) and ports around the earlier hunk, citing it; no rebase, no force-push.
 
 | File | Order |
 | --- | --- |
-| `backend/app/agent/loop.py` | 0218-S3b → (0230) → 0231-S2 → 0231-S4 → 0231-S5 → 0232-S3 → 0232-S4 → 0233-S3 → 0233-S4 |
-| `backend/app/decision/owner_turn.py` | (0230) → 0231-S1 → 0232-S2 → 0233-S1 |
-| `backend/app/decision/adapters/rules.py`, `backend/app/agent/request_routing.py` | (0230) → 0231-S1 → 0233-S1 |
-| `backend/app/config.py` | 0228-S1 → 0228-S2 → (0230) → 0231-S2 → 0233-S1 |
-| `backend/app/api/settings.py` | 0231-S2 → 0233-S1 |
-| `backend/app/db/models.py` | (0230) → 0231-S2 → 0233-S3 |
-| `backend/app/api/tasks.py` | (0230) → 0231-S2 → 0231-S5 → 0233-S3 → 0233-S4 |
-| `backend/app/main.py` | 0225-S1 → S2 → S3 → 0231-S5 → 0233-S4 |
+| `backend/app/agent/loop.py` | #649 (landed) → 0218-S3b → 0230-S0 → 0230-S2 → 0230-S3 → 0232-S3 → 0232-S4 → 0232-S5 → 0231-S4 → 0231-S5 → 0233-S3 → 0233-S4 |
+| `backend/app/decision/owner_turn.py` | #649 (landed) → 0230-S5 → 0232-S2 → 0231-S1 → 0233-S1 |
+| `backend/app/decision/adapters/rules.py` | 0231-S1 → 0233-S1 (0230 and 0232 do not edit it) |
+| `backend/app/agent/request_routing.py` | 0231-S1 → 0233-S1 (pass-through only; 0230 and 0232 do not edit it) |
+| `backend/app/config.py` | #649 (landed) → 0228-S1 → 0228-S2 → 0231-S2 → 0233-S1 (0230 and 0232 do not edit it) |
+| `backend/app/api/settings.py` | #649 (landed) → 0231-S2 → 0233-S1 |
+| `backend/app/db/models.py` | #649 (landed) → 0231-S2 → 0233-S3 (0230 and 0232 do not edit it) |
+| `backend/app/api/tasks.py` | #649 (landed) → 0231-S5 → 0233-S3 → 0233-S4 (0230 and 0232 do not edit it) |
+| `backend/app/main.py` | 0230-S0 → 0230-S5 → 0225-S1 → 0225-S2 → 0225-S3 → 0231-S0 → 0231-S5 → 0233-S4 (0232 does not edit it) |
+| `backend/app/agent/task_workflow.py` | #649 (landed, created it) → 0231-S2. 0233 does not edit it |
 | `backend/app/agent/large_prompt_queue.py` | 0231-S5 (creates it) → 0233-S4 |
+| `backend/app/agent/development_worker.py`, `tests/test_rfc0211_development_scheduler.py` | #585 (creates them) → 0233-S3, one line plus one test, only when #585 lands first (§3.4.1) |
 | `backend/app/tools/registry.py` | (#585 if it lands first) → 0233-S4 → 0233-S5 |
 | `backend/app/tools/exposure.py` | (#585 if it lands first) → 0233-S4 |
 | `backend/app/policy/approval_grant.py`, `backend/app/tools/capability.py`, `backend/app/agent/tooling.py` | 0233-S3 only |
 | `frontend/src/api.ts` | 0218-S3 → 0231-S6 → 0233-S6 |
-| `frontend/src/chat/OwnerChatTranscript.tsx`, `frontend/src/pages/Phone.tsx`, `frontend/src/pages/Tools.tsx` | 0233-S6 only (RFC-0231 does not edit them) |
-| `frontend/package.json`, `.github/workflows/pr-tests.yml` | append-only, any order, rebase on conflict |
+| `frontend/src/chat/OwnerChatTranscript.tsx`, `frontend/src/pages/Phone.tsx`, `frontend/src/pages/Tools.tsx` | 0233-S6 only (0230, 0231 and 0232 do not edit them) |
+| `frontend/package.json`, `.github/workflows/pr-tests.yml` | append-only, any order; on a conflict merge `development` in (merge commit) |
 
 ## Ticket cards
 
 | ID | Title | Model | Depends |
 | --- | --- | --- | --- |
-| 0233-S1 | Catalog, capability index, gap rider | Grok 4.5 | 0231-S1, 0232-S2 |
+| 0233-S1 | Catalog, capability index, gap rider | Grok 4.5 | 0232-S2, 0231-S1 |
 | 0233-S2 | Sealed sandbox, evidence guard, broker fetch, audit chain | Grok 4.6 | S1 |
 | 0233-S3 | Proposals, owner approval gate, approval window, runtime trigger | Grok 4.6 | S1, S2, 0225-S3, 0231-S5, 0232-S4 |
 | 0233-S4 | Install child, registration, rollback/uninstall, resume, recovery, API | Grok 4.6 | S3, 0231-S2, 0231-S5 |
