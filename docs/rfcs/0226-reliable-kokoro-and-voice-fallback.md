@@ -4,7 +4,7 @@
 **Priority:** P0 (Taco bug batch 2026-10-17, bug 1)  
 **Queue item:** (none in this PR — Architect may add a master-plan line after land; do not edit `JARVIS_MASTER_PLAN.md` here)  
 **Author:** Jarvis Architect  
-**Date:** 2026-10-20 (re-sliced 2026-10-20: lands on current `development` without drafts #648/#649)
+**Date:** 2026-10-20 (re-sliced 2026-10-20: lands on current `development` without drafts #648/#649; D2 re-review items 1–3 of 2026-10-20 folded in)
 
 **Owner ask (verbatim intent, 2026-10-17):** "Kokoro shows 'FAILED TO LOAD' and only falls back to SAPI as an explicit system voice. Make voice load reliably, with a clean automatic fallback."  
 **Aligns with:** [`ANZU_PRODUCT_NORTH_STAR.md`](../../ANZU_PRODUCT_NORTH_STAR.md) §4 (voice is a primary interface — "It should not sound like a generic operating-system accessibility voice pretending to be an AI."; "The voice should belong to the selected ANZU personality and visual presence."; cites RFC-0092 and RFC-0111), §8 (verify — no fake "loaded"), §19 ("Do expose state when the user needs confidence in what ANZU is doing."; "Do not preserve an inferior implementation solely because an older specification happened to describe it." / "Do preserve the behavioural requirement…"), §20 Q6 ("Can ANZU recover intelligently when the happy path fails?") and Q8.  
@@ -54,13 +54,30 @@ Each fallback engine speaks with exactly one voice; nothing else is ever chosen 
 Rules:
 
 1. **Runtime truth only (probe owned by S2).** An engine joins the chain only after `tts/engines.py::probe_fallback_engine(engine_id)` passes: it synthesizes the phrase "Voice check." with the voice from the table, through the same synthesis function the chain uses, and requires a valid WAV header, duration ≥ 0.3 s and RMS above −50 dBFS (non-silent). Results are cached with a timestamp, re-run on the S1 backoff after a failure, and never run during an utterance. Kokoro keeps its RFC-0111 five-fact verification. `is_piper_available()` (binary/module present) stays as a precondition only; it is no longer sufficient.
-2. **Automatic, never silent.** When a non-primary engine speaks, ANZU (a) logs `tts_synthesis` with `requested_engine`, `actual_engine`, `fallback_reason` (existing log, extended); (b) publishes one `voice_fallback` event on `backend/app/events.py::BUS` per state change (not per utterance) with `{requested, actual, reason, credit}`; (c) updates the fallback state served by `GET /api/voice/status` (below); (d) self-check `household_voice` becomes `degraded` with "Speaking with <Engine> while Kokoro recovers — <reason>"; (e) the frontend consumer (S3) shows the notice with the credit. The notice is **non-blocking**: no modal, no confirmation, speech continues.
+2. **Automatic, never silent.** When a non-primary engine speaks, ANZU (a) logs `tts_synthesis` with `requested_engine`, `actual_engine`, `fallback_reason` (existing log, extended); (b) publishes one `voice_fallback` event on `backend/app/events.py::BUS` per state change (not per utterance), in the bus's own shape (see "`voice_fallback` wire contract" below); (c) updates the fallback state served by `GET /api/voice/status` (below); (d) self-check `household_voice` becomes `degraded` with "Speaking with <Engine> while Kokoro recovers — <reason>"; (e) the frontend consumer (S3) shows the notice with the credit. The notice is **non-blocking**: no modal, no confirmation, speech continues.
 3. **`/api/voice/status` truth (D2 #1, owned by S2).** `workers/voice.py::voice_status()` today hard-codes `fallback_active: False` and reports `actual_engine: None` whenever Kokoro is not ready. It returns instead, from the S2 fallback state: `actual_engine` (engine of the last successful persona synthesis, or the first probed-ready engine of the active chain before any synthesis), `fallback_active` (`actual_engine` ≠ requested primary), `fallback_reason` (plain words, e.g. "Kokoro is still checking its voice", "Kokoro failed: English language model missing"), `fallback_engine_credit` (table above; `null` when not falling back). `tts_ready` is true when any chain engine is ready. The fields live in `tts_runtime` and reach clients as `GET /api/voice/status` → `tts.{actual_engine, fallback_active, fallback_reason, fallback_engine_credit}` through the existing merge in `api/voice.py::get_voice_status` (that file only gains the S1 reload route).
 4. **SAPI is last and labelled (RFC-0092 guarantee kept).** SAPI is reached only when no neural engine passed its probe; SAPI audio is never tagged with the persona's neural `model_id`; `SynthesizedSpeech.engine_id`/`model_id` report `system` / `windows-sapi`; the notice names "Windows SAPI (system voice)". The persona's stored `voice_profile_id` is never rewritten to `windows_natural_en_v1`. Explicitly choosing "Windows natural" as a persona voice stays refused. Unsigned speech (no active profile) and single-engine calls (`synthesize_with_engine(engine_id=...)`) still never fall back.
 5. **Persona switch while Kokoro is verifying or falling back (D2 #5, owned by S2).** `voice_profiles/catalog.py::_profile_is_available` and `persona/named_persona.py::pack_status` treat a Kokoro profile whose assets and package are installed as available while Kokoro is `verifying` or failed-with-a-ready-fallback (status `ok`, availability reason `degraded`). Switching to such a persona succeeds, binds the Kokoro profile unchanged, speaks through the fallback voice, and shows the notice. `tts_unavailable` is returned only when Kokoro assets/package are missing **and** no fallback engine passed its probe.
 6. **Retry / reload.** On Kokoro failure a background re-verify runs with backoff 30 s → 2 min → 10 min (cap), off the event loop and never during an utterance. On success the chain returns to Kokoro and a `voice_fallback` event `{actual: "kokoro", reason: "recovered"}` clears the notice. Owner "Retry Kokoro" forces `reset()` + `verify(force=True)` immediately.
 7. **Pending ≠ failed.** Self-check and the picker distinguish `verifying` ("Kokoro · checking voice…", status `starting`) from `failed` (real `last_error`). Warm start runs `verify_kokoro_runtime_async()` once after pipelines warm.
 8. **Root cause recorded.** S1 writes the confirmed cause and evidence; the fix targets that cause, and `last_error` shown to the owner names it in plain words.
+
+### `voice_fallback` wire contract (normative; D2 re-review #1)
+
+`EventBus.publish` (`backend/app/events.py`) emits exactly `{task_id, kind, title, detail, stage, source, created_at}`. There is no `type` key and no free-form field, and `/api/ws` (`main.py::websocket_endpoint`) forwards that dict unchanged. The signal therefore uses the bus shape, published by S2 as:
+
+```python
+await BUS.publish_ephemeral(
+    "voice",                       # task_id / channel (no TaskEvent row, no task FK)
+    "voice_fallback",              # kind
+    actual_engine,                 # title, e.g. "pocket_tts" or "kokoro"
+    json.dumps({"requested": requested_engine, "actual": actual_engine,
+                "reason": reason, "credit": credit}, ensure_ascii=False),  # detail
+    "voice",                       # stage
+)
+```
+
+so the frame on the socket is `{"task_id": "voice", "kind": "voice_fallback", "title": "<actual>", "detail": "<JSON string {requested, actual, reason, credit}>", "stage": "voice", "source": "jarvis-agent", "created_at": "<ISO>"}` (`source` is `publish_ephemeral`'s default). `publish_ephemeral` (persist=False) is used because the event belongs to no task. Consumers match on **`kind == "voice_fallback"`** only, and parse `detail` with `JSON.parse` inside a try (a malformed `detail` still triggers the status re-read; `GET /api/voice/status` stays the source of truth for what is rendered).
 
 ### Tests retired or inverted by S2 (D2 #6)
 
@@ -144,7 +161,7 @@ Assign order: **S1 → S2 → S3.**
 - [ ] Missing assets / wrong version / pipeline exception → `ready == false`, `last_error` names the specific cause; no code path sets `synthesis_verified` without a produced WAV.
 - [ ] Background re-verify runs on backoff and recovers when the cause is removed (test swaps assets in); it never runs during an active synthesis.
 - [ ] `POST /api/voice/kokoro/reload` returns the new state and is serialized with synthesis (adapter lock).
-- [ ] `tests/test_rfc0111_kokoro_runtime.py` passes unchanged; `tests/test_rfc0092_neural_tts.py` passes (S2 amends only assertions that require "mute on failure", listed by test name in the S2 PR).
+- [ ] `tests/test_rfc0111_kokoro_runtime.py`, `tests/test_rfc0092_neural_tts.py` and `tests/test_uniform_persona_speech.py` pass **unchanged** after S1 (S1 edits none of them). The only later change to the existing RFC-0092 / uniform-persona tests is S2's removal of exactly `test_rfc0092_neural_tts.py:60` and `test_uniform_persona_speech.py:180` (table above); no assertion in any existing test is amended, and replacements live only in new `tests/test_rfc0226_*.py` files.
 
 ### S2 — Fallback chain, real probes, `/api/voice/status` truth, `voice_fallback` signal, persona switch
 
@@ -153,20 +170,21 @@ Assign order: **S1 → S2 → S3.**
 | Path | Why |
 | --- | --- |
 | `backend/app/tts/engines.py` | `engine_chain_for_profile`: tail per the normative chain; `probe_fallback_engine()` (rule 1, real synthesis smoke test, cached); `fallback_chain_for_profile()` filters to probed engines; `FALLBACK_VOICES` table (voice + credit per engine) |
-| `backend/app/tts/synthesize.py` | Fallback synthesis uses the table's voice (`_resolve_piper_onnx(voice="en_US-lessac-medium")`, Pocket `alba`, VoiceStudio `default`); no other implicit voice |
+| `backend/app/tts/synthesize.py` | Second owner after RFC-0225 S2 (its Piper `registered_subprocess` wrapper kept). Fallback synthesis uses the table's voice (`_resolve_piper_onnx(voice="en_US-lessac-medium")`, Pocket `alba`, VoiceStudio `default`); no other implicit voice |
 | `backend/app/workers/voice.py` | Second owner after RFC-0225 S2 (registry wrappers kept). `synthesize_speech_result`: allow the system tail only when the chain reached it; `SynthesizedSpeech` gains `fallback_reason`; `voice_status()` returns real `actual_engine`, `fallback_active`, `fallback_reason`, `fallback_engine_credit` from the fallback state (rule 3); extend `tts_synthesis` log |
-| `backend/app/tts/persona_speech.py` | Persona speech uses the chain (persona primary first); `SpeechRefused` only for an explicitly SAPI persona voice; holds the fallback state and publishes `voice_fallback` on `BUS` on state change |
+| `backend/app/tts/persona_speech.py` | Persona speech uses the chain (persona primary first); `SpeechRefused` only for an explicitly SAPI persona voice; holds the fallback state and publishes `voice_fallback` on `BUS` on state change, exactly per the wire contract (`BUS.publish_ephemeral("voice", "voice_fallback", …)`) |
 | `backend/app/voice_profiles/catalog.py` | `_profile_is_available`: Kokoro profile with installed assets/package is available (`degraded`) while verifying or falling back (rule 5) |
 | `backend/app/persona/named_persona.py` | `pack_status`: same rule; `tts_unavailable` only when Kokoro is missing **and** no fallback passed its probe |
 | `backend/app/systems/self_check.py` | `household_voice`: `ready` / `starting` (verifying) / `degraded` with "Speaking with <Engine> while Kokoro recovers — <reason>" / `missing` |
 | `tests/test_rfc0226_voice_fallback.py` (new), `tests/test_rfc0226_voice_status.py` (new), `tests/test_rfc0226_persona_switch.py` (new) | Below |
-| `tests/test_rfc0092_neural_tts.py`, `tests/test_uniform_persona_speech.py` | **Only** the removal of the two retired tests listed in "Tests retired or inverted by S2" (`:60`, `:180`); every other test in both files unchanged |
+| `frontend/test-fixtures/voice_fallback_event.json` (new) | The exact bus frame of the wire contract (Kokoro → Pocket TTS), shared by the S2 backend test and the S3 JS test |
+| `tests/test_rfc0092_neural_tts.py`, `tests/test_uniform_persona_speech.py` | **Only** the removal of the two retired tests listed in "Tests retired or inverted by S2" (`test_rfc0092_neural_tts.py:60`, `test_uniform_persona_speech.py:180`); no assertion in either file is amended and every other test is byte-identical; replacements live in the new files above |
 
 - [ ] Kokoro failing + Pocket TTS probed → audio from Pocket TTS voice `alba`; `actual_engine == "pocket_tts"`, `fallback_reason` set.
 - [ ] Kokoro + Pocket failing, Piper with `en_US-lessac-medium` present → Piper audio from that voice; Piper binary present but the voice missing or producing silence → probe fails, Piper skipped (fixtures: missing ONNX, all-zero WAV, sub-0.3 s WAV).
 - [ ] Kokoro + all neural engines failing → SAPI audio; `engine_id == "system"`, `model_id == "windows-sapi"`; persona `voice_profile_id` unchanged; notice credit "Windows SAPI (system voice)".
 - [ ] **(D2 #1)** `GET /api/voice/status` while Pocket speaks for a failed Kokoro → `actual_engine: "pocket_tts"`, `fallback_active: true`, `fallback_reason` names the Kokoro cause, `fallback_engine_credit: "Voice: Alba (Kyutai Pocket TTS), CC BY 4.0"`; Kokoro ready → `fallback_active: false`, credit `null`; nothing hard-coded (test flips states).
-- [ ] `voice_fallback` published on `BUS` once per state change (Kokoro→Pocket, Pocket→Kokoro recovered) with `credit`, not per utterance.
+- [ ] `voice_fallback` published on `BUS` once per state change (Kokoro→Pocket, Pocket→Kokoro recovered) with `credit`, not per utterance. **(D2 re-review #1)** `tests/test_rfc0226_voice_fallback.py::test_voice_fallback_event_exact_bus_payload`: a `BUS.subscribe()` queue receives a dict whose keys are exactly `{task_id, kind, title, detail, stage, source, created_at}`, with `task_id == "voice"`, `kind == "voice_fallback"`, `title == "pocket_tts"`, `stage == "voice"`, `source == "jarvis-agent"`, `json.loads(detail) == {"requested": "kokoro", "actual": "pocket_tts", "reason": <reason>, "credit": "Voice: Alba (Kyutai Pocket TTS), CC BY 4.0"}`, no `type` key, and no `TaskEvent` row written. The test also asserts that this dict equals the committed fixture `frontend/test-fixtures/voice_fallback_event.json` (every key and value except `created_at`, which must parse as ISO 8601), so a bus-shape change fails both the backend and the JS test.
 - [ ] **(D2 #5)** Switching to a Kokoro persona while Kokoro is `verifying` → switch succeeds (no `tts_unavailable`), next line speaks via the fallback, status shows the notice fields; same while Kokoro is failed with Pocket ready; Kokoro assets missing and no fallback probed → `tts_unavailable` as today.
 - [ ] Self-check never reports `ready` while a fallback engine is speaking; detail names the engine and reason.
 - [ ] Explicit persona voice = `windows_natural_en_v1` still refused; exact-profile preview (RFC-0112) does not fall back; unsigned speech still refused (kept tests green).
@@ -178,17 +196,17 @@ Assign order: **S1 → S2 → S3.**
 
 | Path | Why |
 | --- | --- |
-| `frontend/src/tts/voiceFallback.ts` (new) | **The `voice_fallback` consumer (D2 #2):** opens `/api/ws` through `getAuthUrl("/api/ws")` (same auth helper the EventSource streams use), filters `type == "voice_fallback"`, and on each event re-reads `GET /api/voice/status`; if the socket closes it polls `/api/voice/status` every 15 s until it reconnects; exposes `useVoiceFallback()` → `{active, actualEngine, reason, credit}` |
+| `frontend/src/tts/voiceFallback.ts` (new) | **The `voice_fallback` consumer (D2 #2):** opens `/api/ws` through `getAuthUrl("/api/ws")` (same auth helper the EventSource streams use), filters on **`kind == "voice_fallback"`** (the bus has no `type` key; wire contract above), and on each event re-reads `GET /api/voice/status`; if the socket closes it polls `/api/voice/status` every 15 s until it reconnects; exposes `useVoiceFallback()` → `{active, actualEngine, reason, credit}` |
 | `frontend/src/tts/VoiceProfilePicker.tsx` | Status line: `verifying` text; "Speaking with <Engine> meanwhile · <credit>" suffix from `useVoiceFallback()`; "Retry Kokoro" button → `POST /api/voice/kokoro/reload` with pending/result state; updated honesty sentence |
 | `frontend/src/hud/VoiceFallbackNotice.tsx` (new) | Non-blocking, dismissible HUD chip "Speaking with <Engine> while Kokoro recovers · <credit>" while `active`; dismiss hides it until the next state change |
 | `frontend/src/hud/HudShell.tsx` | One mount line for `<VoiceFallbackNotice />` (second owner after RFC-0225 S4; existing mounts untouched) |
-| `frontend/voice-fallback-notice.test.mjs` (new); `frontend/package.json` (`test:voice-fallback-notice`, one line); `.github/workflows/pr-tests.yml` (one append-only `frontend-build` step `- name: Voice fallback notice tests (RFC-0226 S3)` / `run: npm run test:voice-fallback-notice`) | Below |
+| `frontend/voice-fallback-notice.test.mjs` (new; reads S2's `frontend/test-fixtures/voice_fallback_event.json`, not edited here); `frontend/package.json` (`test:voice-fallback-notice`, one line); `.github/workflows/pr-tests.yml` (one append-only `frontend-build` step `- name: Voice fallback notice tests (RFC-0226 S3)` / `run: npm run test:voice-fallback-notice`) | Below |
 
 `frontend/src/settings/VoiceSettingsPane.tsx` is **not** edited (it renders the picker, which carries the status line).
 
 - [ ] Kokoro failing + fallback speaking → picker shows the real error **and** "Speaking with Pocket TTS meanwhile · Voice: Alba (Kyutai Pocket TTS), CC BY 4.0"; HUD chip shows the same; no modal, chat unaffected.
 - [ ] **(D2 #3)** The CC BY 4.0 Alba credit text is rendered whenever Pocket TTS is the fallback (picker and HUD; JS test).
-- [ ] **(D2 #2)** A `voice_fallback` message on the socket triggers a status re-read and updates picker + chip; socket closed → 15 s polling keeps them current (JS test with fake socket/timers); `Kokoro recovered` event clears both.
+- [ ] **(D2 #2, re-review #1)** A `voice_fallback` message on the socket triggers a status re-read and updates picker + chip; socket closed → 15 s polling keeps them current (JS test with fake socket/timers); `Kokoro recovered` event clears both. The JS test feeds the exact bus dict from `frontend/test-fixtures/voice_fallback_event.json` (S2's golden file): that frame triggers the re-read; the same frame with `kind` changed (e.g. `model_switch`) does not; a frame carrying `type: "voice_fallback"` but another `kind` does not; a frame with malformed `detail` still triggers the re-read.
 - [ ] "Retry Kokoro" shows working state, then READY or the new error; double-click does not queue two reloads.
 - [ ] Verifying state shows "checking voice…", never "FAILED TO LOAD".
 - [ ] Every existing control (select, preview, install, Install household voice) still present and working — PR includes the preserved-behaviour section.
@@ -213,7 +231,7 @@ Assign order: **S1 → S2 → S3.**
 
 ## Likely files
 
-See ownership tables. Cross-RFC chains (sequential): `backend/app/workers/voice.py` RFC-0225 S2 → 0226-S2; `frontend/src/hud/HudShell.tsx` RFC-0225 S4 → 0226-S3. No other file here is owned by another RFC of the batch.
+See ownership tables. Cross-RFC chains (sequential): `backend/app/workers/voice.py` RFC-0225 S2 → 0226-S2; `backend/app/tts/synthesize.py` RFC-0225 S2 → 0226-S2 (shared: 0225-S2 registers the Piper subprocess, 0226-S2 pins the fallback voices); `frontend/src/hud/HudShell.tsx` RFC-0225 S4 → 0226-S3. No other file here is owned by another RFC of the batch. Within this RFC: `frontend/test-fixtures/voice_fallback_event.json` 0226-S2 (creates) → 0226-S3 (reads only).
 
 `frontend/package.json` and `.github/workflows/pr-tests.yml` are shared by every frontend ticket in the 2026-10-17 batch: each ticket adds exactly one `test:*` script line and one `frontend-build` step (append-only hunks, trivial rebase) and touches nothing else in those files.
 
