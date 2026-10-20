@@ -10,17 +10,18 @@ from .base import RiskLevel, Tool, ToolResult
 class ReadIngressTool(Tool):
     name = "read_ingress"
     description = (
-        "Read an exact slice of this task's long owner message by blob id and character offset. "
-        "Use when the condensed task brief lacks a precise detail."
+        "Read an exact slice of this task's owner message by blob_id, or a completed "
+        "task prompt result by prompt_step ordinal. Use when the compact brief lacks a precise detail."
     )
     parameters = {
         "type": "object",
         "properties": {
             "blob_id": {"type": "string", "description": "Stored input id shown in the task brief."},
+            "prompt_step": {"type": "integer", "minimum": 1, "description": "Read this completed stage's full result instead of a blob."},
             "offset": {"type": "integer", "minimum": 0, "description": "Zero-based character offset."},
             "limit": {"type": "integer", "minimum": 1, "maximum": 4000, "description": "Characters to read (max 4000)."},
         },
-        "required": ["blob_id", "offset"],
+        "required": ["offset"],
     }
     risk = RiskLevel.LOW
 
@@ -28,6 +29,31 @@ class ReadIngressTool(Tool):
         from ..memory.ingress_spill import get_ingress_blob, list_ingress_chunks, read_ingress
 
         task_id = str(kwargs.get("_task_id") or "").strip()
+        if kwargs.get("prompt_step") is not None:
+            if not task_id:
+                return ToolResult(False, "", error="A current task is required")
+            try:
+                ordinal = int(kwargs["prompt_step"])
+                offset = max(0, int(kwargs.get("offset") or 0))
+                limit = max(1, min(4000, int(kwargs.get("limit") or 3000)))
+            except (ValueError, TypeError):
+                return ToolResult(False, "", error="prompt_step, offset and limit must be integers")
+            from sqlalchemy import select
+            from ..db.models import TaskPromptStep
+            from ..db.session import SessionLocal
+            async with SessionLocal() as session:
+                row = await session.scalar(select(TaskPromptStep).where(
+                    TaskPromptStep.task_id == task_id, TaskPromptStep.ordinal == ordinal,
+                    TaskPromptStep.status == "completed"))
+                if row is None:
+                    return ToolResult(False, "", error="Completed prompt result is unavailable for this task")
+                result = row.result or ""
+            part = result[offset:offset + limit]
+            next_offset = offset + len(part)
+            more = next_offset < len(result)
+            return ToolResult(True, f"Stored prompt {ordinal} result chars {offset}-{next_offset}; "
+                              f"next_offset={next_offset}; has_more={more}\n{part}",
+                              data={"prompt_step": ordinal, "next_offset": next_offset, "has_more": more})
         blob_id = str(kwargs.get("blob_id") or "").strip()
         if not task_id or not blob_id:
             return ToolResult(False, "", error="A current task and blob id are required")

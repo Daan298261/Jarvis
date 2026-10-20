@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -11,6 +12,8 @@ from typing import Any
 from . import provision, store
 from .skill import guide
 from .artifacts import BUILTIN_SCHEMAS
+
+logger = logging.getLogger(__name__)
 
 # Admission is independent of descriptions or untrusted MCP annotations.
 STATIC_OPERATIONS = frozenset("""
@@ -36,6 +39,8 @@ capture_process_scenario capture_browser_scenario capture_electron_scenario
 run_controlled_replay prepare_node_characterization execute_node_characterization
 android_capture
 """.split())
+# Close/cancel waits this long for a running FFS ingest thread to exit before returning.
+FFS_STOP_WAIT_SECONDS = 30.0
 
 
 def approval_target(arguments: dict) -> str:
@@ -148,6 +153,8 @@ class Investigations:
         self.sessions: dict[str, SessionActor] = {}
         self.locks: dict[str, asyncio.Lock] = {}
         self.active: dict[str, asyncio.Task] = {}
+        # Strong references keep background FFS ingests alive until they finish.
+        self.ingest_tasks: set[asyncio.Task] = set()
 
     async def actor(self, ident: str) -> SessionActor:
         actor = self.sessions.get(ident)
@@ -200,21 +207,65 @@ class Investigations:
         task_id: str | None = None,
         investigation_id: str | None = None,
         source_type: str = "auto",
-        checkpoint_interval: int = 1,
+        checkpoint_interval: int | None = None,
         stop_after: int | None = None,
+        background: bool = False,
     ) -> dict:
-        from .ffs_ingest import FFSIngest
-        ingest_svc = FFSIngest(
+        """RFC-0208 FFS ingest. ``background`` returns the admitted row at once and keeps
+        the ingest running as this investigation's active work (close/cancel stop it)."""
+        from . import ffs_ingest
+        if investigation_id:
+            self.owned(investigation_id, task_id)
+            if ffs_ingest.running(investigation_id):
+                raise RuntimeError("An FFS ingest is already running for this investigation")
+        ingest_svc = ffs_ingest.FFSIngest(
             source=source,
             investigation_id=investigation_id,
             task_id=task_id,
             question=question,
             source_type=source_type,
-            checkpoint_interval=checkpoint_interval,
+            checkpoint_interval=checkpoint_interval or ffs_ingest.DEFAULT_CHECKPOINT_INTERVAL,
             allowed_directories=allowed,
             stop_after=stop_after,
         )
-        return await ingest_svc.run()
+        row = await asyncio.to_thread(ingest_svc.prepare_investigation)
+        if not background:
+            return await ingest_svc.run()
+        ident = row["id"]
+
+        async def work():
+            try:
+                await ingest_svc.run()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # The row already carries status=interrupted and last_error for the owner.
+                logger.exception("Background FFS ingest failed for investigation %s", ident)
+            finally:
+                if self.active.get(ident) is task:
+                    self.active.pop(ident, None)
+
+        task = asyncio.create_task(work())
+        self.active[ident] = task
+        self.ingest_tasks.add(task)
+        task.add_done_callback(self.ingest_tasks.discard)
+        return {**row, "ingest": "started"}
+
+    def ingest_status(self, ident: str, task_id: str | None) -> dict:
+        from . import ffs_ingest
+        row = self.owned(ident, task_id)
+        return {"id": ident, "status": row.get("status"), "running": ffs_ingest.running(ident),
+                "ffs": row.get("ffs"), "progress": row.get("progress"), "evidence": row.get("evidence", []),
+                "unknowns": row.get("unknowns", []), "last_error": row.get("last_error")}
+
+    async def ffs_query(self, ident: str, task_id: str | None, arguments: dict) -> dict:
+        from . import ffs_ingest
+        self.owned(ident, task_id)
+        allowed = {"path_contains", "suffix", "type_contains", "offset", "limit"}
+        unknown = set(arguments) - allowed
+        if unknown:
+            raise ValueError(f"Unsupported ffs_query arguments: {sorted(unknown)}")
+        return await asyncio.to_thread(ffs_ingest.query_index, ident, **arguments)
 
     async def catalog(self, ident: str, task_id: str | None, operation: str = "") -> dict:
         row = self.owned(ident, task_id)
@@ -222,8 +273,16 @@ class Investigations:
             raise ValueError("Investigation is closed")
         if row["kind"] == "source":
             return {"operations": [], "workflow": "Use normal repository tools; source evidence may be recorded with action=record_source."}
-        if row["kind"] == "forensic":
-            return {"operations": [], "workflow": "Forensic image investigation: files indexed with cryptographic hashes and chain of custody."}
+        from .ffs_ingest import FFS_KINDS
+        if row["kind"] in FFS_KINDS:
+            return {"operations": [], "workflow": (
+                "FFS dump investigation (RFC-0208): the dump is indexed read-only in index/files.ndjson "
+                "(path, bytes, sha256, mtime, magic_hex, type). Use reverse_engineer action=ingest_status for "
+                "progress, action=ffs_query (path_contains/suffix/type_contains/offset/limit) to find files, "
+                "action=evidence for the ffs_ingest index evidence and the ffs_tab_profile (.tab entropy/header, "
+                "AT\\x00\\x02 container census with key ids and XOR-text candidates) "
+                "evidence, and action=report citing those evidence IDs. To analyze an APK found in a folder dump, "
+                "prepare it through POST /api/investigations/apk/prepare with source_type=ffs.")}
         actor = await self.actor(ident)
         tools = {k: v for k, v in actor.tools.items() if k in STATIC_OPERATIONS | RUNTIME_OPERATIONS}
         tools.update(BUILTIN_SCHEMAS)
@@ -279,6 +338,11 @@ class Investigations:
             row = self.owned(ident, task_id)
             if row["status"] in {"cancelled", "closed"}:
                 raise ValueError("Investigation is closed; prepare a new target")
+            from .ffs_ingest import FFS_KINDS
+            if row["kind"] in FFS_KINDS:
+                # The snapshot is the evidence dump itself: no provider may open, extract or copy it.
+                raise ValueError("FFS investigations have no provider operations; use ingest_status, "
+                                 "ffs_query, evidence and report")
             await asyncio.to_thread(store.validate_snapshot, row)
             from .apk_sidecar import CATALOG as APK_CATALOG
             if operation == "android_decompile" and row.get("apk"):
@@ -402,7 +466,11 @@ class Investigations:
                                                         "text": "\n".join(lines[start-1:end])})
 
     async def close(self, ident: str, task_id: str | None, cancelled=False) -> dict:
+        from . import ffs_ingest
         self.owned(ident, task_id)
+        # A running FFS ingest stops at its next block and checkpoints; owner close/cancel is final
+        # (status stays closed/cancelled, the ingest is not resumable).
+        ffs_ingest.cancel(ident)
         active = self.active.get(ident)
         if active and active is not asyncio.current_task():
             active.cancel()
@@ -410,14 +478,17 @@ class Investigations:
         actor = self.sessions.pop(ident, None)
         if actor:
             await actor.close(cancel=cancelled)
-        # Re-read after an interrupted call persisted its state.
+        # Re-read after an interrupted call persisted its state. The FFS ingest thread may still
+        # be inside a block; its guarded saves never downgrade this terminal status.
         async with self.locks.setdefault(ident, asyncio.Lock()):
-            row = store.load(ident)
-            row["status"] = "cancelled" if cancelled else "closed"
-            return store.save(row)
+            await asyncio.to_thread(store.set_status, ident, "cancelled" if cancelled else "closed")
+        await asyncio.to_thread(ffs_ingest.wait_stopped, ident, FFS_STOP_WAIT_SECONDS)
+        return store.load(ident)
 
     async def release_task(self, task_id: str, cancelled=False):
+        from . import ffs_ingest
         for row in store.list_rows(task_id):
+            ffs_ingest.cancel(row["id"])
             active = self.active.get(row["id"])
             if active and active is not asyncio.current_task():
                 active.cancel()
@@ -426,11 +497,14 @@ class Investigations:
             if actor:
                 await actor.close(cancel=True)
             if cancelled and row["status"] not in {"reported", "partial", "closed", "cancelled"}:
-                current = store.load(row["id"])
-                current["status"] = "cancelled"
-                store.save(current)
+                await asyncio.to_thread(store.set_status, row["id"], "cancelled",
+                                        {"reported", "partial", *store.TERMINAL_STATUSES})
+            await asyncio.to_thread(ffs_ingest.wait_stopped, row["id"], FFS_STOP_WAIT_SECONDS)
 
     async def shutdown(self):
+        from . import ffs_ingest
+        for ident in list(self.active):
+            ffs_ingest.cancel(ident)
         active = [t for t in self.active.values() if t is not asyncio.current_task()]
         for task in active:
             task.cancel()

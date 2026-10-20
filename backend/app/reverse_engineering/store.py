@@ -6,17 +6,22 @@ import os
 import re
 import shutil
 import stat
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..config import data_dir
-from ..tools.safety import resolve_allowed_path
+from ..config import LOCAL_NETWORK_SCOPE, data_dir
+from ..tools.safety import _is_unc_path, path_is_under_root, reject_unsafe_path_text, resolve_allowed_path
 from .privacy import private_directory
 
 _ID = re.compile(r"^[a-f0-9]{32}$")
 MAX_FILES = 50000
 MAX_BYTES = 8 * 1024**3
+# Owner decisions that no background writer may downgrade (RFC-0201 close/cancel).
+TERMINAL_STATUSES = frozenset({"closed", "cancelled"})
+_ROW_LOCKS: dict[str, threading.Lock] = {}
+_ROW_LOCKS_GUARD = threading.Lock()
 
 
 def root() -> Path:
@@ -49,6 +54,40 @@ def save(row: dict) -> dict:
     row["updated_at"] = datetime.now(timezone.utc).isoformat()
     atomic_json(directory(row["id"]) / "investigation.json", row)
     return row
+
+
+def row_lock(ident: str) -> threading.Lock:
+    """Per-investigation lock serializing status read-modify-writes across threads."""
+    with _ROW_LOCKS_GUARD:
+        return _ROW_LOCKS.setdefault(ident, threading.Lock())
+
+
+def save_guarded(row: dict) -> bool:
+    """Save ``row`` but never downgrade a closed/cancelled status already on disk.
+
+    Background writers (the FFS ingest thread) hold a stale in-memory row; the owner's
+    close/cancel wins. Returns True when the stored status is terminal, so the caller stops.
+    """
+    with row_lock(row["id"]):
+        try:
+            current = load(row["id"]).get("status")
+        except FileNotFoundError:
+            current = None
+        terminal = current in TERMINAL_STATUSES
+        if terminal:
+            row["status"] = current
+        save(row)
+        return terminal
+
+
+def set_status(ident: str, status: str, unless: frozenset[str] | set[str] = frozenset()) -> dict:
+    """Atomically set ``status`` (re-reading the row) unless the stored status is in ``unless``."""
+    with row_lock(ident):
+        row = load(ident)
+        if row.get("status") in unless:
+            return row
+        row["status"] = status
+        return save(row)
 
 
 def list_rows(task_id: str | None = None) -> list[dict]:
@@ -174,8 +213,164 @@ def prepare(target: str, question: str, allowed: list[str], task_id: str | None)
         raise
 
 
+FFS_OUTSIDE_ALLOWED = "Path is outside allowed directories"
+
+
+def _ffs_admit_lexically(target: str, allowed: list[str]) -> None:
+    """Allow-list gate for :func:`prepare_ffs` that runs before any filesystem probe of the target.
+
+    The target is judged by its lexical absolute form (``~`` expanded, ``..`` collapsed, no
+    link followed, no stat), so every path outside the allowed folders raises the same
+    ``PermissionError(FFS_OUTSIDE_ALLOWED)`` whether it exists, is missing, or is a link.
+    Allowed roots are matched both as written and as their realpath (owner config, not the target).
+    """
+    raw = reject_unsafe_path_text(target)
+    if _is_unc_path(raw):
+        try:
+            resolve_allowed_path(raw, allowed)  # lexical for UNC paths; never contacts the share
+        except PermissionError as exc:
+            raise PermissionError(FFS_OUTSIDE_ALLOWED) from exc
+        return
+    if not allowed:
+        raise PermissionError("No workspace directories are configured")
+    candidate = os.path.normcase(os.path.abspath(os.path.expanduser(raw)))
+    for root in allowed:
+        root = str(root or "")
+        if not root or root == LOCAL_NETWORK_SCOPE or "\x00" in root:
+            continue
+        expanded = os.path.expanduser(root)
+        for base in {os.path.normcase(os.path.abspath(expanded)), os.path.normcase(os.path.realpath(expanded))}:
+            try:
+                if os.path.commonpath((base, candidate)) == base:
+                    return
+            except ValueError:
+                continue
+    raise PermissionError(FFS_OUTSIDE_ALLOWED)
+
+
+def _ffs_admit_real_parent(target: str, allowed: list[str]) -> None:
+    """Second gate, after :func:`_ffs_admit_lexically` and before any probe of the final component.
+
+    An in-list linked folder can point outside (``allowed/linkdir -> /outside``), so the parent's
+    real path must be inside the allowed folders too; otherwise the leaf's link/exists probe would
+    run on the outside path. Same fixed ``PermissionError`` as the lexical gate. The target being an
+    allowed root itself needs no parent check. UNC targets stay lexical (the share is never contacted).
+
+    The parent is taken from the path *as typed* (``..`` not collapsed) and resolved with
+    ``realpath``, which, like the OS, follows a link before applying a later ``..``:
+    ``allowed/linkdir/../leaf`` is judged by ``realpath("allowed/linkdir/..")``, not by ``allowed/``.
+    A target whose last component is ``.``/``..`` is judged by its own real path.
+    """
+    raw = reject_unsafe_path_text(target)
+    if _is_unc_path(raw):
+        return
+    expanded = os.path.expanduser(raw)
+    as_typed = expanded if os.path.isabs(expanded) else os.path.join(os.getcwd(), expanded)
+    stripped = as_typed.rstrip("/\\") or as_typed
+    head, leaf = os.path.split(stripped)
+    # The leaf itself is not followed: its parent's real path plus its own name.
+    target_in_real_parent = os.path.normcase(os.path.join(os.path.realpath(head), leaf))
+    for root in allowed:
+        root = str(root or "")
+        if not root or root == LOCAL_NETWORK_SCOPE or "\x00" in root:
+            continue
+        if leaf in {"", ".", ".."}:
+            if path_is_under_root(stripped, root):
+                return
+            continue
+        root_abs = os.path.abspath(os.path.expanduser(root))
+        root_forms = {os.path.normcase(os.path.realpath(root_abs)),
+                      os.path.normcase(os.path.join(os.path.realpath(os.path.dirname(root_abs)),
+                                                    os.path.basename(root_abs)))}
+        if target_in_real_parent in root_forms:
+            return  # the allowed root itself (its parent is outside by definition)
+        if path_is_under_root(head, root):
+            return
+    raise PermissionError(FFS_OUTSIDE_ALLOWED)
+
+
+def prepare_ffs(target: str, question: str, allowed: list[str] | None, task_id: str | None, *,
+                source_type: str = "auto", investigation_id: str | None = None) -> dict:
+    """RFC-0208: prepare (or adopt) a ``kind == "ffs"`` investigation for a full file-system dump.
+
+    Unlike :func:`prepare` nothing is copied and no size cap applies: the original dump path
+    is referenced read-only as the snapshot. ``allowed`` is the owner's allowed-directory
+    list (an empty list admits nothing); ``None`` is reserved for trusted in-process callers.
+    Adopting a closed/cancelled investigation, or one that references another dump, is refused.
+    """
+    from . import ffs_ingest
+
+    if allowed is not None:
+        # Allow-list first, on the lexical path only: nothing about an outside target (exists,
+        # missing, link) may change the answer, so the caller cannot probe outside the folders.
+        _ffs_admit_lexically(target, allowed)
+        _ffs_admit_real_parent(target, allowed)
+    raw = Path(target).expanduser()
+    if raw.is_symlink() or (raw.exists() and getattr(raw.lstat(), "st_file_attributes", 0) & 0x400):
+        raise PermissionError("Linked/reparse target is not admitted")
+    if allowed is not None:
+        try:
+            # Still enforce the realpath check, so a linked parent folder cannot escape the list.
+            source = resolve_allowed_path(target, allowed)
+        except PermissionError as exc:
+            raise PermissionError(FFS_OUTSIDE_ALLOWED) from exc
+    else:
+        source = raw.resolve()
+    if not source.exists():
+        raise FileNotFoundError(f"Source target does not exist: {source}")
+    stype = source_type if source_type != "auto" else ffs_ingest.detect_source_type(source)
+    if stype not in {"folder", "zip", "tar", "raw"}:
+        raise ValueError(f"Unknown source_type: {stype}")
+    if (stype == "folder") != source.is_dir():
+        raise ValueError(f"source_type {stype!r} does not match the target {source}")
+    if investigation_id is None:
+        ident = uuid.uuid4().hex
+        workspace = directory(ident)
+        private_directory(workspace)
+        row: dict = {"id": ident, "task_id": task_id, "question": question or ffs_ingest.DEFAULT_QUESTION,
+                     "evidence": [], "findings": [], "unknowns": [], "chain_of_custody": [],
+                     "created_at": datetime.now(timezone.utc).isoformat()}
+    else:
+        row = load(investigation_id)
+        if row.get("status") in TERMINAL_STATUSES:
+            raise ValueError("Investigation is closed; prepare a new FFS ingest")
+        if row.get("kind") == ffs_ingest.KIND and row.get("target") and row["target"] != str(source):
+            raise ValueError("This FFS investigation already references a different dump; prepare a new one")
+    row.setdefault("evidence", [])
+    row.setdefault("unknowns", [])
+    row.setdefault("chain_of_custody", [])
+    # The dump itself is the snapshot: referenced in place, read-only, never copied.
+    row.update(target=str(source), kind=ffs_ingest.KIND, source_type=stype, snapshot=str(source))
+    if not any(e.get("event") == "source_admitted" for e in row["chain_of_custody"]):
+        row["chain_of_custody"].append(ffs_ingest.make_chain_of_custody_entry(
+            "source_admitted", source,
+            f"FFS dump admitted for read-only, non-copying ingest ({stype}); referenced in place as the snapshot.",
+            metadata={"source_stat": ffs_ingest.source_stat(source)},
+            entry_index=len(row["chain_of_custody"]) + 1,
+        ))
+    if row.get("status") != "completed":
+        row["status"] = "prepared"
+        row.setdefault("ffs", {"status": "prepared", "files_indexed": 0, "bytes_indexed": 0,
+                               "last_path": None, "updated_at": datetime.now(timezone.utc).isoformat(),
+                               "unknowns": []})
+        row.setdefault("progress", ffs_ingest._progress("prepared", 0, 0, None, None, None, False))
+    idx = directory(row["id"]) / ffs_ingest.INDEX_DIR
+    idx.mkdir(mode=0o700, parents=True, exist_ok=True)
+    custody_path = idx / ffs_ingest.CUSTODY_FILE
+    if not custody_path.is_file():
+        atomic_json(custody_path, {
+            "investigation_id": row["id"], "source": str(source), "source_kind": stype,
+            "task_id": row.get("task_id"), "tool_version": ffs_ingest.TOOL_VERSION,
+            "source_stat_at_admission": ffs_ingest.source_stat(source), "sessions": [],
+            "source_sha256": None, "manifest": None,
+        })
+    return save(row)
+
+
 def validate_snapshot(row: dict) -> None:
-    if row["kind"] not in {"browser", "forensic"} and row.get("snapshot") and fingerprint(Path(row["snapshot"]))[0] != row["sha256"]:
+    from .ffs_ingest import FFS_KINDS
+    # FFS snapshots are the dump itself; the ingest's own change detection covers them.
+    if row["kind"] not in {"browser", *FFS_KINDS} and row.get("snapshot") and fingerprint(Path(row["snapshot"]))[0] != row["sha256"]:
         raise ValueError("Analysis snapshot changed; prepare a new investigation")
 
 
@@ -189,10 +384,14 @@ def write_report(row: dict, findings: list[dict], unknowns: list[str]) -> dict:
         refs = finding.get("evidence_ids") or []
         if not refs or any(ref not in ids for ref in refs):
             raise ValueError("Every finding must cite saved evidence IDs")
+    identity = row.get("sha256") or "live browser; capture-specific identity"
+    from .ffs_ingest import FFS_KINDS
+    if row.get("kind") in FFS_KINDS:
+        identity, unknowns = _ffs_identity_and_unknowns(row, unknowns)
     row.update(findings=findings, unknowns=unknowns,
                status="partial" if unknowns else "reported")
     lines = [f"# Investigation: {row['question']}", "", f"Target: {row['target']}",
-             f"Identity: {row.get('sha256') or 'live browser; capture-specific identity'}", ""]
+             f"Identity: {identity}", ""]
     for item in findings:
         lines.extend([f"- **{item['kind']}**: {item['claim']} [{', '.join(item['evidence_ids'])}]",
                       f"  Limitations: {item.get('limitations') or 'See cited evidence coverage.'}"])
@@ -206,3 +405,27 @@ def write_report(row: dict, findings: list[dict], unknowns: list[str]) -> dict:
     save(row)
     atomic_json(directory(row["id"]) / "report.json", row)
     return row
+
+
+def _ffs_identity_and_unknowns(row: dict, unknowns: list[str]) -> tuple[str, list[str]]:
+    """FFS reports cite the sealed manifest digest and keep every declared ingest unknown (RFC-0201)."""
+    from . import ffs_ingest
+    ffs = row.get("ffs") or {}
+    declared = list(ffs.get("unknowns") or [])
+    custody_path = directory(row["id"]) / ffs_ingest.INDEX_DIR / ffs_ingest.CUSTODY_FILE
+    try:
+        sealed = json.loads(custody_path.read_text(encoding="utf-8")).get("source_sha256")
+    except (OSError, ValueError):
+        sealed = None
+    if ffs.get("status") == "completed" and sealed:
+        identity = f"FFS manifest SHA-256 {sealed} (index/files.ndjson, chain of custody in index/custody.json)"
+    else:
+        identity = "FFS index not sealed; no manifest digest (ingest incomplete)"
+        if ffs:
+            declared.append(f"The FFS ingest is {ffs.get('status') or 'not started'} with "
+                            f"{int(ffs.get('files_indexed') or 0)} file(s) indexed; the index is incomplete "
+                            "and coverage of the dump is partial.")
+        else:
+            declared.append("Legacy forensic ingest without an RFC-0208 NDJSON index or sealed manifest; "
+                            "coverage of the dump is unverified.")
+    return identity, list(dict.fromkeys([*declared, *unknowns]))

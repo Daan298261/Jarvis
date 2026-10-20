@@ -40,6 +40,23 @@ def guide(kind: str) -> str:
             "Source text establishes static behavior; target execution requires separate approval. "
             "Do not call REA readiness or native provider operations for ordinary source targets."
         )
+    from .ffs_ingest import FFS_KINDS
+    if kind in FFS_KINDS:
+        return (
+            "This target is a full file-system (FFS) dump ingested read-only under RFC-0208; it was not copied. "
+            "Check progress with reverse_engineer action=ingest_status, investigation_id=<id> (action=ingest resumes "
+            "an interrupted ingest). Find files with action=ffs_query, arguments={path_contains, suffix, type_contains, "
+            "offset, limit}; every index line carries path, bytes, sha256, mtime, magic_hex and type. "
+            "On completion two evidence records exist: ffs_ingest (index summary, manifest SHA-256, unknowns) and "
+            "ffs_tab_profile (.tab entropy classes, header prefixes, per-file entropy, and summary.container_census: "
+            "Autel AT\\x00\\x02 container fields (tag, table_type, body_transform keyed/plain, record_count, key_id), "
+            "key_id groups with each group's dominant body byte, and single-byte-XOR text candidates; per-file rows "
+            "carry the parsed container. These field names are observations from dumps, not vendor documentation, "
+            "so cite them as such). Read them with action=evidence "
+            "and report with findings citing those IDs. High entropy is consistent with encryption or compression; "
+            "say which you cannot distinguish. The report keeps the ingest unknowns and cites the sealed manifest "
+            "SHA-256 automatically; add your own unanswered questions as unknowns."
+        )
     names = {
         "native": "native-and-artifacts.md", "managed": "native-and-artifacts.md",
         "archive": "native-and-artifacts.md", "mobile": "native-and-artifacts.md",

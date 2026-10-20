@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import logging
 from typing import Literal
 
 from fastapi import APIRouter
@@ -18,6 +21,37 @@ from ..inference.backends import suggested_port
 from ..tools.registry import REGISTRY
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+_front_reconfigure_task: asyncio.Task | None = None
+_front_revision = 0
+
+
+async def stop_front_reconfigure() -> None:
+    global _front_reconfigure_task
+    if _front_reconfigure_task and not _front_reconfigure_task.done():
+        _front_reconfigure_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _front_reconfigure_task
+    _front_reconfigure_task = None
+
+
+def _schedule_front_reconfigure() -> None:
+    global _front_reconfigure_task, _front_revision
+    _front_revision += 1
+    if _front_reconfigure_task and not _front_reconfigure_task.done():
+        return
+
+    async def apply_latest():
+        from ..inference.front_runtime import FRONT_RUNTIME
+        while True:
+            revision = _front_revision
+            try:
+                await FRONT_RUNTIME.ensure_started(load_settings())
+            except Exception:
+                logging.getLogger(__name__).exception("Front reconfiguration failed")
+            if revision == _front_revision:
+                return
+
+    _front_reconfigure_task = asyncio.create_task(apply_latest())
 
 
 class SettingsUpdate(BaseModel):
@@ -35,6 +69,7 @@ class SettingsUpdate(BaseModel):
     backup_enabled: bool | None = None
     profile: str | None = None
     execution_mode: str | None = None
+    large_task_reviews: bool | None = None
     inference_backend: str | None = None
     inference_host: str | None = None
     inference_port: int | None = None
@@ -159,7 +194,12 @@ async def get_settings():
 
 @router.put("")
 async def update_settings(body: SettingsUpdate):
+    # Only runtime-affecting front choices need a background restart. Worker
+    # selection and unrelated UI saves must never restart the conversational seat.
+    front_runtime_keys = ("enabled", "profile", "model", "device", "placement", "placement_policy",
+                          "remote_base_url", "remote_api_key", "prompt_cache")
     settings = load_settings()
+    previous_front = tuple(getattr(settings.front_responder, k) for k in front_runtime_keys)
     if body.autonomy is not None:
         settings.autonomy = body.autonomy
     if body.allowed_directories is not None:
@@ -197,6 +237,8 @@ async def update_settings(body: SettingsUpdate):
         settings.inference.profile = body.profile
     if body.execution_mode is not None:
         settings.execution_mode = body.execution_mode
+    if body.large_task_reviews is not None:
+        settings.large_task_reviews = body.large_task_reviews
     if body.inference_backend is not None:
         settings.inference.backend = body.inference_backend
         if body.inference_port is None:
@@ -381,4 +423,6 @@ async def update_settings(body: SettingsUpdate):
 
     save_settings(settings)
     REGISTRY.apply_settings(settings)
+    if previous_front != tuple(getattr(settings.front_responder, k) for k in front_runtime_keys):
+        _schedule_front_reconfigure()
     return settings.model_dump()

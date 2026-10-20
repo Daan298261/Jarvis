@@ -49,6 +49,7 @@ COMPONENT_IDS = (
     "vision_projector",
     "expert_model",
     "heretic_27b_model",
+    "front_08b_model",
     "playwright_chromium",
 )
 
@@ -81,6 +82,7 @@ def _label(component_id: str) -> str:
         "expert_model": "Expert model (27B, optional)",
         "heretic_27b_model": "Qwen3.8 27B Heretic reasoning model (optional)",
         "playwright_chromium": "Playwright Chromium",
+        "front_08b_model": "Quick conversational model (Qwen3.5 0.8B)",
     }.get(component_id, component_id)
 
 
@@ -167,6 +169,12 @@ def discover_component_states(*, include_optional_expert: bool | None = None) ->
         path=str(heretic),
         optional=True,
         detail="Owner-selected download" if not heretic.exists() else "",
+    )
+    quick = profile_gguf(PROFILES["front_08b"])
+    states["front_08b_model"] = ComponentState(
+        id="front_08b_model", label=_label("front_08b_model"),
+        status="ready" if quick.exists() and quick.stat().st_size == 563036064 else "skipped",
+        path=str(quick), optional=True,
     )
     marker = repo_root() / ".venv" / ".playwright-chromium-ready"
     if want_playwright:
@@ -424,7 +432,32 @@ def _install_playwright() -> None:
         raise
 
 
+def _install_front_08b() -> None:
+    from huggingface_hub import hf_hub_download
+    from .policy.network_http import require_http_url_allowed
+
+    profile = PROFILES["front_08b"]
+    revision = "8fea620810c4afa23dd6443f999a48574c1611a3"
+    expected = "57d1997790d1744fba5b40a7317df71ea5e2acee28c47e78f0cce39c0703f8cf"
+    existing = profile_gguf(profile)
+    if existing.exists() and existing.stat().st_size == 563036064 and _sha256(existing) == expected:
+        _set_state("front_08b_model", status="ready", path=str(existing), error="")
+        return
+    dest = preferred_gguf_install_dir(profile.repo_dir, need_bytes=600 * 1024**2)
+    url = f"https://huggingface.co/{profile.repo}/resolve/{revision}/{profile.filename}"
+    require_http_url_allowed(url, tool="web_fetch")
+    _set_state("front_08b_model", status="downloading", error="")
+    path = Path(hf_hub_download(repo_id=profile.repo, filename=profile.filename,
+                              revision=revision, local_dir=str(dest)))
+    _set_state("front_08b_model", status="verifying", path=str(path))
+    if path.stat().st_size != 563036064 or _sha256(path) != expected:
+        raise RuntimeError("Quick front model failed pinned size/SHA256 verification")
+    _set_state("front_08b_model", status="ready", path=str(path), bytes_done=path.stat().st_size,
+               bytes_total=path.stat().st_size, error="")
+
+
 _INSTALLERS: dict[str, Callable[[], None]] = {
+    "front_08b_model": _install_front_08b,
     "llama_cpp": _install_llama_and_cuda,
     "cuda_runtime": _install_llama_and_cuda,
     "primary_model": _install_primary,

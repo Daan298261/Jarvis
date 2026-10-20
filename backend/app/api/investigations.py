@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any, Literal
 
@@ -44,7 +45,15 @@ class IngestBody(BaseModel):
     question: str = Field(default="Forensic image ingest and file index", max_length=10000)
     task_id: str | None = None
     source_type: Literal["auto", "folder", "tar", "zip", "raw"] = "auto"
-    background: bool = False
+    # None: POST /ingest runs to completion, POST /{id}/ingest runs in the background (RFC-0208).
+    background: bool | None = None
+
+
+class FfsPrepareBody(BaseModel):
+    target: str = Field(min_length=1, max_length=4096)
+    question: str = Field(default="Forensic image ingest and file index", min_length=1, max_length=10000)
+    task_id: str | None = None
+    source_type: Literal["auto", "folder", "tar", "zip", "raw"] = "auto"
 
 
 class ApkPrepareBody(BaseModel):
@@ -113,30 +122,66 @@ async def prepare(body: PrepareBody):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@router.post("/ffs")
+async def prepare_ffs(body: FfsPrepareBody):
+    """RFC-0208: prepare a ``kind == "ffs"`` investigation. The dump is referenced read-only as the
+    snapshot (nothing is copied); start the ingest with POST /{id}/ingest."""
+    try:
+        row = await asyncio.to_thread(store.prepare_ffs, body.target, body.question,
+                                      load_settings().allowed_directories, body.task_id,
+                                      source_type=body.source_type)
+        return public_row(row)
+    except (ValueError, OSError) as exc:  # PermissionError/FileNotFoundError are OSError
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post("/ingest")
 async def ingest(body: IngestBody):
     source_target = body.target or body.source
     if not source_target.strip():
         raise HTTPException(status_code=422, detail="Source or target path is required")
+    return await _ingest(source_target, body, body.investigation_id, body.task_id, body.question,
+                         background=bool(body.background))
+
+
+async def _ingest(source: str, body: IngestBody, ident: str | None, task_id: str | None, question: str,
+                  *, background: bool) -> dict:
+    """RFC-0208 FFS ingest (start, or resume an interrupted one). ``background`` returns at once;
+    progress is on GET /{id}, GET /{id}/status and the row's ``ffs`` block."""
     try:
-        from ..reverse_engineering.ffs_ingest import FFSIngest
-        settings = load_settings()
-        ingest_svc = FFSIngest(
-            source=source_target,
-            investigation_id=body.investigation_id,
-            task_id=body.task_id,
-            question=body.question,
-            source_type=body.source_type,
-            allowed_directories=settings.allowed_directories,
-        )
-        if body.background:
-            row = ingest_svc.prepare_investigation()
-            asyncio.create_task(ingest_svc.run())
-            return public_row(row)
-        row = await ingest_svc.run()
+        row = await SERVICE.ingest(source, question, load_settings().allowed_directories, task_id, ident,
+                                   body.source_type, background=background)
         return public_row(row)
-    except (ValueError, OSError, PermissionError) as exc:
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (ValueError, OSError) as exc:  # PermissionError/FileNotFoundError are OSError
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/{ident}/ffs/files")
+async def ffs_files(ident: str, path_contains: str = "", suffix: str = "", type_contains: str = "",
+                    offset: int = 0, limit: int = 100):
+    """Page through the FFS index (index/files.ndjson) with simple case-insensitive filters."""
+    from ..reverse_engineering import ffs_ingest
+    try:
+        return await asyncio.to_thread(ffs_ingest.query_index, ident, path_contains=path_contains, suffix=suffix,
+                                       type_contains=type_contains, offset=offset, limit=limit)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc) or "Unknown investigation") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/{ident}/ffs/tab-profile")
+async def ffs_tab_profile(ident: str):
+    """Full .tab entropy/header profile written when the ingest completed."""
+    from ..reverse_engineering import ffs_ingest
+    try:
+        path = ffs_ingest.index_dir(ident) / ffs_ingest.TAB_PROFILE_FILE
+        text = await asyncio.to_thread(path.read_text, encoding="utf-8")
+        return json.loads(text)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail="The .tab profile has not been produced") from exc
 
 
 @router.post("/apk/prepare")
@@ -259,25 +304,10 @@ async def ingest_into_investigation(ident: str, body: IngestBody):
     source_target = body.target or body.source or existing.get("target") or ""
     if not source_target.strip():
         raise HTTPException(status_code=422, detail="Source or target path is required")
-    try:
-        from ..reverse_engineering.ffs_ingest import FFSIngest
-        settings = load_settings()
-        ingest_svc = FFSIngest(
-            source=source_target,
-            investigation_id=ident,
-            task_id=body.task_id or existing.get("task_id"),
-            question=body.question if body.question != "Forensic image ingest and file index" else existing.get("question", body.question),
-            source_type=body.source_type,
-            allowed_directories=settings.allowed_directories,
-        )
-        if body.background:
-            row = ingest_svc.prepare_investigation()
-            asyncio.create_task(ingest_svc.run())
-            return public_row(row)
-        row = await ingest_svc.run()
-        return public_row(row)
-    except (ValueError, OSError, PermissionError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    question = body.question if body.question != "Forensic image ingest and file index" else existing.get("question", body.question)
+    # RFC-0208: this route starts/resumes a background ingest; background=false runs it inline.
+    return await _ingest(source_target, body, ident, body.task_id or existing.get("task_id"), question,
+                         background=body.background is not False)
 
 
 @router.get("/{ident}/catalog")

@@ -2,6 +2,7 @@ import { LocalModelDiscovery } from "./LocalModelDiscovery"
 import { CollapsibleSection } from "../components/CollapsibleSection"
 import { Link } from "react-router-dom"
 import { DecisionTierSettings } from "./DecisionTierSettings"
+import { installSetupComponent } from "../api"
 
 type ModelsSettingsPaneProps = {
   settings: Record<string, unknown>
@@ -87,10 +88,15 @@ export function ModelsSettingsPane({
             value={String(front.profile || "front_2b")}
             onChange={(e) => save({ front_responder_profile: e.target.value })}
           >
-            <option value="front_2b">Faster — Qwen3.5 2B on CPU</option>
+            <option value="front_08b">Quick — Qwen3.5 0.8B on CPU</option>
+            <option value="front_2b">Balanced — Qwen3.5 2B on CPU</option>
             <option value="front_4b">Smarter — Qwen3.5 4B on GPU when it fits</option>
           </select>
         </label>
+        <button type="button" onClick={async () => {
+          try { await installSetupComponent("front_08b_model"); setMsg("Quick model download started. Select Quick after it finishes to use it.") }
+          catch (error) { setMsg(error instanceof Error ? error.message : "Quick model download failed") }
+        }}>Download quick 0.8B model (563 MB)</button>
         <label>Front device
           <select
             value={String(front.device || "auto")}
