@@ -37,6 +37,7 @@ Ship **one RFC with five implement slices**, each one CoS-assignable ticket with
 | **ANZU-owned engine** | A process in the S2 process registry (spawned by ANZU, pid + create-time verified), or LM Studio that ANZU itself started via `ensure_local_lmstudio` (recorded as `started_by: anzu`). |
 | **Selected engine** | The endpoint in `settings.inference` (host/port/remote_model). When Taco selects LM Studio :1234 as ANZU's engine, LM Studio is **selected, not foreign**, and is never offered for stopping. |
 | **Foreign engine** | A detected local inference server (RFC-0210 `listener_inventory` + `probe`) that is neither ANZU-owned nor selected. |
+| **Managed engine mode** (amendment 2026-10-20) | Owner-consented, remembered, revocable per-engine flag (`manage: true` in `engine-choices.json`) for the **selected** LM Studio engine. When on, ANZU may load / unload / reload **any** instance of the selected model(s) on that LM Studio, including instances the owner loaded himself (RFC-0228 S2 applies the idle-unload timer, on-demand reload and VRAM yielding). When off (default), ANZU only touches instances it loaded. Managed mode never stops the LM Studio server or app. |
 | **Engine ledger** | Durable record (`data_dir()/runtime/engine-ledger.json`) of every foreign engine ANZU stopped with owner consent: kind, port, executable path, command line, served model ids, stop method, `stopped_at`, respawn method, `respawn_on_exit` flag. |
 
 ### Owner-consequential rule (normative)
@@ -51,6 +52,7 @@ Stopping another application's engine is owner-consequential (§7). Therefore:
 6. **Respawn on demand:** when the owner or the router requests a model that only a ledgered engine serves (e.g. `anzu-coder-27b` on Ollama), ANZU restarts that engine with the recorded method, waits for health, attaches through the existing provider, and tells the owner in one line ("Restarted Ollama for anzu-coder-27b."). Failure is surfaced, never swallowed.
 7. **Respawn on exit:** if the owner ticked "restart it when ANZU closes", ANZU's shutdown path restarts ledgered engines after its own servers are down. Default off.
 8. Busy engines (another client mid-request) are never stopped; the prompt says so and offers "Ask me again when it is idle".
+9. **Managed engine mode (amendment 2026-10-20).** When the selected engine is LM Studio, the S4 prompt (once) and the Model page offer "Let ANZU manage LM Studio models (unload when idle, reload when needed, make room for the coding model)". Off by default; the answer is remembered in `engine-choices.json`; revocable on the Model page at any time. Turning it on is the owner consent RFC-0228 S2 requires before it unloads or reloads an owner-loaded instance; turning it off restores the ANZU-loaded-only rule immediately.
 
 ### Resilience contract (normative)
 
@@ -127,10 +129,10 @@ Reproduce on Taco's Windows profile (LM Studio :1234 with the 9B loaded, Ollama 
 | Path | Why |
 | --- | --- |
 | `backend/app/inference/running_models.py` | Classify each RFC-0210 row as `anzu_owned` / `selected` / `foreign` using the S2 registry and `settings.inference`; add engine kind (`lmstudio`, `ollama`, `llama-server`, `remote`) and executable path to rows; reuse `stop_listener` / `verify_unloaded` |
-| `backend/app/inference/engine_coexistence.py` (new) | Startup check (after model autoload decision, off the event loop), prompt payload, remembered choices (`data_dir()/runtime/engine-choices.json`), stop per the owner-consequential rule, engine ledger write, `respawn(entry)`, on-demand respawn hook, on-exit respawn |
+| `backend/app/inference/engine_coexistence.py` (new) | Startup check (after model autoload decision, off the event loop), prompt payload, remembered choices (`data_dir()/runtime/engine-choices.json`, incl. the `manage` flag and read-only `is_managed(engine)` used by RFC-0228 S2), stop per the owner-consequential rule, engine ledger write, `respawn(entry)`, on-demand respawn hook, on-exit respawn |
 | `backend/app/inference/endpoint.py` (new) | `inference_base_url(settings)`; single builder for the selected engine URL |
 | `backend/app/inference/lmstudio_server.py` | Record `started_by: anzu` when ANZU starts LM Studio; expose `stop_lmstudio_server()` (`lms server stop`) and reuse `ensure_local_lmstudio` as the LM Studio respawn method; use `endpoint.py` |
-| `backend/app/api/model.py` | `GET /api/model/engines` (prompt payload), `POST /api/model/engines/decision` (`keep` / `stop` / `stop_always`, `remember`, `respawn_on_exit`), `GET /api/model/engines/ledger`, `POST /api/model/engines/{id}/respawn` |
+| `backend/app/api/model.py` | `GET /api/model/engines` (prompt payload), `POST /api/model/engines/decision` (`keep` / `stop` / `stop_always`, `remember`, `respawn_on_exit`, `manage` for the selected LM Studio engine), `GET /api/model/engines/ledger`, `POST /api/model/engines/{id}/respawn` |
 | `tests/test_rfc0225_engine_coexistence.py` (new) | Below |
 
 - [ ] With Taco's selected engine = LM Studio :1234, LM Studio is classified `selected` and never appears as a stop candidate.
@@ -139,6 +141,8 @@ Reproduce on Taco's Windows profile (LM Studio :1234 with the 9B loaded, Ollama 
 - [ ] Successful stop writes a ledger entry with kind, port, exe, argv, models, method, timestamp; failed verification writes nothing and returns the error.
 - [ ] Requesting a model served only by a ledgered engine respawns it, waits for health, attaches, and publishes one owner line; respawn failure is surfaced to the owner and the request fails visibly.
 - [ ] `respawn_on_exit` true → shutdown restarts the engine after ANZU's servers are down; false → nothing restarted.
+- [ ] `manage: true` for selected LM Studio is persisted, survives restart, is returned by `is_managed()`, and `manage: false` reverts immediately; `manage` is rejected for non-selected or non-LM-Studio engines.
+- [ ] Managed mode never stops the LM Studio server/app (only RFC-0228 S2 instance load/unload).
 - [ ] Remembered `stop_always` applies on next start **and** the startup announcement still names what was stopped (never silent).
 - [ ] Editors/agents (Cursor, Aider, Antigravity) are never classified as engines.
 
@@ -148,15 +152,16 @@ Reproduce on Taco's Windows profile (LM Studio :1234 with the 9B loaded, Ollama 
 
 | Path | Why |
 | --- | --- |
-| `frontend/src/hud/EngineCoexistencePrompt.tsx` (new) | One non-modal card listing detected foreign engines (port, process, model ids, busy); per-engine Keep / Stop now / Stop whenever ANZU starts; "Remember my choice" (off by default); "Restart it when ANZU closes"; per-row pending + result state |
+| `frontend/src/hud/EngineCoexistencePrompt.tsx` (new) | One non-modal card listing detected foreign engines (port, process, model ids, busy); per-engine Keep / Stop now / Stop whenever ANZU starts; "Remember my choice" (off by default); "Restart it when ANZU closes"; per-row pending + result state; one-time "Let ANZU manage LM Studio models" question when LM Studio is the selected engine |
 | `frontend/src/hud/HudShell.tsx` | Mount the prompt next to the existing `<RunningModels />` mount (existing mount unchanged) |
-| `frontend/src/pages/Model.tsx` | "Other engines" section: remembered choices (revocable), ledger with "Restart now" |
+| `frontend/src/pages/Model.tsx` | "Other engines" section: remembered choices (revocable), ledger with "Restart now", "ANZU manages LM Studio models" toggle |
 | `frontend/engine-coexistence.test.mjs` (new) + `package.json` script | Below |
 
 - [ ] Prompt shows only when S3 reports ≥1 foreign engine without a remembered choice; it never blocks chat or the HUD.
 - [ ] Each row displays port, process/executable, model ids and busy state; Stop is disabled for busy rows with the reason shown.
 - [ ] Answering writes through `POST /api/model/engines/decision`; answered rows also disappear from the RFC-0210 offer (shared choices store).
 - [ ] Model page lists remembered choices (revoke works) and ledger entries ("Restart now" calls respawn and shows the result).
+- [ ] Selected engine = LM Studio and no remembered `manage` answer → prompt asks once "Let ANZU manage LM Studio models…" (default off); the answer is remembered and shown on the Model page with an on/off toggle that writes `manage` through the decision endpoint.
 - [ ] Preserved-live-behaviour section in the PR covers every row of the table above; `npm --prefix frontend run build` + lint pass.
 
 ### S5 — Debounced, identity-checked local-API reachability
