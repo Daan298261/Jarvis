@@ -118,10 +118,21 @@ fun defaultFileSha256(file: File): String {
 }
 
 /** Pack lifecycle: missing / downloading / ready / running / error */
+/**
+ * Install and resume facts for every catalog pack plus the bytes on disk. Built by
+ * [CompanionPackManager.packFileSnapshot] off the main thread so UI publishing never stats pack files.
+ */
+data class PackFileSnapshot(
+    val installed: Map<String, Boolean> = emptyMap(),
+    val resumeBytes: Map<String, Long> = emptyMap(),
+    val storageBytes: Long = 0,
+)
+
 class CompanionPackManager(
     context: Context,
     val engine: LocalInferenceEngine = LlamaCppInferenceEngine(),
     digestCache: VerifiedDigestCache? = null,
+    private val fileDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
 ) {
     private val app = context.applicationContext
     val digestCache: VerifiedDigestCache = digestCache ?: VerifiedDigestCache(
@@ -215,6 +226,15 @@ class CompanionPackManager(
     fun lastError(): String = errorRef.get()
 
     fun storageBytes(): Long = packDir.walkTopDown().filter { it.isFile }.map { it.length() }.sum()
+
+    /** Stats every pack file and `.partial` on [fileDispatcher] (IO), never on the caller's thread. */
+    suspend fun packFileSnapshot(): PackFileSnapshot = withContext(fileDispatcher) {
+        PackFileSnapshot(
+            installed = catalog.associate { it.id to isPackInstalled(it) },
+            resumeBytes = catalog.associate { it.id to File(packDir, "${it.filename}.partial").length() },
+            storageBytes = storageBytes(),
+        )
+    }
 
     fun selectedPack(): CompanionPack? = catalog.firstOrNull { it.id == selectedPackId() }
 

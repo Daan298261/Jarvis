@@ -10,8 +10,8 @@ object DevicePackChromePublisher {
         else -> DevicePackStatus.MISSING
     }
 
-    fun buildState(model: CompanionModel, companionState: CompanionState): DevicePackChromeState {
-        val manager = model.packManager
+    /** Pure mapping: all file facts come from [files], so this is safe on the main thread. */
+    fun buildState(manager: CompanionPackManager, companionState: CompanionState, files: PackFileSnapshot): DevicePackChromeState {
         val selected = manager.selectedPack()
         val status = toDeviceStatus(companionState.localPackStatus)
         val progress = companionState.localPackProgress
@@ -19,20 +19,21 @@ object DevicePackChromePublisher {
             status = status,
             selectedPackId = manager.selectedPackId(),
             selectedPackLabel = selected?.label ?: "",
-            bytesOnDisk = manager.storageBytes(),
+            bytesOnDisk = files.storageBytes,
             downloadProgress = if (status == DevicePackStatus.DOWNLOADING) progress / 100f else null,
             error = companionState.localPackError.takeIf { it.isNotBlank() },
             availablePacks = manager.catalog().map { pack ->
                 DevicePackOption(id = pack.id, label = pack.label, sizeBytes = pack.sizeBytes,
-                    minRamMb = pack.minRamMb, installed = manager.isPackInstalled(pack), canDownload = pack.url.isNotBlank(),
-                    resumeBytes = java.io.File(manager.packRoot(), "${pack.filename}.partial").length())
+                    minRamMb = pack.minRamMb, installed = files.installed[pack.id] == true, canDownload = pack.url.isNotBlank(),
+                    resumeBytes = files.resumeBytes[pack.id] ?: 0L)
             },
             downloads = companionState.modelDownloads,
             nativeRuntimeBundled = manager.engine.isRuntimeAvailable(),
         )
     }
 
-    fun publish(model: CompanionModel, chrome: CompanionDeviceModelChrome, companionState: CompanionState) {
-        chrome.publish(buildState(model, companionState))
+    /** Reads pack files on IO via [CompanionPackManager.packFileSnapshot], then publishes on the caller. */
+    suspend fun publish(model: CompanionModel, chrome: CompanionDeviceModelChrome, companionState: CompanionState) {
+        chrome.publish(buildState(model.packManager, companionState, model.packManager.packFileSnapshot()))
     }
 }
