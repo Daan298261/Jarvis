@@ -44,7 +44,8 @@ TACO_PROMPTS = [
     r"Analyze D:\cases\x\app.apk: what servers does it talk to?",
 ]
 
-# D2: dump wordings that must all route (S1 table ids); WEAK matches, probe stood in as "dump".
+# D2: dump wordings that must all route (S1 table ids); all WEAK matches (a bare "full file system
+# dump" is weak; only "full file system extraction" is explicit), probe stood in as "dump".
 DUMP_WORDING_PROMPTS = [
     pytest.param(r"D:\cases\x\ffs what apps are installed?", id="ffs"),
     pytest.param(r"D:\cases\x\extraction which accounts are on the phone?", id="extraction"),
@@ -63,8 +64,9 @@ DUMP_WORDING_PROMPTS = [
     ),
 ]
 
-# EXPLICIT owner wording routes without a dump marker (CoS amendment A, narrowed: the probe still
-# runs with require_marker=False for the allow-list gate and the source veto).
+# EXPLICIT owner wording (only the four owner phrases: full FFS, full file system extraction,
+# FFS of my <device>, extraction of my <device>) routes without a dump marker; the probe still
+# runs with require_marker=False for the allow-list gate and the source veto.
 EXPLICIT_PROMPTS = [
     pytest.param(r"D:\cases\x\p1 is a full FFS of my Pixel, which apps?", id="full-ffs"),
     pytest.param(r"D:\cases\x\p1 is a full file system extraction, which accounts are on it?", id="full-file-system-extraction"),
@@ -82,6 +84,12 @@ PLAIN_PATH_PROMPTS = [
     pytest.param(r"C:\code\fs what does the file system dump command in /usr/bin do?", id="file-system-dump-command"),
     pytest.param(r"C:\code\aosp\system\framework what does this module do?", id="aosp-system-framework"),
     pytest.param(r"C:\code\launcher\data\app which class handles install?", id="launcher-data-app"),
+    # D2 round 4: none of these is one of the four owner phrases, so none is explicit.
+    pytest.param(r"C:\code\tool what does the forensic image parser do?", id="forensic-image-parser"),
+    pytest.param(r"C:\code\backup where is the full file system image backup written?", id="full-file-system-image-backup"),
+    pytest.param(r"C:\code\mdm how is the extraction of the device id done?", id="extraction-of-the-device-id"),
+    pytest.param(r"C:\code\agent what does the device extraction module do?", id="device-extraction-module"),
+    pytest.param(r"C:\Users\taco\proj ffs of the tests fail again, why?", id="ffs-of-the-tests"),
 ]
 
 
