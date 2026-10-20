@@ -19,6 +19,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Awaitable, Callable
 
+# RFC-0229 S1: (level, action, detail) sink for the Manager debug log; main.py
+# wires it to debug_log so restarts, backoffs and preserved crash logs are visible.
+SupervisorEventSink = Callable[[str, str, dict], None]
+
 log = logging.getLogger(__name__)
 
 TICK_SECONDS = 10.0
@@ -116,12 +120,15 @@ class CoreSupervisor:
         launch: Callable[[str], None],
         clock: Callable[[], float] = time.time,
         enabled: bool | None = None,
+        on_event: SupervisorEventSink | None = None,
     ) -> None:
         self._root = root
         self._healthy = healthy
         self._process_present = process_present
         self._launch = launch
         self._clock = clock
+        self._on_event = on_event
+        self._last_tick: str | None = None
         # Opt-in via env so only the real manager process (start-anzu-manager.ps1)
         # supervises the core; imports from tests or tools never launch anything.
         self.enabled = (os.environ.get("JARVIS_MANAGER_WATCHDOG") == "1") if enabled is None else enabled
@@ -194,8 +201,30 @@ class CoreSupervisor:
             "last_exit": s.last_exit,
         }
 
+    def _emit(self, level: str, action: str, detail: dict) -> None:
+        if self._on_event is not None:
+            self._on_event(level, action, detail)
+
     async def tick(self) -> str:
         """One supervision step. Returns what happened (for tests and logs)."""
+        result = await self._tick()
+        if result != self._last_tick:
+            # Log decision changes only, so a steady state does not flood the debug log.
+            if result == "backoff":
+                self._emit(
+                    "INFO",
+                    "backoff",
+                    {
+                        "restart_attempts": self.state.restart_attempts,
+                        "next_restart_in_seconds": max(0, round(self.state.next_restart_at - self._clock())),
+                    },
+                )
+            elif result != "restarted":  # _restart already wrote its own line
+                self._emit("DEBUG", "tick", {"result": result})
+            self._last_tick = result
+        return result
+
+    async def _tick(self) -> str:
         if not self.enabled or not self.state.desired_running or self.state.restarting:
             return "idle"
         if self.state.control_in_flight:
@@ -252,6 +281,17 @@ class CoreSupervisor:
             s.history = (s.history + [{"at": now, "reason": reason}])[-10:]
             self._save()
             log.warning("ANZU watchdog restarting core (attempt %s): %s", s.restart_attempts, reason)
+            self._emit(
+                "WARNING",
+                "restart",
+                {
+                    "reason": reason,
+                    "hung": hung,
+                    "attempt": s.restart_attempts,
+                    "backoff_seconds": backoff_seconds(s.restart_attempts),
+                    "crash_log": s.last_exit["crash_log"],
+                },
+            )
             if hung:
                 await asyncio.to_thread(self._launch, "stop")
             await asyncio.to_thread(self._launch, "start")
@@ -260,6 +300,7 @@ class CoreSupervisor:
             s.last_exit = {**(s.last_exit or {}), "launch_error": str(exc)}
             self._save()
             log.exception("ANZU watchdog relaunch failed")
+            self._emit("ERROR", "restart_failed", {"error": str(exc), "attempt": s.restart_attempts})
         finally:
             s.restarting = False
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import mimetypes
 import os
 import secrets
 import shutil
@@ -12,7 +13,7 @@ from pathlib import Path
 from typing import Literal
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
@@ -21,7 +22,15 @@ from pydantic import BaseModel
 
 from ..config import repo_root
 from ..hardware import hardware_dict
+from . import debug_log
+from .redact import redact_headers, register_secret
 from .supervisor import LAUNCH_LOG_MAX_BYTES, LAUNCH_LOGS_KEPT, CoreSupervisor, rotate_file
+
+# RFC-0229 S1: app.js is an ES module, and browsers/WebView2 refuse a module served
+# as anything but JavaScript. Starlette's StaticFiles takes Content-Type from
+# Python mimetypes, which on Windows reads the registry (often .js -> text/plain),
+# so pin it before the /assets mount below.
+mimetypes.add_type("text/javascript", ".js")
 
 CORE_HEALTH_URL = "http://127.0.0.1:4780/api/health"
 STATIC_DIR = Path(__file__).with_name("static")
@@ -30,6 +39,10 @@ ALLOWED_ACTIONS = {"start", "stop", "restart"}
 
 class ControlRequest(BaseModel):
     confirm: bool = False
+
+
+class VerboseRequest(BaseModel):
+    enabled: bool
 
 
 def _root() -> Path:
@@ -64,7 +77,8 @@ async def _core_details() -> dict:
             "swarm": swarm.json() if swarm.is_success else None,
             "model": system_data.get("model"),
         }
-    except Exception:
+    except Exception as exc:
+        debug_log.write("WARNING", "status_error", detail={"error": f"core details unavailable: {exc}"})
         return {"tasks": {"active": 0, "total": 0}, "swarm": None, "model": None}
 
 
@@ -149,6 +163,7 @@ def _launch(action: str) -> None:
     else:
         raise RuntimeError("restart is sequenced by the control endpoint")
     # Launcher output goes to a size-rotated log so a failed start is never silent.
+    debug_log.spawn(action, args, os.environ)
     log_path = root / "logs" / "anzu-launch.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     rotate_file(log_path, LAUNCH_LOGS_KEPT, LAUNCH_LOG_MAX_BYTES)
@@ -210,11 +225,14 @@ async def _wait_for(action: str) -> dict:
 
 log = logging.getLogger(__name__)
 
+debug_log.configure(lambda: _root())
+
 SUPERVISOR = CoreSupervisor(
     root=lambda: _root(),
     healthy=lambda: _core_healthy(),
     process_present=lambda: _managed_process_running(),
     launch=lambda action: _launch(action),
+    on_event=lambda level, action, detail: debug_log.write(level, "supervisor", action=action, detail=detail),
 )
 
 # Per-manager-session token for control actions. Clients on this computer get it
@@ -222,6 +240,50 @@ SUPERVISOR = CoreSupervisor(
 # that cannot read it cannot start, stop or restart ANZU.
 SESSION_TOKEN = secrets.token_urlsafe(32)
 TOKEN_HEADER = "X-Anzu-Manager-Token"
+register_secret(SESSION_TOKEN)  # never written to the debug log or returned by it
+
+# RFC-0229 S1: every control press carries a client request id (logged at receipt
+# and completion) and reports its phase while it runs.
+REQUEST_ID_HEADER = "X-Anzu-Request-Id"
+# Only the Manager page itself may switch verbose logging on (not the :4780 portal).
+MANAGER_ORIGINS = frozenset({"http://127.0.0.1:4782", "http://localhost:4782"})
+PHASE_TEXT = {
+    "stopping": "Stopping…",
+    "waiting_stop": "Waiting for ANZU to stop…",
+    "starting": "Starting…",
+    "waiting_health": "Waiting for health…",
+}
+_clock = time.monotonic
+CONTROL_PROGRESS: dict = {}
+
+
+def _set_phase(phase: str) -> None:
+    CONTROL_PROGRESS["phase"] = phase
+    CONTROL_PROGRESS["phase_text"] = PHASE_TEXT[phase]
+    debug_log.write(
+        "DEBUG",
+        "control_start",
+        action=CONTROL_PROGRESS.get("action"),
+        request_id=CONTROL_PROGRESS.get("request_id"),
+        detail={"phase": phase},
+    )
+
+
+def control_progress() -> dict:
+    if not CONTROL_PROGRESS:
+        return {"active": False}
+    return {
+        "active": True,
+        "action": CONTROL_PROGRESS["action"],
+        "request_id": CONTROL_PROGRESS["request_id"],
+        "phase": CONTROL_PROGRESS.get("phase"),
+        "phase_text": CONTROL_PROGRESS.get("phase_text"),
+        "elapsed_ms": round((_clock() - CONTROL_PROGRESS["started"]) * 1000),
+    }
+
+
+def _token_ok(token: str | None) -> bool:
+    return bool(token) and secrets.compare_digest(token, SESSION_TOKEN)
 
 app = FastAPI(title="ANZU Manager", docs_url=None, redoc_url=None)
 
@@ -264,37 +326,106 @@ async def manager_session():
     return {"token": SESSION_TOKEN, "header": TOKEN_HEADER}
 
 
+@app.get("/api/manager/v1/control/progress")
+async def manager_control_progress():
+    return control_progress()
+
+
 @app.post("/api/manager/v1/control/{action}")
 async def manager_control(
     action: Literal["start", "stop", "restart"],
     body: ControlRequest,
+    request: Request,
     token: str | None = Header(default=None, alias=TOKEN_HEADER),
+    client_request_id: str | None = Header(default=None, alias=REQUEST_ID_HEADER),
 ):
-    if not token or not secrets.compare_digest(token, SESSION_TOKEN):
+    request_id = debug_log.clean_request_id(client_request_id)
+    started = _clock()
+    debug_log.write("INFO", "press", action=action, request_id=request_id)
+    debug_log.write("DEBUG", "press", action=action, request_id=request_id, detail={"headers": redact_headers(request.headers)})
+    ok = False
+    error: str | None = None
+    try:
+        result = await _run_control(action, body, token, request_id)
+        ok = bool(result["ok"])
+        return result
+    except HTTPException as exc:
+        error = f"{exc.status_code}: {exc.detail}"
+        raise
+    finally:
+        debug_log.write(
+            "INFO" if ok else "WARNING",
+            "control_end",
+            action=action,
+            request_id=request_id,
+            duration_ms=round((_clock() - started) * 1000),
+            ok=ok,
+            detail={"error": error} if error else None,
+        )
+
+
+async def _run_control(action: str, body: ControlRequest, token: str | None, request_id: str) -> dict:
+    if not _token_ok(token):
         raise HTTPException(status_code=403, detail="Manager session token required")
     if not body.confirm:
         raise HTTPException(status_code=400, detail="Explicit confirmation is required")
     if SUPERVISOR.state.control_in_flight:
         raise HTTPException(status_code=409, detail=f"ANZU {SUPERVISOR.state.control_in_flight} is already in progress")
     SUPERVISOR.set_desired(action != "stop")
-    async with SUPERVISOR.control_action(action):
-        try:
-            if action == "restart":
-                await asyncio.to_thread(_launch, "stop")
-                stopped = await _wait_for("stop")
-                if stopped["core"]["state"] != "stopped":
-                    raise HTTPException(status_code=409, detail="ANZU did not stop; restart was not attempted")
-                await asyncio.to_thread(_launch, "start")
-                SUPERVISOR.note_launch()
-            else:
-                await asyncio.to_thread(_launch, action)
-                if action == "start":
+    debug_log.write("INFO", "control_start", action=action, request_id=request_id)
+    bound = debug_log.bind_control(action, request_id)
+    CONTROL_PROGRESS.clear()
+    CONTROL_PROGRESS.update({"action": action, "request_id": request_id, "started": _clock()})
+    try:
+        async with SUPERVISOR.control_action(action):
+            try:
+                if action == "restart":
+                    _set_phase("stopping")
+                    await asyncio.to_thread(_launch, "stop")
+                    _set_phase("waiting_stop")
+                    stopped = await _wait_for("stop")
+                    if stopped["core"]["state"] != "stopped":
+                        raise HTTPException(status_code=409, detail="ANZU did not stop; restart was not attempted")
+                    _set_phase("starting")
+                    await asyncio.to_thread(_launch, "start")
                     SUPERVISOR.note_launch()
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        snapshot = await _wait_for(action)
+                else:
+                    _set_phase("stopping" if action == "stop" else "starting")
+                    await asyncio.to_thread(_launch, action)
+                    if action == "start":
+                        SUPERVISOR.note_launch()
+            except RuntimeError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+            _set_phase("waiting_stop" if action == "stop" else "waiting_health")
+            snapshot = await _wait_for(action)
+    finally:
+        CONTROL_PROGRESS.clear()
+        debug_log.unbind_control(bound)
     ok = snapshot["core"]["healthy"] if action != "stop" else snapshot["core"]["state"] == "stopped"
     return {"action": action, "ok": ok, "status": snapshot}
+
+
+@app.get("/api/manager/v1/debug-log")
+async def manager_debug_log(tail: int = Query(default=200, ge=1, le=2000)):
+    lines = await asyncio.to_thread(debug_log.read_tail, tail)
+    return {"lines": lines, "verbose": debug_log.is_verbose()}
+
+
+@app.post("/api/manager/v1/debug-log/verbose")
+async def manager_debug_log_verbose(
+    body: VerboseRequest,
+    token: str | None = Header(default=None, alias=TOKEN_HEADER),
+    origin: str | None = Header(default=None),
+):
+    # Loopback middleware already ran; additionally require the session token and
+    # the Manager page's own origin, so the :4780 portal (which can read /session)
+    # still cannot switch verbose on.
+    if not _token_ok(token):
+        raise HTTPException(status_code=403, detail="Manager session token required")
+    if origin not in MANAGER_ORIGINS:
+        raise HTTPException(status_code=403, detail="Verbose logging can be changed only from the ANZU Manager page")
+    debug_log.set_verbose(body.enabled)
+    return {"verbose": debug_log.is_verbose()}
 
 
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
