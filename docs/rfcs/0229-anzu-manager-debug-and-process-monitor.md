@@ -4,12 +4,12 @@
 **Priority:** P2 (Taco batch 2026-10-17, items 8 and 9)  
 **Queue item:** (none in this PR — Architect may add a master-plan line after land; do not edit `JARVIS_MASTER_PLAN.md` here)  
 **Author:** Jarvis Architect  
-**Date:** 2026-10-20
+**Date:** 2026-10-20 (re-sliced 2026-10-20: UX review items 1–4 folded in)
 
 **Owner ask (verbatim intent, 2026-10-17):** "8. Add a debug logger and visual feedback on button presses. 9. Add a small screen listing every process ANZU spawned, showing its status, resource usage, and whether it is idle or working, with a timer for how long."  
 **Aligns with:** [`ANZU_PRODUCT_NORTH_STAR.md`](../../ANZU_PRODUCT_NORTH_STAR.md) §2 (one design language; "Finished is the target."), §10 ("Swarm computing should be invisible unless inspected" — this is the *inspect* surface), §15 ("ANZU should know whether its own systems are healthy… explain what happened"), §19 ("Do expose state when the user needs confidence in what ANZU is doing."; "Do not expose architecture simply because the architecture exists." — the screen lives in the Manager, not the main HUD), §20 Q6, Q11.  
 **Extends (do not rewrite):** [RFC-0196 native ANZU Manager](0196-native-anzu-manager.md) (loopback :4782, start/stop/restart with session token + confirm, supervisor), [RFC-0225](0225-local-engine-coexistence-and-resilient-api.md) **S2 process registry** (the single source of "processes ANZU spawned") and S3 engine ledger.  
-**Depends on:** RFC-0225 S2 for S2 of this RFC. No dependency on #648/#649 (they do not touch `backend/app/manager/**`).  
+**Depends on:** RFC-0225 S2 (process registry) and RFC-0225 S3 (engine classification, selected engine, idle-unload hook) for S2 of this RFC. No gate on #648/#649 (see "Relationship to drafts #648/#649").  
 **Astra boundary:** Persona/presence/WebGL/appearance out of scope (Astra). The Manager's existing background canvas animation (`#field`) is kept as is.
 
 This PR is **specs-only**. No application code.
@@ -22,7 +22,8 @@ Verified in `development` @ `3f17c3d8`:
 
 1. **Button presses give almost no feedback.** `backend/app/manager/static/app.js`: Start/Restart/Stop → `confirm()` → `b.disabled = true` → `fetch` → `alert(e.message)` on error. A restart can take up to 250 s (`frontend/src-tauri/src/lib.rs` comment: 150 + 10 + 90) with only a disabled button; success is indistinguishable from "nothing happened" until the 5 s status refresh.
 2. **No debug log of Manager actions.** `backend/app/manager/main.py` writes launcher stdout to `logs/anzu-launch.log` (rotated) and Tauri logs failed controls, but there is no structured, viewable record of presses, request ids, durations, results or supervisor decisions.
-3. **No process visibility.** The Manager shows core state, task counts, GPU name, disk, RAM. It cannot show ANZU's llama-server(s), front lane, module workers, Supermemory sidecar, LM Studio started by ANZU, etc. Spawn sites track their own handles; RFC-0225 S2 introduces the registry this screen needs.
+3. **No process visibility.** The Manager shows core state, task counts, GPU name, disk, RAM. It cannot show ANZU's llama-server(s), front lane, module workers, Supermemory sidecar, LM Studio started by ANZU, or the **selected** engine ANZU talks to (Taco's LM Studio :1234, which ANZU did not spawn). Spawn sites track their own handles; RFC-0225 S2 introduces the registry this screen needs.
+4. **Manager UI is untested.** `backend/app/manager/static/app.js` is one minified classic script (`<script src="/assets/app.js">`); no JS test covers it and `pr-tests.yml` runs none.
 
 ## Decision
 
@@ -30,10 +31,18 @@ Ship **one RFC with two implement slices** (one named model each, **fast off**).
 
 ### Debug logger (normative)
 
-- `logs/manager-debug.log`, JSON lines, size-rotated with the existing `rotate_file` (reuse `LAUNCH_LOG_MAX_BYTES` / `LAUNCH_LOGS_KEPT` policy). Fields: `ts`, `level`, `event` (`press`, `control_start`, `control_end`, `supervisor`, `status_error`, `process_view`), `action`, `request_id`, `duration_ms`, `ok`, `detail`.
+- `logs/manager-debug.log`, JSON lines, size-rotated with the existing `supervisor.rotate_file`: **2 MiB per file** (`LAUNCH_LOG_MAX_BYTES = 2 * 1024 * 1024`) and **5 rotated files kept** (`LAUNCH_LOGS_KEPT = 5`), so the debug log never uses more than **12 MiB** on disk (current + 5). Fields: `ts`, `level`, `event` (`press`, `control_start`, `control_end`, `supervisor`, `status_error`, `process_view`), `action`, `request_id`, `duration_ms`, `ok`, `detail`.
 - Every control press carries a client `request_id` (header) logged at receipt and completion; supervisor restarts/backoffs are logged.
-- `GET /api/manager/v1/debug-log?tail=200` (loopback-only, existing middleware) returns parsed lines; secrets/tokens never logged (session token redacted).
-- "Debug" drawer in the Manager page shows the tail with level filter and auto-refresh while open; a "Verbose" toggle raises level to DEBUG for the current Manager session.
+- `GET /api/manager/v1/debug-log?tail=200` (loopback-only, existing middleware) returns parsed lines.
+- **Redaction (UX #2), one module `backend/app/manager/redact.py` used by the logger and the process view, applied before anything is written or returned:**
+  - Header values for `Authorization`, `Cookie`, `Set-Cookie`, `X-API-Key`, `Api-Key`, `X-Jarvis-Key`, `X-Anzu-Manager-Token` (`manager/main.py::TOKEN_HEADER`) and the Manager session token → `***`.
+  - Argv: values of `--api-key`, `--token`, `--password`, `--secret`, `--key`, `--hf-token`, `--auth`, `--bearer` (both `--flag value` and `--flag=value`) → `***`; any `NAME=value` arg whose name matches `(KEY|TOKEN|SECRET|PASSWORD|PASS|AUTH|CREDENTIAL)` (case-insensitive) → `NAME=***`.
+  - Environment: values are never logged or returned; only names, and only on DEBUG.
+  - Owner chat text: fields `text`, `prompt`, `message`, `content`, `transcript` → `<n chars>`.
+  - Case-file paths: any path under `data_dir()/investigations` (`reverse_engineering/store.py`) → `<case-file>`.
+  - **Raw argv is never returned.** The process endpoint returns `argv_redacted` only (and the executable name); the raw list never leaves the process.
+- "Debug" drawer in the Manager page shows the tail with level filter and auto-refresh while open.
+- **Verbose toggle (UX #4):** raises the logger to DEBUG. State lives **only in Manager process memory** (`manager/debug_log.py::_verbose`), resets to off on every Manager start, and is never persisted. It is set only by `POST /api/manager/v1/debug-log/verbose` from the local Manager UI: the route requires the loopback middleware **and** the Manager session token (`X-Anzu-Manager-Token`), and rejects requests whose `Origin` is not the Manager page itself (`http://127.0.0.1:4782` / `http://localhost:4782`) — the portal on 4780 can read the session token via `/session` but still cannot enable verbose (no remote enable, no LAN, no core-side setter).
 
 ### Button feedback (normative)
 
@@ -41,9 +50,10 @@ States per control button: `idle → pressed (≤100 ms) → working (spinner + 
 
 ### Process monitor (normative)
 
-- Source: RFC-0225 S2 registry. With the core healthy, the Manager reads `GET /api/system/processes`; with the core down, it reads `data_dir()/runtime/process-registry.json` directly and verifies each pid/create-time with psutil (so orphans left by a crashed core are visible).
+- Source: RFC-0225 S2 registry for ANZU-spawned processes. With the core healthy, the Manager reads `GET /api/system/processes`; with the core down, it reads `data_dir()/runtime/process-registry.json` directly and verifies each pid/create-time with psutil (so orphans left by a crashed core are visible).
 - Columns: name/kind, pid, status (`running` / `exited (code)` / `orphaned`), CPU % (1 s sample), RAM (RSS), GPU memory where the platform exposes per-process GPU usage (NVIDIA `nvidia-smi --query-compute-apps`; otherwise the cell reads "not reported by driver"), activity (`working` / `idle`), and **timer** "for 12m 03s" since the last activity change, plus uptime.
 - Activity rules: llama-server → `/slots` `is_processing` (RFC-0210 probe); module workers / sidecars → CPU > 5 % averaged over 10 s = working; others → CPU rule. The rule used is shown in a tooltip.
+- **Selected engine row (UX #1).** The engine ANZU talks to is listed even though ANZU did not spawn it: from RFC-0225 S3 `GET /api/model/engines` (rows classified `selected`, e.g. Taco's LM Studio, kind `lmstudio`, port 1234, pid + exe from the RFC-0225 identity check). Activity: LM Studio native API `GET http://127.0.0.1:1234/api/v1/models` (loaded instances + state) or, when the REST call fails, `lms ps`; a loaded instance with an in-flight request → `working`, loaded and quiet → `idle`, none loaded → `unloaded`. When RFC-0225's `idle_unloaded()` hook is set for that engine (written by RFC-0228 S2), the row reads **"unloaded (idle) for 12m 03s"** with the timer from `unloaded_idle_at`. Core down → the Manager probes `:1234` itself and shows "core down — idle state unknown" instead of guessing.
 - Read-only by default. A "Stop" action per row is **not** added in this RFC (stopping ANZU's own children stays with RFC-0093/0136 force-stop and Manager Stop).
 - Refresh every 2 s while the screen is visible, 0 when hidden; psutil work off the event loop.
 
@@ -67,6 +77,14 @@ No stubs. A process screen fed by mock data, a GPU column that is always blank w
 
 ---
 
+## Relationship to drafts #648/#649
+
+PG ruling via CoS (2026-10-20): no gate. #648/#649 do not touch `backend/app/manager/**`, `frontend/manager-controls.test.mjs` / `frontend/manager-processes.test.mjs` or this RFC's endpoints; nothing is ported. The selected-engine and idle-unload data come from RFC-0225 S3 (which ports the #648 `lmstudio_server._loaded_model_ids` inventory this screen reads through `/api/model/engines`).
+
+**Reconciliation rule:** if a draft lands first and touches a file owned here, the slice reuses the draft's code and adds only this RFC's behaviour; if a slice lands first, the draft rebases onto it.
+
+---
+
 ## Slices (one ticket each)
 
 Assign order: **S1 → S2** (S2 also needs RFC-0225 S2).
@@ -77,35 +95,47 @@ Assign order: **S1 → S2** (S2 also needs RFC-0225 S2).
 
 | Path | Why |
 | --- | --- |
-| `backend/app/manager/main.py` | JSON-lines debug logger; `request_id` on control; phase reporting for control (`GET /api/manager/v1/control/progress`); `GET /api/manager/v1/debug-log`; token redaction |
+| `backend/app/manager/debug_log.py` (new) | JSON-lines logger, rotation (2 MiB × 5), in-memory `_verbose` |
+| `backend/app/manager/redact.py` (new) | Redaction rules above |
+| `backend/app/manager/main.py` | `request_id` on control; phase reporting (`GET /api/manager/v1/control/progress`); `GET /api/manager/v1/debug-log`; `POST /api/manager/v1/debug-log/verbose` (local-only); script tag `type="module"` |
 | `backend/app/manager/supervisor.py` | Emit supervisor events to the debug logger (restart, backoff, crash-log preserved) |
-| `backend/app/manager/static/app.js` | Button state machine, elapsed timer, phase text, inline failure, Debug drawer |
-| `backend/app/manager/static/index.html` | Debug drawer markup |
+| `backend/app/manager/static/app.js` | Becomes an ES module entry (same behaviour, same `confirm()`/`alert()` calls); wires buttons and the Debug drawer |
+| `backend/app/manager/static/controls.js` (new) | Pure, DOM-free button state machine (`idle → pressed → working → success/failed`), elapsed formatting, phase text — exported for tests |
+| `backend/app/manager/static/index.html` | Debug drawer markup + Verbose toggle; `<script type="module" src="/assets/app.js">` |
 | `backend/app/manager/static/style.css` | Pressed/working/success/failed styles in the existing design language |
 | `tests/test_rfc0229_manager_debug.py` (new) | Below (alongside `tests/test_rfc0196_anzu_manager.py`, `tests/test_manager_supervisor.py`) |
+| `frontend/manager-controls.test.mjs` (new); `frontend/package.json` (`test:manager-controls`: `node --test manager-controls.test.mjs`, importing `../backend/app/manager/static/controls.js`); `.github/workflows/pr-tests.yml` (one append-only `frontend-build` step `- name: Manager control feedback tests (RFC-0229 S1)` / `run: npm run test:manager-controls`) | UX #3 |
 
 - [ ] Each press writes `press` + `control_start` + `control_end` lines with the same `request_id`, `duration_ms`, `ok`.
-- [ ] Session token never appears in the log (test greps output).
+- [ ] **(UX #2)** Redaction: a control request with `Authorization: Bearer x`, a spawn argv with `--api-key sk-1`, `--token=t`, `HF_TOKEN=h`, an env dict, an owner message body and a path under `data_dir()/investigations` → log and endpoint contain none of the secret values, `<n chars>` for the message and `<case-file>` for the path (test greps output); session token never appears.
+- [ ] **(UX #2)** Disk cap: writing 30 MiB of events leaves at most 6 files, each ≤ 2 MiB, total ≤ 12 MiB.
+- [ ] **(UX #4)** Verbose: off at start; local UI POST with token + Manager origin → DEBUG lines appear; Manager restart → off again; POST without token, with a foreign `Origin`, or from a non-loopback client → 403 and level unchanged; no file contains the verbose state.
+- [ ] **(UX #3)** `npm run test:manager-controls` covers pressed ≤100 ms transition, working with elapsed, success auto-clear after 3 s, failed stays until dismissed, other buttons disabled while one runs; runs in `pr-tests.yml`.
 - [ ] Debug-log endpoint returns the last N lines, rejects non-loopback (existing middleware test pattern).
 - [ ] Button shows pressed within 100 ms, elapsed timer during a simulated 30 s restart, then success or the inline error; existing confirm texts unchanged.
 - [ ] Log rotation honoured; RFC-0196 tests green.
 
 ### S2 — Spawned-process monitor screen
 
-**Model:** Grok 4.5 (fast off) · **Lane:** UX · **Depends:** S1 (sequential owner of `main.py` / static files), RFC-0225 S2
+**Model:** Grok 4.5 (fast off) · **Lane:** UX · **Depends:** S1 (sequential owner of `main.py` / static files), RFC-0225 S2 (registry), RFC-0225 S3 (`/api/model/engines` selected row + `idle_unloaded()` hook)
 
 | Path | Why |
 | --- | --- |
-| `backend/app/manager/process_view.py` (new) | Merge core `/api/system/processes` or the on-disk registry with psutil samples; activity rules; timers; NVIDIA per-process GPU when available |
+| `backend/app/manager/process_view.py` (new) | Merge core `/api/system/processes` or the on-disk registry with psutil samples; selected-engine row from `/api/model/engines` + LM Studio native API / `lms ps`; idle-unloaded state; activity rules; timers; NVIDIA per-process GPU when available; output through `redact.py` (`argv_redacted` only) |
 | `backend/app/manager/main.py` | `GET /api/manager/v1/processes` |
-| `backend/app/manager/static/processes.js` (new) | Processes screen rendering, 2 s refresh while visible |
+| `backend/app/manager/static/processes.js` (new) | ES module: pure row formatting (`formatRow`, timer text, "unloaded (idle) for …") exported for tests + screen rendering, 2 s refresh while visible |
 | `backend/app/manager/static/index.html` / `style.css` | Processes card/link and table styles |
 | `tests/test_rfc0229_process_view.py` (new) | Below |
+| `frontend/manager-processes.test.mjs` (new); `frontend/package.json` (`test:manager-processes`, importing `../backend/app/manager/static/processes.js`); `.github/workflows/pr-tests.yml` (one append-only step `- name: Manager process screen tests (RFC-0229 S2)` / `run: npm run test:manager-processes`) | UX #3 |
 
 - [ ] Core healthy → every RFC-0225 registry entry listed with status, CPU, RSS, activity and timer.
 - [ ] Core stopped with a leftover llama-server → listed as `orphaned` from the on-disk registry; pid reuse (create-time mismatch) is not listed as ANZU's.
 - [ ] llama-server busy fixture (`is_processing: true`) → `working`; timer resets on activity change.
 - [ ] No NVIDIA driver → GPU cell reads "not reported by driver"; with fixture data → MiB value.
+- [ ] **(UX #1)** Taco fixture (RFC-0227 `lmstudio_1234_selected.json`): LM Studio :1234 row listed as selected, kind `lmstudio`, with the 9B instance and `idle`/`working` from the native API; REST failing → activity from a fake `lms ps`.
+- [ ] **(UX #1)** `idle_unloaded()` set 12 min ago for that engine → row reads "unloaded (idle) for 12m …" (Python + JS tests); core down → "core down — idle state unknown".
+- [ ] **(UX #2)** Endpoint returns `argv_redacted` only; a registry entry with `--api-key` never shows the value; no `argv` key in the payload.
+- [ ] **(UX #3)** `npm run test:manager-processes` covers row formatting, timers and the idle-unloaded text; runs in `pr-tests.yml`.
 - [ ] Endpoint p95 < 300 ms for 20 processes; screen stops polling when hidden.
 
 ---
@@ -121,11 +151,13 @@ Assign order: **S1 → S2** (S2 also needs RFC-0225 S2).
 | ID | Title | Model | Lane | Depends |
 | --- | --- | --- | --- | --- |
 | 0229-S1 | Manager debug logger + button feedback | Composer 2.5 | UX | — |
-| 0229-S2 | Spawned-process monitor screen | Grok 4.5 | UX | S1, 0225-S2 |
+| 0229-S2 | Spawned-process monitor screen (+ selected engine row) | Grok 4.5 | UX | S1, 0225-S2, 0225-S3 |
 
 ## Likely files
 
-See ownership tables. No file here is owned by another RFC of the 2026-10-17 batch.
+See ownership tables. Manager files are owned sequentially 0229-S1 → 0229-S2. No file here is owned by another RFC of the batch. Manager static files are bundled by the existing `--collect-all app` step in `scripts/build-backend-sidecar.ps1` and served by the existing `/assets` mount in `manager/main.py` (new modules need no build change).
+
+`frontend/package.json` and `.github/workflows/pr-tests.yml` are shared by every frontend ticket in the 2026-10-17 batch: each ticket adds exactly one `test:*` script line and one `frontend-build` step (append-only hunks, trivial rebase) and touches nothing else in those files.
 
 ## Out of scope
 
@@ -137,4 +169,5 @@ See ownership tables. No file here is owned by another RFC of the 2026-10-17 bat
 ## Risks
 
 - **psutil cost on Windows** — sampling off the event loop, 2 s cadence only while visible.
-- **Registry not yet landed** — S2 hard-depends on RFC-0225 S2; S1 ships independently.
+- **Registry not yet landed** — S2 hard-depends on RFC-0225 S2 and S3; S1 ships independently.
+- **Module script on older WebView2** — ES modules are supported by every WebView2 runtime ANZU ships with; the Manager page is also opened in the default browser, where they are universal.
