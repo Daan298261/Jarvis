@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..config import LOCAL_NETWORK_SCOPE, data_dir
-from ..tools.safety import _is_unc_path, reject_unsafe_path_text, resolve_allowed_path
+from ..tools.safety import _is_unc_path, path_is_under_root, reject_unsafe_path_text, resolve_allowed_path
 from .privacy import private_directory
 
 _ID = re.compile(r"^[a-f0-9]{32}$")
@@ -248,6 +248,32 @@ def _ffs_admit_lexically(target: str, allowed: list[str]) -> None:
     raise PermissionError(FFS_OUTSIDE_ALLOWED)
 
 
+def _ffs_admit_real_parent(target: str, allowed: list[str]) -> None:
+    """Second gate, after :func:`_ffs_admit_lexically` and before any probe of the final component.
+
+    An in-list linked folder can point outside (``allowed/linkdir -> /outside``), so the parent's
+    real path must be inside the allowed folders too; otherwise the leaf's link/exists probe would
+    run on the outside path. Same fixed ``PermissionError`` as the lexical gate. The target being an
+    allowed root itself needs no parent check. UNC targets stay lexical (the share is never contacted).
+    """
+    raw = reject_unsafe_path_text(target)
+    if _is_unc_path(raw):
+        return
+    candidate = os.path.abspath(os.path.expanduser(raw))
+    parent = os.path.dirname(candidate)
+    for root in allowed:
+        root = str(root or "")
+        if not root or root == LOCAL_NETWORK_SCOPE or "\x00" in root:
+            continue
+        expanded = os.path.expanduser(root)
+        if os.path.normcase(candidate) in {os.path.normcase(os.path.abspath(expanded)),
+                                           os.path.normcase(os.path.realpath(expanded))}:
+            return
+        if path_is_under_root(parent, root):
+            return
+    raise PermissionError(FFS_OUTSIDE_ALLOWED)
+
+
 def prepare_ffs(target: str, question: str, allowed: list[str] | None, task_id: str | None, *,
                 source_type: str = "auto", investigation_id: str | None = None) -> dict:
     """RFC-0208: prepare (or adopt) a ``kind == "ffs"`` investigation for a full file-system dump.
@@ -263,6 +289,7 @@ def prepare_ffs(target: str, question: str, allowed: list[str] | None, task_id: 
         # Allow-list first, on the lexical path only: nothing about an outside target (exists,
         # missing, link) may change the answer, so the caller cannot probe outside the folders.
         _ffs_admit_lexically(target, allowed)
+        _ffs_admit_real_parent(target, allowed)
     raw = Path(target).expanduser()
     if raw.is_symlink() or (raw.exists() and getattr(raw.lstat(), "st_file_attributes", 0) & 0x400):
         raise PermissionError("Linked/reparse target is not admitted")

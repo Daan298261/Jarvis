@@ -134,3 +134,53 @@ async def test_api_returns_identical_refusal_for_outside_existing_missing_and_li
         assert bodies == {(422, '{"detail":"' + store.FFS_OUTSIDE_ALLOWED + '"}')}
         ok = await client.post("/api/investigations/ffs", json={"target": str(layout.dump)})
         assert ok.status_code == 200, ok.text
+
+
+def test_linked_parent_to_outside_never_reveals_the_outside_leaf(layout, monkeypatch):
+    """D2 #660 review: allowed/linkdir -> /outside must not lstat /outside/<leaf> before refusing."""
+    _symlink(layout.allowed / "linkdir", layout.outside)
+    _symlink(layout.outside / "leaf_link", layout.secret)
+    _symlink(layout.outside / "leaf_dangling", layout.outside / "gone")
+    (layout.outside / "sub").mkdir()
+    linkdir = layout.allowed / "linkdir"
+    targets = [linkdir / "secret_dump", linkdir / "missing", linkdir / "leaf_link", linkdir / "leaf_dangling",
+               linkdir / "sub" / ".." / "leaf_link", linkdir / "sub" / "missing"]
+    results = {_refusal(str(t), layout.roots) for t in targets}
+    assert results == {(PermissionError, store.FFS_OUTSIDE_ALLOWED)}
+
+    probed: list[str] = []
+    real_lstat = os.lstat
+
+    def spy(path, *a, **kw):
+        if os.fspath(path).endswith("leaf_link"):
+            probed.append(os.fspath(path))
+        return real_lstat(path, *a, **kw)
+
+    monkeypatch.setattr(os, "lstat", spy)
+    assert _refusal(str(linkdir / "leaf_link"), layout.roots) == (PermissionError, store.FFS_OUTSIDE_ALLOWED)
+    assert probed == []
+
+
+def test_allowed_root_itself_and_in_list_linked_parent_staying_inside_are_admitted(layout):
+    row = store.prepare_ffs(str(layout.allowed), "q", layout.roots, None)  # the root needs no parent check
+    assert row["target"] == str(layout.allowed.resolve())
+    _symlink(layout.allowed / "alias", layout.allowed / "inner")
+    (layout.allowed / "inner").mkdir()
+    (layout.allowed / "inner" / "d").mkdir()
+    (layout.allowed / "inner" / "d" / "f.bin").write_bytes(b"x")
+    row = store.prepare_ffs(str(layout.allowed / "alias" / "d"), "q", layout.roots, None)
+    assert row["target"] == str((layout.allowed / "inner" / "d").resolve())
+
+
+@pytest.mark.asyncio
+async def test_api_linked_parent_to_outside_gives_the_identical_422(layout, allow_loopback_api, monkeypatch):
+    _symlink(layout.allowed / "linkdir", layout.outside)
+    _symlink(layout.outside / "leaf_link", layout.secret)
+    monkeypatch.setattr("app.api.investigations.load_settings",
+                        lambda: SimpleNamespace(allowed_directories=layout.roots))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+        targets = [layout.secret, layout.outside / "missing", layout.allowed / "linkdir" / "leaf_link",
+                   layout.allowed / "linkdir" / "secret_dump", layout.allowed / "linkdir" / "missing"]
+        responses = [await client.post("/api/investigations/ffs", json={"target": str(t)}) for t in targets]
+        assert {(r.status_code, r.text) for r in responses} == {
+            (422, '{"detail":"' + store.FFS_OUTSIDE_ALLOWED + '"}')}
