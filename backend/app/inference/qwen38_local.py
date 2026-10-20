@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,6 +31,8 @@ EVERYDAY_PROFILE_NAMES = frozenset({"balanced", "fast", "quality", "qwen38_9b"})
 PINNED_PROFILE_NAMES = frozenset(
     {"expert", "ornith_9b", "ornith_35b", "bootstrap"}
 )
+_PATH_CACHE: tuple[str, float, list[Path]] | None = None
+_PATH_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -86,6 +91,21 @@ def _lmstudio_root() -> Path:
 
 
 def _owner_gguf_paths(extra_roots: list[Path] | None = None) -> list[Path]:
+    global _PATH_CACHE
+    # The status rail polls frequently. Do not recursively walk every weight
+    # directory twice per poll, or run overlapping scans from status/loader.
+    if extra_roots is not None or os.environ.get("PYTEST_CURRENT_TEST"):
+        return _scan_owner_gguf_paths(extra_roots)
+    key = str(models_dir()) + ":" + str(_lmstudio_root())
+    with _PATH_LOCK:
+        if _PATH_CACHE and _PATH_CACHE[0] == key and time.monotonic() - _PATH_CACHE[1] < 30:
+            return list(_PATH_CACHE[2])
+        paths = _scan_owner_gguf_paths()
+        _PATH_CACHE = (key, time.monotonic(), paths)
+        return list(paths)
+
+
+def _scan_owner_gguf_paths(extra_roots: list[Path] | None = None) -> list[Path]:
     from .lmstudio_catalog import extra_volume_loose_ggufs, extra_volume_model_roots
 
     roots = [models_dir(), _lmstudio_root(), *extra_volume_model_roots()]

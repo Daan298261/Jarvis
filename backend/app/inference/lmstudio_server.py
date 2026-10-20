@@ -12,6 +12,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from .backends import probe_remote_server
 
 _log = logging.getLogger(__name__)
@@ -67,6 +69,8 @@ def _run_cli(args: list[str], timeout: float) -> subprocess.CompletedProcess[str
         args,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout,
         check=False,
     )
@@ -96,7 +100,9 @@ async def ensure_local_lmstudio(
         return {"ok": False, "method": "skipped", "detail": "refusing to auto-start a remote LM Studio"}
 
     probe = await probe_remote_server(host, port, timeout=2.0, retry=False)
-    if probe.get("ok"):
+    loaded = await _loaded_model_ids(host, port) if probe.get("ok") and model else None
+    model_ready = not model or (model in loaded if loaded is not None else model in (probe.get("models") or []))
+    if probe.get("ok") and model_ready:
         return {"ok": True, "method": "already-up", "detail": "LM Studio was already serving"}
 
     cli = lmstudio_cli()
@@ -108,13 +114,13 @@ async def ensure_local_lmstudio(
             "detail": "LM Studio is not installed on this PC",
         }
 
-    if app:
+    if app and not probe.get("ok"):
         try:
             await asyncio.to_thread(_launch_app, app)
         except Exception as exc:
             _log.warning("Could not launch LM Studio app: %s", exc)
 
-    if cli:
+    if cli and not probe.get("ok"):
         try:
             started = await asyncio.to_thread(
                 _run_cli,
@@ -130,7 +136,7 @@ async def ensure_local_lmstudio(
         except Exception as exc:
             _log.warning("lms server start failed: %s", exc)
 
-    ready = await _wait_until_up(host, port, timeout)
+    ready = probe if probe.get("ok") else await _wait_until_up(host, port, timeout)
     if not ready.get("ok"):
         return {
             "ok": False,
@@ -153,9 +159,39 @@ async def ensure_local_lmstudio(
             _log.warning("lms load failed: %s", exc)
         ready = await probe_remote_server(host, port, timeout=4.0, retry=True)
 
+    loaded = await _loaded_model_ids(host, port) if model else None
+    model_ready = not model or (model in loaded if loaded is not None else model in (ready.get("models") or []))
     return {
-        "ok": bool(ready.get("ok")),
+        "ok": bool(ready.get("ok") and model_ready),
         "method": "auto-start",
-        "detail": "Started LM Studio on this PC",
+        "detail": "Started LM Studio on this PC" if model_ready else "The selected LM Studio model did not load",
         "models": list(ready.get("models") or []),
     }
+
+
+async def _loaded_model_ids(host: str, port: int) -> set[str] | None:
+    """Native inventory distinguishes loaded weights from downloaded/JIT models."""
+    async with httpx.AsyncClient(timeout=1.0, trust_env=False) as client:
+        for path in ("/api/v1/models", "/api/v0/models"):
+            try:
+                response = await client.get(f"http://{host}:{port}{path}")
+                if not response.is_success:
+                    continue
+                body = response.json()
+                if not isinstance(body, dict):
+                    continue
+                modern = body.get("models")
+                if isinstance(modern, list) and any(isinstance(row, dict) and "loaded_instances" in row for row in modern):
+                    result = set()
+                    for row in modern:
+                        if isinstance(row, dict) and row.get("type") == "llm" and row.get("loaded_instances"):
+                            if row.get("key"):
+                                result.add(str(row["key"]))
+                            result.update(str(item["id"]) for item in row["loaded_instances"] if isinstance(item, dict) and item.get("id"))
+                    return result
+                legacy = body.get("data")
+                if isinstance(legacy, list) and any(isinstance(row, dict) and "state" in row for row in legacy):
+                    return {str(row["id"]) for row in legacy if isinstance(row, dict) and row.get("state") == "loaded" and row.get("id")}
+            except (httpx.HTTPError, ValueError, TypeError):
+                continue
+    return None
