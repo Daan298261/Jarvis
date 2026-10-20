@@ -258,21 +258,36 @@ def _admit_real_parent(target: str, allowed: list[str]) -> None:
     real path must be inside the allowed folders too; otherwise the leaf's link/exists probe would
     run on the outside path. Same fixed ``PermissionError`` as the lexical gate. The target being an
     allowed root itself needs no parent check. UNC targets stay lexical (the share is never contacted).
+
+    The parent is taken from the path *as typed* (``..`` not collapsed) and resolved with
+    ``realpath``, which, like the OS, follows a link before applying a later ``..``:
+    ``allowed/linkdir/../leaf`` is judged by ``realpath("allowed/linkdir/..")``, not by ``allowed/``.
+    A target whose last component is ``.``/``..`` is judged by its own real path.
     """
     raw = reject_unsafe_path_text(target)
     if _is_unc_path(raw):
         return
-    candidate = os.path.abspath(os.path.expanduser(raw))
-    parent = os.path.dirname(candidate)
+    expanded = os.path.expanduser(raw)
+    as_typed = expanded if os.path.isabs(expanded) else os.path.join(os.getcwd(), expanded)
+    stripped = as_typed.rstrip("/\\") or as_typed
+    head, leaf = os.path.split(stripped)
+    # The leaf itself is not followed: its parent's real path plus its own name.
+    target_in_real_parent = os.path.normcase(os.path.join(os.path.realpath(head), leaf))
     for root in allowed:
         root = str(root or "")
         if not root or root == LOCAL_NETWORK_SCOPE or "\x00" in root:
             continue
-        expanded = os.path.expanduser(root)
-        if os.path.normcase(candidate) in {os.path.normcase(os.path.abspath(expanded)),
-                                           os.path.normcase(os.path.realpath(expanded))}:
-            return
-        if path_is_under_root(parent, root):
+        if leaf in {"", ".", ".."}:
+            if path_is_under_root(stripped, root):
+                return
+            continue
+        root_abs = os.path.abspath(os.path.expanduser(root))
+        root_forms = {os.path.normcase(os.path.realpath(root_abs)),
+                      os.path.normcase(os.path.join(os.path.realpath(os.path.dirname(root_abs)),
+                                                    os.path.basename(root_abs)))}
+        if target_in_real_parent in root_forms:
+            return  # the allowed root itself (its parent is outside by definition)
+        if path_is_under_root(head, root):
             return
     raise PermissionError(OUTSIDE_ALLOWED)
 
