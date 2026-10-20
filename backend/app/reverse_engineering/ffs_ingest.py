@@ -497,7 +497,12 @@ def running(ident: str) -> bool:
 
 
 def cancel(ident: str) -> bool:
-    """Ask a running ingest to stop at the next block; it checkpoints and stays resumable."""
+    """Ask a running ingest to stop at the next block and checkpoint.
+
+    Used by owner close/cancel, which are final: the investigation keeps its closed/cancelled
+    status and is not resumed (prepare a new one instead). Only shutdown, ``stop_after`` and
+    errors leave an ingest ``interrupted`` and resumable.
+    """
     with _RUNNING_LOCK:
         ingest = _RUNNING.get(ident)
     if ingest is None:

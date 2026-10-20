@@ -467,7 +467,8 @@ class Investigations:
     async def close(self, ident: str, task_id: str | None, cancelled=False) -> dict:
         from . import ffs_ingest
         self.owned(ident, task_id)
-        # A running FFS ingest stops at its next block, checkpoints and stays resumable.
+        # A running FFS ingest stops at its next block and checkpoints; owner close/cancel is final
+        # (status stays closed/cancelled, the ingest is not resumable).
         ffs_ingest.cancel(ident)
         active = self.active.get(ident)
         if active and active is not asyncio.current_task():
