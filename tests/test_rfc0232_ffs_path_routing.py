@@ -32,7 +32,7 @@ from tests.test_verification_loop import ScriptedProvider, _finished, _tool
 # Hard per-call context budget the fix enforces (RFC-0232 §Context budget).
 CONTEXT_BUDGET_CHARS = 24_000
 
-# Taco's Windows / UNC / POSIX forms (S1 table). Every one is a WEAK prefilter match, so these
+# Taco's Windows / UNC / POSIX / .apk forms (S1 table). Every one is a WEAK prefilter match, so these
 # tests stand the probe in with a "dump" verdict: they pin path parsing and route wiring for path
 # forms that cannot exist on the CI runner. The real probe is exercised on disk below.
 TACO_PROMPTS = [
@@ -64,9 +64,11 @@ DUMP_WORDING_PROMPTS = [
     ),
 ]
 
-# EXPLICIT owner wording (only the four owner phrases: full FFS, full file system extraction,
-# FFS of my <device>, extraction of my <device>) routes without a dump marker; the probe still
-# runs with require_marker=False for the allow-list gate and the source veto.
+# EXPLICIT owner wording is exactly the four CoS phrases: "reverse engineer", "full FFS",
+# "full file system extraction" and "extraction of my phone" (strict literal). It routes without a
+# dump marker; the probe still runs with require_marker=False for the allow-list gate and the source
+# veto. "FFS of my ...", "decompile"/"disassemble" and .apk paths are WEAK and need a "dump" verdict.
+# ("reverse engineer" is also pinned live by test_reverse_engineer_wording_still_routes below.)
 EXPLICIT_PROMPTS = [
     pytest.param(r"D:\cases\x\p1 is a full FFS of my Pixel, which apps?", id="full-ffs"),
     pytest.param(r"D:\cases\x\p1 is a full file system extraction, which accounts are on it?", id="full-file-system-extraction"),
