@@ -1,4 +1,4 @@
-# RFC-0231: Large-prompt pipeline (reflex detect, immediate large-model load, spoken ack, split, completeness, durable sequential prompts)
+# RFC-0231: Large-prompt pipeline (reflex detect, gated large-model preload, spoken ack, split, completeness, durable sequential prompts)
 
 **Status:** accepted
 **Priority:** P1 (Taco ask B, relayed by Chief of Staff 2026-10-20)
@@ -873,7 +873,7 @@ On `loop.py` and `owner_turn.py` the order is RFC-0230 (#666), then RFC-0232 (#6
 | `scripts/anzu-latency-repro.ps1`, `scripts/latency_repro.py` | 0230-S0 (creates them) → 0231-S4 (append-only: one `--cases` argument) |
 | `frontend/src/api.ts` | 0230-S0 → 0218-S3 → 0227 → 0231-S6 → 0233-S6 |
 | `frontend/src/taskStatus.ts`, `frontend/src/components/TaskActivity.tsx` | #649 (landed) → 0231-S6 |
-| `frontend/package.json`, `.github/workflows/pr-tests.yml` | **Append-only.** The Architect owns the workflow file. Open appenders: #662 (0229-S1), 0228-S2, 0230-S0, 0230-S3, 0232-S6 and 0231-S0…S6. Rule: each ticket appends its own step, never edits another's, and on a conflict merges `development` with a merge commit and keeps both steps |
+| `frontend/package.json`, `.github/workflows/pr-tests.yml` | **Append-only.** The Architect owns the workflow file. Rule: each ticket appends its own step, never edits another's, and on a conflict merges `development` with a merge commit and keeps both steps |
 
 ## Ticket cards
 
