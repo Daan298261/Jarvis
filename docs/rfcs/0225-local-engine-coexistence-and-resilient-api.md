@@ -225,16 +225,116 @@ Reproduce on Taco's Windows profile (LM Studio :1234 with the 9B, Ollama `anzu-c
 
 | Path | Why |
 | --- | --- |
-| `backend/app/runtime/process_registry.py` (new) | `register(kind, pid, create_time, argv, port, owner_module, lifetime)` (`lifetime` ∈ `short` (registered_subprocess), `child` (terminated on shutdown), `detached` (left running on shutdown; used by S3's Ollama start)), `unregister`, `snapshot()`, `is_anzu_owned(pid, create_time)`, `registered_subprocess(...)` async context manager for short-lived children; argv stored **redacted** (secret flags `--api-key`, `--token`, `--password`, `--hf-token`, `--key`, `--secret` and any `KEY=VALUE` env-style arg with a secret-like key are replaced by `***`); atomic persist to `data_dir()/runtime/process-registry.json` |
+| `backend/app/runtime/process_registry.py` (new) | `register(kind, pid, create_time, argv, port, owner_module, lifetime, role=None)` (`kind` ∈ the `ProcessKind` enum and the file layout in "Process registry file + processes API" below; `lifetime` ∈ `short` (registered_subprocess), `child` (terminated on shutdown), `detached` (left running on shutdown; used by S3's Ollama start)), `unregister`, `snapshot()`, `is_anzu_owned(pid, create_time)`, `registered_subprocess(...)` async context manager for short-lived children; argv stored **redacted** (secret flags `--api-key`, `--token`, `--password`, `--hf-token`, `--key`, `--secret` and any `KEY=VALUE` env-style arg with a secret-like key are replaced by `***`); atomic persist to `data_dir()/runtime/process-registry.json` |
 | `backend/app/inference/backends.py` | Register/unregister managed llama-server (worker + front); pre-spawn port check → `port_conflict`; health accepts only listener pid == registered pid; `probe_remote_server` rejects non-2xx (ported from #648) |
 | `backend/app/modules/supervisor.py` | Register module workers — covers `modules/crucix_runtime.py` (Crucix `node server.mjs`) and `studio/blackgrid_runtime.py` (BlackGrid), which spawn through `get_supervisor(...).start` (D2 #4) |
 | `backend/app/modules/supermemory_runtime.py` | Register the Supermemory sidecar |
 | `backend/app/workers/voice.py` | Register voice/STT subprocesses: ffmpeg conversion, whisper.cpp CLI, SAPI STT PowerShell (short-lived, via `registered_subprocess`); first owner in the chain S2 → RFC-0226 S2 |
 | `backend/app/tts/system_sapi.py` | Register SAPI PowerShell synthesis subprocesses (short-lived) |
 | `backend/app/tts/synthesize.py` | Register the Piper CLI subprocess (short-lived); first owner in the chain S2 → RFC-0226 S2 |
-| `backend/app/api/processes.py` (new) | `GET /api/system/processes` → registry snapshot + live status (running/exited/orphaned, CPU %, RSS), argv never returned raw (redacted form only) |
+| `backend/app/api/processes.py` (new) | `GET /api/system/processes` → registry snapshot + live status (running/exited/orphaned, CPU %, RSS), argv never returned raw (redacted form only); exact response shape below |
 | `backend/app/main.py` | Include the processes router; terminate/unregister registered `child` processes on shutdown (existing order kept; `detached` entries are left running); second owner in the chain S1 → S2 → S3 |
 | `tests/test_rfc0225_process_registry.py` (new); `tests/test_rfc0225_flicker_repro.py` | Below; remove the xfail marker |
+
+#### Process registry file + processes API (normative, S2; consumed by RFC-0229 S2)
+
+**`ProcessKind` (string enum, `process_registry.ProcessKind`).** These are the only values of `kind`, both in the file and in the API. The engine kinds are the same strings RFC-0225 S3 uses in `engine_id` (`<kind>@<host>:<port>`) and RFC-0229 shows (`lmstudio`).
+
+| `kind` | Spawned by (owner_module) | `role` |
+| --- | --- | --- |
+| `llama-server` | `inference.backends` | `"worker"` or `"front"` |
+| `ollama` | `inference.ollama_runtime` (S3 start) | `null` |
+| `lmstudio` | `inference.lmstudio_server` (when ANZU launches LM Studio) | `null` |
+| `module-worker` | `modules.supervisor` | the module id, e.g. `"crucix"`, `"blackgrid"` |
+| `supermemory` | `modules.supermemory_runtime` | `null` |
+| `ffmpeg` | `workers.voice` | `null` |
+| `whisper-cpp` | `workers.voice` | `null` |
+| `sapi-stt` | `workers.voice` | `null` |
+| `sapi-tts` | `tts.system_sapi` | `null` |
+| `piper` | `tts.synthesize` | `null` |
+
+`register()` raises `ValueError` for any other kind, so a new spawn site has to extend the enum, and its test, explicitly.
+
+**File.** `data_dir()/runtime/process-registry.json`, UTF-8 JSON, written atomically (`<name>.tmp` + `os.replace`) on every register / unregister / exit. It is read by the core on start and by the RFC-0229 Manager when the core is down.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `schema_version` | int, `1` | Readers reject any other value (the Manager shows "registry format not supported"; the core starts a fresh file and logs it) |
+| `updated_at` | string, ISO-8601 UTC | Last write |
+| `core` | object `{pid: int, create_time: float, started_at: string}` | The core process that wrote the file (`create_time` = `psutil.Process().create_time()`, epoch seconds) |
+| `entries[]` | array of objects | One per registered process: |
+| `entries[].id` | string, uuid4 hex | Stable row id |
+| `entries[].kind` | `ProcessKind` | See table |
+| `entries[].role` | string or null | See table |
+| `entries[].pid` | int | OS pid |
+| `entries[].create_time` | float | `psutil` create time of that pid at registration (identity with `pid`) |
+| `entries[].exe_name` | string | Executable basename only (`llama-server.exe`), never a full path containing the user name |
+| `entries[].argv_redacted` | array of strings | Redacted argv (secret flags / `KEY=VALUE` → `***`); raw argv is never written |
+| `entries[].port` | int or null | Listening port when known |
+| `entries[].owner_module` | string | Dotted module that spawned it |
+| `entries[].lifetime` | `"short"` / `"child"` / `"detached"` | As above |
+| `entries[].started_by` | `"anzu"` | Always `"anzu"` (only ANZU-spawned processes are registered) |
+| `entries[].spawned_by_core` | object `{pid: int, create_time: float}` | The core instance that spawned it |
+| `entries[].registered_at` | string, ISO-8601 UTC | |
+| `entries[].exited_at` | string or null | Set when ANZU observed the exit |
+| `entries[].exit_code` | int or null | Exit code when observed |
+
+Exited entries are kept for 10 min (or the last 50, whichever is smaller), then dropped on the next write.
+
+```json
+{
+  "schema_version": 1,
+  "updated_at": "2026-10-20T13:30:02Z",
+  "core": {"pid": 15220, "create_time": 1792502101.42, "started_at": "2026-10-20T13:15:01Z"},
+  "entries": [
+    {"id": "9f1c2a7e4b0d4f0c8a3e5d6b7c8d9e0f", "kind": "llama-server", "role": "front",
+     "pid": 18840, "create_time": 1792502110.07, "exe_name": "llama-server.exe",
+     "argv_redacted": ["llama-server.exe", "--port", "8089", "--api-key", "***"],
+     "port": 8089, "owner_module": "inference.backends", "lifetime": "child", "started_by": "anzu",
+     "spawned_by_core": {"pid": 15220, "create_time": 1792502101.42},
+     "registered_at": "2026-10-20T13:15:10Z", "exited_at": null, "exit_code": null},
+    {"id": "0a7d3c1b2e4f45a6b7c8d9e0f1a2b3c4", "kind": "ollama", "role": null,
+     "pid": 20112, "create_time": 1792502190.88, "exe_name": "ollama.exe",
+     "argv_redacted": ["ollama.exe", "serve"], "port": 11434, "owner_module": "inference.ollama_runtime",
+     "lifetime": "detached", "started_by": "anzu", "spawned_by_core": {"pid": 15220, "create_time": 1792502101.42},
+     "registered_at": "2026-10-20T13:16:30Z", "exited_at": null, "exit_code": null}
+  ]
+}
+```
+
+**How an entry is classified (one function, `process_registry.classify(entry, live_core)`, used by the API and imported by RFC-0229's `process_view.py` when the core is down):**
+- pid not alive → `exited` (`exit_code` from the entry, or `null` = "exited (unknown)");
+- pid alive but `psutil` create time ≠ `entry.create_time` (compared rounded to 0.01 s) → **pid reused**: the entry is pruned from the file, never killed and never listed as ANZU's;
+- pid alive, create time matches, and `spawned_by_core` equals the live core (`pid` + `create_time`) → `running`;
+- pid alive, create time matches, but `spawned_by_core` is a core that is no longer running (crashed or stopped core; with the core down, every such entry) → **`orphaned`**. A `detached` entry from an earlier core (e.g. ANZU-started Ollama) is re-adopted on core start: `spawned_by_core` is rewritten to the new core and it is `running`, because detached processes are meant to outlive the core.
+
+**`GET /api/system/processes`** (existing core auth for `/api/system/*`; psutil work in `asyncio.to_thread`). **200**:
+
+```json
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-20T13:30:04Z",
+  "core": {"pid": 15220, "create_time": 1792502101.42},
+  "sample_interval_s": 2.0,
+  "processes": [
+    {"id": "9f1c2a7e4b0d4f0c8a3e5d6b7c8d9e0f", "kind": "llama-server", "role": "front",
+     "pid": 18840, "exe_name": "llama-server.exe",
+     "argv_redacted": ["llama-server.exe", "--port", "8089", "--api-key", "***"],
+     "port": 8089, "owner_module": "inference.backends", "lifetime": "child", "started_by": "anzu",
+     "status": "running", "exit_code": null, "exited_at": null,
+     "cpu_percent": 3.5, "rss_bytes": 1311244288, "uptime_s": 894.0,
+     "registered_at": "2026-10-20T13:15:10Z", "sample_error": null}
+  ],
+  "warnings": []
+}
+```
+
+Field types: `schema_version` int; `generated_at` ISO string; `core` `{pid: int, create_time: float}`; `sample_interval_s` float (the interval CPU is measured over, see below); each process: `id` string, `kind` `ProcessKind`, `role` string|null, `pid` int, `exe_name` string, `argv_redacted` string[], `port` int|null, `owner_module` string, `lifetime` enum, `started_by` `"anzu"`, `status` `"running"|"exited"|"orphaned"`, `exit_code` int|null, `exited_at` string|null, `cpu_percent` float|null, `rss_bytes` int|null, `uptime_s` float|null, `registered_at` string, `sample_error` string|null. There is **no** `argv` key and no `create_time` per row (identity stays server-side). Rows are sorted by `kind`, then `registered_at`.
+- **CPU %** is measured over the interval since the previous request (`psutil.Process.cpu_percent(interval=None)` on a per-pid `Process` object cached in the API). The **first** sample for a pid is `null` (the UI shows "measuring…"). `sample_interval_s` reports the real interval, so the RFC-0229 2 s refresh gives a 2 s average, and the endpoint never sleeps.
+- **Empty case:** no registered processes → `200` with `"processes": []` and `"warnings": []`.
+- **Per-row failure:** `psutil.AccessDenied` / `NoSuchProcess` mid-sample → the row stays, with `cpu_percent` / `rss_bytes` / `uptime_s` = `null` and `sample_error` = `"access denied"` / `"exited during sample"`; the response is still `200`.
+- **Registry file unreadable at core start** (corrupt JSON, wrong `schema_version`): the core starts an empty registry, renames the bad file to `process-registry.json.bad-<ts>`, and the endpoint returns `200` with `"warnings": ["registry_file_reset: <reason>"]` until the next core start.
+- **Endpoint failure** (unexpected exception): `500` with `{"error": "processes_unavailable", "detail": "<text>"}`; never a partial list without saying so.
 
 - [ ] Every spawn site above registers on start and unregisters on exit (incl. Crucix and BlackGrid via the supervisor, voice/STT/TTS short-lived children); a crashed child reports `exited` with exit code.
 - [ ] Registry survives a core restart; stale entries (pid reused / create-time mismatch) are pruned, never killed.
@@ -242,6 +342,7 @@ Reproduce on Taco's Windows profile (LM Studio :1234 with the 9B, Ollama `anzu-c
 - [ ] Managed health rejects a responder on 8088 whose pid is not the registered child; `tests/test_rfc0225_flicker_repro.py` passes with the xfail marker removed.
 - [ ] Registry file and API never contain a secret argv value (test with `--api-key sk-…`, `HF_TOKEN=…`).
 - [ ] `GET /api/system/processes` ≤300 ms with 20 entries (psutil off the event loop).
+- [ ] **Registry layout + API shape (for RFC-0229 S2)**, in `tests/test_rfc0225_process_registry.py`: `test_registry_file_layout_schema_v1` (after two registrations the file parses to exactly the documented top-level keys and per-entry keys and types, `schema_version == 1`, and no `argv` key); `test_registry_write_is_atomic` (a crash injected between the tmp write and `os.replace` leaves the previous file intact); `test_register_rejects_unknown_kind` (`ValueError` for `kind="llama"`; every `ProcessKind` value accepted; the enum equals the documented list); `test_engine_kinds_match_engine_id_kinds` (`ollama`, `lmstudio`, `llama-server` are both `ProcessKind` values and the `engine_id` prefixes S3 builds); `test_classify_running_exited_orphaned_reused` (fake psutil: live core match → `running`; dead pid → `exited`; alive pid from a dead core → `orphaned`; create-time mismatch → pruned, never killed, absent from the API); `test_detached_entry_readopted_on_core_start`; `test_exited_entries_retained_10_min_or_50`; `test_bad_registry_file_reset_with_warning` (corrupt file → renamed `.bad-<ts>`, empty registry, the API warning present); `test_processes_api_shape` (exact keys and types per the example, rows sorted, no `argv` / `create_time` per row); `test_processes_api_empty` (`200`, `processes == []`); `test_processes_api_cpu_first_sample_null` (first call `cpu_percent is None`, second call a float, `sample_interval_s` ≈ the faked interval, and the handler never sleeps); `test_processes_api_access_denied_row` (`sample_error == "access denied"`, status still reported); `test_processes_api_failure_500` (patched snapshot raising → `500` `{"error": "processes_unavailable", …}`).
 
 ### S3 — Engine classification, owner-consented stop, ledger, respawn/revive, VRAM gate, managed mode
 
