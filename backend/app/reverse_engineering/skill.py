@@ -40,7 +40,8 @@ def guide(kind: str) -> str:
             "Source text establishes static behavior; target execution requires separate approval. "
             "Do not call REA readiness or native provider operations for ordinary source targets."
         )
-    if kind in {"ffs", "forensic"}:
+    from .ffs_ingest import FFS_KINDS
+    if kind in FFS_KINDS:
         return (
             "This target is a full file-system (FFS) dump ingested read-only under RFC-0208; it was not copied. "
             "Check progress with reverse_engineer action=ingest_status, investigation_id=<id> (action=ingest resumes "
@@ -49,7 +50,8 @@ def guide(kind: str) -> str:
             "On completion two evidence records exist: ffs_ingest (index summary, manifest SHA-256, unknowns) and "
             "ffs_tab_profile (.tab entropy classes, header prefixes, per-file entropy). Read them with action=evidence "
             "and report with findings citing those IDs. High entropy is consistent with encryption or compression; "
-            "say which you cannot distinguish. Carry the ingest unknowns into the report."
+            "say which you cannot distinguish. The report keeps the ingest unknowns and cites the sealed manifest "
+            "SHA-256 automatically; add your own unanswered questions as unknowns."
         )
     names = {
         "native": "native-and-artifacts.md", "managed": "native-and-artifacts.md",

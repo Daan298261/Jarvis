@@ -2,7 +2,7 @@
 
 Accepts an extracted folder, a ``.tar``/``.tar.*`` archive, a ``.zip`` archive or a raw
 image file. The source is evidence: it is opened read-only, never copied and never
-modified. Every member is streamed once in 64 KiB blocks; that single pass yields its
+modified. Every member is streamed once in 1 MiB blocks; that single pass yields its
 SHA-256, size, leading bytes, detected type and, for ``.tab`` files, the entropy profile
 used by the ``.tab`` encryption review (``tab_analyzer``).
 
@@ -15,6 +15,12 @@ Workspace layout (``<investigation>/index/``):
   sessions and, once complete, the finalized manifest digest (``source_sha256``).
 - ``checkpoint.json`` small progress counters; the NDJSON itself is the resume state.
 - ``tab_profile.json`` every ``.tab`` profile plus the aggregate summary.
+
+The investigation row is prepared by ``store.prepare_ffs``: the dump is referenced in place
+as the read-only snapshot. Closed/cancelled is the owner's decision and is never downgraded
+by the ingest thread (``store.save_guarded``). Folder dumps are re-verified member by member
+(size and mtime against the index) when the ingest completes, so a change anywhere in the
+tree is declared as an unknown instead of being sealed as unchanged.
 
 Resume re-reads the NDJSON (dropping a torn final line) and continues in the same
 deterministic order without duplicating or dropping entries.
@@ -33,22 +39,20 @@ import tarfile
 import threading
 import time
 from typing import Any, Callable, Generator, IO
-import uuid
 import zipfile
 import zlib
 
-from ..tools.safety import resolve_allowed_path
 from . import store
-from .privacy import private_directory
 from .tab_analyzer import TabProfiler, is_tab_path, summarize as summarize_tab_profiles
 
-CHUNK_SIZE = 64 * 1024  # 64 KiB chunks for streaming
+CHUNK_SIZE = 1024 * 1024  # RFC-0208: every member is hashed in 1 MiB blocks
 HEADER_MAX_BYTES = 65536  # Header inspection window for magic detection
 MAGIC_HEX_BYTES = 16  # Leading bytes recorded per index line
 
 TOOL_VERSION = "anzu-ffs-ingest/2 (RFC-0208)"
 KIND = "ffs"
-LEGACY_KINDS = frozenset({"forensic"})
+LEGACY_KINDS = frozenset({"forensic"})  # rows written by the pre-conformance ingest (#582/#583)
+FFS_KINDS = frozenset({KIND}) | LEGACY_KINDS
 INDEX_DIR = "index"
 INDEX_FILE = "files.ndjson"
 CUSTODY_FILE = "custody.json"
@@ -346,7 +350,8 @@ def source_totals(source_path: Path, source_type: str) -> tuple[int | None, int 
     return None, None  # tar: only a full scan knows
 
 
-def _source_stat(source_path: Path) -> dict[str, Any]:
+def source_stat(source_path: Path) -> dict[str, Any]:
+    """Admission/completion stat of the dump root (``bytes`` is ``None`` for a folder)."""
     st = source_path.stat()
     return {"bytes": st.st_size if not source_path.is_dir() else None, "mtime_ns": st.st_mtime_ns}
 
@@ -402,10 +407,34 @@ def read_index(index_path: Path, *, repair: bool = False) -> tuple[set[str], int
     return paths, files, total, types, offset
 
 
+def verify_folder_index(source_path: Path, index_path: Path, indexed: set[str]) -> dict[str, list[str]]:
+    """Compare a folder dump with its finished index: ``{modified, removed, added}`` paths.
+
+    Each index line's ``bytes``/``mtime`` were taken before its bytes were read, so any write to
+    a member during or after its read (anywhere in the tree) shows up as ``modified``; the
+    file set is re-walked for members that appeared. Metadata only: nothing is re-read.
+    """
+    modified: list[str] = []
+    removed: list[str] = []
+    with index_path.open("rb") as fh:
+        for raw in fh:
+            obj = json.loads(raw.decode("utf-8"))
+            try:
+                st = (source_path / obj["path"]).lstat()
+            except FileNotFoundError:
+                removed.append(obj["path"])
+                continue
+            if (not stat.S_ISREG(st.st_mode) or st.st_size != int(obj.get("bytes") or 0)
+                    or _iso(st.st_mtime) != obj.get("mtime")):
+                modified.append(obj["path"])
+    added = [rel for rel, *_ in iter_source_entries(source_path, "folder") if rel not in indexed]
+    return {"modified": modified, "removed": removed, "added": added}
+
+
 def file_sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+        for chunk in iter(lambda: fh.read(CHUNK_SIZE), b""):
             h.update(chunk)
     return h.hexdigest()
 
@@ -477,6 +506,17 @@ def cancel(ident: str) -> bool:
     return True
 
 
+def wait_stopped(ident: str, timeout: float | None) -> bool:
+    """Block until a running ingest's worker thread has exited (True), or ``timeout`` passes (False).
+
+    Close/cancel use this so the returned row is final; if a read is stuck past the timeout the
+    guarded save still keeps the owner's closed/cancelled status.
+    """
+    with _RUNNING_LOCK:
+        ingest = _RUNNING.get(ident)
+    return True if ingest is None else ingest.finished.wait(timeout)
+
+
 class FFSIngest:
     """Streaming FFS ingest with NDJSON index, checkpoints and chain of custody (RFC-0208)."""
 
@@ -500,84 +540,22 @@ class FFSIngest:
         self.allowed_directories = allowed_directories
         self.stop_after = stop_after
         self.cancel_event = threading.Event()
+        self.finished = threading.Event()
 
     # ----- setup -------------------------------------------------------------------------
 
-    def _resolve_source(self) -> Path:
-        raw = Path(self.source).expanduser()
-        if raw.is_symlink() or (raw.exists() and getattr(raw.lstat(), "st_file_attributes", 0) & 0x400):
-            raise PermissionError("Linked/reparse target is not admitted")
-        # API and agent callers always pass the owner's list; an empty list admits nothing.
-        # ``None`` is reserved for trusted in-process callers (tests, offline validation).
-        if self.allowed_directories is not None:
-            resolved = resolve_allowed_path(self.source, self.allowed_directories)
-        else:
-            resolved = raw.resolve()
-        if not resolved.exists():
-            raise FileNotFoundError(f"Source target does not exist: {resolved}")
-        return resolved
-
-    def _source_type(self, source_path: Path) -> str:
-        stype = self.source_type if self.source_type != "auto" else detect_source_type(source_path)
-        if stype not in {"folder", "zip", "tar", "raw"}:
-            raise ValueError(f"Unknown source_type: {stype}")
-        if (stype == "folder") != source_path.is_dir():
-            raise ValueError(f"source_type {stype!r} does not match the target {source_path}")
-        return stype
-
     def prepare_investigation(self) -> dict[str, Any]:
-        """Create (or adopt) the investigation row as ``kind == "ffs"``; nothing is copied."""
-        source_path = self._resolve_source()
-        stype = self._source_type(source_path)
-        if self.investigation_id is None:
-            ident = uuid.uuid4().hex
-            self.investigation_id = ident
-            workspace = store.directory(ident)
-            workspace.mkdir(mode=0o700, exist_ok=True)
-            private_directory(workspace)
-            row: dict[str, Any] = {
-                "id": ident,
-                "task_id": self.task_id,
-                "question": self.question,
-                "evidence": [],
-                "findings": [],
-                "unknowns": [],
-                "chain_of_custody": [],
-                "created_at": _now(),
-            }
-        else:
-            row = store.load(self.investigation_id)
-            if row.get("status") in {"closed", "cancelled"}:
-                raise ValueError("Investigation is closed; prepare a new FFS ingest")
-            if row.get("kind") == KIND and row.get("target") and row["target"] != str(source_path):
-                raise ValueError("This FFS investigation already references a different dump; prepare a new one")
-        row.setdefault("evidence", [])
-        row.setdefault("unknowns", [])
-        row.setdefault("chain_of_custody", [])
-        row.update(target=str(source_path), kind=KIND, source_type=stype, snapshot=None)
-        if not any(e.get("event") == "source_admitted" for e in row["chain_of_custody"]):
-            row["chain_of_custody"].append(make_chain_of_custody_entry(
-                "source_admitted", source_path,
-                f"FFS dump admitted for read-only, non-copying ingest ({stype}).",
-                metadata={"source_stat": _source_stat(source_path)},
-                entry_index=len(row["chain_of_custody"]) + 1,
-            ))
-        if row.get("status") != "completed":
-            row["status"] = "prepared"
-            row.setdefault("ffs", {"status": "prepared", "files_indexed": 0, "bytes_indexed": 0,
-                                   "last_path": None, "updated_at": _now(), "unknowns": []})
-            row.setdefault("progress", _progress("prepared", 0, 0, None, None, None, False))
-        idx = index_dir(row["id"])
-        idx.mkdir(mode=0o700, parents=True, exist_ok=True)
-        custody_path = idx / CUSTODY_FILE
-        if not custody_path.is_file():
-            store.atomic_json(custody_path, {
-                "investigation_id": row["id"], "source": str(source_path), "source_kind": stype,
-                "task_id": row.get("task_id"), "tool_version": TOOL_VERSION,
-                "source_stat_at_admission": _source_stat(source_path), "sessions": [],
-                "source_sha256": None, "manifest": None,
-            })
-        return store.save(row)
+        """Create (or adopt) the investigation row as ``kind == "ffs"`` via ``store.prepare_ffs``."""
+        row = store.prepare_ffs(self.source, self.question, self.allowed_directories, self.task_id,
+                                source_type=self.source_type, investigation_id=self.investigation_id)
+        self.investigation_id = row["id"]
+        return row
+
+    def _save(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Persist progress without overwriting the owner's close/cancel; stop if one landed."""
+        if store.save_guarded(row):
+            self.cancel_event.set()
+        return row
 
     # ----- run ---------------------------------------------------------------------------
 
@@ -591,11 +569,16 @@ class FFSIngest:
                 raise RuntimeError("An FFS ingest is already running for this investigation")
             _RUNNING[ident] = self
         try:
+            # A close/cancel that landed between admission and registration (when ``cancel``
+            # found nothing to signal) must still win: never start on a closed investigation.
+            if store.load(ident).get("status") in store.TERMINAL_STATUSES:
+                raise ValueError("Investigation is closed; prepare a new FFS ingest")
             return self._run(ident)
         finally:
             with _RUNNING_LOCK:
                 if _RUNNING.get(ident) is self:
                     _RUNNING.pop(ident, None)
+            self.finished.set()
 
     async def run(self) -> dict[str, Any]:
         """Run the ingest on a worker thread (the event loop stays responsive)."""
@@ -632,7 +615,7 @@ class FFSIngest:
         row["status"] = "ingesting"
         self._progress(row, "resuming" if resumed else "indexing", files, total_bytes, None,
                        total_files_hint, total_bytes_hint, resumed, unknowns)
-        store.save(row)
+        self._save(row)
 
         skipped: list[str] = []
         seen: set[str] = set()
@@ -722,18 +705,32 @@ class FFSIngest:
                  "non-regular entries (devices, FIFOs, links inside archives) were not indexed")
         _declare(unknowns, [s.split(":", 1)[1] for s in skipped if s.startswith("unsafe:")],
                  "archive member name(s) were unsafe (absolute or '..') and were not indexed")
-        admitted = custody.get("source_stat_at_admission") or {}
-        now_stat = _source_stat(source_path)
-        source_unchanged = admitted == now_stat
-        if not source_unchanged:
-            unknowns.append("The source's size or modification time changed during ingest; "
-                            "hashes reflect the bytes read at the time and the dump should be re-verified.")
+        if source_type == "folder":
+            # The root directory's mtime does not move when a nested file changes: re-verify
+            # every indexed member (size + mtime against its index line) and the file set.
+            changes = verify_folder_index(source_path, index_path, indexed)
+            source_unchanged = not any(changes.values())
+            change_detection = "per-member size and mtime re-verified against the index at completion"
+            _declare(unknowns, changes["modified"],
+                     "indexed member(s) changed size or modification time during ingest; their index "
+                     "hashes reflect the bytes read at the time and the dump should be re-verified")
+            _declare(unknowns, changes["removed"], "indexed member(s) disappeared from the dump during ingest")
+            _declare(unknowns, changes["added"], "file(s) appeared in the dump during ingest and are not indexed")
+            custody["source_changes"] = {k: len(v) for k, v in changes.items()}
+        else:
+            admitted = custody.get("source_stat_at_admission") or {}
+            source_unchanged = admitted == source_stat(source_path)
+            change_detection = "source file size and mtime compared with admission"
+            if not source_unchanged:
+                unknowns.append("The source's size or modification time changed during ingest; "
+                                "hashes reflect the bytes read at the time and the dump should be re-verified.")
         manifest_sha = file_sha256(index_path)
         tab = self._tab_profile(ident, index_path)
         custody["manifest"] = {"index": f"{INDEX_DIR}/{INDEX_FILE}", "files": files, "bytes": total_bytes,
                                "sha256": manifest_sha}
         custody["source_sha256"] = manifest_sha
         custody["source_unchanged"] = source_unchanged
+        custody["change_detection"] = change_detection
         self._finish_session(custody_path, custody, session, session_files, "completed")
         chain.append(make_chain_of_custody_entry(
             "ingest_completed", source_path,
@@ -752,6 +749,7 @@ class FFSIngest:
             "index_sha256": manifest_sha,
             "custody": f"{INDEX_DIR}/{CUSTODY_FILE}",
             "source_unchanged": source_unchanged,
+            "change_detection": change_detection,
             "types": [{"type": t, "files": n} for t, n in types.most_common(MAX_TYPE_GROUPS)],
             "unreadable_members": len(errors),
             "unknowns": unknowns,
@@ -785,7 +783,7 @@ class FFSIngest:
         row["ffs"]["tab_files"] = tab["summary"]["file_count"]
         store.atomic_json(checkpoint_path, {"status": "completed", "files_indexed": files, "bytes_indexed": total_bytes,
                                             "updated_at": _now()})
-        return store.save(row)
+        return self._save(row)
 
     # ----- helpers -------------------------------------------------------------------------
 
@@ -801,7 +799,7 @@ class FFSIngest:
         store.atomic_json(path, {"status": status, "files_indexed": files, "bytes_indexed": total_bytes,
                                  "last_path": current, "updated_at": _now()})
         self._progress(row, "indexing", files, total_bytes, current, total_files, total_size, resumed, unknowns)
-        store.save(row)
+        self._save(row)
 
     def _interrupt(self, row: dict, checkpoint_path: Path, source_path: Path, files: int, total_bytes: int,
                    current: str | None, total_files: int | None, total_size: int | None, resumed: bool,
@@ -814,9 +812,9 @@ class FFSIngest:
             f"Ingest {outcome} after {files} indexed entries; resumable from the NDJSON index.",
             entry_index=len(chain) + 1,
         ))
-        row["status"] = "interrupted"
+        row["status"] = "interrupted"  # resumable, unless the owner closed/cancelled it (kept by _save)
         self._progress(row, outcome, files, total_bytes, current, total_files, total_size, resumed, unknowns)
-        return store.save(row)
+        return self._save(row)
 
     @staticmethod
     def _finish_session(custody_path: Path, custody: dict, session: dict, session_files: int, outcome: str) -> None:

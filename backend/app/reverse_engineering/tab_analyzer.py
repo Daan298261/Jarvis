@@ -12,12 +12,10 @@ from __future__ import annotations
 
 from collections import Counter
 import math
-from pathlib import Path
 from typing import Any, Iterable
 
 import numpy as np
 
-CHUNK_SIZE = 1024 * 1024
 HEADER_BYTES = 16
 TAB_SUFFIX = ".tab"
 
@@ -74,18 +72,6 @@ class TabProfiler:
             "entropy": round(shannon_entropy(self._counts.tolist(), self._total), 4),
             "header_hex": bytes(self._header).hex(),
         }
-
-
-def profile_file(path: Path) -> dict[str, Any]:
-    """Stream one local file read-only and return its size, entropy and header bytes."""
-    profiler = TabProfiler()
-    with path.open("rb") as handle:
-        while True:
-            chunk = handle.read(CHUNK_SIZE)
-            if not chunk:
-                break
-            profiler.update(chunk)
-    return profiler.result()
 
 
 def entropy_class(entropy: float, size: int) -> str:

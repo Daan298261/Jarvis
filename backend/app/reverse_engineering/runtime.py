@@ -39,6 +39,8 @@ capture_process_scenario capture_browser_scenario capture_electron_scenario
 run_controlled_replay prepare_node_characterization execute_node_characterization
 android_capture
 """.split())
+# Close/cancel waits this long for a running FFS ingest thread to exit before returning.
+FFS_STOP_WAIT_SECONDS = 30.0
 
 
 def approval_target(arguments: dict) -> str:
@@ -271,7 +273,8 @@ class Investigations:
             raise ValueError("Investigation is closed")
         if row["kind"] == "source":
             return {"operations": [], "workflow": "Use normal repository tools; source evidence may be recorded with action=record_source."}
-        if row["kind"] in {"ffs", "forensic"}:
+        from .ffs_ingest import FFS_KINDS
+        if row["kind"] in FFS_KINDS:
             return {"operations": [], "workflow": (
                 "FFS dump investigation (RFC-0208): the dump is indexed read-only in index/files.ndjson "
                 "(path, bytes, sha256, mtime, magic_hex, type). Use reverse_engineer action=ingest_status for "
@@ -334,6 +337,11 @@ class Investigations:
             row = self.owned(ident, task_id)
             if row["status"] in {"cancelled", "closed"}:
                 raise ValueError("Investigation is closed; prepare a new target")
+            from .ffs_ingest import FFS_KINDS
+            if row["kind"] in FFS_KINDS:
+                # The snapshot is the evidence dump itself: no provider may open, extract or copy it.
+                raise ValueError("FFS investigations have no provider operations; use ingest_status, "
+                                 "ffs_query, evidence and report")
             await asyncio.to_thread(store.validate_snapshot, row)
             from .apk_sidecar import CATALOG as APK_CATALOG
             if operation == "android_decompile" and row.get("apk"):
@@ -468,11 +476,12 @@ class Investigations:
         actor = self.sessions.pop(ident, None)
         if actor:
             await actor.close(cancel=cancelled)
-        # Re-read after an interrupted call persisted its state.
+        # Re-read after an interrupted call persisted its state. The FFS ingest thread may still
+        # be inside a block; its guarded saves never downgrade this terminal status.
         async with self.locks.setdefault(ident, asyncio.Lock()):
-            row = store.load(ident)
-            row["status"] = "cancelled" if cancelled else "closed"
-            return store.save(row)
+            await asyncio.to_thread(store.set_status, ident, "cancelled" if cancelled else "closed")
+        await asyncio.to_thread(ffs_ingest.wait_stopped, ident, FFS_STOP_WAIT_SECONDS)
+        return store.load(ident)
 
     async def release_task(self, task_id: str, cancelled=False):
         from . import ffs_ingest
@@ -486,9 +495,9 @@ class Investigations:
             if actor:
                 await actor.close(cancel=True)
             if cancelled and row["status"] not in {"reported", "partial", "closed", "cancelled"}:
-                current = store.load(row["id"])
-                current["status"] = "cancelled"
-                store.save(current)
+                await asyncio.to_thread(store.set_status, row["id"], "cancelled",
+                                        {"reported", "partial", *store.TERMINAL_STATUSES})
+            await asyncio.to_thread(ffs_ingest.wait_stopped, row["id"], FFS_STOP_WAIT_SECONDS)
 
     async def shutdown(self):
         from . import ffs_ingest
