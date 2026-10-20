@@ -45,7 +45,6 @@ from pathlib import Path, PurePosixPath
 from . import android, provision, store
 from .ffs_ingest import make_chain_of_custody_entry
 from .privacy import private_directory
-from ..tools.safety import resolve_allowed_path
 
 JAVA_HOME = "/opt/anzu/jdk"
 JDK = "/opt/anzu/jdk/bin/java"
@@ -580,8 +579,12 @@ def _resolve_under(root: Path, rel: str) -> Path:
     return candidate
 
 
-def _ffs_lookup(ffs_investigation_id: str, apk_relpath: str) -> tuple[dict, dict, Path]:
-    """Load FFS investigation (kind==ffs), find NDJSON entry, return (ffs_row, entry, absolute source)."""
+def _ffs_lookup(ffs_investigation_id: str, apk_relpath: str,
+                allowed: list[str] | None) -> tuple[dict, dict, Path]:
+    """Load FFS investigation (kind==ffs), find NDJSON entry, return (ffs_row, entry, absolute source).
+
+    The dump root is re-checked against the owner's allowed folders (shared gate, fixed message)
+    before its existence is probed."""
     try:
         ffs = store.load(ffs_investigation_id)
     except FileNotFoundError as exc:
@@ -592,10 +595,10 @@ def _ffs_lookup(ffs_investigation_id: str, apk_relpath: str) -> tuple[dict, dict
             "APK FFS origin requires kind == 'ffs'."
         )
     dump = Path(ffs["target"]).expanduser()
+    store.admit_allowed_target(str(dump), allowed)
+    store.resolve_admitted_target(str(dump), allowed)  # as before: None/[] admit nothing here
     if not dump.exists():
-        raise ValueError(
-            f"FFS dump path {dump} is unavailable; cannot extract APK without inventing bytes."
-        )
+        raise ValueError("FFS dump path is unavailable; cannot extract APK without inventing bytes.")
     needle = _norm_ffs_path(apk_relpath)
     matches, base_matches = _scan_ffs_ndjson(store.directory(ffs_investigation_id) / "index" / "files.ndjson",
                                              needle)
@@ -722,9 +725,8 @@ def prepare_apk_from_ffs(
         raise ValueError("ffs origin requires a 32-hex ffs_investigation_id")
     if not apk_path or not str(apk_path).strip():
         raise ValueError("ffs origin requires target (APK path inside the FFS index)")
-    ffs, entry, source = _ffs_lookup(ffs_investigation_id, str(apk_path).strip())
-    # Ensure dump root is under allowed directories when the owner configured roots.
-    resolve_allowed_path(str(Path(ffs["target"]).expanduser()), allowed)
+    # _ffs_lookup re-checks the dump root against the allowed folders before probing it.
+    ffs, entry, source = _ffs_lookup(ffs_investigation_id, str(apk_path).strip(), allowed)
     expected = entry["sha256"].lower()
     uri = f"ffs://{ffs_investigation_id}/{entry['path']}"
     row = _blank_apk_row(uri, question, task_id)
@@ -814,6 +816,8 @@ def prepare_apk(
         raise ValueError("source_type must be 'file', 'device', or 'ffs'")
     if not target or not str(target).strip():
         raise ValueError("file origin requires target path")
+    # Allow-list before the is_dir probe below (shared gate), so an outside path cannot be told apart.
+    store.admit_allowed_target(target, allowed)
     raw = Path(target).expanduser()
     if not raw.is_dir() and raw.suffix.lower() not in APK_SUFFIXES:
         raise ValueError("APK target must be a .apk, .xapk or .apks file, or a split-APK directory")
