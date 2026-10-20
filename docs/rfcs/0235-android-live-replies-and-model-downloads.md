@@ -1,12 +1,12 @@
-# RFC-0234 (part 1): Android live local replies and model download feedback
+# RFC-0235: Android live local replies and model download feedback
 
-**Status:** proposed (pending Jarvis Architect sign-off). Specs are ratified only by the Jarvis Architect; until then this text describes the implementation in its PR and does not count toward completion.
+**Status:** Proposed (pending Jarvis Architect sign-off). Specs are ratified only by the Jarvis Architect; until then this text describes the implementation in its PR and does not count toward completion.
 
 **Author:** Codex, requested by Daan (original #650 text). Split out of #650 by the Jarvis PR fixer.
 
 **Date:** 2026-10-17 (split 2026-10-20)
 
-> RFC-0234 has two parts. This file covers the streamed local replies and the model download feedback, which ship in their own PR. The solar context HUD part (planets, rings, thinking pulses, star field fading with context use, and the native context-usage counters that drive it) stays in #650 as `0234-android-solar-context-and-live-replies.md`, pending Astra's sign-off. Both files use the number 0234 on purpose: they are one RFC delivered in two PRs. The number was chosen because the landed RFC-0223 is startup model selection stability.
+> RFC-0235 covers the streamed local replies and the model download feedback split out of #650. The solar context HUD part (planets, rings, thinking pulses, star field fading with context use, and the native context-usage counters that drive it) stays in #650 as RFC-0234 (`0234-android-solar-context-and-live-replies.md`), pending Astra's sign-off.
 
 ## Problem
 
