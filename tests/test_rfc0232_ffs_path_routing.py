@@ -4,6 +4,7 @@ deterministically, and large inputs must never enter the model context.
 Written xfail(strict=True) first (S1). Fix slices remove each marker:
   S2 — route + dump-wording tests (all twelve cases)
   S3 — ingest dispatch + overflow test
+The plain-path negatives are live from S1 and must stay green in every slice.
 """
 from __future__ import annotations
 
@@ -53,6 +54,13 @@ DUMP_WORDING_PROMPTS = [
 ]
 
 
+# Live negatives (not xfail): a path with a plain or coding question must keep routing normally.
+# They pass on development today; S2's narrowed detector must keep them green (RFC-0232 rule 2).
+PLAIN_PATH_PROMPTS = [
+    pytest.param(r"C:\code\etl what does the extraction step do?", id="etl-extraction-step"),
+    pytest.param(r"C:\Users\taco\proj ffs why does the build fail?", id="ffs-interjection"),
+]
+
 def _fake_android_ffs(root: Path, files: int = 3000) -> Path:
     ffs = root / "ffs"
     (ffs / "system").mkdir(parents=True)
@@ -88,6 +96,12 @@ def test_dump_wordings_route_to_reverse_engineering(prompt):
     assert route.kind == "managed_task"
     assert route.task_class == "reverse engineering"
     assert "reverse_engineer" in tool_names_for(route.task_class, prompt=prompt)
+
+
+@pytest.mark.parametrize("prompt", PLAIN_PATH_PROMPTS)
+def test_path_with_plain_or_coding_question_does_not_route_to_re(prompt):
+    route = route_request(prompt)
+    assert route.task_class != "reverse engineering", route
 
 
 @pytest.mark.xfail(strict=True, reason="RFC-0232 S1 repro: FFS root goes to the model, not ingest (fixed in S3)")
