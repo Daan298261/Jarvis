@@ -320,7 +320,8 @@ async def test_cancel_stops_at_next_block_and_stays_resumable(ffs_env, monkeypat
 @pytest.mark.asyncio
 async def test_ingested_folder_dump_feeds_the_apk_sidecar_ffs_origin(ffs_env, monkeypatch):
     """RFC-0207 slice 4 must work against a real RFC-0208 ingest, not only a synthetic index."""
-    monkeypatch.setattr(apk_sidecar, "resolve_allowed_path", lambda path, allowed: Path(path).resolve())
+    # allowed=[] with a stubbed allow-list: stub the shared gate too (covered in test_re_prepare_allowlist.py).
+    monkeypatch.setattr(store, "admit_allowed_target", lambda target, allowed: None)
     dump = ffs_env / "ffs_dump"
     apk_dir = dump / "data" / "app" / "org.anzu.minimal"
     apk_dir.mkdir(parents=True)

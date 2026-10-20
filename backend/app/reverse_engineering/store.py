@@ -189,10 +189,12 @@ def prepare(target: str, question: str, allowed: list[str], task_id: str | None)
                 raise ValueError("Browser target must be an explicit loopback CDP endpoint with a port")
             row.update(kind="browser", sha256=None, snapshot=target, manifest=[])
         else:
+            # Allow-list first (shared gate): an outside target gets one answer whatever it is.
+            admit_allowed_target(target, allowed)
             raw = Path(target).expanduser()
             if raw.is_symlink() or (raw.exists() and getattr(raw.lstat(), "st_file_attributes", 0) & 0x400):
                 raise PermissionError("Linked/reparse targets are not admitted")
-            source = resolve_allowed_path(target, allowed)
+            source = resolve_admitted_target(target, allowed)
             before, manifest = fingerprint(source)
             destination = workspace / "target" / source.name
             destination.parent.mkdir(mode=0o700)
@@ -213,15 +215,16 @@ def prepare(target: str, question: str, allowed: list[str], task_id: str | None)
         raise
 
 
-FFS_OUTSIDE_ALLOWED = "Path is outside allowed directories"
+OUTSIDE_ALLOWED = "Path is outside allowed directories"
+FFS_OUTSIDE_ALLOWED = OUTSIDE_ALLOWED  # name the RFC-0208 FFS tests use
 
 
-def _ffs_admit_lexically(target: str, allowed: list[str]) -> None:
-    """Allow-list gate for :func:`prepare_ffs` that runs before any filesystem probe of the target.
+def _admit_lexically(target: str, allowed: list[str]) -> None:
+    """Lexical allow-list gate (step 1 of :func:`admit_allowed_target`); no filesystem probe of the target.
 
     The target is judged by its lexical absolute form (``~`` expanded, ``..`` collapsed, no
     link followed, no stat), so every path outside the allowed folders raises the same
-    ``PermissionError(FFS_OUTSIDE_ALLOWED)`` whether it exists, is missing, or is a link.
+    ``PermissionError(OUTSIDE_ALLOWED)`` whether it exists, is missing, or is a link.
     Allowed roots are matched both as written and as their realpath (owner config, not the target).
     """
     raw = reject_unsafe_path_text(target)
@@ -229,7 +232,7 @@ def _ffs_admit_lexically(target: str, allowed: list[str]) -> None:
         try:
             resolve_allowed_path(raw, allowed)  # lexical for UNC paths; never contacts the share
         except PermissionError as exc:
-            raise PermissionError(FFS_OUTSIDE_ALLOWED) from exc
+            raise PermissionError(OUTSIDE_ALLOWED) from exc
         return
     if not allowed:
         raise PermissionError("No workspace directories are configured")
@@ -245,11 +248,11 @@ def _ffs_admit_lexically(target: str, allowed: list[str]) -> None:
                     return
             except ValueError:
                 continue
-    raise PermissionError(FFS_OUTSIDE_ALLOWED)
+    raise PermissionError(OUTSIDE_ALLOWED)
 
 
-def _ffs_admit_real_parent(target: str, allowed: list[str]) -> None:
-    """Second gate, after :func:`_ffs_admit_lexically` and before any probe of the final component.
+def _admit_real_parent(target: str, allowed: list[str]) -> None:
+    """Step 2 of :func:`admit_allowed_target`, before any probe of the final component.
 
     An in-list linked folder can point outside (``allowed/linkdir -> /outside``), so the parent's
     real path must be inside the allowed folders too; otherwise the leaf's link/exists probe would
@@ -271,7 +274,33 @@ def _ffs_admit_real_parent(target: str, allowed: list[str]) -> None:
             return
         if path_is_under_root(parent, root):
             return
-    raise PermissionError(FFS_OUTSIDE_ALLOWED)
+    raise PermissionError(OUTSIDE_ALLOWED)
+
+
+def admit_allowed_target(target: str, allowed: list[str] | None) -> None:
+    """Shared allow-list gate for every reverse-engineering prepare entry point that takes an owner path.
+
+    Runs before any link/exists/is_dir/stat/resolve probe of the target: (1) the path as typed,
+    lexically, then (2) the parent's real path. Every outside target, whether it exists, is missing or
+    is a link, raises the same ``PermissionError(OUTSIDE_ALLOWED)``, which never names a real path.
+    ``None`` (trusted in-process callers) admits without a check; an empty list admits nothing.
+    """
+    if allowed is None:
+        return
+    _admit_lexically(target, allowed)
+    _admit_real_parent(target, allowed)
+
+
+def resolve_admitted_target(target: str, allowed: list[str] | None) -> Path:
+    """``resolve_allowed_path`` for a target that passed :func:`admit_allowed_target` (callers keep
+    their own link/reparse refusal in between). Its realpath allow-list check still runs; a refusal
+    is re-raised with the fixed message so the real path never reaches the caller."""
+    try:
+        return resolve_allowed_path(target, allowed)
+    except PermissionError as exc:
+        if allowed:
+            raise PermissionError(OUTSIDE_ALLOWED) from exc
+        raise
 
 
 def prepare_ffs(target: str, question: str, allowed: list[str] | None, task_id: str | None, *,
@@ -285,29 +314,20 @@ def prepare_ffs(target: str, question: str, allowed: list[str] | None, task_id: 
     """
     from . import ffs_ingest
 
-    if allowed is not None:
-        # Allow-list first, on the lexical path only: nothing about an outside target (exists,
-        # missing, link) may change the answer, so the caller cannot probe outside the folders.
-        _ffs_admit_lexically(target, allowed)
-        _ffs_admit_real_parent(target, allowed)
+    # Allow-list first: nothing about an outside target (exists, missing, link) may change the answer.
+    admit_allowed_target(target, allowed)
     raw = Path(target).expanduser()
     if raw.is_symlink() or (raw.exists() and getattr(raw.lstat(), "st_file_attributes", 0) & 0x400):
         raise PermissionError("Linked/reparse target is not admitted")
-    if allowed is not None:
-        try:
-            # Still enforce the realpath check, so a linked parent folder cannot escape the list.
-            source = resolve_allowed_path(target, allowed)
-        except PermissionError as exc:
-            raise PermissionError(FFS_OUTSIDE_ALLOWED) from exc
-    else:
-        source = raw.resolve()
+    # Still enforce the realpath check, so a linked parent folder cannot escape the list.
+    source = resolve_admitted_target(target, allowed) if allowed is not None else raw.resolve()
     if not source.exists():
-        raise FileNotFoundError(f"Source target does not exist: {source}")
+        raise FileNotFoundError(f"Source target does not exist: {target}")
     stype = source_type if source_type != "auto" else ffs_ingest.detect_source_type(source)
     if stype not in {"folder", "zip", "tar", "raw"}:
         raise ValueError(f"Unknown source_type: {stype}")
     if (stype == "folder") != source.is_dir():
-        raise ValueError(f"source_type {stype!r} does not match the target {source}")
+        raise ValueError(f"source_type {stype!r} does not match the target {target}")
     if investigation_id is None:
         ident = uuid.uuid4().hex
         workspace = directory(ident)
