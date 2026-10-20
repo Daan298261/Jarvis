@@ -5,6 +5,7 @@
 **Author:** Jarvis Architect
 **Date:** 2026-10-20
 **Traced on:** `development` @ `11b264a7`. Drafts and RFC PRs pinned: #649 @ `edb4685` (identical to `b5c3640` for every file cited here), #652 (RFC-0225) @ `140482b`, #655 (RFC-0228) @ `973b979`, #585 (RFC-0211) @ `f412dad`, #663 (RFC-0218 delivery fix) @ `c5db314`.
+**Amended 2026-10-20 (#649 landed):** #649 merged into `development` as `ee786dc`, so S2 no longer ports it. S2 now cites the landed engine and adds only what #649 lacks: `seed_workflow`, the two pipeline tables, and `LargePromptSettings`. Every #649 reference in §4-§6 and S1-S6 is re-traced on `development` @ `d85c9d4`, and so is every `loop.py`, `owner_turn.py`, `api/tasks.py` and `App.tsx` line number (#648 and #649 shifted them).
 **Amended 2026-10-20 (CoS, #665 peer):** the large target `anzu-coder-27b` was assumed to exist as a runtime profile. It does not (see *Target profile: `anzu-coder-27b`*), so new slice **0231-S0** adds it and 0231-S4 hard-depends on it. Re-traced for S0 and for the `hotswap.py`, `config.py` and `main.py` citations on `development` @ `d214b6d` (#648 landed; #663 landed at `781004c`), #652 @ `916cf25`, #655 @ `971ca15`, #649 @ `edb4685`.
 
 **Owner ask (Taco, ask B, intent as relayed):** when Taco speaks or types a large or complex task, Jev/Laya decide that it is complex. Then:
@@ -27,7 +28,7 @@
 **Extends (do not rewrite):**
 - [RFC-0171](0171-system-one-reflex-lane-jev-laya-priority.md) / [RFC-0206](0206-jev-laya-every-turn-arbitration.md): the reflex lane, one decide per turn, arbitration.
 - [RFC-0026](0026-execution-phase-and-verifier-observability.md) / [RFC-0029](0029-transactional-durable-execution.md): the durable task API, `AgentRuntime.create_task` and `/continue`.
-- [RFC-0224](0224-responsive-conversation-and-durable-task-prompts.md) (#649 draft): persisted prompt stages. Its engine is ported here.
+- [RFC-0224](0224-responsive-conversation-and-durable-task-prompts.md) (#649, landed `ee786dc`): persisted prompt stages. Its landed engine is reused as-is.
 - [RFC-0225](0225-local-engine-coexistence-and-resilient-api.md) (#652): `prepare_engine_for` and the VRAM gate.
 - [RFC-0228](0228-installer-update-default-9b-idle-unload.md) (#655): the `NINE_B_REWARM` coordinator.
 - [RFC-0218](0218-persona-surfaces-and-intent-switch.md) S3b, as amended by #663: tasks-path persona switch, `switch_id`, switch line delivered as `chat_tts`.
@@ -36,7 +37,7 @@
 
 Some of these links point at RFC files that live only on their open PRs. They resolve once those PRs land.
 
-**Drafts #649 and #585:** neither gates this RFC. The pieces that overlap are ported with hunk citations (see *Relationship to drafts*).
+**#649 and #585:** #649 has landed and S2 builds on it (see *Relationship to #649 and #585*). #585 is still a draft and does not gate this RFC.
 
 **Astra boundary:** persona, WebGL, presence, morph and appearance are out of scope (Astra). This RFC emits no persona events and edits no persona or presence component.
 
@@ -48,19 +49,19 @@ This PR is **specs-only**. It contains no application code.
 
 Verified on `development` @ `11b264a7`.
 
-1. **"Large" is not a decision.** The single owner-turn decide (`decision/owner_turn.py::decide_owner_turn` L517-610, via `agent/request_routing.py::evaluate_request_route`) yields route, tier and `persona_intent` (`OwnerTurnDecision` L144-156). Nothing decides "this prompt is a multi-part large task". The only related signals are:
+1. **"Large" is not a decision.** The single owner-turn decide (`decision/owner_turn.py::decide_owner_turn` L537-630 on `development` @ `d85c9d4`, via `agent/request_routing.py::evaluate_request_route`) yields route, tier and `persona_intent` (`OwnerTurnDecision` L145-158). Nothing decides "this prompt is a multi-part large task". The only related signals are:
    - `policy.local_complexity_tier` (`decision/policy.py:25`): tier 4 for expert hints or more than 4000 chars, tier 3 for complex hints or more than 1200 chars.
    - The separate `complexity_escalation` surface (`decision/surfaces.py:360-380`).
-   - #649's regex `is_large_request` (#649 `agent/task_workflow.py:31-37`), which is not a reflex decision.
-2. **No immediate load of the large model.** `prepare_answer_route` only runs when the loaded model is an orchestrator, or tier ≤ 1 (`agent/loop.py:2455-2475`), and it runs inside `_run`, after the front lane. A large prompt starts on whatever model is loaded. The swap to the large model happens later, if it happens at all, through `execute_visible_model_switch` (`inference/model_escalation.py:128-203`).
-3. **No large-task ack.** `create_task` publishes the generic `task_acknowledgement(prompt)` as an `acknowledgement` event (`loop.py:547-556`), and it is not spoken. As #663 found, `publish_owner_text` goes to `OWNER_CHAT_CHANNEL` (`persona/chat_delivery.py:71`, `:100`), and no client reads that channel. The only path the live UI speaks is a `chat_tts` event on the task stream: `useTaskSpeech.ts:41-56` → `queueChatSpeech`, mounted in HUD chat and Chat.
+   - #649's regex `is_large_request` (`agent/task_workflow.py:31-37`, landed), which is not a reflex decision. It only triggers #649's model planner inside `_run` (`loop.py:2686-2707`).
+2. **No immediate load of the large model.** `prepare_answer_route` only runs when the loaded model is an orchestrator, or tier ≤ 1 (`agent/loop.py:2475-2495`), and it runs inside `_run`, after the front lane. A large prompt starts on whatever model is loaded. The swap to the large model happens later, if it happens at all, through `execute_visible_model_switch` (`inference/model_escalation.py:128-203`).
+3. **No large-task ack.** `create_task` publishes the generic `task_acknowledgement(prompt)` as an `acknowledgement` event (`loop.py:548-557`), and it is not spoken. As #663 found, `publish_owner_text` goes to `OWNER_CHAT_CHANNEL` (`persona/chat_delivery.py:71`, `:100`), and no client reads that channel. The only path the live UI speaks is a `chat_tts` event on the task stream: `useTaskSpeech.ts:41-56` → `queueChatSpeech`, mounted in HUD chat and Chat.
 4. **The prompt is split only for a dead endpoint.** `agent/intake.py` has a sequential chain:
    - `MAX_SEQUENTIAL_PARTS = 8`, `part_prompt` L235-247, `advance_chain` L281-313.
    - Chains are stored as JSON files under `data/intake_chains`.
    - Its only caller is `persona/owner_chat.py:379-410`, the `stream_owner_chat` endpoint, which has no client.
-   - Chat sends go to `/api/tasks`, which never splits. Splitting is all-or-nothing, with no completeness check.
+   - Chat sends go to `/api/tasks`. Since #649, `_run` asks the loaded model for a 1-8 step plan when `is_large_request` fires (`loop.py:2686-2707`, `task_workflow.py:115-169`). That plan is model-generated, so it isn't a split of the owner's text. It runs on whatever model is loaded, with no completeness check, and a planner failure fails the task (`task_workflow.py:151-152`).
 5. **No completeness check.** No section-level check or bounded iteration exists anywhere.
-6. **Durable prompt stages exist only in a draft.** #649 adds `TaskPromptPlan` and `TaskPromptStep` and executes them one at a time (#649 `db/models.py` +62-88, `agent/loop.py` +2672-2724, +3639-3662). That draft is not merged. Its planner also asks the model for the plan (`PLAN_SYSTEM`, #649 `task_workflow.py:20-28`), which needs the large model to be loaded first.
+6. **Durable prompt stages exist (landed #649), but only one task at a time.** `TaskPromptPlan` / `TaskPromptStep` (`db/models.py:66-88`) are executed one stored prompt at a time inside one task (`loop.py:2709-2722`, `:2969-2984`, `:3639-3660`, completion guard `:776-788`). Its planner asks the model for the plan (`PLAN_SYSTEM`, `task_workflow.py:20-28`), which needs a capable model already loaded. It has no notion of a parent with one child task per section, no section completeness, and no mandatory deeper/quantitative steps.
 7. **No queue that runs owner prompts one after another.**
    - `mobile/scheduler.py::tick` (L77-121) runs periodic automations. It skips while the previous run is non-terminal (L88-94) and is admitted by `automation/breaker.admit_automatic_trigger` (L236-320).
    - `agent/queue_watcher.py` is a file drop queue.
@@ -100,10 +101,10 @@ last part done ─► parent completes with the combined result ─► compare-a
 
 Detection follows the RFC-0218 pattern: rider questions on the existing decide, no second decide.
 
-- **Precheck (rules, sync, under 1 ms)** in `_decide_sync` (`owner_turn.py:399-449`), next to the persona precheck. It produces a candidate only when **all** of these hold:
+- **Precheck (rules, sync, under 1 ms)** in `_decide_sync` (`owner_turn.py:419-469`), next to the persona precheck. It produces a candidate only when **all** of these hold:
   - `route_kind == "managed_task"`;
   - `security_role == ""`;
-  - the reply shape is none of literal, clarify, self_status or basic_qa;
+  - the reply shape is none of literal, clarify, self_status or basic_qa (all in `REPLY_SHAPES`, `owner_turn.py:43`; `basic_qa` landed with #649);
   - `settings.large_prompts.enabled` is true;
   - at least one floor rule L1-L5 below fires.
 
@@ -117,7 +118,7 @@ Detection follows the RFC-0218 pattern: rider questions on the existing decide, 
   - **L1:** `len(prompt) ≥ 4000`.
   - **L2:** at least 3 list items (`^\s*(\d+[.)]|[-*•])\s+`) and `len ≥ 600`.
   - **L3:** at least 3 question sentences (ending in `?`, or starting with an interrogative word in en/nl) and `len ≥ 200`. This also sets split `questions`.
-  - **L4:** the project-scale patterns of #649 `is_large_request` (L31-37), ported verbatim into `decision/large_prompt.py`.
+  - **L4:** `task_workflow.is_large_request(prompt)` (landed #649, `agent/task_workflow.py:31-37`), imported and called as is, not copied. At decide time the ingress hints are not known yet, so `size_class` and `complexity` keep their defaults.
   - **L5:** `local_complexity_tier(prompt) == 4`.
 
   Split mode: `questions` when L3 fired and fewer than 3 list items exist, otherwise `sections`.
@@ -132,17 +133,17 @@ Detection follows the RFC-0218 pattern: rider questions on the existing decide, 
   - `decision_source`;
   - `confidence`.
 
-  `_apply_floors` (L278-350) applies the floor. `request_routing` passes the field through unchanged.
+  `_apply_floors` (L296-370) applies the floor. `request_routing` passes the field through unchanged.
 - **Arbitration class.** The large ack is a front notice, not an answer. The parent's final result is the combined child outcome, which matches `keep_worker` semantics (`surfaces.py:395-410`). `arbitrate_front_and_worker` is not called for the ack, because no front model text exists to arbitrate.
 
 ### 2. Ack and preload (S4)
 
-**Insertion point.** In `AgentRuntime.create_task` (`loop.py:478-558`), in this order:
+**Insertion point.** In `AgentRuntime.create_task` (`loop.py:479-559`), in this order:
 1. the `Task` commit;
 2. RFC-0218 S3b's persona block (unchanged, including `publish_persona_switch_line` per #663);
 3. this RFC's large branch.
 
-The large branch replaces only the generic ack at L547-556:
+The large branch replaces only the generic ack at L548-557:
 
 1. **Start the preload** with `asyncio.create_task(large_prompt.preload(task.id, target))`. It is not awaited. The handle is stored on the runtime so cancel can reach it.
 2. **Ack.** It is a fixed template, not front-model generation, because a model generation cannot meet the budget, the front model may be cold, and the 27B load contends for the GPU. It is published with:
@@ -336,18 +337,39 @@ At dispatch, the child gets `Previous part result (≤ 1800 chars)`, which is in
 - **Mirror failure:** produces a visible parent event. DB persistence and the run continue.
 - `large_prompts.store` takes the values `"db"` (default) or `"db_and_vault"`.
 
-### 4. Storage: #649's engine, ported (S2)
+### 4. Storage: landed #649 engine plus seeding (S2)
 
-**Port** from #649 @ `edb4685`, verbatim except where noted. The ported tests go in `tests/test_rfc0231_prompt_steps.py`.
+#649 landed as `ee786dc`. S2 **reuses** its engine unchanged and ports nothing. Every citation below is `development` @ `d85c9d4`:
 
-| From #649 | To | Port note |
+| Landed #649 piece | Where | Used by 0231 as |
 | --- | --- | --- |
-| `db/models.py` +62-88 `TaskPromptPlan`, `TaskPromptStep` (uq `task_id`+`ordinal`) | same | verbatim |
-| `agent/task_workflow.py` `REVIEW_STEPS` L15-19, `TaskWorkflow` L40-98, `load_workflow` L101-112, `workflow_payload` L172-177 | same new file | verbatim. **Not ported:** `PLAN_SYSTEM`, `is_large_request` (moved to S1 rules L4), model-planned `prepare_workflow`, `append_followup`. The parent handles follow-ups (§5). |
-| — | `task_workflow.seed_workflow(session, task_id, steps: list[StepSpec])` | new. Writes the plan and steps in the caller's session, before the runner starts. Idempotent on (`task_id`, `ordinal`). |
-| `agent/loop.py` +2344-2349 (stored workflow load), +2672-2724 (workflow execution incl. `max_steps` L2719), +2968-2984 (per-prompt step limit), +3639-3662 (`finish_current`, advance to the next prompt), +776-788 (completion guard) | `agent/loop.py` | ported, but run only when a stored workflow exists. #649's auto-planning branch is not ported. |
-| `api/tasks.py` +287-288, +304-307 (`prompt_steps` in the task payload) | `api/tasks.py` | verbatim |
-| `config.py` +494 `large_task_reviews=True`; `api/settings.py` +72, +240-241 | same | verbatim |
+| `TaskPromptPlan` (goal, source_ref, followups_json), `TaskPromptStep` (uq `task_id`+`ordinal`, kind, prompt, status, result) | `db/models.py:66-88` | child prompt storage, unchanged |
+| `REVIEW_STEPS` | `agent/task_workflow.py:15-19` | appended to every child when `large_task_reviews` is on |
+| `TaskWorkflow` (`prompt()` with bounded predecessor summaries, `owns_history`, `finish_current`, `mark_running`) | `task_workflow.py:40-98` | runs the child's seeded steps |
+| `load_workflow` | `task_workflow.py:101-112` | child `_run` finds its seeded plan |
+| `workflow_payload`, `prompt_steps` in `GET /api/tasks/{id}` and observability | `task_workflow.py:172-177`, `api/tasks.py:288`, `:306` | child payload, unchanged |
+| stored-workflow load and the `needs_workflow` flag | `agent/loop.py:2344-2349` | a child with seeded steps takes the workflow path |
+| stored-workflow execution (`mark_running`, prompt, `max_steps = min(320, policy.max_steps × steps)`) | `loop.py:2709-2722` | unchanged |
+| per-prompt step limit | `loop.py:2981-2983` | unchanged |
+| advance to the next stored prompt with fresh context | `loop.py:3639-3660` | unchanged, plus the S5 validator gate before L3640 (§3) |
+| completion guard (no completion while more than one stored prompt is open) | `loop.py:776-788` | unchanged |
+| `large_task_reviews` setting | `config.py:494`; `api/settings.py:72`, `:240-241` | unchanged |
+| prompt-steps rows in the panel, status label, types | `TaskActivity.tsx:306-319`, `taskStatus.ts:207`, `api.ts:230`, `:269` | child panel, unchanged (S6 adds no prompt-steps UI) |
+| tests | `tests/test_rfc0224_task_workflow.py` (24 tests, `pytest` "Run full backend suite") | stays #649's; S2 doesn't edit it, and it must keep passing |
+
+**Not used by the pipeline (left exactly as landed):** `PLAN_SYSTEM` / `prepare_workflow` (`task_workflow.py:20-28`, `:115-169`), the auto-plan branch (`loop.py:2686-2707`) and `append_followup` (`task_workflow.py:180-216`, `loop.py:2675-2683`):
+- A pipeline **parent** never reaches them: S4's parent-runner entry returns before `loop.py:2344`.
+- A **child** has seeded steps, so `workflow is not None` and the auto-plan branch is skipped (`loop.py:2686`).
+- Child `/continue` goes to the parent (§5), so `append_followup` never runs for a child.
+- Every other task, including any large request when `large_prompts.enabled=false` or the precheck excludes the turn, keeps #649's behaviour unchanged.
+
+**Added by S2 (what #649 does not provide):**
+- `task_workflow.seed_workflow(session, task_id, *, goal: str, source_ref: str, steps: list[StepSpec]) -> None`, appended to `task_workflow.py` after `workflow_payload`. `StepSpec = tuple[str, str]` is (kind, prompt). It runs in the caller's session, before `_start_runner`. It writes one `TaskPromptPlan` and one `TaskPromptStep` per spec (ordinal 1..n, status `pending`) and sets `task.plan_json` the way `prepare_workflow` does at L165. It is idempotent: if a plan already exists for `task_id`, it returns without writing. Bounds are 1 ≤ len(steps) ≤ 12 and `len(goal) ≤ 16000`, the same ceiling `append_followup` enforces at L200. Anything over raises `ValueError`, and the child is never created.
+- **What a child's seeded rows contain:**
+  - `goal`: the section's `detailed_prompt` (≤ 6000 chars), plus `Previous part result` (≤ 1800 chars) when there is one;
+  - `source_ref`: `large_prompt_sections id=<id>`, plus `; read_ingress blob_id=<blob>` when the pipeline has a blob;
+  - steps: `("work", "Deliver this part as specified in the goal.")`, `("deeper", <deeper prompt, §3>)`, `("quantitative", <quantitative prompt, §3>)`, then `REVIEW_STEPS` when `large_task_reviews` is on.
+- The two pipeline tables below and `LargePromptSettings` (§Settings).
 
 **New tables** (`db/models.py`; created by `create_all`, no ALTER needed):
 
@@ -390,14 +412,14 @@ This reuses the semantics of `agent/intake.py`'s chain (stable ids, advance on t
   - Under a per-parent `asyncio.Lock`, pick the lowest-ordinal `pending` or `queued` section.
   - Call `admit_automatic_trigger` (`automation/breaker.py:236-320`) with automation id `large-prompt:<parent>`, `ensure_automation` first. When the kill switch is engaged or the breaker is open, the parent fails visibly with the breaker reason. No retry loop.
   - Call `AGENT.create_task(child_prompt, request_id=uuid5(NS, f"large-prompt:{parent}:{ordinal}"), pipeline_section=section_id, profile=target)`.
-  - The id is stable, so a re-dispatch after a crash reuses the same child (`loop.py:492-499` request_id reuse).
+  - The id is stable, so a re-dispatch after a crash reuses the same child (`loop.py:493-500` request_id reuse).
 - **`create_task(..., pipeline_section: str | None = None)`**, keyword-only, default `None`, so every existing call is unchanged. When it is set:
   - The route is fixed to MANAGED with the parent's task class and **no decide** (the parent turn already decided; still exactly one decide per owner turn).
   - No persona block, no large branch (no recursion) and no generic ack.
   - `seed_workflow` with `work, deeper, quantitative, *REVIEW_STEPS?` runs in the same session as the Task commit, before `_start_runner`.
   - The title is `Part n of N · <section title ≤ 60 chars>`.
-- **`_run` for a child:** skip the managed front lane (L2400-2420) and its `chat_tts`. Children never speak, because the HUD follows the parent. Run the seeded workflow on the target profile. Per-child `speak_outcome` in the terminal hook is suppressed.
-- **Terminal hook** (`_update`, L786-812), placed next to `advance_intake_chain`, as `large_prompt_queue.on_child_terminal(child_id, status, result)`:
+- **`_run` for a child:** skip the managed front lane (L2420-2440) and its `chat_tts`. Children never speak, because the HUD follows the parent. Run the seeded workflow on the target profile. Per-child `speak_outcome` in the terminal hook is suppressed.
+- **Terminal hook** (`_update`, L800-826), placed next to `advance_intake_chain`, as `large_prompt_queue.on_child_terminal(child_id, status, result)`:
 
 | Child status | Effect |
 | --- | --- |
@@ -420,17 +442,17 @@ This reuses the semantics of `agent/intake.py`'s chain (stable ids, advance on t
 
   `_update`'s terminal hook therefore never sees a parent until the pipeline itself sets it terminal.
 - **Cancel:**
-  - `AGENT.cancel(parent)` also cancels the running child and the preload task, and marks the rest `cancelled`. `cancel` (L732-737) gets one call, `large_prompt_queue.on_parent_cancel(parent)`.
-  - `POST /api/tasks/{child}/cancel` (existing, `api/tasks.py:336-346`) skips that part only.
+  - `AGENT.cancel(parent)` also cancels the running child and the preload task, and marks the rest `cancelled`. `cancel` (L733-738) gets one call, `large_prompt_queue.on_parent_cancel(parent)`.
+  - `POST /api/tasks/{child}/cancel` (existing, `api/tasks.py:341-352`) skips that part only.
 - **Follow-ups:**
-  - `/continue` on a **child** is redirected to the parent, in `continue_task` (L560-589).
-  - `/continue` on the **parent** is handled in `_run`'s follow-up path, after S3b's follow-up persona block. If a part is `needs_owner`, the reply answers it (§3). Otherwise the text is appended as a new last part (content hash dedupe, the #649 `append_followup` L180-216 rule) and goes through completeness and compile.
+  - `/continue` on a **child** is redirected to the parent, in `continue_task` (L561-590).
+  - `/continue` on the **parent** is handled in `_run`'s follow-up path, after S3b's follow-up persona block. If a part is `needs_owner`, the reply answers it (§3). Otherwise the text is appended as a new last part (content-hash dedupe, the same rule as landed `append_followup`, `task_workflow.py:182-186`; the parent has no stored workflow, so `append_followup` itself is not called) and goes through completeness and compile.
 - **Startup recovery** (`main.py`, after `reconcile_execution_on_startup`, L213-218 on `d214b6d`). For each pipeline in `running` or `waiting`:
   - re-take the rewarm hold;
   - if the current child is terminal, run `on_child_terminal` (a missed advance);
   - if it is `queued` without a runner, dispatch it again (same id);
   - if it is `running` without a runner, call `continue_task(child)`, which resumes the durable run (RFC-0029).
-- **Visibility:** `get_task` (`api/tasks.py:255-287`) gains a `large_prompt` object containing:
+- **Visibility:** `get_task` (`api/tasks.py:256-289`) gains a `large_prompt` object containing:
   - mode;
   - status;
   - target;
@@ -439,7 +461,7 @@ This reuses the semantics of `agent/intake.py`'s chain (stable ids, advance on t
   - sections (`ordinal`, `title`, `status`, `completeness`, `rounds`, `missing`, `child_task_id`, `vault_rel_path`, `vault_conflict`).
 
   Parent events are plain human text, so Show work (`OwnerChatTranscript.tsx:232-280`, which renders `title` and `detail`) shows the progress without an edit.
-- **Recents:** children appear in `/api/tasks` (polled by `App.tsx:221`) with their "Part n of N" titles. The list endpoint is unchanged.
+- **Recents:** children appear in `/api/tasks` (polled by `App.tsx:223`) with their "Part n of N" titles. The list endpoint is unchanged.
 
 ### 6. Owner UI (S6)
 
@@ -448,8 +470,8 @@ This reuses the semantics of `agent/intake.py`'s chain (stable ids, advance on t
   - an "Open" link to the child, a "Cancel part" button (POST child cancel) and an "Obsidian note" path when one is mirrored;
   - a "Cancel remaining" button (POST parent cancel);
   - a status line with target, preload_status and ack_ms.
-- **Prompt steps UI:** #649's prompt-steps UI (`TaskActivity.tsx` +306-319, `taskStatus.ts` +207) is ported for children.
-- **`api.ts`:** add-only types (`LargePromptPayload`, `PromptStep`; #649 `api.ts` +230, +269).
+- **Prompt steps UI:** landed #649 already renders a child's prompt steps (`TaskActivity.tsx:306-319`, `taskStatus.ts:207`). S6 doesn't edit or duplicate it.
+- **`api.ts`:** one add-only type, `LargePromptPayload`, plus `large_prompt?: LargePromptPayload` on `Task`. `prompt_steps` already exists (`api.ts:230`, `:269`).
 - **Not edited:** OwnerChatTranscript, HudChat, Chat, Phone, `useTaskSpeech` and every persona component.
 
 ### Live-UI add-alongside reasoning pass (2026-10-14 standing order)
@@ -463,7 +485,7 @@ Touched live UI: TaskActivity panel (HudChat, Chat, Phone), task speech, Show wo
 | Show work (`OwnerChatTranscript.tsx:232-280`) | **Yes**, unchanged | Parent events are human-readable text, so no formatter is needed. |
 | RFC-0218 persona switch line, highlight, morph | **Yes** | Parent switch per S3b, before the ack. Children emit no persona events. |
 | Phone | **Yes** | Shows the parent's events and panel via its existing poll. No speech is added. |
-| Task recents (`App.tsx:221`) | **Yes** | Part children are listed with "Part n of N" titles. |
+| Task recents (`App.tsx:223`) | **Yes** | Part children are listed with "Part n of N" titles. |
 
 ### Stub rule
 
@@ -494,7 +516,7 @@ class LargePromptSettings(BaseModel):
 
 | With | Rule |
 | --- | --- |
-| **RFC-0224 / #649** | Its storage and execution engine is ported (§4), with hunks cited. Its model-planned `prepare_workflow` and `append_followup` are not ported: the plan here is the deterministic compile. If #649 lands first, S2 drops the duplicate hunks and keeps `seed_workflow`. If this RFC lands first, #649 rebases onto the ported files. Neither waits for the other. |
+| **RFC-0224 / #649 (landed `ee786dc`)** | Its engine is reused unchanged (§4). S2 adds `seed_workflow`, the pipeline tables and `LargePromptSettings`, and copies no #649 code. Pipeline parents bypass #649's model planner (S4 entry before `loop.py:2344`). Children are seeded, so they never auto-plan. Every other task keeps #649's behaviour. `tests/test_rfc0224_task_workflow.py` is not edited and must stay green. |
 | **RFC-0211 / #585** | Sections are rows a future scheduler can list as "upcoming tasks". When `DevelopmentScheduler` lands, its `resource_hold` (L380-411) is respected: dispatch defers while a hold names Ollama, with the parent event "Waiting for the scheduler's model hold". Nothing here waits on #585. |
 | **RFC-0026 / 0029** | Children are ordinary durable tasks created through `AgentRuntime.create_task`. Follow-ups use `/continue`, and recovery uses `continue_task`. There is no second task system. |
 | **Reflex arbitration** | One decide per owner turn, with two riders. The ack is a fixed front notice, so `keep_worker` semantics apply to the parent result (§1). |
@@ -504,16 +526,17 @@ class LargePromptSettings(BaseModel):
 | **RFC-0225 S3 (gate requirement)** | 0231-S0 adds the `anzu-coder-27b` requirement (12 GB) as the first lookup in the step-5 gate. The gate logic, ledger and owner lines stay 0225's. |
 | **RFC-0228 S2** | The restore goes through `schedule_orchestrator_restore` → `NINE_B_REWARM`. The hold API is added to `rewarm.py` after 0228-S2. |
 | **`agent/intake.py`** | Left in place for `stream_owner_chat`. The large pipeline replaces its use only on the tasks path. Merging the two is out of scope. |
-| **RFC-0230** (in flight) | Unknown content at time of writing. Its slices go **first** on every shared file listed below, and 0231 slices rebase onto them. |
+| **RFC-0232 (#664)** | Shared files: its S2 (`owner_turn.py`) and S3/S4 (`loop.py`) go before 0231-S1, -S4 and -S5 (CoS ruling 2026-10-20). |
+| **RFC-0230 (#666)** | Its slices go **first** on every shared file below: `loop.py` (0230-S0 → S2 → S3), `owner_turn.py` (0230-S5), `main.py` (0230-S0 → S5). After them come RFC-0232 (#664), then 0231. 0231 slices rebase onto whatever has landed. |
 
-## Relationship to drafts
+## Relationship to #649 and #585
 
 | Draft hunk | Taken? | Where |
 | --- | --- | --- |
-| #649 models, task_workflow subset, loop workflow execution, `prompt_steps`, `large_task_reviews`, UI steps | **Ported** | S2, S6 |
-| #649 `is_large_request` | **Ported** as rules L4 | S1 |
-| #649 `PLAN_SYSTEM` / model planning / `append_followup` | Not ported (replaced by the deterministic compile and the parent follow-up rule) | — |
-| #649 `basic_qa` reply shape in `owner_turn.py` | Not ported here. The precheck excludes basic_qa only when the shape exists; otherwise the condition is skipped. | S1 |
+| #649 models, `TaskWorkflow` engine, loop workflow execution, `prompt_steps`, `large_task_reviews`, UI steps | **Landed; reused unchanged** (`db/models.py:66-88`, `task_workflow.py:15-19`, `:40-112`, `:172-177`, `loop.py:2344-2349`, `:2709-2722`, `:2981-2983`, `:3639-3660`, `:776-788`, `TaskActivity.tsx:306-319`) | S2 (seeding only), S5, S6 |
+| #649 `is_large_request` | **Landed; imported** as rules L4 (`task_workflow.py:31-37`) | S1 |
+| #649 `PLAN_SYSTEM` / `prepare_workflow` / auto-plan branch / `append_followup` | Landed; **not used by the pipeline** and left unchanged for every other task (§4) | — |
+| #649 `basic_qa` reply shape | Landed (`owner_turn.py:43`); the S1 precheck excludes it | S1 |
 | #585 scheduler | Not ported (respected when it lands) | S5 |
 
 ---
@@ -546,7 +569,7 @@ Tests (CI: `pytest` job, step "Run full backend suite", `.github/workflows/pr-te
 
 ### S1: Large-prompt detection riders
 
-**Model:** Grok 4.5 · **Depends:** none (after RFC-0230's `owner_turn.py` slice, if any)
+**Model:** Grok 4.5 · **Depends:** none in code. Merge order on `owner_turn.py`: after RFC-0230 S5 (#666) and RFC-0232 S2 (#664) (CoS ruling 2026-10-20).
 
 | File | Change |
 | --- | --- |
@@ -567,28 +590,29 @@ Tests (CI: `pytest` job, step "Run full backend suite"):
 - `test_questions_mode_from_l3`.
 - `test_disabled_is_byte_identical`.
 
-### S2: Prompt-step engine port, tables, settings
+### S2: Workflow seeding on the landed #649 engine, pipeline tables, settings
 
-**Model:** Grok 4.6 · **Depends:** S1 (none in code; S1 only goes first in the merge order)
+**Model:** Grok 4.5 · **Depends:** S1 (merge order only; no code dependency). #649 has landed (`ee786dc`), so there is no draft dependency.
 
 | File | Change |
 | --- | --- |
-| `backend/app/db/models.py` | #649 `TaskPromptPlan` and `TaskPromptStep`; `LargePromptPipeline`, `LargePromptSection` |
-| `backend/app/agent/task_workflow.py` (new) | #649 subset plus `seed_workflow` |
-| `backend/app/agent/loop.py` | #649 workflow execution hunks (§4) |
-| `backend/app/api/tasks.py` | `prompt_steps` in the payload |
-| `backend/app/config.py` | `large_task_reviews`, `LargePromptSettings` |
-| `backend/app/api/settings.py` | #649 hunks plus `large_prompts` |
-| `tests/test_rfc0231_prompt_steps.py` (new) | #649 `tests/test_rfc0224_task_workflow.py` cases ported, plus new cases |
+| `backend/app/db/models.py` | Only: `LargePromptPipeline` and `LargePromptSection` (§4 tables), appended after `TaskPromptStep` (L75-88); the #649 models are untouched |
+| `backend/app/agent/task_workflow.py` | Only: append `StepSpec` and `seed_workflow` after `workflow_payload` (L172-177); every landed #649 function is untouched (second owner after #649) |
+| `backend/app/config.py` | Only: `LargePromptSettings` and `AppSettings.large_prompts`, next to `decision` (`config.py:511`); `large_task_reviews` (L494) is #649's and is untouched |
+| `backend/app/api/settings.py` | Only: `large_prompts` on the existing GET/PUT, next to #649's `large_task_reviews` (L72, L240-241) |
+| `tests/test_rfc0231_prompt_steps.py` (new) | Below |
 
-Tests:
-- `test_seed_workflow_idempotent`.
-- `test_steps_execute_in_order_fresh_context`.
-- `test_step_limit_enforced`.
-- `test_review_steps_toggle`.
-- `test_prompt_steps_in_task_payload`.
+`agent/loop.py` and `api/tasks.py` are **not** edited by S2. #649's hunks are already there; S4 and S5 own the 0231 hunks in those files.
+
+Tests (CI: `pytest` job, step "Run full backend suite", `.github/workflows/pr-tests.yml:94-95`; the landed `tests/test_rfc0224_task_workflow.py` runs in the same step and must stay green):
+- `test_seed_workflow_writes_plan_and_steps_in_caller_session`: rows are visible in the same session before commit; `task.plan_json` lists the prompts.
+- `test_seed_workflow_idempotent`: a second call writes nothing.
+- `test_seed_workflow_bounds`: 0 steps, 13 steps, and a goal over 16000 chars each raise `ValueError`, and no rows are written.
+- `test_seeded_child_runs_on_landed_engine_without_planner`: a seeded task runs its stored prompts in order through `loop.py:2709-2722` / `:3639-3660`, and `MANAGER.chat` is never called with `PLAN_SYSTEM`.
+- `test_seeded_steps_include_deeper_and_quantitative_and_reviews_toggle`: `large_task_reviews` on gives work, deeper, quantitative, bugfix, fact_check, quality_control; off gives the first three.
 - `test_tables_created_on_fresh_db` (`init_db` on an empty DB).
-- `test_no_workflow_path_unchanged`: a task without a stored workflow runs exactly as before.
+- `test_large_prompts_settings_roundtrip` (GET/PUT, defaults `enabled=True`, `target_runtime="anzu-coder-27b"`, `store="db"`).
+- `test_unseeded_large_request_keeps_649_planner`: with no pipeline row, an `is_large_request` prompt still goes through `prepare_workflow` exactly as landed.
 
 ### S3: Split, completeness, compile, mandatory sub-tasks, persistence
 
@@ -624,7 +648,7 @@ Tests:
 | File | Change |
 | --- | --- |
 | `backend/app/agent/large_prompt.py` (new) | `resolve_target` (enabled rows only), `preload` (incl. the Ollama `/api/ps` check and `record_anzu_load`), ack texts, compare-and-restore |
-| `backend/app/agent/loop.py` | Large branch in `create_task` (after S3b's block, replacing the generic ack for large turns only); parent runner entry in `_run` |
+| `backend/app/agent/loop.py` | Large branch in `create_task` (after S3b's block, replacing the generic ack for large turns only); parent-runner entry in `_run`. For a task that has a `large_prompt_pipelines` row, it runs the parent runner and returns **before** the landed #649 workflow block (`loop.py:2344`), so #649's model planner never runs for a pipeline parent |
 | `backend/app/inference/rewarm.py` | `hold` and `release`, plus deferral while held (second owner after 0228-S2) |
 | `tests/test_rfc0231_ack_preload.py` (new) | Below |
 
@@ -653,7 +677,7 @@ Tests:
 | File | Change |
 | --- | --- |
 | `backend/app/agent/large_prompt_queue.py` (new) | `dispatch_next`, `on_child_terminal`, `on_parent_cancel`, parent completion, `recover_on_startup` |
-| `backend/app/agent/loop.py` | `pipeline_section` keyword in `create_task`; child path in `_run` (no front lane, seeded workflow, target profile); terminal hook call; cancel hook; `/continue` redirect and parent follow-up |
+| `backend/app/agent/loop.py` | `pipeline_section` keyword in `create_task`; child path in `_run` (no front lane, seeded workflow, target profile); validator gate for `deeper` / `quantitative` steps before `workflow.finish_current` (L3639-3640) and before the final completion of the last stored step (S3 validators, 2 retries, then `_fail_task` with the S3 text); terminal hook call; cancel hook; `/continue` redirect and parent follow-up |
 | `backend/app/api/tasks.py` | `large_prompt` payload in `get_task` |
 | `backend/app/main.py` | One startup call to `recover_on_startup` |
 | `tests/test_rfc0231_large_prompt_queue.py` (new) | Below |
@@ -674,6 +698,7 @@ Tests:
 - `test_restore_after_parent_terminal`.
 - `test_recovery_redispatch_advance_resume`.
 - `test_large_prompt_payload`.
+- `test_validator_gate_retries_stored_step_then_fails_visibly`: a quantitative step whose result has no numeric row is retried twice with the validator message, then the child fails with "Part n of N: quantitative sub-task did not meet its format after 3 attempts", and `finish_current` is never called for it.
 
 ### S6: Large-prompt sections panel
 
@@ -682,31 +707,33 @@ Tests:
 | File | Change |
 | --- | --- |
 | `frontend/src/components/LargePromptSections.tsx` (new) | Panel (§6) |
-| `frontend/src/components/TaskActivity.tsx` | One mount line, plus the #649 prompt-steps rows (+306-319) |
-| `frontend/src/api.ts` | Add-only types |
-| `frontend/src/taskStatus.ts` | #649 +207 (step status label) |
+| `frontend/src/components/TaskActivity.tsx` | One mount line inside `TaskActivityPanel` (L185). The landed #649 prompt-steps rows (L306-319) are untouched. |
+| `frontend/src/api.ts` | Add-only `LargePromptPayload` and `Task.large_prompt?` |
 | `frontend/large-prompt-sections.test.mjs` (new) | Rows render, buttons call the correct endpoints, absent payload renders nothing, existing panel rows still present |
 | `frontend/package.json` | Append `test:large-prompt-sections` |
 | `.github/workflows/pr-tests.yml` | Append the step `Large prompt sections tests (RFC-0231 S6)` → `npm run test:large-prompt-sections` after "Persona morph hook tests (RFC-0218 S5)" in `frontend-build` |
 
 ## Ownership chains (handoff order on shared files)
 
-Every listed RFC-0230 slice goes **first** on any file it claims. When RFC-0230 lands, the 0231 tickets rebase onto it.
+Every listed RFC-0230 slice goes **first** on any file it claims. On `loop.py` and `owner_turn.py` the order is RFC-0230 (#666), then RFC-0232 (#664), then RFC-0231 (CoS ruling 2026-10-20). The 0231 tickets rebase onto whichever of those has landed.
 
 | File | Order |
 | --- | --- |
-| `backend/app/agent/loop.py` | 0218-S3b → (0230) → 0231-S2 → 0231-S4 → 0231-S5 |
-| `backend/app/decision/owner_turn.py`, `adapters/rules.py` | (0230) → 0231-S1 |
-| `backend/app/config.py` | 0228-S1 → 0228-S2 → (0230) → 0231-S2 |
-| `backend/app/api/tasks.py` | (0230) → 0231-S2 → 0231-S5 |
+| `backend/app/agent/loop.py` | #649 (landed) → 0218-S3b → RFC-0230 (#666) → RFC-0232 (#664) S3 → S4 → 0231-S4 → 0231-S5 (S2 no longer edits it; CoS ruling 2026-10-20) |
+| `backend/app/decision/owner_turn.py` | #649 (landed) → RFC-0230 (#666) → RFC-0232 (#664) S2 → 0231-S1 (CoS ruling 2026-10-20) |
+| `backend/app/decision/adapters/rules.py` | 0231-S1 only (RFC-0230 does not edit it) |
+| `backend/app/config.py` | #649 (landed) → 0228-S1 → 0228-S2 → 0231-S2 (RFC-0230 does not edit it) |
+| `backend/app/api/tasks.py` | #649 (landed) → 0231-S5 (S2 no longer edits it; RFC-0230 does not edit it) |
 | `backend/app/inference/rewarm.py` | 0228-S2 (creates it) → 0231-S4 |
 | `backend/app/inference/hotswap.py` | 0225-S3 → 0228-S2. 0231 does **not** edit it. |
 | `backend/app/main.py` | (0230-S0 → 0230-S5) → 0225-S1 → S2 → S3 → 0231-S0 → 0231-S5 |
 | `backend/app/inference/engine_coexistence.py` | 0225-S3 (creates it) → 0231-S0 |
 | `backend/app/inference/model_stack.py`, `backend/app/inference/anzu_coder.py` | 0231-S0 only |
-| `backend/app/db/models.py` | (0230) → 0231-S2 |
+| `backend/app/db/models.py` | #649 (landed) → 0231-S2 (RFC-0230 does not edit it) |
 | `frontend/src/api.ts` | 0218-S3 → 0231-S6 |
-| `frontend/src/components/TaskActivity.tsx` | (#649 if it lands first) → 0231-S6 |
+| `frontend/src/components/TaskActivity.tsx` | #649 (landed) → 0231-S6 |
+| `backend/app/agent/task_workflow.py` | #649 (landed, created it) → 0231-S2 |
+| `backend/app/api/settings.py` | #649 (landed) → 0231-S2 |
 | `frontend/package.json`, `.github/workflows/pr-tests.yml` | Append-only, any order, rebase on conflict |
 
 ## Ticket cards
@@ -715,7 +742,7 @@ Every listed RFC-0230 slice goes **first** on any file it claims. When RFC-0230 
 | --- | --- | --- | --- |
 | 0231-S0 | `anzu-coder-27b` runtime profile, VRAM requirement, enable reconcile | Grok 4.5 | 0225-S3 |
 | 0231-S1 | Large-prompt detection riders | Grok 4.5 | — |
-| 0231-S2 | Prompt-step engine port, tables, settings | Grok 4.6 | S1 (order) |
+| 0231-S2 | Workflow seeding on landed #649, pipeline tables, settings | Grok 4.5 | S1 (order) |
 | 0231-S3 | Split, completeness, compile, sub-tasks, persistence | Grok 4.5 | S2 |
 | 0231-S4 | Ack, preload, create_task branch, rewarm hold | Grok 4.6 | **S0**, S1-S3, 0225-S3, 0228-S2, 0218-S3b |
 | 0231-S5 | Sequential queue, lifecycle, recovery | Grok 4.6 | S4 |
@@ -745,4 +772,4 @@ All seven run with fast mode off.
 - **27B load time over 180 s on a cold disk.** Mitigation: defined fallback plus owner line. The deadline is a module constant, so it is tunable after the live audit.
 - **Deterministic split mis-sections free prose.** Mitigation: completeness repairs and the owner `needs_owner` loop. N == 1 is always valid.
 - **The quantitative format feels forced on qualitative parts.** Mitigation: the "Measurable criteria" row keeps the format honest without inventing numbers.
-- **Collisions in `loop.py`.** Mitigation: the strict ownership chain above, three 0231 slices in sequence.
+- **Collisions in `loop.py`.** Mitigation: the strict ownership chain above, with two 0231 slices (S4, S5) in sequence after landed #649.
