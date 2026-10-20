@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -33,7 +35,7 @@ class OverrideBody(BaseModel):
 
 @router.get("/catalog")
 async def get_catalog(show_hidden: bool = False):
-    return build_catalog(show_hidden=show_hidden)
+    return await asyncio.to_thread(build_catalog, show_hidden=show_hidden)
 
 
 @router.get("/candidates")
@@ -112,7 +114,7 @@ class DiscoverSelectBody(BaseModel):
 
 @router.get("/discovery")
 async def get_discovery():
-    return discovery_payload()
+    return await asyncio.to_thread(discovery_payload)
 
 
 @router.post("/discovery/select")

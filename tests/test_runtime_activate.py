@@ -154,11 +154,13 @@ async def test_autoload_recovers_from_unavailable_local_lmstudio(jarvis_env, mon
     settings.inference.host = "127.0.0.1"
     settings.inference.port = 1234
     settings.inference.profile = "quality"
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr("app.inference.lmstudio_server.ensure_local_lmstudio", AsyncMock(return_value={"ok": True}))
     calls = []
     saved = []
 
-    async def fake_load(candidate, profile):
-        calls.append((candidate.inference.backend, profile))
+    async def fake_load(candidate, profile=None, **kwargs):
+        calls.append((candidate.inference.backend, profile or candidate.inference.profile))
         if candidate.inference.backend == "lmstudio":
             raise RuntimeError("LM Studio is closed")
         return jarvis_env["manager"].state
@@ -170,9 +172,8 @@ async def test_autoload_recovers_from_unavailable_local_lmstudio(jarvis_env, mon
     await main_module._autoload_model(settings)
 
     assert calls == [("lmstudio", "quality"), ("llama.cpp", "quality")]
-    assert len(saved) == 1
-    assert saved[0].inference.backend == "llama.cpp"
-    assert saved[0].inference.port == 8088
+    assert saved == []
+    assert settings.inference.backend == "lmstudio"
 
 
 @pytest.mark.asyncio
@@ -226,8 +227,8 @@ async def test_activate_runtime_profile_wraps_load_errors(jarvis_env, monkeypatc
         is_local=True,
     )
 
-    async def fake_apply_settings(_runtime):
-        return None
+    async def fake_apply_settings(_runtime, **kwargs):
+        return jarvis_env["settings"]
 
     async def failing_load(*_args, **_kwargs):
         raise RuntimeError("llama.cpp did not become ready")
@@ -256,8 +257,8 @@ async def test_activate_runtime_profile_does_not_force_reload_by_default(jarvis_
     )
     seen = {}
 
-    async def fake_apply_settings(_runtime):
-        return None
+    async def fake_apply_settings(_runtime, **kwargs):
+        return jarvis_env["settings"]
 
     async def fake_load(*_args, **kwargs):
         seen["force"] = kwargs.get("force")
@@ -291,8 +292,8 @@ async def test_activate_runtime_profile_passes_owner_gguf_path(jarvis_env, monke
     )
     seen = {}
 
-    async def fake_apply_settings(_runtime):
-        return None
+    async def fake_apply_settings(_runtime, **kwargs):
+        return jarvis_env["settings"]
 
     async def fake_load(*_args, **kwargs):
         seen["gguf_path"] = kwargs.get("gguf_path")
@@ -363,8 +364,8 @@ async def test_activate_local_slot_reports_missing_weights(jarvis_env, monkeypat
         is_local=True,
     )
 
-    async def fake_apply_settings(_runtime):
-        return None
+    async def fake_apply_settings(_runtime, **kwargs):
+        return jarvis_env["settings"]
 
     async def missing_load(*_args, **_kwargs):
         raise FileNotFoundError(

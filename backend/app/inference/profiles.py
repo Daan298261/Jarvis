@@ -219,6 +219,16 @@ PROFILES: dict[str, ModelProfile] = {
     ),
     # Front-lane profiles. The shipped default is front_2b (CPU). front_4b is the
     # optional GPU choice. Filenames match the existing Hugging Face install path.
+    "front_08b": ModelProfile(
+        name="front_08b", label="Quick · Qwen3.5 0.8B", quant="Q4_0",
+        filename="Qwen3.5-0.8B-Q4_0.gguf", family="qwen3.5-0.8b",
+        alias="Qwen3.5-0.8B", repo="ggml-org/Qwen3.5-0.8B-GGUF",
+        repo_dir="Qwen3.5-0.8B-GGUF", mmproj_filename="", thinking=False,
+        thinking_mode="off", context_size=4096, temperature=0.25,
+        top_p=0.8, top_k=20, presence_penalty=0.0,
+        description="Small CPU conversational front. Basic answers and bounded handoffs; tools stay with the worker.",
+        vision=False, fallbacks=(),
+    ),
     "front_2b": ModelProfile(
         name="front_2b",
         label="Faster · Qwen3.5 2B",

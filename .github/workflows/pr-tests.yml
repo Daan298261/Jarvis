@@ -94,6 +94,9 @@ jobs:
       - name: Run full backend suite
         run: python -m pytest -q -rs
 
+      - name: Manager JS MIME type tests (RFC-0229 S1)
+        run: python -m pytest -q -rs tests/test_rfc0229_manager_js_mime.py
+
   frontend-build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -126,6 +129,9 @@ jobs:
 
       - name: Persona morph hook tests (RFC-0218 S5)
         run: npm run test:persona-morph-hook
+
+      - name: Manager control feedback tests (RFC-0229 S1)
+        run: npm run test:manager-controls
 
   installer-compile:
     name: installer-compile

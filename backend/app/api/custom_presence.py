@@ -36,7 +36,7 @@ class DefaultPresetIn(BaseModel):
 
 
 @router.get("")
-async def get_custom_presence() -> dict:
+def get_custom_presence() -> dict:
     return public_custom_presence_state()
 
 
