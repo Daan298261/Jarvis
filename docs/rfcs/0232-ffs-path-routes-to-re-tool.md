@@ -7,7 +7,7 @@
 **Root-cause credit:** D1 (initial trace) + D2 (peer corrections). Every citation below was re-verified against `development` @ `a44da353` (after #648, #649, #657 and #660 landed; `store.py` is the only cited file that moved after `d85c9d4c`).  
 **Aligns with:** [`ANZU_PRODUCT_NORTH_STAR.md`](../../ANZU_PRODUCT_NORTH_STAR.md) §6 (deterministic rule → reflex → tools → model), §8 (verify from evidence), §19 ("Do use fast deterministic mechanisms where they are superior to AI reasoning."), §20 Q1 / Q6 / Q7.  
 **Extends (do not rewrite):** [RFC-0208 FFS dump self-ingest](0208-ffs-dump-self-ingest.md) (`store.prepare_ffs`, `ffs_ingest`, `ffs_query`, `POST /api/investigations/ffs`), [RFC-0207 APK reverse sidecar](0207-apk-reverse-sidecar.md) (`apk_sidecar.prepare_apk`), [RFC-0200 REA MCP](0200-rea-mcp-local-investigation.md), [RFC-0201 Reverse Engineer Anything](0201-reverse-engineer-anything.md), [RFC-0206 every-turn Jev/Laya](0206-jev-laya-every-turn-arbitration.md), [RFC-0122 ingress size-gate](0122-ingress-size-gate-spill-and-trajectory-cap.md), [RFC-0182 segmented input](0182-context-and-segmented-agentic-tasks.md).  
-**Reconciles with (in progress):** [RFC-0218 S3b](0218-persona-surfaces-and-intent-switch.md) (#658, tasks-path persona switch — this RFC does not touch persona surfaces), RFC-0231 large-prompt pipeline (#665 @ `8d713f04`; **RE path + intent takes precedence** over prompt-splitting, see §Precedence vs RFC-0231), RFC-0230 PC first-response latency (#666 @ `99aef631`; routing is pre-model / reflex, so it cuts the 9B turn rather than adding to it; 0230 goes first on shared files per the CoS ruling), [RFC-0225](0225-local-engine-coexistence-and-resilient-api.md) (#652 @ `60573c62`, specs only) for the no-task owner-line channel. RE prepare allow-list chain: **#660** (`prepare_ffs`, landed `90a0010`) and **#661** (`4b81ac11`, `store.prepare` / `prepare_apk`, open onto `development`).  
+**Reconciles with (in progress):** [RFC-0218 S3b](0218-persona-surfaces-and-intent-switch.md) (#658, tasks-path persona switch — this RFC does not touch persona surfaces), RFC-0231 large-prompt pipeline (#665 @ `57106ba5`; **RE path + intent takes precedence** over prompt-splitting, see §Precedence vs RFC-0231), RFC-0230 PC first-response latency (#666 @ `99aef631`; routing is pre-model / reflex, so it cuts the 9B turn rather than adding to it; 0230 goes first on shared files per the CoS ruling), [RFC-0225](0225-local-engine-coexistence-and-resilient-api.md) (#652 @ `60573c62`, specs only) for the no-task owner-line channel. RE prepare allow-list chain: **#660** (`prepare_ffs`, landed `90a0010`) and **#661** (`4b81ac11`, `store.prepare` / `prepare_apk`, open onto `development`).  
 **Reserved numbers:** 0230 and 0231 are parallel; **0233 is reserved** for another RFC. Touch only this RFC's README row (see S1 for how the row coexists with #652's next-free rewrite).  
 **Taco 2026-10-09 ruling (binding):** RE extends and complements REA. No removal. Native `reverse_engineer` (ingest / prepare / ffs_query / apk) stays; `rea_investigate` stays available when REA roots are configured.
 
@@ -92,45 +92,93 @@ Traced on `development` @ `d85c9d4c` and locked by RFC-0225 (#652 @ `60573c62`):
   - **Dependency (not a gate):** `owner_line` is docs-only on #652 today; `backend/app/inference/engine_coexistence.py` does not exist on `development` @ `d85c9d4c`. The **with-task** path (`BUS.publish` on the task stream) works now and is what every path + question turn uses. Only S2's **no-task** `roots_empty` line needs `owner_line`, so that one call and its test (`test_roots_empty_without_task_uses_engine_owner_line`) land in S2 **after RFC-0225 S3's implement PR adds `engine_coexistence.owner_line`**. If S2 is ready first, it ships everything else and the no-task call follows as an S2 follow-up commit on the same branch once 0225-S3 is on `development`; S2 does not add its own owner channel or a placeholder.
 - **Forbidden:** `persona/chat_delivery.py::publish_owner_text` / `enqueue_chat_tts` / polling `GET /api/owner/chat/tts/pending`. No client in `frontend/src`, `android/`, `extensions/` or the Manager listens (RFC-0225, #652 @ `60573c62`, "What the portal actually consumes").
 
-### Deterministic path + question router (normative)
+### Deterministic path + RE-intent router (normative; two stages)
 
-A new helper `agent/planning.py::ffs_or_apk_investigation(prompt) -> tuple[str, str] | None` returns `(target, kind)` where `kind ∈ {"ffs", "apk"}`, or `None`.
+D2 round 3 showed that growing one regex either misses Taco's wording or routes coding questions on source trees to RE. Detection is therefore **two-stage**: (a) a cheap wording-plus-path prefilter, then (b) for weak matches only, a bounded, allow-list-first on-disk probe. Explicit owner wording needs no probe (CoS amendment A, from D2); the probe never touches a path outside the allowed folders (CoS amendment B, from D1).
 
-Detection rules (all must hold):
+**Stable helper (S2, `backend/app/agent/planning.py`):**
 
-1. The latest owner utterance (`latest_user_utterance`) contains a local path in one of these forms (reuse / extend `_PATH_OR_URL` at `planning.py:269–271`):
-   - Windows drive: `D:\cases\x\ffs`, `D:/cases/x/ffs`
-   - UNC: `\\NAS\cases\x\ffs`, `//nas/cases/x/ffs`
-   - POSIX absolute: `/mnt/cases/x/ffs`
-2. **And** RE intent (D2 round 2: narrowed so a bare `extraction` / `ffs` / `dump` word plus any path never fires). One of these holds; every pattern is compiled with **`re.IGNORECASE`**:
-   - **APK:** a path ends in `.apk` / `.apks` / `.xapk` → `kind="apk"`.
-   - **Path component** (path split on `\` and `/`, compared case-insensitively): a component that is exactly `ffs`, `fullfs`, `extraction`, `extract` or `dump`, or ends in `_ffs` / `-ffs` / `_dump` / `-dump` / `_extraction` / `-extraction` → `kind="ffs"`.
-   - **Known extraction layout** in the path (component-aligned, so `C:\code\data\x` never matches): `data/data`, `data/app`, `data/user/0`, `data/media/0`, `data/system_ce`, `data/system_de`, `system/app`, `system/priv-app`, `system/framework`, `storage/emulated/0`, `sdcard`, `private/var/mobile` → `kind="ffs"`.
-   - **Image / archive file:** the path ends in `.img` / `.raw` / `.dd` / `.e01`, or in `.zip` / `.tar` / `.tar.gz` / `.tgz` / `.7z` and its file name contains `ffs`, `fullfs`, `extract`, `dump`, `image`, `android` or `phone` → `kind="ffs"`.
-   - **Dump wording** anywhere in the utterance:
-     `\b(?:ffs\s+(?:root|dump|image|extraction|folder|tree)|(?:android|phone|device)\s+ffs|(?:full|phone|device|android|forensic|ffs)\s+(?:file[\s-]?system\s+)?extraction|full[\s-]?file[\s-]?system|file[\s-]?system\s+(?:dump|image|extraction)|android\s+file[\s-]?system|forensic\s+(?:image|dump)|(?:android|phone|device)\s+(?:dump|image)|dump\s+root|extract(?:ed)?\s+(?:dump|image|folder))\b`
-     So `extraction` counts only after full / phone / device / Android / forensic / FFS, `ffs` only as "FFS root / dump / image / extraction / folder / tree" or "Android / phone / device FFS", and `dump` only as "Android / phone / device dump", "dump root" or "file system dump". `android\s+file[\s-]?system` covers Taco's "this is the root of an Android file system" (D2 2026-10-20).
-   - **Bare "file system" + absolute path:** `\bfile[\s-]system\b[^\n]{0,40}?(?:[a-z]:[\\/]|\\\\|//|(?<!\w)/)` with `re.IGNORECASE` (so `D:\` matches; D2 round 2 found the pattern case-sensitive as first written). A space or hyphen is required, so the single word "filesystem" never counts (e.g. "file system at D:\cases\x\phone", "file system root: /mnt/cases/x/phone").
-3. **And** there is a question or investigative ask (a `?`, or an interrogative / investigative stem: `what|which|where|when|how many|who|show|list|find|analyse|analyze|inspect|investigate|summarise|summarize`).
+```python
+@dataclass(frozen=True)
+class ReIntent:
+    target: str                            # the path as typed
+    kind: Literal["ffs", "apk"]
+    basis: Literal["explicit", "probed"]   # explicit wording, or a weak match the probe confirmed
+    evidence: str                          # e.g. "wording:full ffs", "marker:data/data", "ext:.zip"
 
-`route_request`, `classify_task`, `requests_agent_tools`, `is_explicit_action` and the owner-turn action floor all call this helper. When it returns non-`None`:
+def re_intent_match(prompt: str, *, allowed: Sequence[str] | None = None) -> ReIntent | None: ...
+```
+
+`allowed=None` means `load_settings().allowed_directories`. It reads `latest_user_utterance(prompt)`. Results are memoised per `(utterance, tuple(allowed))` in an LRU of 64 entries with a 5 s TTL, so the baseline `route_request`, `classify_task`, `requests_agent_tools`, `is_explicit_action`, the S2 floor in `_apply_floors`, and RFC-0231-S1's precheck share **one** probe per turn. RFC-0231 calls exactly this name. The on-disk probe is a separate S2 function, `planning.probe_dump_target(target: str, allowed: Sequence[str] | None = None) -> DumpProbe` (`DumpProbe.verdict ∈ {"dump", "source", "absent", "outside", "timeout"}`, plus `DumpProbe.evidence`). S1's tests stand it in by that name.
+
+**Rule 1: a path.** The latest owner utterance contains a local path in one of these forms (reuse / extend `_PATH_OR_URL` at `planning.py:269–271`):
+- Windows drive: `D:\cases\x\ffs`, `D:/cases/x/ffs`
+- UNC: `\\NAS\cases\x\ffs`, `//nas/cases/x/ffs`
+- POSIX absolute: `/mnt/cases/x/ffs`
+
+No path means no match.
+
+**Stage (a): prefilter (no I/O; every pattern compiled with `re.IGNORECASE`).**
+
+*Explicit* routes with no probe and no question required. Any one of these:
+- a path ending in `.apk` / `.apks` / `.xapk` → `kind="apk"`;
+- the RE verbs of `skill._INTENT` (`skill.py:6`, reused, not copied): `reverse engineer(ing)`, `decompile`, `disassemble`;
+- `full FFS`, and `FFS of my/the/this/a/his/her …`: `\bfull\s+ffs\b`, `\bffs\s+of\s+(?:my|the|this|a|his|her)\b`;
+- `full file system extraction / dump / image`: `\bfull\s+file[\s-]?system\s+(?:extraction|dump|image)\b`;
+- `extraction of my phone` and close variants: `\b(?:full\s+|forensic\s+)?extraction\s+of\s+(?:my|the|this|a|his|her)\s+(?:phone|device|pixel|iphone|galaxy|android|handset|mobile)\b`, and `\b(?:my|the|this)\s+(?:phone|device|pixel|iphone)(?:'s)?\s+(?:full\s+)?(?:ffs|extraction)\b` ("my phone's extraction", "the Pixel FFS");
+- `forensic extraction` / `forensic image`: `\bforensic\s+(?:extraction|image)\b`.
+
+*Weak* matches go to stage (b). They also need a question or investigative ask: a `?`, or one of `what|which|where|when|how many|who|show|list|find|analyse|analyze|inspect|investigate|summarise|summarize`. Any one of these:
+- **Path component** (path split on `\` and `/`, compared on the stem with the extension removed): exactly `ffs`, `fullfs`, `extraction`, `extract` or `dump`, or ending in `_ffs` / `-ffs` / `_dump` / `-dump` / `_extraction` / `-extraction` (so `p1_ffs.tar` is weak).
+- **Forensic-only layout** in the path, component-aligned: `data/data`, `data/user/0`, `data/media/0`, `data/system_ce`, `data/system_de`, `storage/emulated/0`, `private/var/mobile`. D2 round 3 dropped `system/app`, `system/priv-app`, `system/framework`, `data/app` and `sdcard`, which are common in AOSP and app source trees.
+- **Forensic image extension** on the path: `.img`, `.dd`, `.raw`, `.e01`, `.ex01`, `.ufd`, `.ufdr`, `.aff4`. Generic `.zip` / `.tar` / `.bin` need a component signal.
+- **Wording:** `\b(?:android\s+file[\s-]system|(?:android|phone|device)\s+ffs|ffs\s+(?:root|dump|image|extraction|folder|tree)|(?:full|phone|device|android|forensic)\s+extraction|file[\s-]system\s+(?:image|extraction)|dump\s+root)\b`. "Android" needs a separated `file system` / `file-system`, so "Android filesystem API" never matches. `phone|device` + `image|dump` and `file system dump` are dropped. This covers Taco's "this is the root of an Android file system".
+- **Bare "file system" + absolute path:** `\bfile[\s-]system\b[^\n]{0,40}?(?:[a-z]:[\\/]|\\\\|//|(?<!\w)/)`. The probe target is the first path in the utterance.
+
+**Stage (b): on-disk probe (weak matches only).**
+1. **Allow-list first.** `store.admit_allowed_target(target, allowed)` (#661 @ `4b81ac11`, `store.py:295`) runs before any `stat` of the target or of any marker. On `development` @ `a44da353` the same two gates exist under #660's names, `_ffs_admit_lexically` (`store.py:219–248`, lexical, no stat) then `_ffs_admit_real_parent` (`:251–289`). #661 folds them into `admit_allowed_target`. S2 calls `admit_allowed_target` if #661 has landed when S2 is cut. Otherwise it calls the two #660 functions in that order and switches to the #661 name in the same PR when #661 lands first; no third gate is written. `PermissionError` → verdict `outside`. **Zero** filesystem calls on the target, so routing is never an existence oracle (the leak #660 closed). A weak match on an outside path routes normally; explicit wording on an outside path still routes, and S3's ingest admission then returns the constant `FFS path not allowed` line.
+2. **One `stat` of the target.** Missing → `absent`.
+3. **File:** an image or container extension → `dump` (evidence `ext:<ext>`). The list is `.img .bin .dd .raw .e01 .E01 .ex01 .ufd .ufdr .aff4 .tar .tgz .tar.gz .zip .7z .ab .dar .dmg`; matching is case-insensitive. Any other file → `absent`.
+4. **Directory, source veto first:** a `stat` of each of `.git`, `.repo`, `.hg`, `Android.bp`, `Android.mk`, `build/make`, `build/soong`, `settings.gradle`, `build.gradle`, `package.json`, `pyproject.toml`, `CMakeLists.txt`, `Cargo.toml`, `go.mod` under the target root. Any hit → `source`, routes normally. A dump marker never overrides it: an AOSP checkout has `.repo` / `build/make` / `Android.bp`.
+5. **Directory, dump markers (any one is enough):** Android: `data/data/` (dir), `system/build.prop` (file), `data/user/0/`, `storage/emulated/0/`, `sdcard/Android/` (sdcard-only pulls). iOS (Architect's discretion, same any-one rule): `private/var/mobile/` (dir), `System/Library/CoreServices/SystemVersion.plist` (file). Hit → `dump` (evidence `marker:<rel>`). No hit → `absent`.
+
+**Probe budget (it must fit the 50 ms decide, `OWNER_TURN_DEADLINE_MS`, `owner_turn.py:39`):**
+- Only `os.stat` / `os.lstat` calls. No `listdir`, `open`, `read` or recursion.
+- At most **22** stat calls per probe (1 target + 14 veto + 7 markers), plus the realpath of the parent inside the admit gate. The test's hard cap is **24**.
+- It runs on a dedicated single-thread executor (`thread_name_prefix="re-probe"`). The caller waits at most **10 ms** (`future.result(timeout=0.010)`). On timeout, or while a previous probe still holds the executor (e.g. a hung SMB share), the verdict is `timeout` and a weak match routes normally. The abandoned stat finishes in the background, and its result is cached for the next turn.
+- The probe runs once per turn: the memo above, filled by the first caller, which is the baseline `route_request` before `decide_owner_turn`.
+
+**Kind.** `apk` when the matched path ends in `.apk` / `.apks` / `.xapk`, else `ffs`.
+
+When `re_intent_match` returns non-`None`:
 
 - `route_request` → `RequestRoute(MANAGED_TASK, "reverse engineering")`
 - `classify_task` → `"reverse engineering"`
-- `is_explicit_action` → `True` (forces `managed_task` / `handoff` even if Jev/Laya would have picked `direct_reply` — closes the `owner_turn.py:347–353` hole)
+- `is_explicit_action` → `True` (forces `managed_task` / `handoff` even if Jev/Laya would have picked `direct_reply`; closes the `owner_turn.py:347–353` hole)
 - `tool_names_for` always includes `reverse_engineer` (native)
+- the S2 floor in `_apply_floors` (below) forces `managed_task` / `reverse engineering`
 
-**Not matched:** ordinary source trees without dump wording, bare "what's in this folder", weather, chat. Those keep today's classifiers. Named negatives (live in S1, must stay green in every slice): `C:\code\etl what does the extraction step do?` (bare `extraction`, coding question) and `C:\Users\taco\proj ffs why does the build fail?` (`ffs` as an interjection, non-dump path).
+**Not matched:** ordinary source trees, bare "what's in this folder", weather, chat, and a path with a plain or coding question. These keep today's classifiers. Named negatives live in S1 and must stay green in every slice: `C:\code\etl what does the extraction step do?`, `C:\Users\taco\proj ffs why does the build fail?`, D2's round-3 set (Android filesystem API, phone image, device image, device dump handler, file system dump command, `aosp\system\framework`, `launcher\data\app`), an on-disk fake AOSP tree, and an outside path with markers that is never stat'd.
 
 ### Precedence vs RFC-0231 (normative; owned by S2)
 
 > A turn whose prompt contains an absolute filesystem path together with RE intent (RFC-0232's narrowed dump/extraction detection) routes to reverse engineering and is never split by RFC-0231; a path with a plain or coding question routes normally.
 
-"RE intent" means `ffs_or_apk_investigation(latest_user_utterance(prompt))` returns non-`None` (rules 1–3 above). #665 (RFC-0231) carries the same line. Mechanism: S2 computes `ffs_or_apk_investigation` once at the top of `owner_turn._decide_sync` (`owner_turn.py:419`) and, when it matches, returns the `managed_task` / `reverse engineering` decision before any rider precheck runs. RFC-0231-S1, which follows 0232-S2 on `owner_turn.py`, places its large-prompt precheck after that early return, so a matching turn never gets the `large_prompt` / `large_prompt_split` riders and `OwnerTurnDecision.large_prompt` stays `None`. In `create_task` the RFC-0231 large-prompt branch keys off `decision.large_prompt`, so it never runs for that turn either. Named test: `test_path_plus_re_intent_routes_to_re_before_large_prompt_split` (S2, `tests/test_rfc0232_intent_and_alias.py`). It is written against the decision fields, so it is meaningful before #665 lands (no riders exist) and after (riders exist but are skipped).
+"RE intent" means `planning.re_intent_match(prompt)` returns non-`None` (both stages above). This line is to appear verbatim in #665 (RFC-0231) as well. At #665 @ `57106ba5` it does not yet; see §Handoff order.
+
+**Mechanism: a floor in `_apply_floors`, not an early return.** Every turn keeps `_decide_sync` unchanged: the RFC-0218 `persona_intent_precheck` (`owner_turn.py:448`) and exactly **one** `decide()` (`:453–460`), carrying the RFC-0206 every-turn arbitration and audit. S2 adds one floor inside `_apply_floors` (`owner_turn.py:296+`), right after the `task_class` block (`:347–356`) and before `covers` (`:358`): if `re_intent_match(user_message)` (memo hit) is non-`None` and there is no `literal`, then `route_kind = MANAGED_TASK`, `reply_shape = "handoff"`, `task_class = "reverse engineering"`. Because `_apply_floors` is also the deadline-fallback path (`:600`, `:623`), the floor holds there too. `persona_intent` is still attached afterwards (`:467–469`; `_with_deadline_persona` on the fallback paths). RFC-0231-S1's precheck in `_decide_sync` calls `planning.re_intent_match(user_message)` and appends no `large_prompt` / `large_prompt_split` riders when it matches. In `create_task`, the RFC-0231 large-prompt branch keys off `decision.large_prompt`, which stays `None`.
+
+Named test: `test_path_plus_re_intent_routes_to_re_before_large_prompt_split` (S2, `tests/test_rfc0232_intent_and_alias.py`). It asserts all of the following:
+- the route and class above;
+- `getattr(decision, "large_prompt", None) is None` and no `large_prompt*` rider;
+- `decision.persona_intent` is set;
+- a spy on `owner_turn.decide` sees **exactly one** call with `decision_class == "request_routing"`.
+
+The existing `test_one_decide_per_turn_carries_persona_question` (`tests/test_decision_persona_intent.py:70`) stays green unmodified, and S2 cites it.
 
 ### Pre-model / reflex dispatch (normative)
 
-In `agent/loop.py::create_task` (`loop.py:479+`; and the managed-task entry of `_run`, `:2226+`), when `ffs_or_apk_investigation(prompt)` matches **and** `task_class == "reverse engineering"`.
+In `agent/loop.py::create_task` (`loop.py:479+`; and the managed-task entry of `_run`, `:2226+`), when `re_intent_match(prompt)` matches **and** `task_class == "reverse engineering"`.
 
 **Position in `create_task`:** after RFC-0230-S3's `prewarm_worker("turn")` (started before the reflex decision; it warms the worker that will answer from the index, so it stays) and after `evaluate_request_route` (`:503–505`) returns; **before** RFC-0231's large-prompt branch (preload / spoken ack / split). A matching turn never reaches that branch, because its decision carries no `large_prompt` (§Precedence vs RFC-0231).
 
@@ -153,7 +201,13 @@ Today, for any task where `skill.requested(prompt)` is true or `working.task_cla
 - An FFS row goes `prepared` → `ingesting` (`ffs_ingest.py:622`) and becomes `completed` only at `:790` (`interrupted` at `:827`). The check tells the model to **prepare** again, which is the prepare loop D1 traced.
 - Simply accepting completion while an ingest runs would kill it: a terminal `_update` calls `investigations.release_task(task_id, …)` (`loop.py:800–802`), and `release_task` calls `ffs_ingest.cancel` and cancels the active ingest task for every row of the task (`runtime.py:488–502`).
 
-**S3 replaces `:913–924`** with one helper, `AgentRuntime._re_completion_gate(task_id, working) -> str | None | Complete` (`None` = complete with the model's content; `Complete(line)` = complete with that line as the result; a string = the internal message to append before `return False`). Only S3 touches this block.
+**S3 replaces `:913–924`** with one helper, `AgentRuntime._re_completion_gate(task_id, working) -> str | None | Complete | Failed`. The return values mean:
+- `None`: complete with the model's content.
+- `Complete(line)`: complete with that line as the result.
+- `Failed(line)`: the existing fail path, `self._fail_task(task_id, line, working, metrics)`. The line and its `chat_tts` twin are published first, because speech is skipped once the task is terminal.
+- a string: the internal message to append before `return False`.
+
+`Complete` and `Failed` are frozen one-field dataclasses in `agent/loop.py`. Only S3 touches this block.
 
 **Row states.** For each row of `store.list_rows(task_id)`, sorted by `created_at` then `id` (deterministic), the gate assigns exactly one state:
 
@@ -163,7 +217,7 @@ Today, for any task where `skill.requested(prompt)` is true or `working.task_cla
 | `RUNNING` | `kind == "ffs"` and `ffs_ingest.running(id)` (`ffs_ingest.py:496`) is true. This covers both ingest modes: `running()` reads `_RUNNING`, which `FFSIngest.run_sync` fills for foreground and background ingests alike |
 | `PREPARED` | `kind == "ffs"`, status `prepared`, not running (what S3's own `store.prepare` → `prepare_ffs` delegation creates) |
 | `INDEXED` | `kind == "ffs"`, status `completed`, no report |
-| `INTERRUPTED` | `kind == "ffs"`, status `interrupted` |
+| `INTERRUPTED` | `kind == "ffs"` and either status `interrupted`, **or** status `ingesting` with no live ingest: `ffs_ingest.running(id)` is false **and** `SERVICE.active.get(id)` is `None` or done. A backend kill or restart mid-ingest leaves such a stale row: only `ffs_ingest.py:622` writes `ingesting`, only an in-process stop rewrites it (`:827`), and nothing on `development` clears a stale one. Resume is safe: `prepare_ffs` re-admits any non-`completed` row as `prepared` (`store.py:351–353`), and the NDJSON checkpoint carries the progress |
 | `CANCELLED` | `kind == "ffs"`, status `cancelled`, no report |
 | `CLOSED` | `kind == "ffs"`, status `closed`, no report (`closed` is in `TERMINAL_STATUSES`, `store.py:22`) |
 | `OTHER` | any non-FFS row without a report (source / native / browser / APK) |
@@ -174,7 +228,7 @@ Today, for any task where `skill.requested(prompt)` is true or `working.task_cla
 - In both modes each 15 s slice calls `self._update(task_id, status="running", stage="understand", current_action="Indexing FFS …")` and publishes the `Indexing FFS` progress event (§Progress during ingest), with no model call and no step spent.
 
 **Combining several rows (deterministic):**
-1. Every `PREPARED` row is started by the gate itself, with no model step: `SERVICE.ingest(source=row["target"], question=row["question"], allowed=settings.allowed_directories, task_id=task_id, investigation_id=row["id"], background=True)`. It is then `RUNNING`. If admission raises `PermissionError` / `FileNotFoundError` / `ValueError`, the row gets the matching failure line (§Failure lines, task event + `chat_tts`) and the gate ends the task as failed with that line.
+1. Every `PREPARED` row is started by the gate itself, with no model step: `SERVICE.ingest(source=row["target"], question=row["question"], allowed=settings.allowed_directories, task_id=task_id, investigation_id=row["id"], background=True)`. It is then `RUNNING`. If admission raises `PermissionError` / `FileNotFoundError` / `ValueError`, the gate publishes the matching failure line (§Failure lines, task event + `chat_tts`) and returns `Failed(<that line>)`.
 2. If **any** row is `RUNNING` → wait (one slice), then re-evaluate from step 1. A report on another row does not end the wait, because completing would cancel the running ingest through `release_task`.
 3. Otherwise, if any row is `REPORTED` → **complete** (today's rule).
 4. Otherwise, if any row is `INTERRUPTED` → publish one `FFS ingest interrupted` line per interrupted row (task event + `chat_tts`), then the message *"Call reverse_engineer action=ingest with investigation_id=<id> to resume from the checkpoint. Do not call prepare."* (one sentence per row, in row order).
@@ -182,7 +236,7 @@ Today, for any task where `skill.requested(prompt)` is true or `working.task_cla
 6. Otherwise, if any row is `OTHER`, or there are no rows → today's message, byte-identical. Live behaviour for non-dump targets is preserved.
 7. Otherwise every remaining row is `CANCELLED` or `CLOSED` → publish the `FFS ingest cancelled` or `FFS investigation closed` line per row (task event + `chat_tts`, before the terminal update, because speech is skipped once the task is `completed`) and return `Complete(<those lines joined>)`. No loop.
 
-Precedence, in short: running > reported > interrupted > indexed > other / none > cancelled / closed. The same `max_steps` budget bounds steps 4–6; waiting in step 2 spends no steps. Owner cancel of the task still ends the wait through the existing cancel path (`release_task(..., cancelled=True)`).
+Precedence, in short: prepared-admit failure (`Failed`) > running > reported > interrupted (incl. stale `ingesting`) > indexed > other / none > cancelled / closed. The same `max_steps` budget bounds steps 4–6; waiting in step 2 spends no steps. Owner cancel of the task still ends the wait through the existing cancel path (`release_task(..., cancelled=True)`).
 
 ### Alias and REA coexistence (normative; D2 refinement of fix b)
 
@@ -285,10 +339,14 @@ Shared files and who goes first. Later slices merge `development` in (a merge co
 | --- | --- |
 | `backend/app/reverse_engineering/store.py` | **#660** (allow-list-first `prepare_ffs`, landed `90a0010`) → **#661** (`4b81ac11`, D1's stacked allow-list gate for `store.prepare` / `prepare_apk`) → **this RFC S3** (dump-shaped classifier inside `prepare` that delegates to `prepare_ffs`) → S5 |
 | `backend/app/reverse_engineering/{runtime,skill,ffs_ingest}.py` | **#657** (tab container, landed `d85c9d4c`) → **this RFC S3 / S4** (skill text, `ffs_summary` / `ffs_read`, `ffs_query` default limit) → **S5** (`runtime.py` `apk_prepare` wrapper) |
-| `backend/app/decision/owner_turn.py` | #649 (landed `ee786dc1`) → **RFC-0230-S5** (#666; reflex executor) → **this RFC S2** (RE early return in `_decide_sync` + action floor) → **RFC-0231-S1** (#665; large-prompt precheck + riders, placed after S2's early return) |
-| `backend/app/agent/loop.py` | #649 (landed `ee786dc1`) → **RFC-0230-S0 → S2 → S3** (#666; latency marks, first-sentence wiring, `prewarm_worker` in `create_task`) → **this RFC S3** (FFS pre-model dispatch in `create_task` + RE completion check `:913–924`) → **S4** (24k per-turn budget hunk) → **S5** (APK branch of the dispatch) → **RFC-0231** (#665; `create_task` large-prompt branch and `pipeline_section`) |
+| `backend/app/decision/owner_turn.py` | #649 (landed `ee786dc1`) → **RFC-0218-S3b** (`basic_qa` stay guard; not landed: `tests/test_rfc0218_s3b_lock_and_tasks_switch.py` is absent on `development` @ `a44da353`) → **RFC-0230-S5** (#666; reflex executor) → **this RFC S2** (RE floor in `_apply_floors` after the `task_class` block + action floor) → **RFC-0231-S1** (#665; large-prompt precheck + riders, which call `planning.re_intent_match` and skip when it matches) |
+| `backend/app/agent/loop.py` | #649 (landed `ee786dc1`) → **RFC-0218-S3b** (`create_task` / `_run` persona switch; not landed) → **RFC-0230-S0 → S2 → S3** (#666; latency marks, first-sentence wiring, `prewarm_worker` in `create_task`) → **this RFC S3** (FFS pre-model dispatch in `create_task` + RE completion check `:913–924`) → **S4** (24k per-turn budget hunk) → **S5** (APK branch of the dispatch) → **RFC-0231-S4 → S5** (#665; `create_task` large-prompt branch and `pipeline_section`) |
 
-Order on `loop.py` / `owner_turn.py` follows the CoS ruling (2026-10-20): RFC-0230 first, then RFC-0232, then RFC-0231. 0232 goes before 0231 because the RE bug is one of Taco's top asks. #666 @ `99aef631` still lists RFC-0231 ahead of RFC-0232 on both files (its L239, L241) and names only 0232-S2 on `loop.py`; its next-owner rows need the same order as this table.
+Order on `loop.py` / `owner_turn.py` follows the CoS ruling (2026-10-20): 0218-S3b (already queued after #649), then RFC-0230, then RFC-0232, then RFC-0231. 0232 goes before 0231 because the RE bug is one of Taco's top asks. Cross-spec alignment still open on the current heads:
+- **#665 @ `57106ba5`:** its `loop.py` row omits 0232-S5. Its `owner_turn.py` row omits 0218-S3b. It does not yet carry the precedence line or the two CoS negatives (`C:\code\etl …`, `C:\Users\taco\proj ffs …`).
+- **#666 @ `99aef631`:** it still lists RFC-0231 ahead of RFC-0232 on both files (its L239, L241) and names only 0232-S2 on `loop.py`.
+
+Both must match this table before #664 lands.
 | `backend/app/agent/planning.py`, `agent/tool_exposure.py`, `agent/tool_retrieval.py` | **this RFC S2** (sole owner for the new helper + alias fix) |
 | `backend/app/tools/filesystem.py` | **this RFC S4** (list/search/read caps + early-stop search) |
 | `backend/app/tools/reverse_engineer.py` | **this RFC S3** then S5 (`apk_prepare` action) |
@@ -303,36 +361,39 @@ On a conflict, merge `development` into the slice branch (merge commit). No reba
 **Model:** Composer 2.5 · **fast off**  
 **Owns:** `tests/test_rfc0232_ffs_path_routing.py` (new), `docs/rfcs/0232-ffs-path-routes-to-re-tool.md`, `docs/rfcs/README.md` (this RFC's row only), `/workspace/rfc/RFC-0232.md` mirror.
 
-**Tests (concrete; all `pytest.mark.xfail(strict=True)` until the named fix slice removes the marker):**
+**Tests (concrete; all `pytest.mark.xfail(strict=True)` until the named fix slice removes the marker).** Path-form and wording cases whose paths cannot exist on the CI runner stand the S2 probe in by name (`planning.probe_dump_target` → verdict `dump`, `raising=False`). Explicit cases replace it with a function that raises, proving no probe runs. On-disk cases use `jarvis_env`'s `tmp_path`, which is the allowed folder, and the real probe.
 
-| Test | Marker removed by |
+| Test | Stage | Marker removed by |
+| --- | --- | --- |
+| `test_path_plus_question_routes_to_reverse_engineering[…]`: the six Taco forms (Windows `D:\cases\x\ffs …`, "Android FFS root … full extraction …", UNC `\\NAS\…`, `//nas/…`, POSIX `/mnt/…`, `Analyze D:\cases\x\app.apk …`) | weak (component) / explicit (`.apk`) | S2 |
+| `test_dump_wordings_route_to_reverse_engineering[ffs]`, `[extraction]`, `[dump]` | weak (component) | S2 |
+| `test_dump_wordings_route_to_reverse_engineering[full-file-system-dump]` | explicit | S2 |
+| `test_dump_wordings_route_to_reverse_engineering[android-file-system]`, `[file-system-abs-path]` (Taco's wording, D2 2026-10-20) | weak (wording / bare file system) | S2 |
+| `test_explicit_wording_routes_without_probe[full-ffs]`: `D:\cases\x\p1 is a full FFS of my Pixel, which apps?` (D2 round 3) | explicit, probe forbidden | S2 |
+| `test_explicit_wording_routes_without_probe[full-file-system-extraction]`, `[extraction-of-my-phone]` | explicit, probe forbidden | S2 |
+| `test_on_disk_dump_routes_after_probe[android-full]` (`data/data` + `system/build.prop`) | weak → probe `dump` | S2 |
+| `test_on_disk_dump_routes_after_probe[data-only]` (partial dump, `data/data` only) | weak → probe `dump` | S2 |
+| `test_on_disk_dump_routes_after_probe[sdcard-only]` (partial dump, `sdcard/Android` only) | weak → probe `dump` | S2 |
+| `test_on_disk_dump_routes_after_probe[ffs-tar]`, `[ffs-zip]` (`p1_ffs.tar` / `p1_ffs.zip` archives) | weak (component) → probe `ext:` | S2 |
+| `test_ffs_path_plus_question_calls_ingest_without_overflow` | weak → probe `dump` → dispatch | S3 (+ S4 caps) |
+
+That is 21 xfail cases.
+
+**Live tests (not xfail; they pass on `development` today, and every slice must keep them green, S2 most of all because it adds the detector):**
+
+| Test | Guards |
 | --- | --- |
-| `test_path_plus_question_routes_to_reverse_engineering[D:\\cases\\x\\ffs what apps are installed and when was WhatsApp last used?]` | S2 |
-| `test_path_plus_question_routes_to_reverse_engineering[Here is the Android FFS root D:\\cases\\x\\ffs and the full extraction D:\\cases\\x\\extraction.zip. Which accounts are on the phone?]` | S2 |
-| `test_path_plus_question_routes_to_reverse_engineering[\\\\NAS\\cases\\x\\ffs - which messaging apps have databases?]` | S2 |
-| `test_path_plus_question_routes_to_reverse_engineering[//nas/cases/x/ffs which messaging apps have databases?]` | S2 |
-| `test_path_plus_question_routes_to_reverse_engineering[/mnt/cases/x/ffs which apps are installed?]` | S2 |
-| `test_path_plus_question_routes_to_reverse_engineering[Analyze D:\\cases\\x\\app.apk: what servers does it talk to?]` | S2 |
-| `test_dump_wordings_route_to_reverse_engineering[ffs]` | S2 |
-| `test_dump_wordings_route_to_reverse_engineering[extraction]` | S2 |
-| `test_dump_wordings_route_to_reverse_engineering[dump]` | S2 |
-| `test_dump_wordings_route_to_reverse_engineering[full-file-system-dump]` | S2 |
-| `test_dump_wordings_route_to_reverse_engineering[android-file-system]` — `D:\cases\x\phone this is the root of an Android file system - which accounts are on the phone?` (D2 2026-10-20) | S2 |
-| `test_dump_wordings_route_to_reverse_engineering[file-system-abs-path]` — `Here is the file system at D:\cases\x\phone. What apps are installed?` (D2 2026-10-20) | S2 |
-| `test_ffs_path_plus_question_calls_ingest_without_overflow` | S3 (+ S4 caps) |
+| `test_path_with_plain_or_coding_question_does_not_route_to_re[etl-extraction-step]` (`C:\code\etl what does the extraction step do?`) and `[ffs-interjection]` (`C:\Users\taco\proj ffs why does the build fail?`) | CoS negatives |
+| `test_path_with_plain_or_coding_question_does_not_route_to_re[android-filesystem-api]`, `[phone-image]`, `[device-image]`, `[device-dump-handler]`, `[file-system-dump-command]`, `[aosp-system-framework]`, `[launcher-data-app]` | D2 round-3 negatives |
+| `test_reverse_engineer_wording_still_routes` (`reverse engineer D:\cases\x\ffs`) | today's only working wording stays explicit |
+| `test_aosp_source_tree_routes_normally`: fake AOSP tree (`.repo/manifests`, `build/make`, `Android.bp`, plus `data/data` and `system/build.prop`) with weak wording | source veto beats dump markers |
+| `test_outside_path_with_markers_is_never_probed`: a fake dump outside the allowed folder; spies on `os.stat` / `Path.exists` record **no** call under that path, and the route is not RE | allow-list first (#660 / #661); no existence oracle |
 
-**Live negatives (not xfail; they pass on `development` today and every slice must keep them green, S2 most of all because it adds the detector):**
-
-| Test | Guarded by |
-| --- | --- |
-| `test_path_with_plain_or_coding_question_does_not_route_to_re[etl-extraction-step]` — `C:\code\etl what does the extraction step do?` | S2 (narrowed rule 2) |
-| `test_path_with_plain_or_coding_question_does_not_route_to_re[ffs-interjection]` — `C:\Users\taco\proj ffs why does the build fail?` | S2 (narrowed rule 2) |
-
-Neither new wording's path ends in `ffs` / `dump` / `extraction`, so only the new rule-2 alternatives can route them.
+That is 12 live tests.
 
 **CI step:** existing `.github/workflows/pr-tests.yml:94–95` → "Run full backend suite" (`python -m pytest -q -rs`), which collects `tests/test_rfc0232_ffs_path_routing.py`. No workflow edit in S1. Architect owns `pr-tests.yml`.
 
-**Acceptance:** all thirteen xfail cases above (six Taco forms, six dump wordings, one overflow) xfail strictly on `development`; the two live negatives pass; CI green.
+**Acceptance:** all 21 xfail cases above xfail strictly on `development`; the 12 live tests pass; CI green.
 
 **README row:** #652 (open) rewrites the last README paragraph and appends the 2026-10-17 batch paragraph with "Next free after **0229** is **0230**". So that a later merge resolves without a conflict, S1 leaves that paragraph untouched and adds one separate paragraph before the "Memory recall follow-up" paragraph (so an unchanged paragraph sits between the two hunks; `git merge-tree` against #652's head is clean) in #652's batch format (bold date label, linked number, status, PR number), which says 0230/0231 are parallel and 0233 is reserved. Once #652 lands, the Architect merges `development` into this branch (merge commit) or, if this PR landed first, makes a docs commit that moves that sentence into #652's single next-free line ("Next free after **0233** is **0234**" once 0230/0231/0233 exist) and drops the separate paragraph, so the README keeps one next-free line.
 
@@ -341,24 +402,30 @@ Neither new wording's path ends in `ffs` / `dump` / `extraction`, so only the ne
 ### S2 — Deterministic intent + alias + REA roots visibility
 
 **Model:** Grok 4.6 · **fast off**  
-**Owns:** `backend/app/agent/planning.py` (`ffs_or_apk_investigation`, wire into `route_request` / `classify_task` / `requests_agent_tools` / `is_explicit_action` via a thin re-export or direct call from `owner_turn.py`), `backend/app/decision/owner_turn.py` (RE early return at the top of `_decide_sync` for §Precedence vs RFC-0231, plus the action floor; after RFC-0230-S5, before RFC-0231-S1), `backend/app/agent/tool_exposure.py` (alias → `reverse_engineer`; conditional `rea_investigate`), `backend/app/agent/tool_retrieval.py` (drop `rea_investigate` terms), `backend/app/tools/rea_investigate.py` (surface `roots_empty` through the owner channel when hit), `tests/test_rfc0232_ffs_path_routing.py` (remove the xfail markers from `test_path_plus_question_routes_to_reverse_engineering` and `test_dump_wordings_route_to_reverse_engineering`, all twelve cases), `tests/test_rfc0232_intent_and_alias.py` (new).
+**Owns:** `backend/app/agent/planning.py` (`ReIntent`, `re_intent_match`, `probe_dump_target` + its `re-probe` executor and memo; wire into `route_request` / `classify_task` / `requests_agent_tools` / `is_explicit_action` via a thin re-export or direct call from `owner_turn.py`), `backend/app/decision/owner_turn.py` (RE floor in `_apply_floors` after the `task_class` block per §Precedence vs RFC-0231, plus the action floor; `_decide_sync` untouched; after RFC-0218-S3b and RFC-0230-S5, before RFC-0231-S1), `backend/app/agent/tool_exposure.py` (alias → `reverse_engineer`; conditional `rea_investigate`), `backend/app/agent/tool_retrieval.py` (drop `rea_investigate` terms), `backend/app/tools/rea_investigate.py` (surface `roots_empty` through the owner channel when hit), `tests/test_rfc0232_ffs_path_routing.py` (remove the xfail markers from `test_path_plus_question_routes_to_reverse_engineering`, `test_dump_wordings_route_to_reverse_engineering`, `test_explicit_wording_routes_without_probe` and `test_on_disk_dump_routes_after_probe`, all 20 cases; the 12 live tests stay unmodified and green), `tests/test_rfc0232_intent_and_alias.py` (new).
 
 **Named tests:**
 
-- `test_dump_wordings_route_across_path_forms` — parametrize the six dump wordings of S1's `DUMP_WORDING_PROMPTS`: (1) path + `ffs`, (2) path + `extraction`, (3) path + `dump`, (4) path + `file-system dump` / `full file system`, (5) path + `Android file system` (`android-file-system`), (6) bare `file system` followed by an absolute path (`file-system-abs-path`); each with a question; Windows, UNC, POSIX.
-- `test_bare_filesystem_word_does_not_route` — `D:\src\app what is the filesystem layout?` (one word, no dump wording) and `file system questions in general?` (no path) keep today's route; neither returns `reverse engineering`.
-- `test_narrowed_rule_does_not_route_plain_paths` — parametrized negatives for the narrowed rule 2: `C:\code\etl what does the extraction step do?`, `C:\Users\taco\proj ffs why does the build fail?`, `C:\code\data\x what is in data?` (no layout match), `C:\code\app what does the dump() function do?`; each keeps today's route, `ffs_or_apk_investigation` returns `None`, and `reverse_engineer` is not forced into `tool_names_for`.
-- `test_extraction_layout_paths_route` — `D:\cases\x\phone\data\data which apps are installed?` and `/mnt/x/storage/emulated/0 what photos are there?` route to RE via the layout list.
-- `test_path_plus_re_intent_routes_to_re_before_large_prompt_split` — a 40 KB prompt (`D:\cases\x\ffs which accounts are on the phone?` plus a pasted 40 KB listing) → `decide_owner_turn` returns `managed_task` / `reverse engineering`, `getattr(decision, "large_prompt", None) is None`, and no rider named `large_prompt` or `large_prompt_split` is in the decision; the same 40 KB prompt with `C:\code\etl what does the extraction step do?` in place of the path line is not routed to RE.
+- `test_dump_wordings_route_across_path_forms`: S1's six dump wordings × Windows / UNC / POSIX, probe stood in as `dump`; each routes.
+- `test_bare_filesystem_word_does_not_route`: `D:\src\app what is the filesystem layout?` (one word) and `file system questions in general?` (no path) keep today's route.
+- `test_narrowed_rule_does_not_route_plain_paths`: stage (a) returns no match for `C:\code\etl what does the extraction step do?`, `C:\Users\taco\proj ffs why does the build fail?`, `C:\code\data\x what is in data?`, `C:\code\app what does the dump() function do?` and D2's round-3 set (`D:\src\app how does the Android filesystem API work here?`, `C:\code\shop which phone image is shown on the product page?`, `C:\code\cam what does the device image upload do?`, `C:\code\kernel where is the device dump handler?`, `C:\code\aosp\system\framework what does this module do?`, `C:\code\launcher\data\app which class handles install?`). `C:\code\fs what does the file system dump command in /usr/bin do?` is a weak match whose probe returns `absent` / `source`, so it routes normally. `re_intent_match` is `None` for all of them, and `reverse_engineer` is not forced.
+- `test_probe_is_allow_list_first` (CoS amendment B): with `store.admit_allowed_target` (or #660's pair) spied, it runs before the first `os.stat`. For an outside target it raises, and the stat spy records zero calls.
+- `test_probe_markers_any_one_is_enough`: tmp trees with only `data/data`, only `system/build.prop`, only `storage/emulated/0`, only `sdcard/Android`, only `private/var/mobile`, and only `System/Library/CoreServices/SystemVersion.plist` each give verdict `dump` with the matching `evidence`.
+- `test_probe_container_extensions`: tmp files `x.img`, `x.bin`, `x.dd`, `x.E01`, `x.ufd`, `x.tar`, `x.tar.gz`, `x.zip`, `x.raw` give `dump`; `x.txt` gives `absent`.
+- `test_probe_source_tree_veto`: a tmp tree with `data/data` plus any one of `.git`, `.repo`, `Android.bp`, `build/make` gives `source`.
+- `test_probe_budget_stat_only_and_timeout`: a stat spy counts ≤ 24 calls and sees no `listdir` / `open`. A stat patched to block makes `re_intent_match` return within 15 ms with verdict `timeout`, and the weak match routes normally. A second call while the first still blocks also returns `timeout` without queueing.
+- `test_probe_runs_once_per_turn`: `route_request` + `decide_owner_turn` + `classify_task` on one utterance run the probe once (memo).
+- `test_extraction_layout_paths_route`: `D:\cases\x\phone\data\data which apps are installed?` and `/mnt/x/storage/emulated/0 what photos are there?` are weak (layout) matches; with the probe stood in as `dump`, they route.
+- `test_path_plus_re_intent_routes_to_re_before_large_prompt_split`: a 40 KB prompt (`D:\cases\x\p1 is a full FFS of my Pixel, which accounts are on it?` plus a pasted 40 KB listing) gives `decide_owner_turn` → `managed_task` / `reverse engineering`, `getattr(decision, "large_prompt", None) is None`, no `large_prompt*` rider, `decision.persona_intent` set, and a spy on `owner_turn.decide` that sees exactly one call. The same 40 KB prompt with `C:\code\etl what does the extraction step do?` is not routed to RE. `test_one_decide_per_turn_carries_persona_question` (`tests/test_decision_persona_intent.py:70`) stays green unmodified.
 - `test_direct_reply_cannot_bypass_ffs_path` — baseline would be `direct_reply`; after the floor, route is `managed_task` / `reverse engineering` and `reverse_engineer` is exposed.
 - `test_alias_maps_to_native_reverse_engineer` — `normalize_capabilities(["reverse_engineer","reverse-engineer","rea"])` → `["reverse_engineer"]`.
 - `test_rea_investigate_only_when_roots_configured` — empty roots → not in `tool_names_for`; configured intersecting roots → present alongside `reverse_engineer`.
 - `test_roots_empty_reaches_task_stream` — call `rea_investigate` with empty roots under a live task → one task event whose detail contains `Settings → Integrations → Reverse Engineering` **and** one `chat_tts` event; **zero** calls to `publish_owner_text`.
 - `test_roots_empty_without_task_uses_engine_owner_line` — monkeypatch `engine_coexistence.owner_line`; assert it is called once with `level="error"` and `title="Reverse engineering"` (RFC-0225, #652 @ `60573c62`). Lands once RFC-0225 S3 adds `owner_line` (see §Owner-visible channel, Dependency).
 
-**CI step:** `.github/workflows/pr-tests.yml:94–95` "Run full backend suite" collects `tests/test_rfc0232_ffs_path_routing.py` (including the two live negatives) and `tests/test_rfc0232_intent_and_alias.py`; the slice is green only when every named test above passes there.
+**CI step:** `.github/workflows/pr-tests.yml:94–95` "Run full backend suite" collects `tests/test_rfc0232_ffs_path_routing.py` (including the 12 live tests), `tests/test_rfc0232_intent_and_alias.py` and `tests/test_decision_persona_intent.py`; the slice is green only when every named test above passes there.
 
-**Acceptance:** the twelve S1 route / wording xfails (including `[android-file-system]` and `[file-system-abs-path]`) are gone and pass; new tests pass; no soft-fail on empty roots.
+**Acceptance:** the 20 S1 routing xfails (path forms, dump wordings, explicit wording, on-disk dumps) are gone and pass; the 12 live tests and `test_one_decide_per_turn_carries_persona_question` stay green; every probe is allow-list first, stat-only, ≤ 24 stats and ≤ 10 ms; no soft-fail on empty roots.
 
 ---
 
@@ -381,6 +448,8 @@ Neither new wording's path ends in `ffs` / `dump` / `extraction`, so only the ne
 - `test_completion_starts_ingest_for_prepared_row` (D2 round 2 a) — a `prepared` FFS row with no ingest running → the gate calls `SERVICE.ingest(..., investigation_id=<id>, background=True)` once with no provider call in between, then waits; the row reaches `completed`; no message contains `prepare`.
 - `test_completion_closed_row_completes_with_line` (D2 round 2 b) — an owner-`closed` FFS row with no report → the task completes with the `FFS investigation closed` detail as its result, the `chat_tts` twin is published before the `completed` update, and there is no loop.
 - `test_completion_waits_on_foreground_ingest_without_keyerror` (D2 round 2 c) — a foreground ingest (`SERVICE.ingest(..., background=False)` started from a separate coroutine, so `SERVICE.active.get(id)` is `None` while `ffs_ingest.running(id)` is true) → the gate polls without `KeyError`, does not cancel the foreground ingest, and resolves from the persisted row once it finishes (`asyncio.sleep` patched to make the slices instant).
+- `test_completion_resumes_stale_ingesting_row_after_restart` (D2 round 3 1a): a row persisted as `ingesting` with `ffs_ingest.running(id)` false and no `SERVICE.active` entry (simulated restart) is classed `INTERRUPTED`. One `FFS ingest interrupted` task event + `chat_tts` is published, and the message names `action=ingest` with the id, never `prepare`. After the scripted resume the row reaches `completed`.
+- `test_completion_prepared_row_admit_failure_fails_task` (D2 round 3 1b): a `prepared` row whose target was removed, or moved outside `allowed_directories`, makes the gate's `SERVICE.ingest` raise. The task ends `failed` through `_fail_task` with the exact `FFS path not found` / `FFS path not allowed` line, and the `chat_tts` twin is published before the terminal update.
 - `test_completion_combines_rows_deterministically` (D2 round 2 d) — one task with rows {running FFS, reported source} → waits; then {interrupted FFS, indexed FFS} → the resume message only; then {indexed FFS, other source} → the index message; then {cancelled FFS, closed FFS} → completes with both lines in row order. Each combination gives the same result on repeated runs.
 
 **CI step:** `.github/workflows/pr-tests.yml:94–95` "Run full backend suite" collects `tests/test_rfc0232_ffs_path_routing.py` and `tests/test_rfc0232_ingest_dispatch.py` (which holds `test_completion_accepts_ffs_ingest_without_prepare_loop` and the other completion tests); the slice is green only when every named test above passes there.
@@ -467,7 +536,7 @@ Neither new wording's path ends in `ffs` / `dump` / `extraction`, so only the ne
 5. Empty REA roots produce the actionable Settings sentence on the task stream or via `engine_coexistence.owner_line` + the owner-line surfaces (#652 @ `60573c62`).
 6. #660 (`prepare_ffs`) and #661 (`store.prepare` / `prepare_apk`) allow-list behaviour is preserved (constant outside-allow message; no existence leak).
 7. An FFS task is never sent back to `prepare` by the completion check, and never completes while its ingest runs (`test_completion_accepts_ffs_ingest_without_prepare_loop`, `test_completion_waits_on_foreground_ingest_without_keyerror`).
-8. A path with a plain or coding question does not route to RE (`test_path_with_plain_or_coding_question_does_not_route_to_re`), and a path with RE intent is never split by RFC-0231 (`test_path_plus_re_intent_routes_to_re_before_large_prompt_split`).
+8. A path with a plain or coding question does not route to RE (`test_path_with_plain_or_coding_question_does_not_route_to_re`, `test_aosp_source_tree_routes_normally`). A path with RE intent is never split by RFC-0231 and still gets its persona check and one `decide()` (`test_path_plus_re_intent_routes_to_re_before_large_prompt_split`). The probe never stats an outside path (`test_outside_path_with_markers_is_never_probed`).
 9. No stubs, soft-fails, or orphaned events.
 
 ---

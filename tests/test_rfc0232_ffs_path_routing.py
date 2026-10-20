@@ -1,14 +1,22 @@
-"""RFC-0232 S1 repro: a local FFS/APK path plus a question must reach the RE tool
-deterministically, and large inputs must never enter the model context.
+"""RFC-0232 S1 repro: a local FFS/APK path plus RE intent must reach the RE tool
+deterministically, a path with a plain or coding question must route normally, and large
+inputs must never enter the model context.
+
+Detection is two-stage (RFC-0232 §Deterministic path + RE-intent router):
+  (a) a cheap wording-plus-path prefilter: EXPLICIT owner wording routes with no probe;
+      a WEAK match must pass
+  (b) the on-disk probe ``planning.probe_dump_target`` (allow-list first, stat only, bounded).
 
 Written xfail(strict=True) first (S1). Fix slices remove each marker:
-  S2 — route + dump-wording tests (all twelve cases)
-  S3 — ingest dispatch + overflow test
-The plain-path negatives are live from S1 and must stay green in every slice.
+  S2: path-form, dump-wording, explicit-wording and on-disk probe tests
+  S3: ingest dispatch + overflow test
+The live tests (no marker) pass on development today and must stay green in every slice.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -22,7 +30,9 @@ from tests.test_verification_loop import ScriptedProvider, _finished, _tool
 # Hard per-call context budget the fix enforces (RFC-0232 §Context budget).
 CONTEXT_BUDGET_CHARS = 24_000
 
-# Taco's Windows / UNC / POSIX forms (S1 table).
+# Taco's Windows / UNC / POSIX forms (S1 table). Every one is a WEAK prefilter match, so these
+# tests stand the probe in with a "dump" verdict: they pin path parsing and route wiring for path
+# forms that cannot exist on the CI runner. The real probe is exercised on disk below.
 TACO_PROMPTS = [
     r"D:\cases\x\ffs what apps are installed and when was WhatsApp last used?",
     r"Here is the Android FFS root D:\cases\x\ffs and the full extraction D:\cases\x\extraction.zip. Which accounts are on the phone?",
@@ -32,15 +42,13 @@ TACO_PROMPTS = [
     r"Analyze D:\cases\x\app.apk: what servers does it talk to?",
 ]
 
-# D2: dump wordings that must all route (S1 table ids). The last two are Taco's own phrasing
-# (D2 2026-10-20); neither path ends in ffs/dump/extraction, so only the new rule-2 wording
-# alternatives (`android file system`, bare `file system` + absolute path) can route them.
+# D2: dump wordings that must all route (S1 table ids); WEAK matches, probe stood in as "dump".
 DUMP_WORDING_PROMPTS = [
     pytest.param(r"D:\cases\x\ffs what apps are installed?", id="ffs"),
     pytest.param(r"D:\cases\x\extraction which accounts are on the phone?", id="extraction"),
     pytest.param(r"D:\cases\x\dump what databases are present?", id="dump"),
     pytest.param(
-        r"D:\cases\x\phone full file system dump — which messaging apps have databases?",
+        r"D:\cases\x\phone full file system dump - which messaging apps have databases?",
         id="full-file-system-dump",
     ),
     pytest.param(
@@ -53,13 +61,51 @@ DUMP_WORDING_PROMPTS = [
     ),
 ]
 
+# EXPLICIT owner wording routes with no marker and no probe (CoS amendment A).
+EXPLICIT_PROMPTS = [
+    pytest.param(r"D:\cases\x\p1 is a full FFS of my Pixel, which apps?", id="full-ffs"),
+    pytest.param(r"D:\cases\x\p1 is a full file system extraction, which accounts are on it?", id="full-file-system-extraction"),
+    pytest.param(r"D:\cases\x\p1 is the extraction of my phone. Which messaging apps are there?", id="extraction-of-my-phone"),
+]
 
-# Live negatives (not xfail): a path with a plain or coding question must keep routing normally.
-# They pass on development today; S2's narrowed detector must keep them green (RFC-0232 rule 2).
+# Live negatives: a path with a plain or coding question routes normally (CoS + D2 rounds 2-3).
 PLAIN_PATH_PROMPTS = [
     pytest.param(r"C:\code\etl what does the extraction step do?", id="etl-extraction-step"),
     pytest.param(r"C:\Users\taco\proj ffs why does the build fail?", id="ffs-interjection"),
+    pytest.param(r"D:\src\app how does the Android filesystem API work here?", id="android-filesystem-api"),
+    pytest.param(r"C:\code\shop which phone image is shown on the product page?", id="phone-image"),
+    pytest.param(r"C:\code\cam what does the device image upload do?", id="device-image"),
+    pytest.param(r"C:\code\kernel where is the device dump handler?", id="device-dump-handler"),
+    pytest.param(r"C:\code\fs what does the file system dump command in /usr/bin do?", id="file-system-dump-command"),
+    pytest.param(r"C:\code\aosp\system\framework what does this module do?", id="aosp-system-framework"),
+    pytest.param(r"C:\code\launcher\data\app which class handles install?", id="launcher-data-app"),
 ]
+
+
+def _dump_verdict(monkeypatch):
+    """Stand in for the S2 probe (it does not exist yet; raising=False)."""
+    monkeypatch.setattr(
+        "app.agent.planning.probe_dump_target",
+        lambda target, allowed=None: SimpleNamespace(verdict="dump", evidence="test stand-in"),
+        raising=False,
+    )
+
+
+def _no_probe(monkeypatch):
+    def forbidden(*_a, **_k):
+        raise AssertionError("explicit wording must route without the on-disk probe")
+
+    monkeypatch.setattr("app.agent.planning.probe_dump_target", forbidden, raising=False)
+
+
+def _routes_to_re(prompt: str) -> None:
+    route = route_request(prompt)
+    assert route.kind == "managed_task"
+    assert route.task_class == "reverse engineering"
+    assert "reverse_engineer" in tool_names_for(route.task_class, prompt=prompt)
+
+
+# ----- on-disk fixtures (tmp_path; jarvis_env allows tmp_path) --------------------------
 
 def _fake_android_ffs(root: Path, files: int = 3000) -> Path:
     ffs = root / "ffs"
@@ -76,33 +122,128 @@ def _fake_android_ffs(root: Path, files: int = 3000) -> Path:
     return ffs
 
 
+def _dump_android_full(root: Path) -> Path:
+    return _fake_android_ffs(root, files=3)
+
+
+def _dump_data_only(root: Path) -> Path:
+    d = root / "pixel_partial"
+    (d / "data" / "data" / "com.whatsapp" / "databases").mkdir(parents=True)
+    return d
+
+
+def _dump_sdcard_only(root: Path) -> Path:
+    d = root / "pixel_sdcard"
+    (d / "sdcard" / "Android" / "data").mkdir(parents=True)
+    (d / "sdcard" / "DCIM").mkdir(parents=True)
+    return d
+
+
+def _dump_tar(root: Path) -> Path:
+    f = root / "p1_ffs.tar"
+    f.write_bytes(b"\x00" * 1024)
+    return f
+
+
+def _dump_zip(root: Path) -> Path:
+    f = root / "p1_ffs.zip"
+    f.write_bytes(b"PK\x05\x06" + b"\x00" * 18)
+    return f
+
+
+ON_DISK_DUMPS = [
+    pytest.param(_dump_android_full, "{p} this is the root of an Android file system - which apps are installed?", id="android-full"),
+    pytest.param(_dump_data_only, "{p} this is the root of an Android file system - which apps are installed?", id="data-only"),
+    pytest.param(_dump_sdcard_only, "{p} this is an Android file system pull - what photos are on it?", id="sdcard-only"),
+    pytest.param(_dump_tar, "{p} which apps are installed?", id="ffs-tar"),
+    pytest.param(_dump_zip, "{p} which apps are installed?", id="ffs-zip"),
+]
+
+
+def _fake_aosp_tree(root: Path) -> Path:
+    aosp = root / "aosp"
+    for rel in (".repo/manifests", "build/make", "system/core", "data/data"):
+        (aosp / rel).mkdir(parents=True)
+    (aosp / "Android.bp").write_text("// soong\n", encoding="utf-8")
+    (aosp / "system" / "build.prop").write_text("ro.build.version.release=14\n", encoding="utf-8")
+    return aosp
+
+
 def _call_chars(call: dict) -> int:
     return sum(len(getattr(m, "content", "") or "") for m in call["messages"])
 
 
+# ----- xfail (flipped by S2) ------------------------------------------------------------
+
 @pytest.mark.xfail(strict=True, reason="RFC-0232 S1 repro: path+question is not routed to the RE tool (fixed in S2)")
 @pytest.mark.parametrize("prompt", TACO_PROMPTS)
-def test_path_plus_question_routes_to_reverse_engineering(prompt):
-    route = route_request(prompt)
-    assert route.kind == "managed_task"
-    assert route.task_class == "reverse engineering"
-    assert "reverse_engineer" in tool_names_for(route.task_class, prompt=prompt)
+def test_path_plus_question_routes_to_reverse_engineering(prompt, monkeypatch):
+    _dump_verdict(monkeypatch)
+    _routes_to_re(prompt)
 
 
 @pytest.mark.xfail(strict=True, reason="RFC-0232 S1 repro: dump wordings do not route (fixed in S2)")
 @pytest.mark.parametrize("prompt", DUMP_WORDING_PROMPTS)
-def test_dump_wordings_route_to_reverse_engineering(prompt):
-    route = route_request(prompt)
-    assert route.kind == "managed_task"
-    assert route.task_class == "reverse engineering"
-    assert "reverse_engineer" in tool_names_for(route.task_class, prompt=prompt)
+def test_dump_wordings_route_to_reverse_engineering(prompt, monkeypatch):
+    _dump_verdict(monkeypatch)
+    _routes_to_re(prompt)
 
+
+@pytest.mark.xfail(strict=True, reason="RFC-0232 S1 repro: explicit dump wording does not route (fixed in S2)")
+@pytest.mark.parametrize("prompt", EXPLICIT_PROMPTS)
+def test_explicit_wording_routes_without_probe(prompt, monkeypatch):
+    _no_probe(monkeypatch)
+    _routes_to_re(prompt)
+
+
+@pytest.mark.xfail(strict=True, reason="RFC-0232 S1 repro: on-disk dumps are not detected (fixed in S2)")
+@pytest.mark.parametrize(("make", "template"), ON_DISK_DUMPS)
+def test_on_disk_dump_routes_after_probe(make, template, jarvis_env):
+    target = make(jarvis_env["tmp"])
+    _routes_to_re(template.format(p=target))
+
+
+# ----- live (pass today; every slice keeps them green) ----------------------------------
 
 @pytest.mark.parametrize("prompt", PLAIN_PATH_PROMPTS)
 def test_path_with_plain_or_coding_question_does_not_route_to_re(prompt):
     route = route_request(prompt)
     assert route.task_class != "reverse engineering", route
 
+
+def test_reverse_engineer_wording_still_routes():
+    _routes_to_re(r"reverse engineer D:\cases\x\ffs")
+
+
+def test_aosp_source_tree_routes_normally(jarvis_env):
+    aosp = _fake_aosp_tree(jarvis_env["tmp"])
+    route = route_request(f"{aosp} this is the root of an Android file system - what does init do?")
+    assert route.task_class != "reverse engineering", route
+
+
+def test_outside_path_with_markers_is_never_probed(jarvis_env, tmp_path_factory, monkeypatch):
+    outside = _dump_android_full(tmp_path_factory.mktemp("outside_allowed"))
+    probed: list[str] = []
+    real_stat, real_exists = os.stat, Path.exists
+
+    def spy_stat(path, *a, **k):
+        if str(outside) in os.fspath(path):
+            probed.append(os.fspath(path))
+        return real_stat(path, *a, **k)
+
+    def spy_exists(self, *a, **k):
+        if str(outside) in str(self):
+            probed.append(str(self))
+        return real_exists(self, *a, **k)
+
+    monkeypatch.setattr(os, "stat", spy_stat)
+    monkeypatch.setattr(Path, "exists", spy_exists)
+    route = route_request(f"{outside} this is the root of an Android file system - which apps are installed?")
+    assert probed == [], probed  # allow-list first: no existence oracle (#660 / #661)
+    assert route.task_class != "reverse engineering", route
+
+
+# ----- xfail (flipped by S3) ------------------------------------------------------------
 
 @pytest.mark.xfail(strict=True, reason="RFC-0232 S1 repro: FFS root goes to the model, not ingest (fixed in S3)")
 async def test_ffs_path_plus_question_calls_ingest_without_overflow(jarvis_env):
