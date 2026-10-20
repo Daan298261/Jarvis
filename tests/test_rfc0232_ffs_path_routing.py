@@ -92,6 +92,9 @@ PLAIN_PATH_PROMPTS = [
     pytest.param(r"C:\code\mdm how is the extraction of the device id done?", id="extraction-of-the-device-id"),
     pytest.param(r"C:\code\agent what does the device extraction module do?", id="device-extraction-module"),
     pytest.param(r"C:\Users\taco\proj ffs of the tests fail again, why?", id="ffs-of-the-tests"),
+    # D2 round 5: a hyphen is not a word boundary, so neither owner phrase matches here.
+    pytest.param(r"C:\code\contacts how do I fix the extraction of my phone-number parser?", id="phone-number-parser"),
+    pytest.param(r"C:\code\retests full FFS-like test fixture, what does it do?", id="ffs-like-fixture"),
 ]
 
 
