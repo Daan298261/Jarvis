@@ -7,8 +7,10 @@
 **Aligns with:** [`ANZU_PRODUCT_NORTH_STAR.md`](../../ANZU_PRODUCT_NORTH_STAR.md) §4 ("The end goal is conversational latency. ANZU should acknowledge simple requests almost immediately"), §6 ("Simple operations should feel like conventional software"), §19 ("Do not optimize benchmarks while damaging perceived responsiveness"), §20 Q11.
 **Builds on (port, do not rewrite):** [RFC-0117](0117-tiny-front-chat-responder.md) (warm front responder + 2026-10-08 ack-only-when-late), [RFC-0127](0127-swift-initial-reply-and-progress.md), [RFC-0171](0171-system-one-reflex-lane-jev-laya-priority.md) / [RFC-0206](0206-jev-laya-every-turn-arbitration.md) (50 ms reflex), [RFC-0203](0203-fast-path-lane-consolidation.md), [RFC-0214](0214-performance-compass.md), #550 (resident CPU Qwen3.5-2B front, 4B option, remote node with local fallback; Taco's 2026-10-08 decision).
 **Landed (reused, never re-ported):** #648 RFC-0223 (`d214b6d`), #649 RFC-0224 (merge `ee786dc`; the single-system envelope is `bd873c6`).
-**Reconciles with (open):** #652 RFC-0225 @ `aac2f5c`, #655 RFC-0228 @ `971ca15`, #664 RFC-0232 @ `df37b22`, #665 RFC-0231 @ `57106ba`.
-**Re-traced on:** `development` @ `3007696` (`a44da35` plus #662, which touches only the Manager, `pr-tests.yml` and `package.json`). Every line reference below is on that head.
+**Reconciles with (open):** #652 RFC-0225 @ `aac2f5c`, #655 RFC-0228 @ `971ca15`, #664 RFC-0232 @ `df37b22`, #665 RFC-0231 @ `8b1ae68` (pre-push head of this joint push).
+**Re-traced on:** `development` @ `bd2558b` (`3007696` plus #661, which touches only `reverse_engineering/store.py`, `apk_sidecar.py` and three RE tests). Every line reference below holds on that head (D1 re-checked them at `ae93c28`).
+**Amended 2026-10-20 (joint push with #664/#665; CoS):** 0230-S3's per-turn prewarm skips while an RFC-0231 lease holds a target (`register_lease_probe` + 0231-S4's `large_prompt.active_target()`) and never touches the 27B; the busy-path RE cases are the same four as #664 (explicit, weak+probe confirms, weak+probe denies, plain negative); explicit wording skips only the dump-marker requirement; #652 @ current head, #664/#665 re-cited.
+**Amended 2026-10-20 (D1 re-peer at `ae93c28`; CoS rulings):** slice rows match §9 on `synthesize.py`, `kokoro_adapter.py`, `api/voice.py`; `workers/voice.py` is 0230-S1 → 0225-S2 → 0226-S2 (S1 first; only S4 waits on the #652 chain); the S5 busy path still submits its single `decide()` and discards a late result; `inference/backends.py:379` per-launch `threads` (0230-S2 → 0225-S2); `test_inline_verify_kept_until_0226` dropped (S4 hard-depends on 0226-S2); re-traced on `bd2558b`.
 **Amended 2026-10-20 (cross-citation pass 2):** #664 re-cited at `df37b22` (final helper `planning.re_intent_match`, probe `planning.probe_dump_target`); 0218-S3b (not landed) added to the `owner_turn.py` chain; the busy-path RE cases are explicit-wording or probe-confirmed and owned by 0232-S2.
 **Amended 2026-10-20 (cross-citation pass):** `workers/voice.py` and `synthesize.py` list RFC-0225 S2 first, then RFC-0226 S2, then 0230 (matching #652); `kokoro_adapter.py` and `api/voice.py` put 0226-S1 before the later 0230 slice; RFC-0226 S1/S2 are cited by their real titles and pieces on development (`docs/rfcs/0226-reliable-kokoro-and-voice-fallback.md`: background re-verify with backoff in `kokoro_adapter.py`, `verify_kokoro_runtime_async()`, `fallback_chain_for_profile()`, `probe_fallback_engine()`, `voice_fallback`).
 **Amended 2026-10-20 (D1 peer, 22 items at `99aef63`; CoS rulings 1-10):** #649 landed, row 6 fixed and pinned; line refs re-traced; order 0230 → 0232 → 0231 on shared files with 0218-S3b and 0232-S5 named; 0225 first on `main.py`; S5 reuses `_start_optional_step`; shared-file rows for `kokoro_adapter.py`, `api/voice.py`, `api.ts`, `answer_routing.py`, `useTaskSpeech.ts`; S4 split moved to `chatTtsPlayer.ts`; S4 inline-verify removal hard-depends on 0226-S1/S2; S0 repro drives the real HUD and closes on browser playback start; trace finish defined; `turnId` in `SpeakOpts`; `owner_chat.py` dropped (no live client); S2 early sentence rule; keep-warm pings only a resident front; S3 prewarm loads only the saved selection, covers `answer_routing.py:206`, exposes `cancel_prewarm`, and needs 0228-S2 for the idle-unload row; target start point and budget defined; S5 busy path reuses the timeout tail.
@@ -64,7 +66,7 @@ Other VRPC figures on record: installed chat with the front lane on **3.927 s**,
 
 **Budget for the 1.5 s:** reflex ≤ 50 ms + front first sentence ≤ 800 ms + Kokoro first sentence ≤ 450 ms + transport and playback start ≤ 150 ms + slack 50 ms.
 - **Front first sentence ≤ 800 ms** is anchored on #649's VRPC figure ("first text **750 ms**" against the resident 2B, row 6). The model emits the JSON prefix `{"action":"…","text":"` (≈ 10 tokens) before any speakable text, so the budget is **≤ 10 prefix tokens + ≤ 16 tokens of first sentence**; S2 caps the first streamed sentence at 16 tokens (longer sentences are split at the first comma or clause boundary). S0 records `front_first_token` and `front_first_sentence`, so the VRPC repro shows whether the 800 ms holds. No new number is assumed here.
-- **CPU contention:** while the first sentence streams, Kokoro synthesizes it and the 2B front keeps generating on the same CPU. S4 caps Kokoro (`torch.set_num_threads`) at half the physical cores, and S2 caps the front server's `--threads` (set from the front's launch settings, `inference/backends.py:379-408`) at the other half, so the two never oversubscribe. Whisper runs between turns, not during this window.
+- **CPU contention:** while the first sentence streams, Kokoro synthesizes it and the 2B front keeps generating on the same CPU. S4 caps Kokoro (`torch.set_num_threads`) at half the physical cores, and S2 caps the front server's `--threads` (S2 adds a per-launch `threads` keyword to `build_args`, `inference/backends.py:361`, `:379-408`) at the other half, so the two never oversubscribe. Whisper runs between turns, not during this window.
 
 **Why this number (north star §4, §6):** a person hears a pause of more than about a second as a stall. 1.5 s is the longest gap that still reads as "ANZU heard me". It is reachable with the shipped 2B on CPU (#649's VRPC 263 ms cached-prefix front), and it does not ask for a bigger GPU or a cloud call.
 
@@ -82,7 +84,7 @@ Other VRPC figures on record: installed chat with the front lane on **3.927 s**,
 
 ## 4. Relationship to #648 / #649 (both landed)
 
-| Piece | Where on `3007696` | This RFC |
+| Piece | Where on `bd2558b` | This RFC |
 |---|---|---|
 | Single leading system envelope (the HTTP 500 fix), history filter | #649 `bd873c6`: `front_responder.py:691-718` (one system message at `:708`), test `tests/test_rfc0224_task_workflow.py:151` | S2 builds on it and adds `test_front_envelope_has_single_leading_system_message` (every front action, with and without `self_status`) so the 500 cannot return |
 | Real-prefix front warmup | #649: `front_runtime.py:585-602` | S2 keep-warm reuses `_warmup`'s envelope; no duplicate |
@@ -114,7 +116,7 @@ No stubs, soft-fails or orphans. A span that nothing records, a mark endpoint no
 
 ## 7. Slices (one developer each, fast off)
 
-Order: **S0 first.** Then S1 ∥ S5, S2, then S3 (after S0, RFC-0225 S3; its idle-unload row after RFC-0228 S2), then S4 (after RFC-0226 S1 and S2). On `main.py`, RFC-0225's slices go first (CoS): 0225-S1 → S2 → S3 → 0230-S0 → 0230-S5; S0 and S5 are developed in parallel and merge their one-line hunks after 0225-S3 with a merge commit.
+Order: **S0 first.** Then S1 ∥ S5, S2, then S3 (after S0, RFC-0225 S3; its idle-unload row after RFC-0228 S2), then S4 (after RFC-0226 S1 and S2; the only slice that waits on the #652 chain). On `main.py`, RFC-0225's slices go first (CoS): 0225-S1 → S2 → S3 → 0230-S0 → 0230-S5; S0 and S5 are developed in parallel and merge their one-line hunks after 0225-S3 with a merge commit.
 
 ### S0 — Per-turn latency trace, owner-visible, with a one-command PC repro
 
@@ -133,7 +135,7 @@ A permanent product feature, not debug scaffolding. One `TurnTrace` per owner tu
 |---|---|
 | `backend/app/observability/turn_trace.py` (new) | `TurnTrace`, `mark(turn_id, name, **meta)`, finish rule above, ring buffer of the last 50 turns persisted to `data_dir()/logs/turn-latency.jsonl`; `summary_line(trace)` for the owner-facing line |
 | `backend/app/agent/loop.py` | marks in `create_task` (`request_received`, `decide_done`), `_run_conversation`, `_run_managed_front_lane`, `_speak_front_reply`, both `MANAGER.load` sites (`:1369-1370`, `:2494-2498`); `turn_latency` event on finish. First 0230 owner in the chain (after #649 and 0218-S3b) |
-| `backend/app/api/voice.py` | `listen` (`:82-102`): `request_received`, `stt_model_ready`, `stt_done`; `speak` (`:122-146`): `tts_synth_done` when `X-ANZU-Turn` is present (existing `Server-Timing` kept). First owner: 0230-S0 → S1 → 0226-S1 |
+| `backend/app/api/voice.py` | `listen` (`:82-102`): `request_received`, `stt_model_ready`, `stt_done`; `speak` (`:122-146`): `tts_synth_done` when `X-ANZU-Turn` is present (existing `Server-Timing` kept). Chain: 0230-S0 → 0226-S1 → 0230-S1 (§9) |
 | `backend/app/api/turn_latency.py` (new) | `GET /api/turn-latency?limit=20` (traces + p50/p95 per stage), `POST /api/turn-latency/{turn_id}/marks` (client marks `input_end`, `first_audio`; only these two names accepted) |
 | `backend/app/main.py` | one `include_router` line (after 0225-S3, per CoS) |
 | `frontend/src/tts/chatTtsPlayer.ts` | `SpeakOpts.turnId?: string`; `X-ANZU-Turn` header on `/api/voice/speak`; `first_audio` POST once per turn on the first item's `playing` event. First owner: 0230-S0 → S4 |
@@ -171,11 +173,11 @@ Acceptance (CI: `pytest` job, step "RFC-0230 latency contract tests", then "Run 
 
 ### S1 — STT resident and off the event loop
 
-**Model:** Grok 4.5 · **Lane:** D2 · **Depends:** S0; merge order after RFC-0225 S2 and RFC-0226 S2 on `workers/voice.py`
+**Model:** Grok 4.5 · **Lane:** D2 · **Depends:** S0. On `workers/voice.py` S1 goes **first** (CoS ruling 2026-10-20, accepting D1: STT resident and off the loop is not held behind the #652 chain); its hunks (model cache, `to_thread`) do not overlap 0225-S2's registry wrappers or 0226-S2's `voice_status()` fields
 
 | Path | Why |
 |---|---|
-| `backend/app/workers/voice.py` | `_whisper_model()` cache: one `WhisperModel` per (path, device, compute type) behind a lock (today constructed per call, `:402`); `transcribe_audio` runs the faster-whisper / openai-whisper calls (`:372-373`) and `voice_status()` (`:355`) via `asyncio.to_thread`; `warm_stt()` loads the model and transcribes 0.5 s of silence. Third owner in the chain 0225-S2 → 0226-S2 → 0230-S1 (registry wrappers and fallback edits kept) |
+| `backend/app/workers/voice.py` | `_whisper_model()` cache: one `WhisperModel` per (path, device, compute type) behind a lock (today constructed per call, `:402`); `transcribe_audio` runs the faster-whisper / openai-whisper calls (`:372-373`) and `voice_status()` (`:355`) via `asyncio.to_thread`; `warm_stt()` loads the model and transcribes 0.5 s of silence. First owner in the chain 0230-S1 → 0225-S2 → 0226-S2 (CoS ruling; #652 is being updated to match) |
 | `backend/app/voice_warm.py` (new) | `schedule_stt_warm_start()` fire-and-forget at startup, result in `last_stt_warm_report()` and in S0's `stt_model_ready` |
 | `backend/app/api/voice.py` | `GET /api/voice/status` adds `stt_warm` (after 0230-S0 and 0226-S1) |
 | `tests/test_rfc0230_stt_resident.py` (new) | below |
@@ -192,27 +194,28 @@ Acceptance (CI: `pytest` job, step "RFC-0230 latency contract tests", then "Run 
 | Path | Why |
 |---|---|
 | `backend/app/agent/front_responder.py` | Incremental parse of the front payload's `text` field while streaming (`:856-878` buffers it today). **Early-stream rule (normative):** the first complete sentence (≤ 16 tokens, §2) is streamed only when the already-parsed `action` is speakable and the sentence passes `enforce_front_safety` and `is_safe_front_speech` (`:355`) **on its own**. Once streamed it stands: it is never cancelled, because the browser may already be playing it. The full-reply check still runs at the end and governs only the remainder; a rejected remainder is not spoken. First owner after #649 |
-| `backend/app/inference/front_runtime.py` | Keep-warm per Decision 5: one cached-prefix request (the `_warmup` envelope, `:585-602`) after 10 min of front idleness, only to `FRONT_RUNTIME.provider(app)` with `decision.mode == "resident"` and local placement, skipped while a turn runs and for a remote front; never `front_provider()`'s `MANAGER.provider` fallback. Front `--threads` capped at half the physical cores (§2). Health watchdog: a dead front server is restarted off the turn path and the next turn's S0 trace has `front_cold = true`; remote placement fallback to local unchanged (#550) |
+| `backend/app/inference/backends.py` | `build_args` (`:361`) gains a keyword `threads: int | None = None` (per launch), used instead of `inference.threads or hardware.cpu_cores` (`:379`) when given; the worker launch passes nothing, so its behaviour is unchanged. First owner: 0230-S2 → 0225-S2 (registry) |
+| `backend/app/inference/front_runtime.py` | Keep-warm per Decision 5: one cached-prefix request (the `_warmup` envelope, `:585-602`) after 10 min of front idleness, only to `FRONT_RUNTIME.provider(app)` with `decision.mode == "resident"` and local placement, skipped while a turn runs and for a remote front; never `front_provider()`'s `MANAGER.provider` fallback. Front `--threads` capped at half the physical cores (§2), passed as `build_args(..., threads=…)` from the front launch. Health watchdog: a dead front server is restarted off the turn path and the next turn's S0 trace has `front_cold = true`; remote placement fallback to local unchanged (#550) |
 | `backend/app/agent/loop.py` | wire `on_first_sentence` to `_speak_front_reply` (`:1045`) (second 0230 owner after S0) |
 | `tests/test_rfc0230_front_stream.py` (new) | below |
 
-- [ ] `test_front_envelope_has_single_leading_system_message`: `small_context_envelope` for `final_basic`, `ack_continue` and `handoff_notice`, each with and without `self_status` and with mixed-role history → exactly one `system` message, at index 0 (pins the HTTP 500 fix from #649).
+- [ ] `test_front_envelope_has_single_leading_system_message` (extends the landed `test_front_envelope_has_one_leading_system_message`, `tests/test_rfc0224_task_workflow.py:151`, which stays unchanged, from `final_basic` only to every action): `small_context_envelope` for `final_basic`, `ack_continue` and `handoff_notice`, each with and without `self_status` and with mixed-role history → exactly one `system` message, at index 0 (pins the HTTP 500 fix from #649).
 - [ ] `test_front_first_sentence_enqueued_before_reply_completes`: stub streams 40 tokens at 20 ms → `tts_enqueued` before the stream ends.
 - [ ] `test_unsafe_first_sentence_never_streamed`: a first sentence that fails the safety checks on its own is not enqueued early.
 - [ ] `test_unsafe_remainder_not_spoken_first_sentence_stands`: safe first sentence, unsafe full reply → exactly the first sentence is spoken, no remainder, no cancel event.
 - [ ] `test_front_keep_warm_ping_after_idle`: fake clock 10 min idle → exactly one cached-prefix request to the resident front; none during an active turn; none for a remote front.
 - [ ] `test_keep_warm_never_pings_worker_provider`: no resident front (`FRONT_RUNTIME.provider()` is `None`) and `MANAGER.provider` is the LM Studio 9B → zero requests to the worker after any idle time; RFC-0228 S2's idle timer and the LM Studio TTL are not reset.
-- [ ] `test_front_threads_capped_half_physical`: 16 physical cores → front `--threads 8`.
+- [ ] `test_front_threads_capped_half_physical`: 16 physical cores → front `--threads 8`; the worker's `build_args` without `threads` still uses `inference.threads or hardware.cpu_cores`.
 - [ ] `test_dead_front_restarted_off_turn_path`: health fails → restart scheduled; the turn falls back exactly as today.
 - [ ] `test_front_default_stays_2b_cpu`: `config/default.json` profile `front_2b`, device `auto` → CPU, `-ngl 0`; 4B and 0.8B still selectable.
 
 ### S3 — Worker load never sits between input and first word
 
-**Model:** Grok 4.6 · **Lane:** D1 · **Depends:** S0, RFC-0225 S3 (`engine_coexistence.prepare_engine_for`; read-only import, that file is not edited here). The VRPC "first turn after an idle unload" row also depends on RFC-0228 S2 (which creates the idle unload) and is measured once it lands.
+**Model:** Grok 4.6 · **Lane:** D1 · **Depends:** S0, RFC-0225 S3 (`engine_coexistence.prepare_engine_for`; read-only import, that file is not edited here). The lease skip uses a registration hook so 0230 never imports 0231: 0230-S3 ships `turn_prewarm.register_lease_probe(fn: Callable[[], object | None])` (nothing registered means no lease), and 0231-S4 registers `large_prompt.active_target` when its module is imported at startup. The VRPC "first turn after an idle unload" row also depends on RFC-0228 S2 (which creates the idle unload) and is measured once it lands.
 
 | Path | Why |
 |---|---|
-| `backend/app/inference/turn_prewarm.py` (new) | `prewarm_worker(reason, *, turn_id=None) -> PrewarmHandle`: when the **saved** selection (`load_settings().inference`) is not loaded or is idle-unloaded, calls `prepare_engine_for(<saved selection>)` (single-flight; LM Studio `127.0.0.1:1234` reload/revive, ANZU llama-server load). It never loads an escalation target or a tier-3+ profile (e.g. `anzu-coder-27b`), never calls `activate_runtime_profile` or `save_settings` (both persist, `hotswap.py:192`, `:232`), never schedules a timer and never re-warms a 9B the VRAM gate unloaded (RFC-0228 `NINE_B_REWARM` keeps that). `cancel_prewarm(turn_id)` cancels a handle that has not yet entered `prepare_engine_for`; one already inside it finishes under the single-flight. `load_needed(turn)` (not loaded, idle-unloaded, or an escalation is decided) lives here |
+| `backend/app/inference/turn_prewarm.py` (new) | `prewarm_worker(reason, *, turn_id=None) -> PrewarmHandle`: when the **saved** selection (`load_settings().inference`) is not loaded or is idle-unloaded, calls `prepare_engine_for(<saved selection>)` (single-flight; LM Studio `127.0.0.1:1234` reload/revive, ANZU llama-server load). It never loads an escalation target or a tier-3+ profile (e.g. `anzu-coder-27b`), never calls `activate_runtime_profile` or `save_settings` (both persist, `hotswap.py:192`, `:232`), never schedules a timer and never re-warms a 9B the VRAM gate unloaded (RFC-0228 `NINE_B_REWARM` keeps that). `cancel_prewarm(turn_id)` cancels a handle that has not yet entered `prepare_engine_for`; one already inside it finishes under the single-flight. `load_needed(turn)` (not loaded, idle-unloaded, or an escalation is decided) lives here. **While an RFC-0231 large-prompt lease holds a target** (the registered lease probe, i.e. 0231-S4's `large_prompt.active_target()`, returns a target), the saved selection being unloaded is by design: `prewarm_worker` and `load_needed` treat the worker as loaded and skip, so a concurrent chat turn never issues a 9B `prepare_engine_for` against the held lease, and the prewarm never touches the 27B |
 | `backend/app/api/turn_latency.py` | `POST /api/turn-latency/prewarm` (second owner after S0) |
 | `backend/app/agent/loop.py` | in `create_task` (`:479-559`), start `prewarm_worker("turn", turn_id=task_id)` **before** the reflex decision (`:505`); in `_run_conversation` / `_run` skip the ack hold when `load_needed(turn)` so the front ack is spoken at once (third 0230 owner after S0, S2). The prewarm never loads for a turn that RFC-0232 S3/S5 dispatch to RE before the model: their dispatch calls `cancel_prewarm(turn_id)`, so an FFS/APK ingest never triggers a worker load. RFC-0231-S4 calls it on a large verdict the same way |
 | `backend/app/inference/answer_routing.py` | `prepare_answer_route` awaits `execute_visible_model_switch` (`:206`) only after the turn's front line is enqueued (S0 `tts_enqueued` mark present) or immediately when the front lane is off. Only owner (no other open RFC edits it) |
@@ -226,6 +229,7 @@ Acceptance (CI: `pytest` job, step "RFC-0230 latency contract tests", then "Run 
 - [ ] `test_prewarm_loads_saved_selection_only_and_never_persists`: saved LM Studio 9B; an escalation decided to `expert` and an enabled `anzu-coder-27b` → the prewarm targets only the 9B; `activate_runtime_profile` and `save_settings` are never called; `settings.json` is byte-identical.
 - [ ] `test_idle_unloaded_worker_reloads_via_prepare_engine_for`: `idle_unloaded()` true → exactly one `prepare_engine_for` call across prewarm + turn.
 - [ ] `test_prewarm_never_touches_gate_unloaded_9b`: `gate_unloaded()` set → no load call.
+- [ ] `test_prewarm_skips_while_large_prompt_lease_held`: `large_prompt.active_target()` returns `anzu-coder-27b` and the saved 9B is not loaded → `prewarm_worker("turn")` makes zero `prepare_engine_for` calls, `load_needed` is false, and nothing loads or unloads the 27B; with the probe returning `None`, or none registered, the prewarm runs as before.
 - [ ] `test_cancel_prewarm_before_prepare`: `cancel_prewarm` before the handle enters `prepare_engine_for` → no load call; after → the single-flight call completes once.
 - [ ] `test_re_dispatched_turn_never_prewarms`: an RE pre-model dispatch cancels the prewarm → no worker load for that turn.
 - [ ] `test_ack_hold_kept_when_worker_warm`: worker loaded → hold unchanged (RFC-0127 tests stay green).
@@ -240,14 +244,13 @@ Acceptance (CI: `pytest` job, step "RFC-0230 latency contract tests", then "Run 
 | Path | Why |
 |---|---|
 | `frontend/src/tts/chatTtsPlayer.ts` | `queueChatSpeech` (`:134`) splits a multi-sentence text into first sentence + remainder as **two queue items** (same `turnId`, same `onStart`/`onEnd` semantics across both); the existing `prefetchNext` (`:69-88`) fetches the remainder's audio while the first plays; `stopChatTts` clears both. This is where the desktop speaks from (`useTaskSpeech.ts:41-55` → `queueChatSpeech`). Second owner after S0 |
-| `backend/app/tts/synthesize.py` | After 0226-S1/S2 land: `_synthesize_kokoro` no longer runs `verify_kokoro_runtime` inline (`:253-257`); not ready → `RuntimeError` at once, 0226-S2's `fallback_chain_for_profile()` moves to the next probed engine and publishes `voice_fallback` (visible), and 0226-S1's background re-verify with backoff (the one scheduler of verifies) runs. Until both land, the inline verify stays, so there is never a silent fallback or silence. First owner in the chain 0230-S4 → 0225-S2 → 0226-S2 |
-| `backend/app/tts/kokoro_adapter.py` | `torch.set_num_threads` capped at half the physical cores (`:137` area) so Kokoro, the 2B front and Whisper do not oversubscribe one CPU; the cap is recorded in `/api/voice/status`. First owner: 0230-S4 → 0226-S1 |
+| `backend/app/tts/synthesize.py` | After 0226-S1/S2 land: `_synthesize_kokoro` no longer runs `verify_kokoro_runtime` inline (`:253-257`); not ready → `RuntimeError` at once, 0226-S2's `fallback_chain_for_profile()` moves to the next probed engine and publishes `voice_fallback` (visible), and 0226-S1's background re-verify with backoff (the one scheduler of verifies) runs. Until S4 merges, the inline verify is simply unchanged (no runtime branch on whether 0226 is present). Third owner in the chain 0225-S2 → 0226-S2 → 0230-S4 (§9) |
+| `backend/app/tts/kokoro_adapter.py` | `torch.set_num_threads` capped at half the physical cores (`:137` area) so Kokoro, the 2B front and Whisper do not oversubscribe one CPU; the cap is recorded in `/api/voice/status`. Chain: 0226-S1 → 0230-S4 (§9) |
 | `backend/app/persona/chat_delivery.py` | **not edited** (its queue is drained only by `GET /api/owner/chat/tts/pending`, which has no client) |
 | `tests/test_rfc0230_tts_first_sentence.py` (new); `frontend/tts-first-sentence.test.mjs` (new); `frontend/package.json` (`test:tts-first-sentence`); `.github/workflows/pr-tests.yml` (`- name: TTS first sentence tests (RFC-0230 S4)` / `run: npm run test:tts-first-sentence`) | below |
 
 - [ ] `frontend/tts-first-sentence.test.mjs`: `queueChatSpeech("One. Two. Three.")` → two `/api/voice/speak` requests, first "One.", then "Two. Three."; the second is fetched by `prefetchNext` while the first plays; no text lost or repeated; `stopChatTts` drops both; a one-sentence text stays one item.
 - [ ] `test_kokoro_not_verified_never_blocks_turn` (after 0226-S1/S2): unverified Kokoro → speak falls through in < 50 ms (fake engines) to the next engine of 0226-S2's `fallback_chain_for_profile()` with one `voice_fallback` event, and exactly one background verify is scheduled, by 0226-S1's background re-verify in `kokoro_adapter.py`.
-- [ ] `test_inline_verify_kept_until_0226`: without 0226-S1/S2 present (feature probe on their entry points), `_synthesize_kokoro` still verifies inline, and an unverified Kokoro never yields a silent fallback.
 - [ ] `test_kokoro_thread_cap`: 16-core fake → 8 threads.
 - [ ] VRPC (S0 repro): `tts_synth_done − tts_enqueued` p50 ≤ 450 ms for the first sentence.
 
@@ -257,13 +260,13 @@ Acceptance (CI: `pytest` job, step "RFC-0230 latency contract tests", then "Run 
 
 | Path | Why |
 |---|---|
-| `backend/app/decision/owner_turn.py` | `decide_owner_turn` runs `_decide_sync` on a dedicated `ThreadPoolExecutor(max_workers=1, thread_name_prefix="reflex")`. **Busy path (normative):** if the previous call still holds the executor (an abandoned Laya call after a timeout), the turn takes the **existing `TimeoutError` tail**: `_deadline_rules_result(reason="reflex executor busy")` → `_apply_floors` (`:296`) → `_with_deadline_persona`, audited as `deadline_fallback`. It never starts a second `decide()` for that turn (exactly one per turn, RFC-0206), and `resolve_persona_context` stays outside the window (`:563`). Floors that apply on the normal path (`:461`) and the deadline paths (`:600`, `:623`) — including RFC-0232 S2's RE floor and RFC-0231 S1's large-prompt floor — therefore apply on the busy path too. The 50 ms budget, audit and `persona_intent` behaviour are unchanged. Chain: #649 → 0218-S3b → 0230-S5 → 0232-S2 → 0231-S1 |
+| `backend/app/decision/owner_turn.py` | `decide_owner_turn` runs `_decide_sync` on a dedicated `ThreadPoolExecutor(max_workers=1, thread_name_prefix="reflex")`. **Busy path (normative):** if the previous call still holds the executor (an abandoned Laya call after a timeout), the turn takes the **existing `TimeoutError` tail**: `_deadline_rules_result(reason="reflex executor busy")` → `_apply_floors` (`:296`) → `_with_deadline_persona`, audited as `deadline_fallback`. The turn **still submits its single `decide()`** to the executor (queued behind the abandoned call), so every turn has exactly one `decide()` (RFC-0206, and `decide_owner_turn`'s "never a skipped call"); the turn does not wait for it, and a result that arrives after the deadline is discarded and audited as late. It never starts a second `decide()`, and `resolve_persona_context` stays outside the window (`:563`). Floors that apply on the normal path (`:461`) and the deadline paths (`:600`, `:623`) — including RFC-0232 S2's RE floor and RFC-0231 S1's large-prompt floor — therefore apply on the busy path too. The 50 ms budget, audit and `persona_intent` behaviour are unchanged. Chain: #649 → 0218-S3b → 0230-S5 → 0232-S2 → 0231-S1 |
 | `backend/app/main.py` | the synchronous Laya restore at `:228-230` becomes `_start_optional_step("laya_restore", lambda: asyncio.to_thread(laya_runtime.restore_on_startup))`, reusing #648's `_start_optional_step` (`:140`), as `presence` does at `:392`. `decision/laya/runtime.py` is not edited. Merges after 0225-S3 and 0230-S0 |
 | `tests/test_rfc0230_reflex_budget.py` (new) | below |
 
 - [ ] `test_decide_within_50ms_while_default_executor_saturated`: default pool filled with blocked jobs → `decide_owner_turn` returns in ≤ 50 ms (event-blocked stubs, no wall-clock sleeps).
 - [ ] `test_abandoned_laya_call_does_not_delay_next_turn`: Laya stub blocked → turn 1 deadline fallback; turn 2 immediate rules fallback, not queued.
-- [ ] `test_executor_busy_fallback_applies_floors_and_persona`: Laya blocked so turn 2 takes the busy path → `_apply_floors` ran (an explicit-action floor fixture gives `managed_task`), `persona_intent` comes from `_with_deadline_persona`, `decide_source == "deadline_fallback"`, and `decide()` was called exactly once across both turns' busy path (zero for turn 2). **RFC-0232 S2 owns** adding the RE cases to `tests/test_rfc0230_reflex_budget.py` after 0230-S5 has landed (`planning.re_intent_match(prompt, *, allowed=None) -> ReIntent | None`, #664 @ `df37b22`): an explicit RE wording such as `full FFS extraction of D:\cases\x\ffs.zip: list the accounts` routes to RE on the busy path; a weak-wording path such as `D:\cases\x\ffs.zip extraction: what accounts?` routes to RE only when `planning.probe_dump_target` confirms the on-disk dump (the test fakes the probe both ways); and `C:\code\etl what does the extraction step do?` does not route to RE.
+- [ ] `test_executor_busy_fallback_applies_floors_and_persona`: Laya blocked so turn 2 takes the busy path → `_apply_floors` ran (an explicit-action floor fixture gives `managed_task`), `persona_intent` comes from `_with_deadline_persona`, `decide_source == "deadline_fallback"`, and `decide()` was submitted exactly once per turn (turn 1: one call; turn 2: one call, queued, its late result discarded and not used for routing). **RFC-0232 S2 owns** adding the RE cases to `tests/test_rfc0230_reflex_budget.py` after 0230-S5 has landed (helper `planning.re_intent_match(prompt, *, allowed=None) -> ReIntent | None` and probe `planning.probe_dump_target`, #664; the probe reads the owner's allow-list from settings, never passes `None` to `store.admit_allowed_target`, and explicit wording skips only the dump-marker requirement, never the allow-list or the source veto). The case set is identical in #664 and here: (1) explicit `D:\cases\x\p1 is a full FFS of my Pixel, which accounts are on it?` with the probe faked as `plain` (admitted, exists, not source) → RE; (2) weak `D:\cases\x\ffs.zip what accounts are on it?` with the probe faked as `dump` → RE; (3) the same weak prompt with the probe faked as `absent` → not RE; (4) `C:\code\etl what does the extraction step do?` → not RE.
 - [ ] `test_laya_restore_off_startup_path`: Laya warm faked at 3 s → `startup()` returns in < 1 s; the step name `laya_restore` is in `startup_health.report()`.
 - [ ] VRPC (S0 repro): `decide_ms` ≤ 50 on 100 % of the 25 repro turns, with Laya enabled.
 
@@ -272,15 +275,15 @@ Acceptance (CI: `pytest` job, step "RFC-0230 latency contract tests", then "Run 
 | ID | Title | Model | Lane | Depends |
 |---|---|---|---|---|
 | 0230-S0 | Per-turn latency trace + PC repro | Grok 4.6 | D1 | — (`main.py` after 0225-S3) |
-| 0230-S1 | STT resident, off the loop | Grok 4.5 | D2 | S0 (merge after 0225-S2, 0226-S2) |
+| 0230-S1 | STT resident, off the loop | Grok 4.5 | D2 | S0 (first on `workers/voice.py`) |
 | 0230-S2 | Front streamed first sentence + keep-warm | Grok 4.6 | D1 | S0 |
 | 0230-S3 | Worker load off the first-word path | Grok 4.6 | D1 | S0, 0225-S3 (idle row: 0228-S2) |
-| 0230-S4 | TTS first sentence, inline verify after 0226 | Grok 4.5 | D2 | S0, **0226-S1**, **0226-S2** |
+| 0230-S4 | TTS first sentence, inline verify after 0226 | Grok 4.5 | D2 | S0, **0226-S1**, **0226-S2** (hard; the only 0230 slice that waits on the #652 chain) |
 | 0230-S5 | Reflex ≤ 50 ms every turn | Grok 4.5 | D2 | S0 |
 
 All run with fast mode off.
 
-## 9. Shared files and handoff order (CoS: 0230 → 0232 → 0231 on the turn files; RFC-0225 first on `main.py`, `workers/voice.py` and `synthesize.py`; RFC-0226 before 0230 on the voice files it owns)
+## 9. Shared files and handoff order (CoS: 0230 → 0232 → 0231 on the turn files; RFC-0225 first on `main.py` and `synthesize.py`; 0230-S1 first on `workers/voice.py` and 0230-S2 first on `backends.py` (CoS); RFC-0226 before 0230-S4 on the voice files S4 shares)
 
 | File | Order |
 |---|---|
@@ -289,8 +292,9 @@ All run with fast mode off.
 | `backend/app/agent/front_responder.py`, `inference/front_runtime.py` | #648/#649 (landed) → 0230-S2 |
 | `backend/app/inference/answer_routing.py` | 0230-S3 only |
 | `backend/app/main.py` | 0225-S1 → 0225-S2 → 0225-S3 → 0230-S0 → 0230-S5 → 0231-S0 → 0231-S5 → #585 (draft; merges onto whatever has landed) |
-| `backend/app/workers/voice.py` | 0225-S2 → 0226-S2 → 0230-S1 (RFC-0225 first, matching #652's RFC-0225 S2 table and RFC-0226 *Likely files*) |
-| `backend/app/tts/synthesize.py` | 0225-S2 → 0226-S2 → 0230-S4 (RFC-0225 first, matching #652's RFC-0225 S2 table; 0230-S4 also hard-depends on 0226-S1/S2) |
+| `backend/app/workers/voice.py` | 0230-S1 → 0225-S2 → 0226-S2 (CoS ruling 2026-10-20 accepting D1; #652 is being updated to match) |
+| `backend/app/inference/backends.py` | 0230-S2 (per-launch `threads` on `build_args`, `:379`) → 0225-S2 (registry) |
+| `backend/app/tts/synthesize.py` | 0225-S2 → 0226-S2 → 0230-S4 (RFC-0225 first, matching #652's RFC-0225 S2 table; S4 hard-depends on 0226-S2 and is the only 0230 slice that waits on the #652 chain) |
 | `backend/app/tts/kokoro_adapter.py` | 0226-S1 (verifying state, background re-verify) → 0230-S4 (thread cap) |
 | `backend/app/api/voice.py` | 0230-S0 → 0226-S1 (`POST /api/voice/kokoro/reload`) → 0230-S1 (`stt_warm`) |
 | `backend/app/api/turn_latency.py` (new) | 0230-S0 → S3 |
