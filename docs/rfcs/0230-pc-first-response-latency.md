@@ -302,7 +302,7 @@ All run with fast mode off.
 | `backend/app/tts/kokoro_adapter.py` | 0226-S1 (verifying state, background re-verify) → 0230-S4 (thread cap) |
 | `backend/app/api/voice.py` | 0230-S0 → 0226-S1 (`POST /api/voice/kokoro/reload`) → 0230-S1 (`stt_warm`) |
 | `backend/app/api/turn_latency.py` (new) | 0230-S0 → S3 |
-| `frontend/src/api.ts` | 0230-S0 → 0218-S3 → 0227 (selection helpers) → 0231-S6 |
+| `frontend/src/api.ts` | 0230-S0 → 0218-S3 → 0227 → 0231-S6 → 0233-S6 (erratum 2026-10-20, CoS: 0233-S6 was missing when #666 landed) |
 | `frontend/src/tts/chatTtsPlayer.ts` | 0230-S0 → 0230-S4 |
 | `frontend/src/tts/useTaskSpeech.ts` | 0230-S0 only |
 | `frontend/src/hud/HudChat.tsx` | 0230-S3 only (one effect; no JSX change) |
