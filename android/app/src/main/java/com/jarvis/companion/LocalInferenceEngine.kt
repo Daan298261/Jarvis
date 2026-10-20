@@ -10,6 +10,8 @@ interface LocalInferenceEngine {
     fun generate(prompt: String, maxTokens: Int, onToken: (String) -> Unit): GenerateOutcome
     fun unload()
     fun requestCancel() {}
-    /** Called before every generate pass so KV/state is fresh. Native llama.cpp clears inside nativeGenerate. */
+    /** Active native tokens and capacity; unavailable before prefill. */
+    fun contextUsage(): Pair<Int, Int>? = null
+    /** Native code validates any reusable prefix before every pass. */
     fun beginPass() {}
 }
