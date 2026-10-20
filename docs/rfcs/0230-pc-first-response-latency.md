@@ -9,6 +9,7 @@
 **Landed (reused, never re-ported):** #648 RFC-0223 (`d214b6d`), #649 RFC-0224 (merge `ee786dc`; the single-system envelope is `bd873c6`).
 **Reconciles with (open):** #652 RFC-0225 @ `aac2f5c`, #655 RFC-0228 @ `971ca15`, #664 RFC-0232 @ `1542881`, #665 RFC-0231 @ `57106ba`.
 **Re-traced on:** `development` @ `3007696` (`a44da35` plus #662, which touches only the Manager, `pr-tests.yml` and `package.json`). Every line reference below is on that head.
+**Amended 2026-10-20 (cross-citation pass):** `workers/voice.py` and `synthesize.py` list RFC-0225 S2 first, then RFC-0226 S2, then 0230 (matching #652); `kokoro_adapter.py` and `api/voice.py` put 0226-S1 before the later 0230 slice; RFC-0226 S1/S2 are cited by their real titles and pieces on development (`docs/rfcs/0226-reliable-kokoro-and-voice-fallback.md`: background re-verify with backoff in `kokoro_adapter.py`, `verify_kokoro_runtime_async()`, `fallback_chain_for_profile()`, `probe_fallback_engine()`, `voice_fallback`).
 **Amended 2026-10-20 (D1 peer, 22 items at `99aef63`; CoS rulings 1-10):** #649 landed, row 6 fixed and pinned; line refs re-traced; order 0230 → 0232 → 0231 on shared files with 0218-S3b and 0232-S5 named; 0225 first on `main.py`; S5 reuses `_start_optional_step`; shared-file rows for `kokoro_adapter.py`, `api/voice.py`, `api.ts`, `answer_routing.py`, `useTaskSpeech.ts`; S4 split moved to `chatTtsPlayer.ts`; S4 inline-verify removal hard-depends on 0226-S1/S2; S0 repro drives the real HUD and closes on browser playback start; trace finish defined; `turnId` in `SpeakOpts`; `owner_chat.py` dropped (no live client); S2 early sentence rule; keep-warm pings only a resident front; S3 prewarm loads only the saved selection, covers `answer_routing.py:206`, exposes `cancel_prewarm`, and needs 0228-S2 for the idle-unload row; target start point and budget defined; S5 busy path reuses the timeout tail.
 **Astra boundary:** persona, WebGL and presence internals are out of scope. Live UI is touched only add-alongside, with the reasoning pass below.
 
@@ -169,13 +170,13 @@ Acceptance (CI: `pytest` job, step "RFC-0230 latency contract tests", then "Run 
 
 ### S1 — STT resident and off the event loop
 
-**Model:** Grok 4.5 · **Lane:** D2 · **Depends:** S0
+**Model:** Grok 4.5 · **Lane:** D2 · **Depends:** S0; merge order after RFC-0225 S2 and RFC-0226 S2 on `workers/voice.py`
 
 | Path | Why |
 |---|---|
-| `backend/app/workers/voice.py` | `_whisper_model()` cache: one `WhisperModel` per (path, device, compute type) behind a lock (today constructed per call, `:402`); `transcribe_audio` runs the faster-whisper / openai-whisper calls (`:372-373`) and `voice_status()` (`:355`) via `asyncio.to_thread`; `warm_stt()` loads the model and transcribes 0.5 s of silence. First owner in the chain 0230-S1 → 0225-S2 → 0226-S2 |
+| `backend/app/workers/voice.py` | `_whisper_model()` cache: one `WhisperModel` per (path, device, compute type) behind a lock (today constructed per call, `:402`); `transcribe_audio` runs the faster-whisper / openai-whisper calls (`:372-373`) and `voice_status()` (`:355`) via `asyncio.to_thread`; `warm_stt()` loads the model and transcribes 0.5 s of silence. Third owner in the chain 0225-S2 → 0226-S2 → 0230-S1 (registry wrappers and fallback edits kept) |
 | `backend/app/voice_warm.py` (new) | `schedule_stt_warm_start()` fire-and-forget at startup, result in `last_stt_warm_report()` and in S0's `stt_model_ready` |
-| `backend/app/api/voice.py` | `GET /api/voice/status` adds `stt_warm` (second owner after S0) |
+| `backend/app/api/voice.py` | `GET /api/voice/status` adds `stt_warm` (after 0230-S0 and 0226-S1) |
 | `tests/test_rfc0230_stt_resident.py` (new) | below |
 
 - [ ] `test_whisper_model_loaded_once_across_utterances`: three transcriptions → one model construction.
@@ -233,18 +234,18 @@ Acceptance (CI: `pytest` job, step "RFC-0230 latency contract tests", then "Run 
 
 ### S4 — TTS: first sentence first; inline verify removed after RFC-0226 S1/S2
 
-**Model:** Grok 4.5 · **Lane:** D2 · **Depends:** S0, **RFC-0226 S1** (background Kokoro re-verify) and **RFC-0226 S2** (visible TTS fallback); hard dependency for the `synthesize.py` change, which does not merge before both
+**Model:** Grok 4.5 · **Lane:** D2 · **Depends:** S0, **RFC-0226 S1** ("Kokoro load root cause + reliable load, verify, retry": the `verifying` state and the background re-verify with backoff in `tts/kokoro_adapter.py`, plus warm start's `verify_kokoro_runtime_async()`) and **RFC-0226 S2** ("Fallback chain, real probes, `/api/voice/status` truth, `voice_fallback` signal, persona switch": `engines.fallback_chain_for_profile()` over `probe_fallback_engine()`, and the `voice_fallback` BUS event from `tts/persona_speech.py`). Hard dependency for the `synthesize.py` change, which does not merge before both. RFC-0226 names no function for the re-verify scheduler; S4 calls it through the adapter's re-verify entry that 0226-S1 ships
 
 | Path | Why |
 |---|---|
 | `frontend/src/tts/chatTtsPlayer.ts` | `queueChatSpeech` (`:134`) splits a multi-sentence text into first sentence + remainder as **two queue items** (same `turnId`, same `onStart`/`onEnd` semantics across both); the existing `prefetchNext` (`:69-88`) fetches the remainder's audio while the first plays; `stopChatTts` clears both. This is where the desktop speaks from (`useTaskSpeech.ts:41-55` → `queueChatSpeech`). Second owner after S0 |
-| `backend/app/tts/synthesize.py` | After 0226-S1/S2 land: `_synthesize_kokoro` no longer runs `verify_kokoro_runtime` inline (`:253-257`); not ready → `RuntimeError` at once, the 0226-S2 chain falls back **visibly**, and 0226-S1's background re-verify (the one scheduler of verifies) runs. Until both land, the inline verify stays, so there is never a silent fallback or silence. First owner in the chain 0230-S4 → 0225-S2 → 0226-S2 |
+| `backend/app/tts/synthesize.py` | After 0226-S1/S2 land: `_synthesize_kokoro` no longer runs `verify_kokoro_runtime` inline (`:253-257`); not ready → `RuntimeError` at once, 0226-S2's `fallback_chain_for_profile()` moves to the next probed engine and publishes `voice_fallback` (visible), and 0226-S1's background re-verify with backoff (the one scheduler of verifies) runs. Until both land, the inline verify stays, so there is never a silent fallback or silence. First owner in the chain 0230-S4 → 0225-S2 → 0226-S2 |
 | `backend/app/tts/kokoro_adapter.py` | `torch.set_num_threads` capped at half the physical cores (`:137` area) so Kokoro, the 2B front and Whisper do not oversubscribe one CPU; the cap is recorded in `/api/voice/status`. First owner: 0230-S4 → 0226-S1 |
 | `backend/app/persona/chat_delivery.py` | **not edited** (its queue is drained only by `GET /api/owner/chat/tts/pending`, which has no client) |
 | `tests/test_rfc0230_tts_first_sentence.py` (new); `frontend/tts-first-sentence.test.mjs` (new); `frontend/package.json` (`test:tts-first-sentence`); `.github/workflows/pr-tests.yml` (`- name: TTS first sentence tests (RFC-0230 S4)` / `run: npm run test:tts-first-sentence`) | below |
 
 - [ ] `frontend/tts-first-sentence.test.mjs`: `queueChatSpeech("One. Two. Three.")` → two `/api/voice/speak` requests, first "One.", then "Two. Three."; the second is fetched by `prefetchNext` while the first plays; no text lost or repeated; `stopChatTts` drops both; a one-sentence text stays one item.
-- [ ] `test_kokoro_not_verified_never_blocks_turn` (after 0226-S1/S2): unverified Kokoro → speak falls through in < 50 ms (fake engines) to 0226-S2's visible fallback, and exactly one background verify is scheduled, by 0226-S1's re-verify scheduler.
+- [ ] `test_kokoro_not_verified_never_blocks_turn` (after 0226-S1/S2): unverified Kokoro → speak falls through in < 50 ms (fake engines) to the next engine of 0226-S2's `fallback_chain_for_profile()` with one `voice_fallback` event, and exactly one background verify is scheduled, by 0226-S1's background re-verify in `kokoro_adapter.py`.
 - [ ] `test_inline_verify_kept_until_0226`: without 0226-S1/S2 present (feature probe on their entry points), `_synthesize_kokoro` still verifies inline, and an unverified Kokoro never yields a silent fallback.
 - [ ] `test_kokoro_thread_cap`: 16-core fake → 8 threads.
 - [ ] VRPC (S0 repro): `tts_synth_done − tts_enqueued` p50 ≤ 450 ms for the first sentence.
@@ -270,7 +271,7 @@ Acceptance (CI: `pytest` job, step "RFC-0230 latency contract tests", then "Run 
 | ID | Title | Model | Lane | Depends |
 |---|---|---|---|---|
 | 0230-S0 | Per-turn latency trace + PC repro | Grok 4.6 | D1 | — (`main.py` after 0225-S3) |
-| 0230-S1 | STT resident, off the loop | Grok 4.5 | D2 | S0 |
+| 0230-S1 | STT resident, off the loop | Grok 4.5 | D2 | S0 (merge after 0225-S2, 0226-S2) |
 | 0230-S2 | Front streamed first sentence + keep-warm | Grok 4.6 | D1 | S0 |
 | 0230-S3 | Worker load off the first-word path | Grok 4.6 | D1 | S0, 0225-S3 (idle row: 0228-S2) |
 | 0230-S4 | TTS first sentence, inline verify after 0226 | Grok 4.5 | D2 | S0, **0226-S1**, **0226-S2** |
@@ -278,7 +279,7 @@ Acceptance (CI: `pytest` job, step "RFC-0230 latency contract tests", then "Run 
 
 All run with fast mode off.
 
-## 9. Shared files and handoff order (CoS: 0230 → 0232 → 0231 on shared files; 0225 first on `main.py`)
+## 9. Shared files and handoff order (CoS: 0230 → 0232 → 0231 on the turn files; RFC-0225 first on `main.py`, `workers/voice.py` and `synthesize.py`; RFC-0226 before 0230 on the voice files it owns)
 
 | File | Order |
 |---|---|
@@ -287,10 +288,10 @@ All run with fast mode off.
 | `backend/app/agent/front_responder.py`, `inference/front_runtime.py` | #648/#649 (landed) → 0230-S2 |
 | `backend/app/inference/answer_routing.py` | 0230-S3 only |
 | `backend/app/main.py` | 0225-S1 → 0225-S2 → 0225-S3 → 0230-S0 → 0230-S5 → 0231-S0 → 0231-S5 → #585 (draft; merges onto whatever has landed) |
-| `backend/app/workers/voice.py` | 0230-S1 → 0225-S2 → 0226-S2 |
-| `backend/app/tts/synthesize.py` | 0230-S4 → 0225-S2 → 0226-S2 (0230-S4's own hunk waits for 0226-S1/S2 to exist; it still merges before 0225-S2/0226-S2's later edits of the same function, rebasing by merge commit) |
-| `backend/app/tts/kokoro_adapter.py` | 0230-S4 → 0226-S1 (verifying / re-verify) |
-| `backend/app/api/voice.py` | 0230-S0 → 0230-S1 → 0226-S1 (`POST /api/voice/kokoro/reload`) |
+| `backend/app/workers/voice.py` | 0225-S2 → 0226-S2 → 0230-S1 (RFC-0225 first, matching #652's RFC-0225 S2 table and RFC-0226 *Likely files*) |
+| `backend/app/tts/synthesize.py` | 0225-S2 → 0226-S2 → 0230-S4 (RFC-0225 first, matching #652's RFC-0225 S2 table; 0230-S4 also hard-depends on 0226-S1/S2) |
+| `backend/app/tts/kokoro_adapter.py` | 0226-S1 (verifying state, background re-verify) → 0230-S4 (thread cap) |
+| `backend/app/api/voice.py` | 0230-S0 → 0226-S1 (`POST /api/voice/kokoro/reload`) → 0230-S1 (`stt_warm`) |
 | `backend/app/api/turn_latency.py` (new) | 0230-S0 → S3 |
 | `frontend/src/api.ts` | 0230-S0 → 0218-S3 → 0227 (selection helpers) → 0231-S6 |
 | `frontend/src/tts/chatTtsPlayer.ts` | 0230-S0 → 0230-S4 |
