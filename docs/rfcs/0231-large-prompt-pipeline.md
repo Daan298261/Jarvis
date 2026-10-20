@@ -4,9 +4,9 @@
 **Priority:** P1 (Taco ask B, relayed by Chief of Staff 2026-10-20)
 **Author:** Jarvis Architect
 **Date:** 2026-10-20
-**Traced on:** `development` @ `e56740c` (every cited `loop.py`, `owner_turn.py`, `api/tasks.py`, `hotswap.py`, `config.py`, `main.py` and frontend line is unchanged from `d85c9d4`; #660 and #661 landed as `90a0010` and `bd2558bd`; #669 changed only `mcp/package.json`, `mcp/package-lock.json` and `frontend/package-lock.json`). Open batch PRs cited: #652 (RFC-0225; final head in this PR's body), #655 (RFC-0228; final head in this PR's body), #664 (RFC-0232; final head in this PR's body), #666 (RFC-0230; final head in this PR's body), #668 (RFC-0233; final head in this PR's body), #585 (RFC-0211; final head in this PR's body). Originally traced on `11b264a7` with #649 @ `edb4685` (identical to `b5c3640` for every file cited here), #652 (RFC-0225; final head in this PR's body), #655 (RFC-0228; final head in this PR's body), #585 (RFC-0211; final head in this PR's body), #663 (RFC-0218 delivery fix; since landed as `781004c`).
+**Traced on:** `development` @ `e56740c` (every cited `loop.py`, `owner_turn.py`, `api/tasks.py`, `hotswap.py`, `config.py`, `main.py` and frontend line is unchanged from `d85c9d4`; #660 and #661 landed as `90a0010` and `bd2558bd`; #669 changed only `mcp/package.json`, `mcp/package-lock.json` and `frontend/package-lock.json`). Open batch PRs cited: #652 (RFC-0225; final head in this PR's body), #655 (RFC-0228; final head in this PR's body), #664 (RFC-0232; final head in this PR's body), #666 (RFC-0230; final head in this PR's body), #668 (RFC-0233; final head in this PR's body), #670 (RFC-0211, supersedes #585; final head in this PR's body). Originally traced on `11b264a7` with #649 @ `edb4685` (identical to `b5c3640` for every file cited here), #652 (RFC-0225; final head in this PR's body), #655 (RFC-0228; final head in this PR's body), #585 (RFC-0211; final head in this PR's body), #663 (RFC-0218 delivery fix; since landed as `781004c`).
 **Amended 2026-10-20 (#649 landed):** #649 merged into `development` as `ee786dc`, so S2 no longer ports it. S2 now cites the landed engine and adds only what #649 lacks: `seed_workflow`, the two pipeline tables, and `LargePromptSettings`. Every #649 reference in §4-§6 and S1-S6 is re-traced on `development` @ `d85c9d4`, and so is every `loop.py`, `owner_turn.py`, `api/tasks.py` and `App.tsx` line number (#648 and #649 shifted them).
-**Amended 2026-10-20 (UX round 3, N1-N9; CoS):** sync `AGENT.cancel` hands `on_parent_cancel` to the main loop thread-safely (`request_parent_cancel`, `cancelling` flag) so voice stop, media, self-dev and the live agent suite reach a running pipeline, one test per caller; `started` re-taken after the precheck, which has its own bound `LARGE_PRECHECK_BOUND_MS = 30`; D2's two explicit-wording negatives tested; keep-alive refreshed every `idle_unload_seconds / 2` while leased (ANZU-loaded only), with no-churn tests; the refuse test and the live audit follow the VRAM-aware rule; `/continue` sets `waiting → running` and recovery re-runs `preparing`; the preload names `anzu-coder-27b`, resolves `profile_name` without the private helper and defines that no owner rebind runs; no reference to the saving hotswap entry point remains; `last_free_vram` added to #652's second-owner row; `loop.py` and `main.py` chains end with 0233; re-pinned (header).
+**Amended 2026-10-20 (UX round 3, N1-N9; CoS):** sync `AGENT.cancel` hands `on_parent_cancel` to the main loop thread-safely (`request_parent_cancel`, `cancelling` flag) so voice stop, media, self-dev and the live agent suite reach a running pipeline, one test per caller; `started` re-taken after the precheck, which has its own bound `LARGE_PRECHECK_BOUND_MS = 30`; D2's two explicit-wording negatives tested; keep-alive refreshed every `idle_unload_seconds / 2` while leased (ANZU-loaded only), with no-churn tests; the refuse test and the live audit follow the VRAM-aware rule; `/continue` sets `waiting → running` and recovery re-runs `preparing`; the preload names `anzu-coder-27b`, resolves `profile_name` without the private helper and defines that no owner rebind runs; no reference to the saving hotswap entry point remains; `last_free_vram` added to #652's second-owner row; `loop.py` and `main.py` chains end with 0233; re-pinned (header). **Then (CoS, pin removal):** open batch PRs are cited by number and RFC only (final heads in the PR body); the `main.py` chain ends at #670 (RFC-0211), which supersedes #585; #670 doesn't edit `loop.py`.
 **Amended 2026-10-20 (UX re-peer, 9 items; D2 + CoS):** cancel endpoint awaits `on_parent_cancel` then calls the sync `AGENT.cancel` (`api/tasks.py:342`); total `large_precheck` inside the `try` at `owner_turn.py:567` and passed to `_apply_floors` at all three call sites (no deadline helper); 0231 adds no RE detection and relies on #664's admit-first probe, settings allow-list and explicit-wording rule; 0230-S3's prewarm skips while a 27B lease is held; in `waiting` the 27B is released after `idle_unload_seconds` (only if ANZU loaded it; reload on `/continue`) and is never pinned; **0231 edits neither `hotswap.py` (0225-S3 only) nor `rewarm.py` (0228-S2 only)**; lease tracked in `large_prompt._leases` keyed by task id (load via the existing `apply_runtime_profile_to_settings(persist=False)` + `MANAGER.load(task_id=)`); `refuse` outlook only on a fresh free-VRAM reading below requirement + 1 GB; a *Statuses* table with one setter and reader per value. Re-traced on `development` @ `e56740c` (`bd2558bd` with #661 landed, plus #669's `mcp/` lockfile only). Cross-checked with #652 (RFC-0225; final head in this PR's body), #655 (RFC-0228; final head in this PR's body), #664, #666 and #668 at the heads of this joint push (PR body).
 **Amended 2026-10-20 (cross-citation pass):** #664 (RFC-0232; final head in this PR's body) re-cited with its final helper `planning.re_intent_match(prompt, *, allowed=None) -> ReIntent | None` (cached per turn) and probe `planning.probe_dump_target`; 0218-S3b (not landed) added to the `owner_turn.py` chain.
 **Amended 2026-10-20 (UX peer, 17 blockers; CoS rulings 1-6; D2 + CoS floor change):** RFC-0232 precedence (verbatim CoS text, §1) with 0232's RE helper consumed in the precheck and its RE floor in `_apply_floors`, one `decide()` per turn; size rules on the full prompt, outside the 50 ms window, also on deadline/exception fallbacks; candidate from the baseline route plus the final gate after floors; #649's planner skipped for a marked parent; one spoken ack on the parent's front lane, worded from the RFC-0225 gate outlook and never claiming a load; Taco's default (LM Studio 9B owner-loaded, managed off, 16 GB) runs the parts on the 9B; request lease holds the target for the whole parent, and the large-task load is never persisted, with the owner's selection restored; breaker bind, cancel races, idempotent vault, L4 length floor, S0 outlook/lease/late-reconcile; S6 extends the live "Saved plan" rows; complete ownership chains with lanes. Re-traced on `development` @ `3007696` (`d85c9d4` plus #660, #667 and #662; only `pr-tests.yml` lines moved: "Build frontend" L118-119, "Persona morph hook tests" L130). Cross-checked with #666 (RFC-0230; final head in this PR's body), #664 (RFC-0232; final head in this PR's body), #652 (RFC-0225; final head in this PR's body).
@@ -36,12 +36,12 @@
 - [RFC-0225](0225-local-engine-coexistence-and-resilient-api.md) (#652): `prepare_engine_for` and the VRAM gate.
 - [RFC-0228](0228-installer-update-default-9b-idle-unload.md) (#655): the `NINE_B_REWARM` coordinator.
 - [RFC-0218](0218-persona-surfaces-and-intent-switch.md) S3b, as amended by #663: tasks-path persona switch, `switch_id`, switch line delivered as `chat_tts`.
-- [RFC-0211](0211-ollama-self-development-scheduler.md) (#585 draft): the scheduler.
+- [RFC-0211](0211-ollama-self-development-scheduler.md) (#670 draft, which supersedes #585): the scheduler.
 - [RFC-0071](0071-automation-failure-circuit-breaker.md): breaker admission.
 
 Some of these links point at RFC files that live only on their open PRs. They resolve once those PRs land.
 
-**#649 and #585:** #649 has landed and S2 builds on it (see *Relationship to #649 and #585*). #585 is still a draft and does not gate this RFC.
+**#649 and #670 (RFC-0211; supersedes #585, same scheduler ported onto `development`, same line numbers):** #649 has landed and S2 builds on it (see *Relationship to #649 and #670*). #670 is still a draft and does not gate this RFC.
 
 **Astra boundary:** persona, WebGL, presence, morph and appearance are out of scope (Astra). This RFC emits no persona events and edits no persona or presence component.
 
@@ -69,13 +69,13 @@ Verified on `development` @ `e56740c` (originally `11b264a7`; the cited lines ar
 7. **No queue that runs owner prompts one after another.**
    - `mobile/scheduler.py::tick` (L77-121) runs periodic automations. It skips while the previous run is non-terminal (L88-94) and is admitted by `automation/breaker.admit_automatic_trigger` (L236-320).
    - `agent/queue_watcher.py` is a file drop queue.
-   - #585's `DevelopmentScheduler` (L132, tick L380-411) is a draft and reserves Ollama for Grokbot work.
+   - #670's `DevelopmentScheduler` (L132, tick L380-411) is a draft and reserves Ollama for Grokbot work.
    - None of them takes N owner sub-prompts and runs them in order.
 8. **No guaranteed deeper or quantitative work.** #649's steps are `work` plus `REVIEW_STEPS` (bugfix, fact_check, quality_control; #649 `task_workflow.py:15-19`). Nothing requires a deeper-analysis or quantitative sub-task, and nothing validates one.
 
 ## Decision
 
-Ship **one RFC with seven implement slices (S0-S6)**, one named model per slice and fast mode off. Nothing waits for #585. #649 has landed and is reused.
+Ship **one RFC with seven implement slices (S0-S6)**, one named model per slice and fast mode off. Nothing waits for #670. #649 has landed and is reused.
 
 **Pipeline at a glance.** A large owner turn becomes one **parent task** (the one the HUD is already following) and N **child tasks**, one per section, run strictly one after another.
 
@@ -593,7 +593,7 @@ class LargePromptSettings(BaseModel):
 | With | Rule |
 | --- | --- |
 | **RFC-0224 / #649 (landed `ee786dc`)** | Its engine is reused unchanged (§4). S2 adds `seed_workflow`, the pipeline tables and `LargePromptSettings`, and copies no #649 code. Pipeline parents are marked by their `large_prompt_pipelines` row and bypass #649's model planner (S4 entry before `loop.py:2344`; `test_649_planner_not_called_for_pipeline_parent_or_child`). Children are seeded, so they never auto-plan. Every other task keeps #649's behaviour. `tests/test_rfc0224_task_workflow.py` is not edited and must stay green. |
-| **RFC-0211 / #585** | Sections are rows a future scheduler can list as "upcoming tasks". When `DevelopmentScheduler` lands, its `resource_hold` (L380-411) is respected: dispatch defers while a hold names Ollama, with the parent event "Waiting for the scheduler's model hold". Nothing here waits on #585. |
+| **RFC-0211 / #670** | Sections are rows a future scheduler can list as "upcoming tasks". When `DevelopmentScheduler` lands, its `resource_hold` (L380-411) is respected: dispatch defers while a hold names Ollama, with the parent event "Waiting for the scheduler's model hold". Nothing here waits on #670. |
 | **RFC-0026 / 0029** | Children are ordinary durable tasks created through `AgentRuntime.create_task`. Follow-ups use `/continue`, and recovery uses `continue_task`. There is no second task system. |
 | **Reflex arbitration** | One decide per owner turn, with two riders only when a candidate exists. The ack is a fixed front notice worded from the gate outlook, so `keep_worker` semantics apply to the parent result (§1). |
 | **RFC-0218 S3b (+ #663)** | The parent turn's persona block runs first, unchanged. `switch_id = task_id:seq` is counted on the parent only. Children never call `apply_persona_switch`, so they publish no `persona_switched` or `persona_switch_failed`, and their `seq` counter stays empty. The 0218 test `t(acknowledgement) − t(persona_switched) < 50 ms` still holds, because the large branch publishes the `acknowledgement` event in the same position. |
@@ -605,7 +605,7 @@ class LargePromptSettings(BaseModel):
 | **RFC-0232 (#664)** | **Precedence (CoS, verbatim):** A turn whose prompt contains an absolute filesystem path together with RE intent (RFC-0232's narrowed dump/extraction detection) routes to reverse engineering and is never split by RFC-0231; a path with a plain or coding question routes normally. 0232-S2's RE helper (two-stage, specified in #664) is called by 0231's precheck and suppresses the riders; 0232's RE floor in `_apply_floors` runs before 0231's; one `decide()` per turn (§1). Tests: 0232's `test_path_plus_re_intent_routes_to_re_before_large_prompt_split` (`tests/test_rfc0232_intent_and_alias.py`); 0231's `test_path_plus_re_intent_routes_to_re_not_split`, `test_plain_path_question_not_routed_to_re`, `test_ffs_word_coding_question_not_routed_to_re`, `test_one_decide_per_turn`. Files: 0232-S2 (`owner_turn.py`) before 0231-S1; 0232-S3 → S4 → S5 (`loop.py`) before 0231-S4 and -S5. |
 | **RFC-0230 (#666)** | Its slices go **first** on the shared turn files: `loop.py` (0230-S0 → S2 → S3, after 0218-S3b), `owner_turn.py` (0230-S5, after 0218-S3b), `api.ts` (0230-S0). Then RFC-0232, then 0231. On `main.py` RFC-0225 goes first (0225-S2 → S3 → 0230-S0 → S5 → 0231-S0 → S5; 0225-S1 does not edit `main.py`, #652 (RFC-0225; final head in this PR's body)). On a held 27B lease, 0230-S3's per-turn prewarm skips via `register_lease_probe` and never touches the 27B. The large ack is the parent's front-lane line (rule 1), marked with 0230-S0's `mark`, and is held to 0230's ≤ 1.5 s p50 / ≤ 2.0 s p95 through three large cases appended to `scripts/anzu-latency-repro.ps1`. On a large verdict 0231 calls 0230-S3's `turn_prewarm.cancel_prewarm(turn_id)`. Row 6 (the two-system-message HTTP 500) is fixed in code by landed #649 (#666). |
 
-## Relationship to #649 and #585
+## Relationship to #649 and #670
 
 | Draft hunk | Taken? | Where |
 | --- | --- | --- |
@@ -613,7 +613,7 @@ class LargePromptSettings(BaseModel):
 | #649 `is_large_request` | **Landed; imported** as rules L4 (`task_workflow.py:31-37`) | S1 |
 | #649 `PLAN_SYSTEM` / `prepare_workflow` / auto-plan branch / `append_followup` | Landed; **not used by the pipeline** and left unchanged for every other task (§4) | — |
 | #649 `basic_qa` reply shape | Landed (`owner_turn.py:43`); the S1 precheck excludes it | S1 |
-| #585 scheduler | Not ported (respected when it lands) | S5 |
+| #670 scheduler | Not ported (respected when it lands) | S5 |
 
 ---
 
@@ -855,11 +855,11 @@ On `loop.py` and `owner_turn.py` the order is RFC-0230 (#666), then RFC-0232 (#6
 
 | File | Order |
 | --- | --- |
-| `backend/app/agent/loop.py` | #649 (landed) → 0218-S3b → 0230-S0 → 0230-S2 → 0230-S3 → 0232-S3 → 0232-S4 → 0232-S5 → 0231-S4 → 0231-S5 → 0233-S3 → 0233-S4 (#668). In `create_task`: 0230's `prewarm_worker` and route decision, then 0232's RE dispatch (S3 FFS, S5 APK), then 0231's large branch |
+| `backend/app/agent/loop.py` | #649 (landed) → 0218-S3b → 0230-S0 → 0230-S2 → 0230-S3 → 0232-S3 → 0232-S4 → 0232-S5 → 0231-S4 → 0231-S5 → 0233-S3 → 0233-S4 (#668; #670, RFC-0211, does not edit `loop.py`). In `create_task`: 0230's `prewarm_worker` and route decision, then 0232's RE dispatch (S3 FFS, S5 APK), then 0231's large branch |
 | `backend/app/decision/owner_turn.py` | #649 (landed) → 0218-S3b (not landed) → 0230-S5 → 0232-S2 → 0231-S1 → 0233-S1 (#668) |
 | `backend/app/decision/adapters/rules.py` | 0231-S1 only |
-| `backend/app/config.py` | #649 (landed) → 0228-S1 → 0228-S2 → 0231-S2 → #585 (draft; rebases onto whatever has landed when it is picked up) |
-| `backend/app/main.py` | 0225-S2 → 0225-S3 → 0230-S0 → 0230-S5 → 0231-S0 → 0231-S5 → 0233-S4 (#668) → #585 (draft, same rule). RFC-0225 goes first on `main.py` (CoS) |
+| `backend/app/config.py` | #649 (landed) → 0228-S1 → 0228-S2 → 0231-S2 → 0233-S1 (#668) → #670 (RFC-0211, supersedes #585; draft, merges `development` in when it is picked up, never rebases) |
+| `backend/app/main.py` | 0225-S2 → 0225-S3 → 0230-S0 → 0230-S5 → 0231-S0 → 0231-S5 → 0233-S4 (#668) → #670 (RFC-0211, supersedes #585; draft, same rule). RFC-0225 goes first on `main.py` (CoS) |
 | `backend/app/api/tasks.py` | #649 (landed) → 0231-S5 |
 | `backend/app/inference/hotswap.py` | 0225-S3 only (#652 (RFC-0225; final head in this PR's body), #655 (RFC-0228; final head in this PR's body)). 0231 does not edit it: the preload calls the existing `apply_runtime_profile_to_settings(persist=False)` (L88) and `MANAGER.load` |
 | `backend/app/inference/engine_coexistence.py` | 0225-S3 (creates it) → 0231-S0 (#652 S3 file table names the second owner) |
@@ -906,7 +906,7 @@ All seven run with fast mode off.
 - Parallel execution of parts.
 - A settings UI for `large_prompts`.
 - Changing `stream_owner_chat`.
-- The #585 scheduler itself.
+- The #670 scheduler itself.
 
 ## Risks
 
