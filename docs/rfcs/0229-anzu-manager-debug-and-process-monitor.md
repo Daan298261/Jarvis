@@ -4,7 +4,7 @@
 **Priority:** P2 (Taco batch 2026-10-17, items 8 and 9)  
 **Queue item:** (none in this PR — Architect may add a master-plan line after land; do not edit `JARVIS_MASTER_PLAN.md` here)  
 **Author:** Jarvis Architect  
-**Date:** 2026-10-20 (re-sliced 2026-10-20: UX review items 1–4 folded in)
+**Date:** 2026-10-20 (re-sliced 2026-10-20: UX review items 1–4 folded in; UX re-review 2026-10-20: `.js` MIME type pinned for the module script, script-tag row corrected)
 
 **Owner ask (verbatim intent, 2026-10-17):** "8. Add a debug logger and visual feedback on button presses. 9. Add a small screen listing every process ANZU spawned, showing its status, resource usage, and whether it is idle or working, with a timer for how long."  
 **Aligns with:** [`ANZU_PRODUCT_NORTH_STAR.md`](../../ANZU_PRODUCT_NORTH_STAR.md) §2 (one design language; "Finished is the target."), §10 ("Swarm computing should be invisible unless inspected" — this is the *inspect* surface), §15 ("ANZU should know whether its own systems are healthy… explain what happened"), §19 ("Do expose state when the user needs confidence in what ANZU is doing."; "Do not expose architecture simply because the architecture exists." — the screen lives in the Manager, not the main HUD), §20 Q6, Q11.  
@@ -48,6 +48,14 @@ Ship **one RFC with two implement slices** (one named model each, **fast off**).
 
 States per control button: `idle → pressed (≤100 ms) → working (spinner + elapsed seconds + phase text from the control endpoint: "Stopping…", "Waiting for health…") → success (green tick, 3 s) | failed (red, inline message, stays until dismissed)`. Other control buttons are disabled while one runs, with a tooltip saying why. Existing `confirm()` prompts are kept.
 
+### Module script MIME type (normative, UX re-review)
+
+S1 turns `app.js` into an ES module (`<script type="module">` in `static/index.html`). Browsers and WebView2 enforce a strict MIME check on module scripts and refuse one served as non-JavaScript, while the current classic script is tolerated. Verified on `development` @ `3f17c3d8`: `backend/app/manager/main.py` line 300 serves `/assets` with `app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")`, and Starlette's `StaticFiles` / `FileResponse` take `Content-Type` from Python `mimetypes`, which on Windows reads the registry, where `.js` is often mapped to `text/plain`. Without a fix, an affected Taco PC would lose the whole Manager UI, live Start/Restart/Stop buttons included.
+
+- `backend/app/manager/main.py` calls `mimetypes.add_type("text/javascript", ".js")` at module level (`import mimetypes` with the other stdlib imports), **before** the `app.mount("/assets", …)` line, so every `/assets/*.js` response carries `text/javascript; charset=utf-8` whatever the registry says. It is a plain call, not wrapped in a try/except or behind a flag.
+- `index.html` itself is served by `FileResponse` at `/admin` as `text/html` and is unaffected.
+- This line is part of S1 (the slice that introduces the module). S2's `processes.js` is served by the same mount and needs no further `main.py` change.
+
 ### Process monitor (normative)
 
 - Source: RFC-0225 S2 registry for ANZU-spawned processes. With the core healthy, the Manager reads `GET /api/system/processes`; with the core down, it reads `data_dir()/runtime/process-registry.json` directly and verifies each pid/create-time with psutil (so orphans left by a crashed core are visible).
@@ -66,6 +74,7 @@ States per control button: `idle → pressed (≤100 ms) → working (spinner + 
 | Error surfaced via `alert(message)` | **Yes** (alert kept) | Inline failed state on the button with the same message |
 | Status cards (Core, Tasks/agents, Model/GPU, Disk, Memory, Manager) refreshing every 5 s | **Yes** | "Processes" card link + Debug drawer |
 | `#field` background canvas | **Yes**, untouched | — |
+| Manager page loads and runs `app.js` (all controls work) on any Windows `.js` registry mapping | **Yes**: the module switch is safe only together with the pinned `text/javascript` type, so both ship in S1 | `mimetypes.add_type("text/javascript", ".js")` in `main.py` + MIME regression test |
 | Loopback-only middleware, session token, explicit confirm on control | **Yes** | Debug-log endpoint behind the same middleware |
 | Tauri manager mode (`JARVIS_MANAGER=1`), tray Quit Manager | **Yes** | — |
 
@@ -97,13 +106,14 @@ Assign order: **S1 → S2** (S2 also needs RFC-0225 S2).
 | --- | --- |
 | `backend/app/manager/debug_log.py` (new) | JSON-lines logger, rotation (2 MiB × 5), in-memory `_verbose` |
 | `backend/app/manager/redact.py` (new) | Redaction rules above |
-| `backend/app/manager/main.py` | `request_id` on control; phase reporting (`GET /api/manager/v1/control/progress`); `GET /api/manager/v1/debug-log`; `POST /api/manager/v1/debug-log/verbose` (local-only); script tag `type="module"` |
+| `backend/app/manager/main.py` | `request_id` on control; phase reporting (`GET /api/manager/v1/control/progress`); `GET /api/manager/v1/debug-log`; `POST /api/manager/v1/debug-log/verbose` (local-only). For the module switch it owns **only** `import mimetypes` + `mimetypes.add_type("text/javascript", ".js")` before `app.mount("/assets", …)`; the script tag is not in this file |
 | `backend/app/manager/supervisor.py` | Emit supervisor events to the debug logger (restart, backoff, crash-log preserved) |
 | `backend/app/manager/static/app.js` | Becomes an ES module entry (same behaviour, same `confirm()`/`alert()` calls); wires buttons and the Debug drawer |
 | `backend/app/manager/static/controls.js` (new) | Pure, DOM-free button state machine (`idle → pressed → working → success/failed`), elapsed formatting, phase text — exported for tests |
-| `backend/app/manager/static/index.html` | Debug drawer markup + Verbose toggle; `<script type="module" src="/assets/app.js">` |
+| `backend/app/manager/static/index.html` | Debug drawer markup + Verbose toggle; the script tag change `<script src="/assets/app.js">` → `<script type="module" src="/assets/app.js">` lives here (page served by `FileResponse` at `/admin`) |
 | `backend/app/manager/static/style.css` | Pressed/working/success/failed styles in the existing design language |
 | `tests/test_rfc0229_manager_debug.py` (new) | Below (alongside `tests/test_rfc0196_anzu_manager.py`, `tests/test_manager_supervisor.py`) |
+| `tests/test_rfc0229_manager_js_mime.py` (new); `.github/workflows/pr-tests.yml` (one append-only `pytest`-job step `- name: Manager JS MIME type tests (RFC-0229 S1)` / `run: python -m pytest -q -rs tests/test_rfc0229_manager_js_mime.py`) | Module MIME regression test (below); also collected by the existing "Run full backend suite" step |
 | `frontend/manager-controls.test.mjs` (new); `frontend/package.json` (`test:manager-controls`: `node --test manager-controls.test.mjs`, importing `../backend/app/manager/static/controls.js`); `.github/workflows/pr-tests.yml` (one append-only `frontend-build` step `- name: Manager control feedback tests (RFC-0229 S1)` / `run: npm run test:manager-controls`) | UX #3 |
 
 - [ ] Each press writes `press` + `control_start` + `control_end` lines with the same `request_id`, `duration_ms`, `ok`.
@@ -114,6 +124,8 @@ Assign order: **S1 → S2** (S2 also needs RFC-0225 S2).
 - [ ] Debug-log endpoint returns the last N lines, rejects non-loopback (existing middleware test pattern).
 - [ ] Button shows pressed within 100 ms, elapsed timer during a simulated 30 s restart, then success or the inline error; existing confirm texts unchanged.
 - [ ] Log rotation honoured; RFC-0196 tests green.
+- [ ] **(UX re-review)** `tests/test_rfc0229_manager_js_mime.py::test_manager_js_served_as_javascript_when_registry_says_text_plain`: in a fresh interpreter (`subprocess.run([sys.executable, "-c", …])` with `PYTHONPATH` = `backend/`, so the preset happens before `app.manager.main` is imported, as the Windows registry does) it first runs `mimetypes.add_type("text/plain", ".js")` and asserts `mimetypes.guess_type("x.js")[0] == "text/plain"` (preset took effect), then imports `app.manager.main` and with `TestClient(main.app)` asserts `GET /assets/app.js` and `GET /assets/controls.js` return 200 with `content-type` starting `text/javascript`. Removing the `add_type` line from `main.py` makes it fail. Runs in the "Manager JS MIME type tests (RFC-0229 S1)" step.
+- [ ] `GET /admin` still returns `index.html` as `text/html` and it contains `<script type="module" src="/assets/app.js">`.
 
 ### S2 — Spawned-process monitor screen
 
@@ -126,6 +138,7 @@ Assign order: **S1 → S2** (S2 also needs RFC-0225 S2).
 | `backend/app/manager/static/processes.js` (new) | ES module: pure row formatting (`formatRow`, timer text, "unloaded (idle) for …") exported for tests + screen rendering, 2 s refresh while visible |
 | `backend/app/manager/static/index.html` / `style.css` | Processes card/link and table styles |
 | `tests/test_rfc0229_process_view.py` (new) | Below |
+| `tests/test_rfc0229_manager_js_mime.py` (S1 file, extended sequentially) | Adds `/assets/processes.js` to the asserted list; no CI change (S1's step already runs the file) |
 | `frontend/manager-processes.test.mjs` (new); `frontend/package.json` (`test:manager-processes`, importing `../backend/app/manager/static/processes.js`); `.github/workflows/pr-tests.yml` (one append-only step `- name: Manager process screen tests (RFC-0229 S2)` / `run: npm run test:manager-processes`) | UX #3 |
 
 - [ ] Core healthy → every RFC-0225 registry entry listed with status, CPU, RSS, activity and timer.
@@ -137,6 +150,7 @@ Assign order: **S1 → S2** (S2 also needs RFC-0225 S2).
 - [ ] **(UX #2)** Endpoint returns `argv_redacted` only; a registry entry with `--api-key` never shows the value; no `argv` key in the payload.
 - [ ] **(UX #3)** `npm run test:manager-processes` covers row formatting, timers and the idle-unloaded text; runs in `pr-tests.yml`.
 - [ ] Endpoint p95 < 300 ms for 20 processes; screen stops polling when hidden.
+- [ ] **(UX re-review)** `tests/test_rfc0229_manager_js_mime.py` asserts `app.js`, `controls.js` **and** `processes.js` are served with `content-type` starting `text/javascript` with `.js` preset to `text/plain`; green in the "Manager JS MIME type tests (RFC-0229 S1)" step.
 
 ---
 
@@ -155,9 +169,9 @@ Assign order: **S1 → S2** (S2 also needs RFC-0225 S2).
 
 ## Likely files
 
-See ownership tables. Manager files are owned sequentially 0229-S1 → 0229-S2. No file here is owned by another RFC of the batch. Manager static files are bundled by the existing `--collect-all app` step in `scripts/build-backend-sidecar.ps1` and served by the existing `/assets` mount in `manager/main.py` (new modules need no build change).
+See ownership tables. Manager files are owned sequentially 0229-S1 → 0229-S2. No file here is owned by another RFC of the batch. Manager static files are bundled by the existing `--collect-all app` step in `scripts/build-backend-sidecar.ps1` and served by the existing `/assets` mount in `backend/app/manager/main.py` with the S1 `text/javascript` pin (new modules need no build change).
 
-`frontend/package.json` and `.github/workflows/pr-tests.yml` are shared by every frontend ticket in the 2026-10-17 batch: each ticket adds exactly one `test:*` script line and one `frontend-build` step (append-only hunks, trivial rebase) and touches nothing else in those files.
+`frontend/package.json` and `.github/workflows/pr-tests.yml` are shared by every frontend ticket in the 2026-10-17 batch: each ticket adds exactly one `test:*` script line and one `frontend-build` step (append-only hunks, trivial rebase) and touches nothing else in those files. 0229-S1 additionally appends one `pytest`-job step (the Manager JS MIME type test), also append-only.
 
 ## Out of scope
 
@@ -170,4 +184,5 @@ See ownership tables. Manager files are owned sequentially 0229-S1 → 0229-S2. 
 
 - **psutil cost on Windows** — sampling off the event loop, 2 s cadence only while visible.
 - **Registry not yet landed** — S2 hard-depends on RFC-0225 S2 and S3; S1 ships independently.
+- **`.js` served as `text/plain` on Windows** — the registry-driven `mimetypes` map would make WebView2 refuse the module and break the whole Manager UI; closed by the S1 `mimetypes.add_type("text/javascript", ".js")` line and its regression test, both required in the same PR as the `type="module"` switch.
 - **Module script on older WebView2** — ES modules are supported by every WebView2 runtime ANZU ships with; the Manager page is also opened in the default browser, where they are universal.
