@@ -71,8 +71,9 @@ data class PhoneMemorySnapshot(
         val fastId = CompanionPackCatalog.ABLITERATED_06B_ID
         val fastTransfer = state.modelDownloads[fastId]
         // Pack files are stat'ed on IO (packFileSnapshot), never during composition.
-        val fastInstalled by produceState(false, state.modelDownloads, state.localPackStatus) {
-            value = model.packManager.packFileSnapshot().installed[fastId] == true
+        var fastInstalled by remember { mutableStateOf(false) }
+        LaunchedEffect(state.modelDownloads, state.localPackStatus) {
+            fastInstalled = model.packManager.packFileSnapshot().installed[fastId] == true
         }
         OutlinedButton(onClick = model::installFastPhoneModel, enabled = !state.busy) { Text("Download fast 0.6B model · 397 MB") }
         if (fastTransfer != null && fastTransfer.stage != ModelDownloadStage.READY) ModelTransferFeedback(fastTransfer,
