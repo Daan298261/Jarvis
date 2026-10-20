@@ -15,12 +15,13 @@ import httpx
 from .development_scheduler import DevelopmentConfig, model_capabilities, read_json, write_json
 from ..providers.openai_compat import OpenAICompatProvider
 from ..inference.vision import messages_need_vision
-from ..providers.base import ChatResult, to_openai_messages
+from ..providers.base import ChatResult, _timeout_s, to_openai_messages
 from ..providers.tool_call_compat import normalize_tool_calls
 
 
 class NativeOllamaProvider(OpenAICompatProvider):
     """Ollama's native thinking, image and tool protocol for local missions."""
+    name = "ollama-native"
     def __init__(self, url, model, *, context_size=16384):
         super().__init__(url.rstrip("/") + "/v1", model=model, timeout=180)
         self.native = httpx.AsyncClient(base_url=url.rstrip("/"), timeout=180)
@@ -80,16 +81,43 @@ class NativeOllamaProvider(OpenAICompatProvider):
     async def chat_stream(self, messages, **kwargs):
         body = self.arguments(messages, **kwargs)
         body["stream"] = True
+        lane = kwargs.get("stream_lane")
+        prompt_tokens = kwargs.get("prompt_token_estimate")
+        started = last_chunk_at = time.perf_counter()
         async with self.native.stream("POST", "/api/chat", json=body) as response:
             response.raise_for_status()
             iterator = response.aiter_lines().__aiter__()
             first = True
             while True:
+                # Same contract as the shared providers (T2): a caller-supplied first-token or
+                # idle deadline raises a typed StreamStallError; no deadline means only the
+                # client's 180 s read timeout applies.
                 budget = kwargs.get("first_token_deadline_ms" if first else "idle_deadline_ms")
+                since = started if first else last_chunk_at
+                timeout = _timeout_s(budget)
+                if timeout is not None and not first:
+                    remaining = timeout
+                elif timeout is not None:
+                    remaining = max(0.0, timeout - (time.perf_counter() - started))
+                else:
+                    remaining = None
                 try:
-                    line = await asyncio.wait_for(anext(iterator), budget / 1000 if budget is not None else 180)
+                    if remaining is None:
+                        line = await anext(iterator)
+                    else:
+                        line = await asyncio.wait_for(anext(iterator), remaining)
                 except StopAsyncIteration:
                     return
+                except asyncio.TimeoutError:
+                    stall = self._stream_stall(
+                        deadline="first_token" if first else "idle",
+                        elapsed_ms=(time.perf_counter() - since) * 1000.0,
+                        budget_ms=float(budget),
+                        prompt_tokens=prompt_tokens,
+                        lane=lane,
+                    )
+                    # The enclosing ``async with`` closes the HTTP response as the stall propagates.
+                    await self._raise_stream_stall(stall, None, lane=lane, prompt_tokens=prompt_tokens)
                 if not line:
                     continue
                 raw = json.loads(line)
@@ -98,6 +126,7 @@ class NativeOllamaProvider(OpenAICompatProvider):
                 content = raw.get("message", {}).get("content", "")
                 if content:
                     first = False
+                    last_chunk_at = time.perf_counter()
                     yield content
 
     async def close(self):

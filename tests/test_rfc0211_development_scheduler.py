@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from app.agent import development_scheduler as ds
@@ -308,3 +309,63 @@ async def test_launch_keeps_owner_model_and_uses_trusted_code(scheduler, tmp_pat
     assert captured["cwd"] == str(control)
     assert run["base_sha"] == spec.start_commit
     scheduler.release()
+
+
+class _SlowNdjson(httpx.AsyncByteStream):
+    """httpx async byte stream: the given NDJSON lines, then silence."""
+
+    def __init__(self, lines, stall_s=5.0):
+        self.lines = lines
+        self.stall_s = stall_s
+        self.closed = False
+
+    async def __aiter__(self):
+        for line in self.lines:
+            yield (json.dumps(line) + "\n").encode()
+        await asyncio.sleep(self.stall_s)
+        yield b""
+
+    async def aclose(self):
+        self.closed = True
+
+
+def _native_provider(stream):
+    from app.agent.development_worker import NativeOllamaProvider
+
+    provider = NativeOllamaProvider("http://ollama.test", "qwen-coder")
+    provider.native = httpx.AsyncClient(
+        base_url="http://ollama.test",
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, stream=stream)),
+    )
+    return provider
+
+
+@pytest.mark.asyncio
+async def test_native_ollama_stream_honours_the_shared_stall_contract():
+    from app.providers.base import StreamStallError
+
+    # Idle deadline: one token, then the server goes silent.
+    stream = _SlowNdjson([{"message": {"content": "Hel"}}])
+    provider = _native_provider(stream)
+    seen = []
+    with pytest.raises(StreamStallError) as idle:
+        async for chunk in provider.chat_stream([ChatMessage("user", "hi")], idle_deadline_ms=50, stream_lane="dev"):
+            seen.append(chunk)
+    assert seen == ["Hel"]
+    assert idle.value.deadline == "idle" and idle.value.budget_ms == 50
+    assert idle.value.provider == "ollama-native" and idle.value.model == "qwen-coder" and idle.value.lane == "dev"
+    assert stream.closed
+    await provider.close()
+
+    # First-token deadline: nothing arrives at all.
+    provider = _native_provider(_SlowNdjson([]))
+    with pytest.raises(StreamStallError) as first:
+        async for _ in provider.chat_stream([ChatMessage("user", "hi")], first_token_deadline_ms=50):
+            pass
+    assert first.value.deadline == "first_token"
+    await provider.close()
+
+    # No deadline supplied: a complete stream is passed through untouched.
+    provider = _native_provider(_SlowNdjson([{"message": {"content": "a"}}, {"message": {"content": "b"}, "done": True}], stall_s=0))
+    assert [c async for c in provider.chat_stream([ChatMessage("user", "hi")])] == ["a", "b"]
+    await provider.close()
