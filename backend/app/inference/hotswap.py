@@ -85,7 +85,7 @@ def local_lmstudio_fallback_settings(settings):
     return fallback
 
 
-async def apply_runtime_profile_to_settings(runtime: RuntimeProfile) -> None:
+async def apply_runtime_profile_to_settings(runtime: RuntimeProfile, *, persist: bool = True):
     # Only save after the external runtime has answered its probe. A failed
     # click must never leave a stale LM Studio server as the next boot target.
     settings = load_settings().model_copy(deep=True)
@@ -188,7 +188,10 @@ async def apply_runtime_profile_to_settings(runtime: RuntimeProfile) -> None:
         settings.inference.profile = runtime.model_profile
     if runtime.context_limit:
         settings.inference.context_size = int(runtime.context_limit)
-    save_settings(settings)
+    settings.inference.gguf_path = (runtime.gguf_path or "").strip() if not _provider_needs_remote_probe(provider) else ""
+    if persist:
+        save_settings(settings)
+    return settings
 
 
 async def activate_runtime_profile(runtime: RuntimeProfile, *, force: bool = False):
@@ -203,8 +206,7 @@ async def activate_runtime_profile(runtime: RuntimeProfile, *, force: bool = Fal
 
     settings = load_settings()
     previous_context = int(MANAGER.state.context_size or settings.inference.context_size or 0)
-    await apply_runtime_profile_to_settings(runtime)
-    settings = load_settings()
+    settings = await apply_runtime_profile_to_settings(runtime, persist=False)
     profile_name = _resolve_builtin_profile_name(runtime, settings.inference.profile)
     context_size = int(runtime.context_limit or settings.inference.context_size or 0) or None
     label = (runtime.label or runtime.name or "runtime profile").strip()
@@ -226,6 +228,8 @@ async def activate_runtime_profile(runtime: RuntimeProfile, *, force: bool = Fal
         if message.lower().startswith("hotswap failed"):
             raise
         raise RuntimeError(f"Hotswap failed for {label}: {message}") from exc
+    settings.inference.profile = profile_name
+    save_settings(settings)
     new_context = int(MANAGER.state.context_size or context_size or settings.inference.context_size or 0)
     rebind_owner_conversations_after_hotswap(
         new_context,

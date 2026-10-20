@@ -1,4 +1,5 @@
 let supported: boolean | undefined
+export const MUSCULAR_HUMANOID_AVATAR_ID = "humanoid_muscular"
 
 export function supportsHumanoidRuntime(): boolean {
   if (supported !== undefined) return supported
