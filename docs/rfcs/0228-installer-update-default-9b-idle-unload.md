@@ -9,6 +9,7 @@
 **Owner ask (verbatim intent, 2026-10-17):** "5. Add 'Update' as an installer option. 6. Make the default model the 9B uncensored, qwen3.5-9b-defiant-fable-uncensored, at Q3 or Q4 so it stays fast. 7. Grey out options that are already installed. When a newer model with a similar GPU, RAM and disk profile exists for an installed-but-outdated option, mark it '(can be updated to > modelname)'."  
 **Owner context (shared memory):** Taco runs the 9B through LM Studio at `http://127.0.0.1:1234/v1`; `anzu-coder-27b` (Ollama, ~12 GB GPU) is for coding; the 9B should get an **idle unload timer** rather than being pinned forever, and ANZU respawns it on demand.  
 **Aligns with:** [`ANZU_PRODUCT_NORTH_STAR.md`](../../ANZU_PRODUCT_NORTH_STAR.md) §6 (fast when simple), §9 ("**ANZU chooses infrastructure.**"), §19 ("Do remove unnecessary complexity from the user's experience."; "Do not remove useful capability merely to simplify the codebase."), §20 Q1 ("Does it reduce the amount of technical knowledge required from the user?"), Q5, Q8, §21 ("can be installed and used with minimal configuration").  
+**Amended 2026-10-20 (CoS follow-up):** LM Studio is an engine ANZU can **drive**, not only stop — owner-consented managed mode (RFC-0225 S3/S4) lets ANZU idle-unload and reload Taco's own 9B and yield VRAM to `anzu-coder-27b`.  
 **Extends (do not rewrite):** [RFC-0124 clean install / reinstall](0124-clean-install-reinstall-owned-path-wipe.md) (existing-install page and custom-file contract), [RFC-0093](0093-installer-force-stop-and-prepare-unstick.md) / [RFC-0136](0136-zombie-kill-setup-next-and-start.md) (stop before install), [RFC-0196](0196-native-anzu-manager.md) ("All installer choices except the 27B model are selected by default"), [RFC-0225](0225-local-engine-coexistence-and-resilient-api.md) (respawn on demand), `INSTALLER.md`.  
 **Open implementation PRs that overlap (rebase gate):** #648 touches `installer/windows/Jarvis.iss`, `backend/app/inference/manager.py`, `lmstudio_server.py`; #649 touches `profiles.py`, `manager.py`, `runtime_install.py`. Slices owning those files start after #648/#649 are merged or closed.  
 **Astra boundary:** Persona/presence/WebGL/appearance out of scope (Astra). Installer branding/theme (`ThemeExistingInstallPage`, `ThemeChecklist`) is reused unchanged.
@@ -42,7 +43,10 @@ Ship **one RFC with three implement slices** (one named model each, **fast off**
 
 - `InferenceSettings.idle_unload_seconds` (default **900**, `0` = pinned; range 0–86400). Applies to the **worker** model only; the front lane (`front_responder.resident`) is unchanged.
 - Managed llama-server: after `idle_unload_seconds` with no request lease held and no task running, `MANAGER.unload()`; next request transparently reloads (same profile/context), with the existing "Loading model…" HUD state and elapsed timer.
-- LM Studio selected engine: pass a native TTL when the installed LM Studio supports it (`lms load --ttl` / REST `ttl`), else ANZU's own timer calls `/api/v1/models/unload` for the instance it loaded; on demand ANZU reloads through `lmstudio_context`/`ensure_local_lmstudio`. ANZU never unloads LM Studio instances it did not load.
+- LM Studio selected engine, **managed mode off** (default): pass a native TTL when the installed LM Studio supports it (`lms load --ttl` / REST `ttl`), else ANZU's own timer calls `/api/v1/models/unload` for the instance it loaded; on demand ANZU reloads through `lmstudio_context`/`ensure_local_lmstudio`. ANZU never unloads LM Studio instances it did not load.
+- LM Studio selected engine, **managed mode on** (RFC-0225 `is_managed()`; owner consent asked once in the 0225-S4 prompt / Model page, remembered, revocable): ANZU may load, unload and reload **any** instance of the selected model(s) on that LM Studio, including instances the owner loaded himself (e.g. Taco's 9B on :1234). It applies `idle_unload_seconds` to them, preferring LM Studio's native TTL (re-load the instance with `ttl` via REST / `lms load --ttl`, same model key + context as the owner's instance) and otherwise its own timer + `/api/v1/models/unload`; on the next request it reloads via the LM Studio API / `lms load` with the recorded model key and context, then answers. Managed mode never stops the LM Studio server or app.
+- **VRAM yielding for `anzu-coder-27b` (managed mode on):** when a request routes to `anzu-coder-27b` (~12 GB, Ollama :11434; respawned via RFC-0225 S3 if ledgered) and free VRAM (NVML / `nvidia-smi`) is below its requirement plus 1 GB headroom, ANZU unloads the managed 9B instance(s) first, then serves the 27B. When the 27B has been idle for `idle_unload_seconds` (or Ollama reports it unloaded via `/api/ps`), ANZU reloads the 9B so ordinary chat is warm again. With managed mode off, ANZU does not unload the owner's 9B; the 27B request proceeds or fails with Ollama's own error, surfaced to the owner.
+- **Owner-visible lines:** exactly one line on each unload-for-VRAM ("Unloaded the 9B in LM Studio to make room for anzu-coder-27b.") and each reload ("Reloaded the 9B in LM Studio."); idle unloads are logged and shown in the HUD model state, not announced. Every failed unload/reload is surfaced to the owner with the LM Studio/Ollama error; never swallowed, never retried silently in a loop.
 - Never unload during an active stream, tool loop or task stage; the timer resets on every lease.
 
 ### Installer Update + installed state (normative)
@@ -105,16 +109,22 @@ Assign order: **S1 → S2; S3 after S1.**
 | Path | Why |
 | --- | --- |
 | `backend/app/config.py` | `InferenceSettings.idle_unload_seconds` (only this hunk) |
-| `backend/app/inference/manager.py` | Idle timer bound to request lease/task activity; unload; transparent reload on next request |
-| `backend/app/inference/lmstudio_server.py` | Native TTL capability detection; reload path |
-| `backend/app/inference/lmstudio_context.py` | Pass TTL on load / unload only ANZU-loaded instances |
+| `backend/app/inference/manager.py` | Idle timer bound to request lease/task activity; unload; transparent reload on next request; VRAM yielding (unload managed 9B before a 27B request that does not fit; reload 9B after 27B idle) |
+| `backend/app/inference/lmstudio_server.py` | Native TTL capability detection; reload path (`lms load` with recorded key/context/TTL) |
+| `backend/app/inference/lmstudio_context.py` | Pass TTL on load; unload only ANZU-loaded instances when managed mode is off, any instance of the selected model(s) when `is_managed()` is on (read-only import from RFC-0225 `engine_coexistence.py`; that file is not edited here) |
 | `frontend/src/settings/ModelsSettingsPane.tsx` | "Unload when idle" control (Never / 5 / 15 / 30 / 60 min), existing controls untouched |
 | `tests/test_rfc0228_idle_unload.py` (new) | Below |
 
 - [ ] No requests for `idle_unload_seconds` → worker unloaded (VRAM freed in Windows soak); front lane untouched.
 - [ ] Next request reloads and answers; HUD shows the existing loading state; no error banner.
 - [ ] Timer never fires during a stream, tool loop or task stage (tests with held lease).
-- [ ] LM Studio: ANZU unloads only the instance it loaded; an owner-loaded instance is never unloaded.
+- [ ] LM Studio, managed mode off: ANZU unloads only the instance it loaded; an owner-loaded instance is never unloaded.
+- [ ] Managed mode on + Taco's owner-loaded 9B in LM Studio :1234 idle for 15 min (`idle_unload_seconds = 900`) → instance unloaded (native TTL when supported, else ANZU unload); VRAM freed in the Windows soak.
+- [ ] Managed mode on, after that idle unload → next chat reloads the 9B via the LM Studio API / `lms load` with the same model key and context, and answers; HUD shows the existing loading state, no error banner.
+- [ ] Managed mode on + request for `anzu-coder-27b` with insufficient free VRAM → 9B unloaded first, one owner line, 27B served; after the 27B idles for `idle_unload_seconds` (or Ollama `/api/ps` shows it unloaded) → 9B reloaded, one owner line.
+- [ ] Managed mode off → Taco's owner-loaded 9B is untouched by the idle timer and by a 27B request (no unload call issued; asserted in tests).
+- [ ] No unload (idle or VRAM yielding) while a stream, tool loop or task stage holds a lease on the 9B; the 27B request waits for the lease or is served once it ends.
+- [ ] Failed unload or reload (LM Studio/Ollama error, timeout) → surfaced to the owner with the error; state is not reported as unloaded/loaded.
 - [ ] `idle_unload_seconds = 0` → never unloads.
 
 ### S3 — Installer Update option, installed/greyed tasks, "can be updated to"
@@ -153,7 +163,7 @@ Assign order: **S1 → S2; S3 after S1.**
 
 ## Likely files
 
-See ownership tables. `lmstudio_server.py` taken over from RFC-0225 S3 after it merges. `config.py`: only the `InferenceSettings.idle_unload_seconds` hunk is owned here.
+See ownership tables. `lmstudio_server.py` taken over from RFC-0225 S3 after it merges; `lmstudio_context.py` is edited only by 0228-S2 and only after 0225-S3 merges (sequential 0225-S3 → 0228-S2 for both LM Studio files). Managed-mode state is owned by RFC-0225 S3 (`engine_coexistence.py`); 0228-S2 only reads it. `config.py`: only the `InferenceSettings.idle_unload_seconds` hunk is owned here.
 
 ## Out of scope
 
@@ -167,3 +177,4 @@ See ownership tables. `lmstudio_server.py` taken over from RFC-0225 S3 after it 
 - **HF repo churn** (80+ commits, last updated 2026-10-17) → pin by commit SHA + file SHA256 in `model-catalog.json`.
 - **Uncensored default** → consistent with the existing abliterated default and owner decision; policy gates (RFC-0002/0031) unchanged.
 - **Reload latency after idle** → visible loading state; owner can set "Never".
+- **Driving owner-loaded LM Studio instances** → only with managed mode on (explicit, remembered, revocable consent); reload reuses the owner's recorded model key and context so his setup is restored as it was.
