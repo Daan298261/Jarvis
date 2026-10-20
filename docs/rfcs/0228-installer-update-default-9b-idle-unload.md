@@ -4,7 +4,7 @@
 **Priority:** P2 (Taco batch 2026-10-17, items 5, 6, 7)  
 **Queue item:** (none in this PR — Architect may add a master-plan line after land; do not edit `JARVIS_MASTER_PLAN.md` here)  
 **Author:** Jarvis Architect  
-**Date:** 2026-10-20 (re-sliced 2026-10-20: lands on current `development` without drafts #648/#649; D2 review items 1–9 folded in; D2 re-review items 1–3 and second re-review items 1–2 of 2026-10-20 folded in)
+**Date:** 2026-10-20 (re-sliced 2026-10-20: lands on current `development` without drafts #648/#649; D2 review items 1–9 folded in; D2 re-review items 1–3 second re-review items 1–2 and third re-review item 1 of 2026-10-20 folded in; S4 skip-unchanged assets added at Taco's request 2026-10-20)
 
 **Owner ask (verbatim intent, 2026-10-17):** "5. Add 'Update' as an installer option. 6. Make the default model the 9B uncensored, qwen3.5-9b-defiant-fable-uncensored, at Q3 or Q4 so it stays fast. 7. Grey out options that are already installed. When a newer model with a similar GPU, RAM and disk profile exists for an installed-but-outdated option, mark it '(can be updated to > modelname)'."  
 **Owner context (shared memory):** Taco runs the 9B through LM Studio at `http://127.0.0.1:1234/v1`; `anzu-coder-27b` (Ollama, ~12 GB GPU) is for coding; the 9B should get an **idle unload timer** rather than being pinned forever, and ANZU respawns it on demand.  
@@ -78,11 +78,11 @@ Terms are RFC-0225's: **reload** = loading a model into a listening engine (this
 - **A 9B the VRAM gate unloaded is re-warmed only by the 27B-idle trigger (D2 second re-review #1).** When the RFC-0225 gate unloads a 9B to make room for a large model, it records `engine_coexistence.note_gate_unload(nine_b=<target>, heavy=<engine, model>)` (an RFC-0225 S3 hook, next to `note_idle_unload`). `NINE_B_REWARM` reads it through `engine_coexistence.gate_unloaded()` and clears it with `clear_gate_unload()`. While that marker is set:
   - the orchestrator trigger is a **no-op** (dropped, not deferred);
   - the 27B-idle trigger fires only once the heavy model has **left VRAM**: Ollama `/api/ps` no longer lists it (its `keep_alive` = `idle_unload_seconds` expired), or, for an LM Studio / llama-server heavy model, native inventory shows it unloaded. Until then it re-polls `/api/ps` every 30 s off the event loop.
-  - Then exactly one reload of the gate-unloaded 9B runs, with one owner line "Reloaded the 9B.", and the marker is cleared.
-  - A new request for the heavy model while waiting keeps it resident and the wait continues. A chat request for the 9B while the 27B is resident goes through `prepare_engine_for`, where the RFC-0225 gate decides, never through the timer.
+  - Then exactly one reload of the gate-unloaded 9B runs, with one owner line `engine_coexistence.owner_line("Reloaded the 9B.")` (RFC-0225 "Owner-line surfaces": an `engine_notice` frame rendered and spoken by the HUD `EngineNotices` consumer), and the marker is cleared.
+  - A new request for the heavy model while waiting keeps it resident and the wait continues. A **chat request for the 9B while the 27B is resident** goes through `prepare_engine_for` and is decided by **RFC-0225 step 6 (reverse direction)**, never by the timer. Measured free VRAM fits the 9B → it loads and nothing is unloaded. Short and the 27B is ANZU-loaded → the 27B is unloaded (verified), `clear_gate_unload()`, the 9B loads through the same prepare/reload path, and one owner line is emitted. Short and the 27B is owner-loaded, or the unload fails / VRAM stays short → explicit error line, no blind load. Meanwhile the resident 2B front lane answers the turn. Any successful 9B load clears the marker, so the pending 27B-idle trigger then finds nothing to do and the timer never reloads the 9B a second time.
   - **Decision (Architect): defer rather than force-unload the 27B.**
     - *VRAM:* both choices avoid oversubscription. Deferring never holds two large models at once, and it never evicts a model ANZU just loaded for an active coding session.
-    - *Latency:* force-unloading the 27B at 120 s would make the next coding request (bursty, minutes apart) pay a ~12 GB reload, then evict the 9B again through the gate. That ping-pong costs two large loads per coding burst. Deferring costs at most one 9B reload (the existing "Loading model…" state) on the first chat turn after a coding burst, and only when that turn arrives before the 27B idles out.
+    - *Latency:* force-unloading the 27B at 120 s would make the next coding request (bursty, minutes apart) pay a ~12 GB reload, then evict the 9B again through the gate. That ping-pong costs two large loads per coding burst. Deferring costs at most one 9B reload (the existing "Loading model…" state, done by the RFC-0225 step 6 reverse rule while the 2B front lane answers) on the first chat turn after a coding burst, and only when that turn arrives before the 27B idles out.
     - The 27B is still never held longer than `idle_unload_seconds` (15 min default).
   - **Last guard:** the coordinator measures free VRAM (RFC-0225 `vram.py`) before any timer reload and skips the reload if free < the 9B requirement + 1 GB. So a restore never loads the 9B while a resident model leaves no room, whoever loaded that model.
 - **`schedule_orchestrator_restore` stops calling `MANAGER.load` itself.** It calls `NINE_B_REWARM.schedule(reason="orchestrator_restore", delay=orchestrator_idle_seconds(app))`. On fire, under the lock, the coordinator re-reads settings, resolves the target with `default_orchestrator_profile_name()`, and:
@@ -91,10 +91,10 @@ Terms are RFC-0225's: **reload** = loading a model into a listening engine (this
   - a gate-unload marker is set → no-op (see above);
   - the 9B was unloaded by the idle timer (`engine_coexistence.idle_unloaded()` true, timestamp `unloaded_idle_at`) → no-op; it is **never** reloaded by a timer, only by the next request through `prepare_engine_for` (the S2 idle unload also cancels any pending re-warm);
   - a request lease is held → waits for it (same bound as the idle timer);
-  - target weights missing → no swap away from the loaded model, and one owner-visible line "Couldn't switch back to <target>: its model file is missing." (no silent `return`);
+  - target weights missing → no swap away from the loaded model, and one owner line `engine_coexistence.owner_line("Couldn't switch back to <target>: its model file is missing.", level="error", engine_id=…)` plus the RFC-0225 `engines:<engine_id>` health-rail item (no silent `return`);
   - otherwise reloads through the **same** S2 reload routine (`prepare_engine_for` → reload: `MANAGER.load(app, target)` for the managed llama-server, the `lmstudio_server` reload routine for LM Studio), so `prepare_engine_for`'s single-flight joins it with any concurrent on-demand reload; a failure is surfaced with the engine error, never swallowed and never retried in a loop.
 - `effective_answer_profile_name` falls back to `default_orchestrator_profile_name()` (the saved 9B), then to the loaded profile, then to the saved profile name, never to `ornith_9b`. `agent/loop.py` is not edited (it keeps calling `schedule_orchestrator_restore`).
-- **Owner-visible lines:** delivered through RFC-0225's "Owner-line surfaces" (`engine_coexistence.owner_line()`; failures also on the HUD health rail through the `engines` self-check item); exactly one line per unload-for-VRAM (RFC-0225) and per re-warm reload; idle unloads are logged and shown in the HUD model state ("unloaded (idle) for 12 min", consumed by RFC-0229 S2), not announced. Every failed unload/reload is surfaced to the owner with the LM Studio/Ollama error; never swallowed, never retried silently in a loop.
+- **Owner-visible lines:** every line in this RFC ("Reloaded the 9B.", "Couldn't switch back to …", every failed unload / reload) goes through RFC-0225's `engine_coexistence.owner_line()` and nothing else. That publishes an `engine_notice` frame on `OWNER_CHAT_CHANNEL`, which the HUD `EngineNotices` consumer (RFC-0225 S3) shows as a chip and speaks when speak-replies is on, plus the task copy (`engine_notice` + `chat_tts`) when a turn is known. `publish_owner_text` is never used for these lines, because its channel has no client on `development`. Failures also appear on the HUD health rail as the per-engine `engines:<engine_id>` self-check item; exactly one line per unload-for-VRAM (RFC-0225) and per re-warm reload; idle unloads are logged and shown in the HUD model state ("unloaded (idle) for 12 min", consumed by RFC-0229 S2), not announced. Every failed unload/reload is surfaced to the owner with the LM Studio/Ollama error; never swallowed, never retried silently in a loop.
 - Never unload during an active stream, tool loop or task stage; the timer resets on every lease.
 
 ### Installer Update + installed state (normative)
@@ -106,6 +106,29 @@ Terms are RFC-0225's: **reload** = loading a model into a listening engine (this
 5. Fresh installs: no greying; default selections as RFC-0196 (27B unchecked); single default 9B per the Ornith decision.
 6. Silent mode (`/VERYSILENT`) supports `/UPDATE` with the same semantics (no successor unless `/UPGRADEMODELS=<ids>` names it).
 7. The `dl_localllm` description changes to the Defiant-Fable 9B; existing Abiray 9B and Ornith 9B installs are "outdated" with successor `fable_9b` (similar profile) → labelled per rule 4.
+
+### Skip unchanged bundled assets (normative; Taco 2026-10-20, owned by S4)
+
+**Manifest (hashes only from here).** On `development` there is no single model manifest. The expected hashes and sizes sit inline in scripts: `installer/windows/stage-front-model.ps1:42` (`$ExpectedSha` + `$ExpectedBytes` for the 2B front GGUF, build-time staging), and `bootstrap.ps1::Ensure-Front2bGguf` (`$expectedBytes = 1280835840`, size only, no hash). `Ensure-BootstrapGguf` accepts any non-empty file. The batch's manifest is **`installer/windows/model-catalog.json`**, created by S3 (component id → files/markers, version, resource profile, `superseded_by`, pinned commit + SHA256). S4 extends every file entry with `size` (bytes) and `sha256` (lower-case hex), plus `superseded_files[]` (`size`, `sha256`, `version`) for the outdated versions S3 already names. It also moves the two inline constants into the catalogue: `stage-front-model.ps1` and `bootstrap.ps1` read them from it, and a test keeps them from drifting. Hashes are never computed from "whatever is on disk" or guessed at runtime; a component without a catalogue `sha256` is never classified (a) and keeps today's behaviour.
+
+**One shared helper.** The installer runs on PowerShell scripts that Inno launches (`bootstrap.ps1`, and S3's `installed-components.ps1`, whose JSON Inno already reads). So the check lives in **`installer/windows/asset-state.ps1`** (new, dot-sourced), with `Get-AnzuAssetState -Catalog <path> -Root <app> -Component <id> [-HashCachePath] [-HashTimeoutSeconds 900] [-ProgressPath]`. It is called by:
+- `installed-components.ps1`, which Inno runs via `Exec` in `PrepareToInstall` (Install, Upgrade, Repair, Reinstall, Update). It writes `{tmp}\asset-state.json` (per component: `state`, `files[]`, `message`), which drives the checklist labels and the `[Files]` `Check:` lookups;
+- `bootstrap.ps1` (the updater path: `-Update`, and fresh-install downloads), before every model download in `Ensure-*`. It reuses the same hash cache, so files Setup just verified are not hashed again.
+
+`[Code]` contains **no** size or hash logic: it reads the JSON (`AssetNeedsCopy('<component>')` = state is `missing`, `damaged` or `hash-failed`). Payload model lines carry `Check: AssetNeedsCopy('<component>')`, combined with existing Checks by `and`.
+
+**States per component (all files must agree):**
+- **(a) present and unchanged.** Every file exists, its size equals the catalogue `size`, **then** its SHA-256 equals the catalogue `sha256`. The download and the payload copy are skipped. The checklist row is **pre-checked** and its label is **prefixed** `(already installed) `. S3's grey-out stays: the row is still disabled, so unticking can't delete a verified file. bootstrap logs `Write-Skip "<name> (already installed)"`.
+- **(b) present but outdated.** Size + hash match a `superseded_files` entry → S3's existing `(can be updated to > <successor>)` behaviour, **unchanged** (unchecked, enabled, opt-in, `ShouldCopyDefault9BPayload` rules). Nothing is downloaded unless ticked.
+- **(c) missing.** Download / copy as today.
+- **damaged** (size matches nothing, or size matches but the hash matches nothing): treated as (c), with the visible line "<name> is damaged; downloading it again." Not a fourth checkbox state.
+- **hash-failed** (I/O error, file locked, or hashing exceeded `-HashTimeoutSeconds`): treated as (c), with the visible line "Couldn't verify <name> (<error>); downloading it again." **Never silent:** the line is shown in the wizard (progress page and, in `CurStepChanged(ssPostInstall)`, the Finished-page summary read from `{tmp}\asset-state.json`), and written to `{app}\logs\installer-assets.log` and the Inno Setup log. bootstrap prints the same line to its log.
+
+**Size first, hash second, cached.** The size check is free; the hash runs only when the size matches the current or a superseded entry. Hashing streams in 4 MiB blocks (`System.Security.Cryptography.SHA256`), off the wizard thread. The cache `{app}\data\installer\asset-hash-cache.json` is keyed on full path (case-normalised) + size + `LastWriteTimeUtc` ticks and stores `sha256` and `hashed_at`. A hit skips hashing; any change to size or mtime is a miss. A corrupt cache file is discarded and rebuilt, with one log line. Clean reinstall removes it along with `data\`.
+
+**Visible progress.** While `installed-components.ps1` runs, Inno shows a `TOutputProgressWizardPage` "Checking installed models…" and polls `{tmp}\asset-state.progress` (written by the helper: `<component> <file> <percent>`) every 250 ms until `{tmp}\asset-state.json` exists or the overall timeout passes. A cache hit shows "verified (cached)". In silent mode the same lines go to the log.
+
+**Interplay with `ShouldCopyDefault9BPayload` (S1/S3).** S4 replaces only the body of S1's `ExistingFable9BMissing` with `AssetNeedsCopy('fable_9b')`, so an own-default repair now also re-copies a damaged or unverifiable Fable, not only a missing one. The fresh-install, Clean-reinstall and opt-in branches are unchanged, and `LmStudioServesFable` still wins. An install whose Fable is present and unchanged copies nothing. With the successor unticked on an Ornith install, `ShouldCopyDefault9BPayload` stays false whatever `asset-state` says.
 
 ### Taco's setup fixtures (normative, D2 #2)
 
@@ -125,7 +148,8 @@ Touched live UI: installer existing-install page and task checklist; Settings �
 | Current live behaviour | Preserved? | Added alongside |
 | --- | --- | --- |
 | Existing-install page: Upgrade (newer) / Repair (same) primary, Reinstall, Semi-clean, Clean, with current texts and confirmations | **Yes**, all kept, same order after the new entry | "Update" entry |
-| `[Tasks]` checklist with Select-all (`CreateSelectAll`), theming, groups | **Yes** | Disabled+checked "(installed)" items; unchecked "(can be updated to > …)" items |
+| `[Tasks]` checklist with Select-all (`CreateSelectAll`), theming, groups | **Yes** | Disabled+checked "(installed)" items; unchecked "(can be updated to > …)" items; (S4) checked "(already installed) …" items whose bytes were verified against the manifest |
+| Every bundled-model download / payload copy runs on every Upgrade / Repair / Update (live today: `bootstrap.ps1::Ensure-BootstrapGguf` skips on any non-empty file, `Ensure-Front2bGguf` on size only, `Jarvis.iss` `[Files]` model lines recopy) | **Yes** for missing, damaged or unverifiable files (still downloaded / copied) | (S4) a byte-verified unchanged file is not downloaded or copied again; verification progress and any fallback are shown |
 | RFC-0124 custom-file contract (Upgrade/Repair keep custom files) | **Yes** — Update keeps custom files identically | — |
 | 27B Expert unchecked by default | **Yes** | — |
 | HUD "Loading model…" + elapsed during load | **Yes** (reused for on-demand reload) | "unloaded (idle)" state |
@@ -159,7 +183,7 @@ PG ruling via CoS (2026-10-20): no gate. Ported pieces are cited "Ported from #6
 
 ## Slices (one ticket each)
 
-Assign order: **S1 → S2; S3 after S1.**
+Assign order: **S1 → S2; S3 after S1; S4 after S3.**
 
 ### S1 — Defiant-Fable 9B default: gate, single default 9B, profile pinning
 
@@ -232,6 +256,10 @@ Assign order: **S1 → S2; S3 after S1.**
   - `test_restore_never_loads_9b_while_27b_resident`: default install (managed off). The coding request makes the RFC-0225 gate `MANAGER.unload()` the ANZU-loaded Fable 9B and load `anzu-coder-27b` in Ollama (`engine_coexistence.gate_unloaded()` set). The `agent/loop.py` restore is scheduled, the fake clock passes 120 s and 600 s with `/api/ps` still listing the 27B → **no** 9B load call, no owner line. `/api/ps` then drops the 27B → exactly **one** 9B reload through `prepare_engine_for` and exactly one owner line "Reloaded the 9B.", and the marker is cleared.
   - `test_restore_skips_when_free_vram_short`: no gate marker, but free VRAM (faked) < 9B requirement + 1 GB because another resident model fills the GPU → restore fires → no load; the next chat request goes through `prepare_engine_for`.
   - `test_coding_request_while_waiting_keeps_27b`: during the wait a second coding request hits the resident 27B → no 9B reload, no 27B unload, wait continues.
+  - **(D2 third re-review #1)** `test_first_chat_after_coding_uses_reverse_gate_and_clears_marker`: default install, ANZU-loaded 27B resident, `gate_unloaded()` set, measured free VRAM short. A chat request at 5 min → the RFC-0225 step 6 reverse rule unloads the 27B (verified), exactly **one** 9B load, `gate_unloaded()` cleared, exactly one `engine_notice` on the owner channel. The fake clock then advances 30 min with `/api/ps` empty → **no** further 9B load by `NINE_B_REWARM`.
+  - `test_first_chat_after_coding_fits_no_unload`: same, but free VRAM fits the 9B → no 27B unload, one 9B load, marker cleared, no later timer reload.
+  - `test_first_chat_after_coding_owner_loaded_27b_refused`: owner-loaded 27B resident, VRAM short → no unload, no 9B load, the error `engine_notice` naming the owner-loaded 27B, marker kept (the 27B-idle trigger still re-warms once it leaves VRAM).
+  - `test_rewarm_owner_lines_use_engine_notice`: "Reloaded the 9B." and "Couldn't switch back to …" each produce exactly one `engine_notice` frame on a `BUS.subscribe(OWNER_CHAT_CHANNEL)` queue, and `publish_owner_text` (patched) is never called.
   - `test_restore_missing_weights_is_owner_visible`: target GGUF missing → no `MANAGER.load` of another profile, loaded model kept, one owner line; reload error → surfaced, not swallowed.
 - [ ] Failed unload or reload (LM Studio/Ollama error, timeout) → surfaced to the owner with the error; state is not reported as unloaded/loaded.
 - [ ] `idle_unload_seconds = 0` → never unloads.
@@ -261,6 +289,33 @@ Assign order: **S1 → S2; S3 after S1.**
 - [ ] Update keeps every custom file (RFC-0124 contract test).
 - [ ] `/VERYSILENT /UPDATE` performs the same refresh without successors; `/UPGRADEMODELS=fable_9b` opts in; Inno compile passes in CI.
 
+### S4 — Installer skip-unchanged assets (size + SHA-256 against the manifest)
+
+**Model:** Grok 4.6 (fast off) · **Lane:** D2 · **Depends:** S3 (sequential owner of `Jarvis.iss`, `bootstrap.ps1`, `model-catalog.json`, `installed-components.ps1`)
+
+| Path | Why |
+| --- | --- |
+| `installer/windows/asset-state.ps1` (new) | `Get-AnzuAssetState`: size-first / SHA-256-second check against the catalogue, states `unchanged` / `outdated` / `missing` / `damaged` / `hash-failed`, hash cache, progress file, timeout, visible messages (only owner) |
+| `installer/windows/model-catalog.json` | Per-file `size` + `sha256` + `superseded_files[]`; the front 2B constants moved in (third step of the chain S3 → S4) |
+| `installer/windows/installed-components.ps1` | Dot-source `asset-state.ps1`; emit `{tmp}\asset-state.json` + progress (second owner after S3) |
+| `installer/windows/bootstrap.ps1` | `Ensure-BootstrapGguf` / `Ensure-Front2bGguf` / every model `Ensure-*` call `Get-AnzuAssetState` before downloading; `(already installed)` skip line; damaged / hash-failed lines; the inline `$expectedBytes` is replaced by the catalogue value (third owner: S1 → S3 → S4) |
+| `installer/windows/stage-front-model.ps1` | Read `$ExpectedSha` / `$ExpectedBytes` from `model-catalog.json` (only owner in the batch) |
+| `installer/windows/Jarvis.iss` | `Exec` of `installed-components.ps1` behind the "Checking installed models…" progress page; `AssetNeedsCopy()` JSON lookup used as `Check:` on the model payload lines; `ExistingFable9BMissing` body → `AssetNeedsCopy('fable_9b')`; `(already installed) ` prefix + pre-check on (a) rows; Finished-page summary of damaged / hash-failed lines; no hash logic in Pascal (third owner: S1 → S3 → S4) |
+| `installer/windows/tests/asset-state.Tests.ps1` (new); `.github/workflows/pr-tests.yml` (one append-only step in the existing Windows `installer-compile` job: `- name: Asset state helper tests (RFC-0228 S4)` / `shell: pwsh` / `run: ./installer/windows/tests/asset-state.Tests.ps1`) | PowerShell behaviour tests (plain asserts, exit 1 on failure; no new module dependency) |
+| `tests/test_installer.py`, `tests/test_rfc0228_installer_update.py` | Added tests only (existing tests unchanged) |
+
+**Label rule, add-alongside (S3 behaviour kept).** S3's checked + disabled grey-out and its `(installed)` suffix stay exactly as specified for rows S3 detects as installed by marker or version only, i.e. components with no catalogue `sha256` (some voice packs). S3's `(can be updated to > …)` rows are untouched. S4 only adds: a row whose files were **byte-verified** as (a) is pre-checked and keeps S3's disabled state, and its label carries the `(already installed) ` prefix instead of the `(installed)` suffix, so the same row never says "installed" twice. Nothing is removed from the checklist, Select-all, theming or groups, and fresh installs (no files) see today's labels.
+
+- [ ] **States** (`asset-state.Tests.ps1`, temp tree + fixture catalogue): `unchanged` (exact size + hash) → state (a), no download call, label prefix `(already installed) `, row pre-checked + disabled; `outdated` (matches `superseded_files`) → state (b), S3 label `(can be updated to > …)` unchanged and unchecked; `missing` → state (c), download invoked once; `damaged` (right size, wrong hash; and wrong size) → re-download with "<name> is damaged; downloading it again.".
+- [ ] **Size first:** a file whose size matches no catalogue entry is never hashed (hasher call counter = 0).
+- [ ] **Hash failure falls back visibly:** locked file (I/O error) and a hasher faked to exceed `-HashTimeoutSeconds 1` → `hash-failed`, download invoked, and "Couldn't verify <name> (<error>); downloading it again." present in `asset-state.json` `message`, in `installer-assets.log` and in the bootstrap log; the run never exits 0 with that line missing.
+- [ ] **Cache:** second run on unchanged files → cache hit, hasher not called, progress shows "verified (cached)"; touching the file's mtime or changing its size → miss and re-hash; corrupt cache file → rebuilt with one log line.
+- [ ] **Progress:** the progress file receives increasing percentages for a multi-block file; Inno's progress page reads it (static).
+- [ ] **One code path (static, `tests/test_installer.py`):** `test_asset_state_helper_is_the_only_hash_path` (`[Code]` of `Jarvis.iss` contains no `GetSHA256OfFile` / `GetSHA256OfStream` / size comparison; `installed-components.ps1` and `bootstrap.ps1` dot-source `asset-state.ps1`; no other installer script calls `Get-FileHash` for a model except `asset-state.ps1`, the existing post-download verifier `front-model-download.ps1:131` and the build-time staging check `stage-front-model.ps1:46`, which now reads its expected values from the catalogue); `test_model_payload_lines_use_asset_needs_copy` (every `[Files]` line sourcing `payload\models\…` carries `AssetNeedsCopy(`); `test_fable_payload_check_still_gated_by_opt_in` (`ShouldCopyDefault9BPayload` still has only the fresh / clean / own-repair / opt-in branches, own-repair now via `AssetNeedsCopy('fable_9b')`); `test_catalog_files_have_size_and_sha256` (every catalogue file entry: int `size` > 0, 64-hex `sha256`); `test_front_model_constants_come_from_catalog` (no literal SHA or byte count left in `stage-front-model.ps1` / `bootstrap.ps1`); `test_installer_compile_job_runs_asset_state_tests` (the CI step exists in `installer-compile`).
+- [ ] **Labels (`tests/test_rfc0228_installer_update.py`):** `test_unchanged_asset_row_prechecked_with_already_installed_prefix`, `test_outdated_row_keeps_can_be_updated_label`, `test_marker_only_row_keeps_installed_suffix`, `test_missing_row_downloads`.
+- [ ] Windows soak on Taco's PC: Update after an Update → no GGUF downloaded or copied again, verification of ~6 GB served from the cache in under 2 s; renaming one byte of a GGUF → "damaged; downloading it again" shown and the file restored.
+- [ ] Inno compile passes in `installer-compile`, with the new step green.
+
 ---
 
 ## Overall acceptance
@@ -276,10 +331,11 @@ Assign order: **S1 → S2; S3 after S1.**
 | 0228-S1 | Fable 9B default: gate, single default 9B, profile pinning | Grok 4.5 | D1 | — |
 | 0228-S2 | Idle unload, reload, Ollama keep-alive, ported selection safety | Grok 4.6 | D1 | S1, 0225-S3, 0225-S4, 0227-S1 |
 | 0228-S3 | Installer Update + installed/greyed + "can be updated to" | Grok 4.6 | D2 | S1, 0227-S3 |
+| 0228-S4 | Installer skip-unchanged assets (size + SHA-256 vs manifest, hash cache, visible fallback) | Grok 4.6 | D2 | S3 |
 
 ## Likely files
 
-See ownership tables. Sequential chains: `config.py` 0228-S1 → 0228-S2; `Jarvis.iss` 0228-S1 → 0228-S3; `bootstrap.ps1` 0228-S1 → 0228-S3; `lmstudio_server.py` 0225-S3 → 0228-S2; `manager.py` 0225-S3 → 0228-S2 (two owners); `hotswap.py` 0225-S3 → 0228-S2 (two owners); `api/model.py` 0225-S1 → 0225-S3 → 0227-S1 → 0228-S2. `lmstudio_context.py`, `gpu_prefer.py`, `profile_roles.py`, `model_escalation.py` and the new `rewarm.py` are edited only by 0228-S2. Managed-mode state is owned by RFC-0225 S3 (`engine_coexistence.py`); 0228-S2 only reads it and calls its hooks.
+See ownership tables. Sequential chains: `config.py` 0228-S1 → 0228-S2; `Jarvis.iss` 0228-S1 → 0228-S3 → 0228-S4; `bootstrap.ps1` 0228-S1 → 0228-S3 → 0228-S4; `model-catalog.json` and `installed-components.ps1` 0228-S3 → 0228-S4; `asset-state.ps1` and `stage-front-model.ps1` only 0228-S4; `lmstudio_server.py` 0225-S3 → 0228-S2; `manager.py` 0225-S3 → 0228-S2 (two owners); `hotswap.py` 0225-S3 → 0228-S2 (two owners); `api/model.py` 0225-S1 → 0225-S3 → 0227-S1 → 0228-S2. `lmstudio_context.py`, `gpu_prefer.py`, `profile_roles.py`, `model_escalation.py` and the new `rewarm.py` are edited only by 0228-S2. Managed-mode state is owned by RFC-0225 S3 (`engine_coexistence.py`); 0228-S2 only reads it and calls its hooks.
 
 `frontend/package.json` and `.github/workflows/pr-tests.yml` are shared by every frontend ticket in the 2026-10-17 batch: each ticket adds exactly one `test:*` script line and one `frontend-build` step (append-only hunks, trivial rebase) and touches nothing else in those files.
 
