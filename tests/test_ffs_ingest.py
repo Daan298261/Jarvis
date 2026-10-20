@@ -858,3 +858,30 @@ async def test_tab_container_header_and_xor_key_reach_index_and_profile(ffs_env)
     assert census["single_byte_xor_text"]["files"] == 1
     tab_ev = evidence(ident, "ffs_tab_profile")
     assert tab_ev["result"]["summary"]["container_census"]["containers"] == {"autel-at2": 1, "unknown": 1}
+
+
+@pytest.mark.asyncio
+async def test_short_keyed_tab_member_is_reported_as_anomalous_header(ffs_env):
+    keyed_header = bytes.fromhex("415400024e4c06010001000000000aa9300045589400010000") + b"\x00" * 39
+    body = b"\x5b" * 10 + bytes(range(0x60, 0x74))
+    archive = ffs_env / "autel_short.zip"
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr("Scan/Vehicle/Domestic/BAICMotor/short.tab", keyed_header[:30])
+        z.writestr("Scan/Vehicle/Domestic/BAICMotor/small_body.tab", keyed_header + body)
+    row = await ingest_source(archive)
+    ident = row["id"]
+    lines = {e["path"]: e for e in index_lines(ident)}
+    # The 30 zero-heavy header bytes of a 94-byte member must not outvote the body's 0x5b.
+    assert lines["Scan/Vehicle/Domestic/BAICMotor/small_body.tab"]["top_byte"] == 0x5B
+    assert lines["Scan/Vehicle/Domestic/BAICMotor/short.tab"]["top_byte"] is None
+
+    profile = json.loads((store.directory(ident) / "index" / "tab_profile.json").read_text(encoding="utf-8"))
+    rows = {f["path"]: f for f in profile["files"]}
+    short = rows["Scan/Vehicle/Domestic/BAICMotor/short.tab"]["container"]
+    assert short["anomalies"] == ["truncated keyed header: member is 30 bytes, keyed header needs 64"]
+    assert rows["Scan/Vehicle/Domestic/BAICMotor/small_body.tab"]["container"]["anomalies"] == []
+    at2 = profile["summary"]["container_census"]["at2"]
+    assert at2["anomalous_headers"] == 1
+    assert at2["key_ids"] == [{"key_id": 0x94, "files": 2, "dominant_top_byte": 0x5B, "dominant_top_byte_files": 1}]
+    tab_ev = evidence(ident, "ffs_tab_profile")
+    assert tab_ev["result"]["summary"]["container_census"]["at2"]["anomalous_headers"] == 1

@@ -10,7 +10,8 @@ Workspace layout (``<investigation>/index/``):
 
 - ``files.ndjson``  append-only index, one ``{path, bytes, sha256, mtime, magic_hex, type}``
   object per line (``.tab`` files add ``entropy``, ``tab_header_hex`` (first 64 bytes),
-  ``top_byte`` and, for single-byte-XOR text, ``xor_key``; ``error`` marks unreadable members).
+  ``top_byte`` (most common byte of the body, AT2 header excluded) and, for
+  single-byte-XOR text, ``xor_key``; ``error`` marks unreadable members).
   This is the index the APK sidecar's FFS origin (RFC-0207 slice 4) reads.
 - ``custody.json``  source, source kind, owning task, tool version, ISO-timestamped ingest
   sessions and, once complete, the finalized manifest digest (``source_sha256``).
@@ -841,10 +842,12 @@ class FFSIngest:
                 if is_tab_path(obj["path"]) and "entropy" in obj:
                     # Indexes written before the container parser carry only the 16-byte magic;
                     # parse_tab_header then reports what it can (no key id) instead of guessing.
+                    # The real member size lets it flag a keyed member that ends inside its
+                    # 64-byte header, which the captured bytes alone cannot distinguish.
                     header_raw = obj.get("tab_header_hex") or obj.get("magic_hex") or ""
                     files.append({"path": obj["path"], "bytes": obj["bytes"], "sha256": obj["sha256"],
                                   "entropy": obj["entropy"], "header_hex": obj.get("magic_hex") or "",
-                                  "container": parse_tab_header(bytes.fromhex(header_raw)),
+                                  "container": parse_tab_header(bytes.fromhex(header_raw), obj["bytes"]),
                                   "top_byte": obj.get("top_byte"), "xor_key": obj.get("xor_key")})
         files.sort(key=lambda item: item["path"])
         payload = {"investigation_id": ident, "summary": summarize_tab_profiles(files), "files": files}

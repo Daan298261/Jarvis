@@ -164,3 +164,60 @@ def test_summary_container_census_groups_key_ids_and_xor_files():
     assert {"tag": "NL", "files": 4} in at2["tags"]
     assert at2["anomalous_headers"] == 0
     assert census["single_byte_xor_text"] == {"files": 1, "keys": [{"xor_key": 0xDD, "files": 1}]}
+
+
+def test_keyed_member_shorter_than_its_header_is_flagged_as_truncated():
+    # A real 30-byte keyed member: magic, descriptor and key id present, but the member ends
+    # inside the 64-byte keyed header. It must not pass as a clean header.
+    short = KEYED_HEADER[:30]
+    parsed = parse_tab_header(short, size=len(short))
+    assert parsed["container"] == "autel-at2" and parsed["body_transform"] == "keyed"
+    assert parsed["key_id"] == 0x94 and parsed["reserved_zero"] is None
+    assert parsed["anomalies"] == ["truncated keyed header: member is 30 bytes, keyed header needs 64"]
+    profiler = TabProfiler()
+    profiler.update(short)
+    result = profiler.result()
+    assert result["size"] == 30 and result["top_byte"] is None  # no body after the header
+    census = summarize([
+        {"path": "short.tab", "bytes": 30, "entropy": 2.0, "header_hex": short[:16].hex(),
+         "container_hex": result["container_hex"], "top_byte": result["top_byte"]},
+    ])["container_census"]
+    assert census["at2"]["anomalous_headers"] == 1
+    # Exactly one header long is a complete header with an empty body: no anomaly.
+    assert parse_tab_header(KEYED_HEADER, size=64)["anomalies"] == []
+
+
+def test_legacy_16_byte_index_entry_stays_silent():
+    # Indexes written before the container parser kept only the 16-byte magic of a full-size
+    # member: the short capture is not a short file, so nothing is flagged.
+    legacy = parse_tab_header(KEYED_HEADER[:16], size=20_900_000)
+    assert legacy["body_transform"] == "keyed" and legacy["key_id"] is None
+    assert legacy["anomalies"] == []
+    census = summarize([
+        {"path": "legacy.tab", "bytes": 20_900_000, "entropy": 6.4, "header_hex": KEYED_HEADER[:16].hex()},
+    ])["container_census"]
+    assert census["containers"] == {"autel-at2": 1} and census["at2"]["anomalous_headers"] == 0
+
+
+def test_top_byte_counts_the_body_not_the_header_zeros():
+    # 30-byte keyed body whose most common byte (0x5b) occurs far fewer times than the ~48
+    # zero bytes of the keyed header: the header must not outvote it.
+    body = b"\x5b" * 10 + bytes(range(0x60, 0x74))
+    assert len(body) == 30 and body.count(0) == 0
+    data = KEYED_HEADER + body
+    assert data.count(0) > body.count(0x5B)
+    profiler = TabProfiler()
+    for i in range(0, len(data), 5):  # header and body split across chunks
+        profiler.update(data[i:i + 5])
+    result = profiler.result()
+    assert result["top_byte"] == 0x5B
+    assert result["size"] == len(data)  # entropy and size still describe the whole member
+    # Plain AT2 members drop their 16-byte header the same way.
+    plain = PLAIN_HEADER[:16] + b"\x41" * 3 + b"\x42\x43"
+    profiler = TabProfiler()
+    profiler.update(plain)
+    assert profiler.result()["top_byte"] == 0x41
+    # Files without the container have no header to drop.
+    profiler = TabProfiler()
+    profiler.update(b"\x00\x00\x00\x07")
+    assert profiler.result()["top_byte"] == 0x00

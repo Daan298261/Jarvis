@@ -124,12 +124,23 @@ class TabProfiler:
     def result(self) -> dict[str, Any]:
         header = bytes(self._header)
         is_at2 = header.startswith(AT2_MAGIC)
+        # ``top_byte`` is the most common byte of the *body*: the AT2 header (64 bytes for
+        # keyed files, about 48 of them zero) is taken out of the histogram so it cannot
+        # outvote the transformed body. ``header`` holds the first min(64, size) bytes, so
+        # the header range is always fully captured and can be subtracted exactly.
+        body_counts = self._counts
+        if is_at2:
+            header_len = at2_header_len(header)
+            body_counts = self._counts - np.bincount(
+                np.frombuffer(header[:header_len], dtype=np.uint8), minlength=256
+            )
+        body_total = int(body_counts.sum())
         return {
             "size": self._total,
             "entropy": round(shannon_entropy(self._counts.tolist(), self._total), 4),
             "header_hex": header[:HEADER_BYTES].hex(),
             "container_hex": header.hex(),
-            "top_byte": int(self._counts.argmax()) if self._total else None,
+            "top_byte": int(body_counts.argmax()) if body_total else None,
             # AT2 bodies use a keyed transform that is not single-byte XOR; only test the rest.
             "xor_key": None if is_at2 else xor_text_key(self._counts, self._total),
         }
@@ -153,8 +164,26 @@ def _tag(raw: bytes) -> str | None:
     return None
 
 
-def parse_tab_header(raw: bytes) -> dict[str, Any]:
+def at2_header_len(raw: bytes) -> int:
+    """Header length of an AT\\x00\\x02 member from its leading bytes.
+
+    ``AT2_TRANSFORMED_HEADER_LEN`` (64) when byte 7 marks a keyed body, otherwise
+    ``AT2_PLAIN_HEADER_LEN`` (16, also used for unrecognised byte-7 values, which are
+    flagged as anomalies by ``parse_tab_header``). Capped at ``len(raw)`` so a member
+    shorter than its header has no body.
+    """
+    if len(raw) > 7 and raw[7] == 1:
+        return min(len(raw), AT2_TRANSFORMED_HEADER_LEN)
+    return min(len(raw), AT2_PLAIN_HEADER_LEN)
+
+
+def parse_tab_header(raw: bytes, size: int | None = None) -> dict[str, Any]:
     """Parse the leading bytes of a `.tab` file (pass at least 64 for a full parse).
+
+    ``size`` is the full member size in bytes. ``raw`` alone cannot tell a member that
+    is shorter than its header from a capture that kept fewer bytes (indexes written
+    before the container parser kept only 16), so a keyed header is reported as
+    truncated only when ``size`` shows the member itself ends inside the 64-byte header.
 
     Returns ``container`` = ``"autel-at2"`` with the decoded fields, or ``"unknown"``
     (no AT\\x00\\x02 magic), ``"empty"`` or ``"truncated"`` (magic but fewer than 16
@@ -190,6 +219,10 @@ def parse_tab_header(raw: bytes) -> dict[str, Any]:
     if raw[4:6] != b"\x00\x00" and parsed["tag"] is None:
         anomalies.append(f"non-ASCII tag bytes {raw[4:6].hex()} at offsets 4-5")
     if transform_byte == 1:
+        if size is not None and size < AT2_TRANSFORMED_HEADER_LEN:
+            anomalies.append(
+                f"truncated keyed header: member is {size} bytes, keyed header needs {AT2_TRANSFORMED_HEADER_LEN}"
+            )
         if len(raw) >= 23:
             if raw[16:20] != AT2_DESCRIPTOR:
                 anomalies.append(f"descriptor {raw[16:20].hex()} != {AT2_DESCRIPTOR.hex()} at offset 16")
@@ -218,7 +251,8 @@ def _container_census(profiles: list[dict[str, Any]]) -> dict[str, Any]:
         if not isinstance(header, dict):
             raw = str(item.get("container_hex") or item.get("header_hex") or "")
             try:
-                header = parse_tab_header(bytes.fromhex(raw))
+                size = item.get("bytes")
+                header = parse_tab_header(bytes.fromhex(raw), int(size) if size is not None else None)
             except ValueError:
                 header = {"container": "unknown"}
         kind = header.get("container", "unknown")
@@ -247,8 +281,9 @@ def _container_census(profiles: list[dict[str, Any]]) -> dict[str, Any]:
             "tags": [{"tag": t, "files": n} for t, n in tags.most_common(MAX_CENSUS_GROUPS)],
             "record_count_total": records,
             "anomalous_headers": anomalous,
-            # key_id vs the body's most common byte: one dominant top byte per key id is the
-            # signature of a keyed, position-independent byte transform (see the writeup).
+            # key_id vs the body's most common byte (``top_byte``, counted after the 64-byte
+            # header): one dominant top byte per key id is the signature of a keyed,
+            # position-independent byte transform (see the writeup).
             "key_ids": [
                 {
                     "key_id": key,

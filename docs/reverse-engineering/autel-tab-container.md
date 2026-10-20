@@ -102,7 +102,7 @@ These measurements come from samples of keyed bodies, from offset 0x40 to the en
 
 - **Not a 16-byte block cipher.** The body length minus 64, mod 16, is spread evenly over 0–15 (2,898 files). Duplicate 16-byte blocks are equally common at alignment shifts 0, 4 and 8: 123,822, 123,560 and 123,849 duplicates over 579 files. ECB or CBC would need aligned lengths. ECB would repeat only on aligned blocks, and CBC or CTR would not repeat at all.
 - **Not a position-dependent keystream.** The index of coincidence has a median of 0.0095. Uniform ciphertext would be 0.0039. The autocorrelation peaks at record-like lags (72, 36, 63, 3, 10, …) in 467 of 579 files, so the record structure survives the transform.
-- **Keyed by byte 0x14.** The most common body byte is stable within a key id and differs between key ids:
+- **Keyed by byte 0x14.** The most common body byte (counted from offset 0x40, so the mostly-zero header is excluded) is stable within a key id and differs between key ids:
   - 0xE9 gives 0x37 in 1,046 of 1,380 sampled files.
   - 0xB0 gives 0x21 in 182 of 196.
   - 0x35 gives 0x14 or 0x2D.
@@ -138,12 +138,12 @@ a second layer or another alphabet.
 
 `backend/app/reverse_engineering/tab_analyzer.py`:
 
-- `TabProfiler` keeps the first 64 bytes of every `.tab` member during the ingest pass. It also keeps the most common byte and a candidate single-byte XOR key, which applies only to files without the container.
-- `parse_tab_header(raw)` decodes the layout above. It returns `container` (`autel-at2`, `unknown`, `empty` or `truncated`), every field, and `anomalies` for any deviation from the observed layout. Those include a descriptor or tail mismatch, non-zero reserved bytes, an unknown byte 07 and a non-ASCII tag.
+- `TabProfiler` keeps the first 64 bytes of every `.tab` member during the ingest pass. It also keeps `top_byte`, the most common byte of the body, and a candidate single-byte XOR key, which applies only to files without the container. For AT2 members the header (`AT2_TRANSFORMED_HEADER_LEN` = 64 bytes when keyed, `AT2_PLAIN_HEADER_LEN` = 16 otherwise) is subtracted from the histogram, so the ~48 zero header bytes of a keyed file cannot outvote a short body. A member with no body after its header has no `top_byte`. Files without the container have no header to drop, so their `top_byte` covers the whole file.
+- `parse_tab_header(raw, size)` decodes the layout above. It returns `container` (`autel-at2`, `unknown`, `empty` or `truncated`), every field, and `anomalies` for any deviation from the observed layout. Those include a descriptor or tail mismatch, non-zero reserved bytes, an unknown byte 07, a non-ASCII tag, and a keyed member whose real `size` is shorter than the 64-byte keyed header. The ingest passes the member size, because the captured bytes alone cannot tell a short member from a short capture; a legacy 16-byte index entry of a full-size member is therefore not flagged.
 - `summarize(...)["container_census"]` aggregates:
   - container kinds;
   - AT2 transforms, table types, tags and record totals;
-  - key-id groups with their dominant body byte;
+  - key-id groups with their dominant body byte (the most common `top_byte`, which excludes the header);
   - XOR-text candidates.
 
 `ffs_ingest.py` writes `tab_header_hex`, `top_byte` and `xor_key` on `.tab` index lines.
