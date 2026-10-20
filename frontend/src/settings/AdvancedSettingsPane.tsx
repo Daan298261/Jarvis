@@ -123,6 +123,12 @@ export function AdvancedSettingsPane({ settings, queueStatus, save }: AdvancedSe
             <option value="reliable">Reliable</option>
           </select>
         </label>
+        <label className="row">
+          <input type="checkbox" checked={settings.large_task_reviews !== false}
+            onChange={(e) => save({ large_task_reviews: e.target.checked })} />
+          Add bugfixing, fact-checking and quality control to large tasks
+        </label>
+        <p className="muted">Large jobs save a plan and run one bounded prompt at a time. These extra review stages are on by default.</p>
         <label>Default timeout (seconds)
           <input
             type="number"
