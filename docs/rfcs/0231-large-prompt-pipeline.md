@@ -6,7 +6,7 @@
 **Date:** 2026-10-20
 **Traced on:** `development` @ `11b264a7`. Drafts and RFC PRs pinned: #649 @ `edb4685` (identical to `b5c3640` for every file cited here), #652 (RFC-0225) @ `140482b`, #655 (RFC-0228) @ `973b979`, #585 (RFC-0211) @ `f412dad`, #663 (RFC-0218 delivery fix) @ `c5db314`.
 **Amended 2026-10-20 (#649 landed):** #649 merged into `development` as `ee786dc`, so S2 no longer ports it. S2 now cites the landed engine and adds only what #649 lacks: `seed_workflow`, the two pipeline tables, and `LargePromptSettings`. Every #649 reference in §4-§6 and S1-S6 is re-traced on `development` @ `d85c9d4`, and so is every `loop.py`, `owner_turn.py`, `api/tasks.py` and `App.tsx` line number (#648 and #649 shifted them).
-**Amended 2026-10-20 (UX peer, 17 blockers at `8d713f0`; CoS rulings 1-6; D2 + CoS floor change):** RFC-0232 precedence (verbatim CoS text, §1) with 0232's RE helper consumed in the precheck and its RE floor in `_apply_floors`, one `decide()` per turn; size rules on the full prompt, outside the 50 ms window, also on deadline/exception fallbacks; candidate from the baseline route plus the final gate after floors; #649's planner skipped for a marked parent; one spoken ack on the parent's front lane, worded from the RFC-0225 gate outlook and never claiming a load; Taco's default (LM Studio 9B owner-loaded, managed off, 16 GB) runs the parts on the 9B; request lease holds the target for the whole parent, and the large-task load is never persisted, with the owner's selection restored; breaker bind, cancel races, idempotent vault, L4 length floor, S0 outlook/lease/late-reconcile; S6 extends the live "Saved plan" rows; complete ownership chains with lanes. Re-traced on `development` @ `a44da35` (`d85c9d4` plus #660 and #667, neither touching a cited file).
+**Amended 2026-10-20 (UX peer, 17 blockers at `8d713f0`; CoS rulings 1-6; D2 + CoS floor change):** RFC-0232 precedence (verbatim CoS text, §1) with 0232's RE helper consumed in the precheck and its RE floor in `_apply_floors`, one `decide()` per turn; size rules on the full prompt, outside the 50 ms window, also on deadline/exception fallbacks; candidate from the baseline route plus the final gate after floors; #649's planner skipped for a marked parent; one spoken ack on the parent's front lane, worded from the RFC-0225 gate outlook and never claiming a load; Taco's default (LM Studio 9B owner-loaded, managed off, 16 GB) runs the parts on the 9B; request lease holds the target for the whole parent, and the large-task load is never persisted, with the owner's selection restored; breaker bind, cancel races, idempotent vault, L4 length floor, S0 outlook/lease/late-reconcile; S6 extends the live "Saved plan" rows; complete ownership chains with lanes. Re-traced on `development` @ `3007696` (`d85c9d4` plus #660, #667 and #662; only `pr-tests.yml` lines moved: "Build frontend" L118-119, "Persona morph hook tests" L130). Cross-checked with #666 @ `2819851`, #664 @ `1542881`, #652 @ `aac2f5c`.
 **Amended 2026-10-20 (CoS, #665 peer):** the large target `anzu-coder-27b` was assumed to exist as a runtime profile. It does not (see *Target profile: `anzu-coder-27b`*), so new slice **0231-S0** adds it and 0231-S4 hard-depends on it. Re-traced for S0 and for the `hotswap.py`, `config.py` and `main.py` citations on `development` @ `d214b6d` (#648 landed; #663 landed at `781004c`), #652 @ `916cf25`, #655 @ `971ca15`, #649 @ `edb4685`.
 
 **Owner ask (Taco, ask B, intent as relayed):** when Taco speaks or types a large or complex task, Jev/Laya decide that it is complex. Then:
@@ -180,7 +180,7 @@ RFC-0232 S2 owns the RE-side test `test_path_plus_re_intent_routes_to_re_before_
 
 **Latency budget (normative), on RFC-0230's clock.**
 - **CI:** the ack `chat_tts` is persisted ≤ 150 ms after `evaluate_request_route` returns, with a preload fake that blocks for 5 s and a split fake that blocks for 5 s.
-- **Owner-visible target:** the large turn is held to RFC-0230's target, **first audible word ≤ 1.5 s at p50 and ≤ 2.0 s at p95 from end of owner input** (#666 L53), measured with 0230-S0's marks. 0231-S4 appends three large-turn cases (fixtures from S3: 5-item list, 4 questions, 6000-char spec) to `scripts/anzu-latency-repro.ps1` (append-only, after 0230-S0 creates it). There is no separate 0231 clock.
+- **Owner-visible target:** the large turn is held to RFC-0230's target, **first audible word ≤ 1.5 s at p50 and ≤ 2.0 s at p95 from end of owner input** (#666 L53), measured with 0230-S0's marks. 0231-S4 adds three large-turn cases (`tests/fixtures/rfc0231/latency_cases.json`, from the S3 fixtures: 5-item list, 4 questions, 6000-char spec) through 0230-S0's `--cases` hook in `scripts/anzu-latency-repro.ps1`. The headline is 0230's client-clock `first_audio − input_end`, closed by the browser's `playing` event. There is no separate 0231 clock.
 
 **Target resolution** (`agent/large_prompt.py::resolve_target(settings) -> TargetResolution`, sync, in-memory):
 1. `settings.large_prompts.target_runtime` (default `"anzu-coder-27b"`, the 0231-S0 profile), matched against **enabled** runtime profiles (`list_runtime_profiles()`, `enabled is True`) by `name`, then `model_profile`, then the provider model id. A disabled row never matches (`runtime_router.py:284-285`).
@@ -512,7 +512,7 @@ The live panel already has #649's "Saved plan and task prompts" block (`TaskActi
   - after that `<ol>`, inside the same `<details>`, one added mount `{largeView && <LargePromptSections view={largeView} />}`;
   - `frontend/src/components/LargePromptSections.tsx` (new) renders the view model and wires buttons to `api()` with the view model's method and path.
   A pipeline child (which has seeded `prompt_steps`) therefore shows the live rows exactly as today plus the "Part n of N" line; a parent (no prompt steps) shows the sections list inside the same block.
-- **Tests run on the pure file.** `frontend/large-prompt-sections.test.mjs` imports `largePromptSectionsView.ts` and `taskStatus.ts` under `node --experimental-strip-types` (no `.tsx` import, like `avatar-motion.test.mjs:3`). `npm run build` (`pr-tests.yml:115-116`, "Build frontend") is the TSX type gate for `TaskActivity.tsx` and `LargePromptSections.tsx`.
+- **Tests run on the pure file.** `frontend/large-prompt-sections.test.mjs` imports `largePromptSectionsView.ts` and `taskStatus.ts` under `node --experimental-strip-types` (no `.tsx` import, like `avatar-motion.test.mjs:3`). `npm run build` (`pr-tests.yml:118-119`, "Build frontend") is the TSX type gate for `TaskActivity.tsx` and `LargePromptSections.tsx`.
 - **Not edited:** OwnerChatTranscript, HudChat, Chat, Phone, `useTaskSpeech` and every persona component.
 
 ### Live-UI add-alongside reasoning pass (2026-10-14 standing order)
@@ -572,7 +572,7 @@ class LargePromptSettings(BaseModel):
 | **RFC-0228 S2** | An ANZU-loaded target is warmed with `keep_alive: "-1"` while the lease is held and handed back to `idle_unload_seconds` at release. The restore goes through the owner's unchanged saved selection and `schedule_orchestrator_restore` → `NINE_B_REWARM`. The hold API is added to `rewarm.py` after 0228-S2. |
 | **`agent/intake.py`** | Left in place for `stream_owner_chat`. The large pipeline replaces its use only on the tasks path. Merging the two is out of scope. |
 | **RFC-0232 (#664)** | **Precedence (CoS, verbatim):** A turn whose prompt contains an absolute filesystem path together with RE intent (RFC-0232's narrowed dump/extraction detection) routes to reverse engineering and is never split by RFC-0231; a path with a plain or coding question routes normally. 0232-S2's RE helper (two-stage, specified in #664) is called by 0231's precheck and suppresses the riders; 0232's RE floor in `_apply_floors` runs before 0231's; one `decide()` per turn (§1). Tests: 0232's `test_path_plus_re_intent_routes_to_re_before_large_prompt_split` (`tests/test_rfc0232_intent_and_alias.py`); 0231's `test_path_plus_re_intent_routes_to_re_not_split`, `test_plain_path_question_not_routed_to_re`, `test_ffs_word_coding_question_not_routed_to_re`, `test_one_decide_per_turn`. Files: 0232-S2 (`owner_turn.py`) before 0231-S1; 0232-S3 → S4 → S5 (`loop.py`) before 0231-S4 and -S5. |
-| **RFC-0230 (#666)** | Its slices go **first** on every shared file: `loop.py` (0230-S0 → S2 → S3), `owner_turn.py` (0230-S5), `main.py` (0230-S0 → S5), `api.ts` (0230-S0). Then RFC-0232, then 0231. The large ack is the parent's front-lane line (rule 1), marked with 0230-S0's `mark`, and is held to 0230's ≤ 1.5 s p50 / ≤ 2.0 s p95 through three large cases appended to `scripts/anzu-latency-repro.ps1`. On a large verdict 0231 calls 0230-S3's `turn_prewarm.cancel_prewarm(turn_id)`. Row 6 (the two-system-message HTTP 500) is fixed in code by landed #649 (#666). |
+| **RFC-0230 (#666)** | Its slices go **first** on the shared turn files: `loop.py` (0230-S0 → S2 → S3, after 0218-S3b), `owner_turn.py` (0230-S5), `api.ts` (0230-S0). Then RFC-0232, then 0231. On `main.py` RFC-0225 goes first (0225-S1 → S2 → S3 → 0230-S0 → S5 → 0231-S0 → S5). The large ack is the parent's front-lane line (rule 1), marked with 0230-S0's `mark`, and is held to 0230's ≤ 1.5 s p50 / ≤ 2.0 s p95 through three large cases appended to `scripts/anzu-latency-repro.ps1`. On a large verdict 0231 calls 0230-S3's `turn_prewarm.cancel_prewarm(turn_id)`. Row 6 (the two-system-message HTTP 500) is fixed in code by landed #649 (#666). |
 
 ## Relationship to #649 and #585
 
@@ -710,7 +710,8 @@ Tests (CI: `pytest` job, step "Run full backend suite", `.github/workflows/pr-te
 | `backend/app/agent/loop.py` | Large branch in `create_task` after 0230's prewarm/decision, 0232's RE dispatch, the Task commit and S3b's block (replacing the generic ack L548-557 for large turns only): pipeline row (the mark), `cancel_prewarm`, `gate_outlook`, one ack with `mark(..., "tts_enqueued", lane="front")`, preload start. In `_run`: for a pipeline parent, skip `_run_managed_front_lane` and the front-off fallback (L2420-2445) and return into the parent runner **before** `loop.py:2344`, so #649's planner never runs for a pipeline parent |
 | `backend/app/inference/hotswap.py` | Only: keywords `persist: bool = True` and `task_id: str \| None = None` on `activate_runtime_profile` (L197); `persist=False` skips the save at L231-232; `task_id` is forwarded to `prepare_engine_for`. Third owner after 0225-S3 → 0228-S2 |
 | `backend/app/inference/rewarm.py` | `hold` and `release`, plus deferral while held (second owner after 0228-S2) |
-| `scripts/anzu-latency-repro.ps1` | Append three large-turn cases (S3 fixtures) to the case set (after 0230-S0 creates it) |
+| `scripts/anzu-latency-repro.ps1` | Append one `--cases tests\fixtures\rfc0231\latency_cases.json` argument (0230-S0's case-file hook) |
+| `tests/fixtures/rfc0231/latency_cases.json` (new) | Three large typed turns built from the S3 fixtures (5-item list, 4 questions, 6000-char spec) |
 | `tests/test_rfc0231_ack_preload.py` (new) | Below |
 
 Tests (CI: `pytest` job, step "Run full backend suite", `.github/workflows/pr-tests.yml:94-95`):
@@ -792,7 +793,7 @@ Tests (CI: `pytest` job, step "Run full backend suite", `.github/workflows/pr-te
 | `frontend/src/api.ts` | Add-only `LargePromptPayload` and `Task.large_prompt?` / `TaskObservability.large_prompt?` |
 | `frontend/large-prompt-sections.test.mjs` (new) | Imports only `.ts`: view-model rows, chips, button→endpoint mapping, child line, `null` without payload, `humanizeToken` labels for `deeper`/`quantitative`, and `mergeObservability` preserving `large_prompt` and every existing field |
 | `frontend/package.json` | Append `test:large-prompt-sections` (`node --experimental-strip-types large-prompt-sections.test.mjs`) |
-| `.github/workflows/pr-tests.yml` | Append the step `Large prompt sections tests (RFC-0231 S6)` → `npm run test:large-prompt-sections` after "Persona morph hook tests (RFC-0218 S5)" (L127) in `frontend-build`. The existing "Build frontend" step (`npm run build`, L115-116) is the TSX gate |
+| `.github/workflows/pr-tests.yml` | Append the step `Large prompt sections tests (RFC-0231 S6)` → `npm run test:large-prompt-sections` after "Persona morph hook tests (RFC-0218 S5)" (L130) in `frontend-build`. The existing "Build frontend" step (`npm run build`, L118-119) is the TSX gate |
 
 ## Ownership chains (handoff order on shared files)
 
@@ -804,7 +805,7 @@ On `loop.py` and `owner_turn.py` the order is RFC-0230 (#666), then RFC-0232 (#6
 | `backend/app/decision/owner_turn.py` | #649 (landed) → 0230-S5 → 0232-S2 → 0231-S1 |
 | `backend/app/decision/adapters/rules.py` | 0231-S1 only |
 | `backend/app/config.py` | #649 (landed) → 0228-S1 → 0228-S2 → 0231-S2 → #585 (draft; rebases onto whatever has landed when it is picked up) |
-| `backend/app/main.py` | 0230-S0 → 0230-S5 → 0225-S1 → 0225-S2 → 0225-S3 → 0231-S0 → 0231-S5 → #585 (draft, same rule) |
+| `backend/app/main.py` | 0225-S1 → 0225-S2 → 0225-S3 → 0230-S0 → 0230-S5 → 0231-S0 → 0231-S5 → #585 (draft, same rule). RFC-0225 goes first on `main.py` (CoS) |
 | `backend/app/api/tasks.py` | #649 (landed) → 0231-S5 |
 | `backend/app/inference/hotswap.py` | 0225-S3 → 0228-S2 → 0231-S4 (keywords only) |
 | `backend/app/inference/engine_coexistence.py` | 0225-S3 (creates it) → 0231-S0 (#652 S3 file table names the second owner) |
@@ -813,8 +814,8 @@ On `loop.py` and `owner_turn.py` the order is RFC-0230 (#666), then RFC-0232 (#6
 | `backend/app/db/models.py` | #649 (landed) → 0231-S2 |
 | `backend/app/agent/task_workflow.py` | #649 (landed, created it) → 0231-S2 |
 | `backend/app/api/settings.py` | #649 (landed) → 0231-S2 |
-| `scripts/anzu-latency-repro.ps1` | 0230-S0 (creates it) → 0231-S4 (append-only) |
-| `frontend/src/api.ts` | 0230-S0 (`X-ANZU-Input-End`) → 0218-S3 → 0231-S6 |
+| `scripts/anzu-latency-repro.ps1`, `scripts/latency_repro.py` | 0230-S0 (creates them) → 0231-S4 (append-only: one `--cases` argument) |
+| `frontend/src/api.ts` | 0230-S0 (`X-ANZU-Input-End`) → 0218-S3 → 0227 (selection helpers) → 0231-S6 |
 | `frontend/src/taskStatus.ts`, `frontend/src/components/TaskActivity.tsx` | #649 (landed) → 0231-S6 |
 | `frontend/package.json`, `.github/workflows/pr-tests.yml` | **Append-only.** The Architect owns the workflow file. Open appenders: #662 (0229-S1), 0228-S2, 0230-S0, 0230-S3, 0232-S6 and 0231-S0…S6. Rule: each ticket appends its own step, never edits another's, and on a conflict merges `development` with a merge commit and keeps both steps |
 
