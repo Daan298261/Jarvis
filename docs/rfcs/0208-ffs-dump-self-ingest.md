@@ -44,13 +44,50 @@ change `store.prepare`'s bounded single-artifact behavior.
 
 ## Acceptance criteria
 
-- [ ] Folder, zip and tar dumps index path/size/SHA-256/mtime/magic for every file.
-- [ ] A raw image with no container is indexed as a blob with a declared unknown.
-- [ ] Ingest never copies the source and leaves source bytes/mtimes unchanged.
-- [ ] Interrupted ingest resumes without duplicating or dropping entries.
-- [ ] Progress and completion are visible through the investigation status API.
-- [ ] Completion writes chain-of-custody and a citable evidence record.
-- [ ] RE/REA/forensic pytest suites plus new FFS tests pass; diff is clean.
+- [x] Folder, zip and tar dumps index path/size/SHA-256/mtime/magic for every file.
+- [x] A raw image with no container is indexed as a blob with a declared unknown.
+- [x] Ingest never copies the source and leaves source bytes/mtimes unchanged.
+- [x] Interrupted ingest resumes without duplicating or dropping entries.
+- [x] Progress and completion are visible through the investigation status API.
+- [x] Completion writes chain-of-custody and a citable evidence record.
+- [x] RE/REA/forensic pytest suites plus new FFS tests pass; diff is clean.
+
+## Implementation (conformance pass, 2026-10-20)
+
+The first implementation (#582/#583) diverged from this RFC: rows were `kind == "forensic"`,
+the whole index was rewritten into one `checkpoint.json` after every file (quadratic on a
+60 GB dump) and inlined into the evidence record, and nothing wrote `index/files.ndjson`,
+so the RFC-0207 slice 4 FFS origin (which requires `kind == "ffs"` and that index) could not
+consume a real ingest. The `.tab` profiler had no caller. The conformance pass:
+
+- `backend/app/reverse_engineering/ffs_ingest.py`: rows are `kind == "ffs"`; the dump stays
+  in place (`target`, no snapshot). Members are yielded lazily (resume skips without reading)
+  in a deterministic order and streamed once in 64 KiB blocks. Each member appends one line
+  `{path, bytes, sha256, mtime, magic_hex, type}` to `index/files.ndjson` (flushed per line,
+  fsynced at checkpoints every 256 files or 5 s). Resume re-reads the NDJSON, drops a torn
+  final line and fails closed on corruption elsewhere. `index/custody.json` records source,
+  source kind, task, tool version, admission stat and every session; completion seals the
+  manifest digest (`source_sha256` = SHA-256 of the finished index) and re-checks the source
+  stat. `row["ffs"]` carries status, files/bytes indexed, last path, totals, unknowns and
+  coverage; `row["progress"]` mirrors it with a percent where totals are knowable.
+- Declared unknowns instead of silent gaps: raw images (Sleuth Kit not provisioned),
+  unreadable members (indexed with `error`, no SHA-256), duplicate archive member names,
+  links/reparse points, special files and unsafe archive names.
+- Evidence: `ffs_ingest` (index summary, manifest digest, type histogram, unknowns; never
+  the inlined index) and `ffs_tab_profile` (derived from it).
+- `.tab` profiling (`tab_analyzer.py`) runs inside the same pass: `.tab` lines carry
+  `entropy`; `index/tab_profile.json` holds every profile plus entropy classes and shared
+  header prefixes; `ffs_tab_profile` inlines up to 2,000 rows.
+- Cancel/close stops a running ingest at the next block; it checkpoints and stays resumable.
+  A second concurrent ingest of the same investigation is refused (HTTP 409).
+- Reachability: REST `POST /api/investigations/ingest`, `POST /{id}/ingest` (background
+  supported), `GET /{id}/ffs/files` (path/suffix/type filters, paged) and
+  `GET /{id}/ffs/tab-profile`; agent tool `reverse_engineer` actions `ingest` (background by
+  default), `ingest_status` and `ffs_query`; FFS catalog workflow and skill guide.
+- Tests (`tests/test_ffs_ingest.py`, `tests/test_tab_analyzer.py`) include an end-to-end
+  folder ingest feeding `apk_sidecar.prepare_apk(source_type="ffs")`, torn-line resume,
+  cancel/resume, unreadable and duplicate members, API and agent-tool paths. Validated on
+  the real Autel MaxiSys `Root.zip` (see the PR for numbers).
 
 ## Out of scope
 
