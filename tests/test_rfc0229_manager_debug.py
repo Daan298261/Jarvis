@@ -413,3 +413,15 @@ def test_unknown_event_or_level_is_a_programming_error(root):
         debug_log.write("INFO", "made_up")
     with pytest.raises(ValueError):
         debug_log.write("LOUD", "press")
+
+
+def test_event_enum_matches_spec_including_process_view(root):
+    # RFC-0229 "Debug logger": event is one of press, control_start, control_end,
+    # supervisor, status_error, process_view (process_view is emitted by S2).
+    assert debug_log.EVENTS == {"press", "control_start", "control_end", "supervisor", "status_error", "process_view"}
+    debug_log.write("WARNING", "process_view", detail={"error": "registry fallback", "argv": ["llama-server", "--api-key", "sekrit"]})
+    row = _lines(root)[-1]
+    assert row["event"] == "process_view" and row["level"] == "WARNING"
+    assert "sekrit" not in json.dumps(row)
+    with pytest.raises(ValueError):
+        debug_log.write("INFO", "not_an_event")

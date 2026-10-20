@@ -32,7 +32,7 @@ MAX_BYTES = LAUNCH_LOG_MAX_BYTES  # 2 MiB per file
 KEPT = LAUNCH_LOGS_KEPT  # 5 rotated files (current + 5 <= 12 MiB)
 MAX_LINE_BYTES = 16 * 1024
 LEVELS = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40}
-EVENTS = frozenset(("press", "control_start", "control_end", "supervisor", "status_error"))
+EVENTS = frozenset(("press", "control_start", "control_end", "supervisor", "status_error", "process_view"))
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 
 _verbose = False
