@@ -303,6 +303,20 @@ export function TaskActivityPanel({
         </div>
       )}
       <PhaseHistory task={view} />
+      {!!view.prompt_steps?.length && (
+        <details>
+          <summary>Saved plan and task prompts</summary>
+          <ol>
+            {view.prompt_steps.map((step) => (
+              <li key={step.ordinal}>
+                <strong>{humanizeToken(step.kind)} · {humanizeToken(step.status)}</strong>
+                <p>{step.prompt}</p>
+                {step.result && <details><summary>Stage result</summary><p>{step.result}</p></details>}
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
       <ChildExecution task={view} />
       <VerificationPanel task={view} />
     </details>

@@ -204,6 +204,7 @@ export function mergeObservability(task: Task, obs: TaskObservability | null | u
   if (!obs) return task
   return {
     ...task,
+      prompt_steps: obs.prompt_steps ?? task.prompt_steps,
     execution_phase: obs.execution_phase ?? task.execution_phase,
     current_activity: obs.current_activity ?? task.current_activity,
     current_action: obs.current_action ?? task.current_action,
