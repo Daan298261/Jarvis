@@ -4,7 +4,7 @@
 **Priority:** P1 (Taco bug batch 2026-10-17, bugs 3 and 4)  
 **Queue item:** (none in this PR — Architect may add a master-plan line after land; do not edit `JARVIS_MASTER_PLAN.md` here)  
 **Author:** Jarvis Architect  
-**Date:** 2026-10-20 (re-sliced 2026-10-20: lands on current `development` without drafts #648/#649; UX review items 1–6 folded in)
+**Date:** 2026-10-20 (re-sliced 2026-10-20: lands on current `development` without drafts #648/#649; UX review items 1–6 folded in; UX re-review 2026-10-20: "Ask later" is the only snooze trigger, `<details>` collapse never snoozes, no close control added)
 
 **Owner ask (verbatim intent, 2026-10-17):** "3. The 'Available local models' chooser popup is unresponsive and appears too often. Make it responsive and make it fire far less often. 4. The top-right model dropdown loses its selections on update. Persist them across updates."  
 **Aligns with:** [`ANZU_PRODUCT_NORTH_STAR.md`](../../ANZU_PRODUCT_NORTH_STAR.md) §2 ("Finished is the target."), §7 ("ANZU should eliminate unnecessary approvals without eliminating meaningful control."), §19 ("Do not optimize benchmarks while damaging perceived responsiveness."; "Do not remove useful capability merely to simplify the codebase."), §20 Q10 ("Does it avoid unnecessary approval prompts and configuration?") and Q11 ("Does it feel responsive…").  
@@ -38,9 +38,9 @@ Ship **one RFC with three implement slices**, one named model each (**fast off**
 1. **Stable identity:** offer key = `engine_kind + normalized model id` (strip LM Studio instance suffixes `:N`, ignore port for the same engine process lineage). Port/instance churn never creates a new offer.
 2. **Durable "already asked":** `notified_at` is persisted in the RFC-0210 choices file (`data_dir()/running-model-choices.json`, same file and atomic write); restart does not re-announce.
 3. **Never offer what ANZU already uses.** The selected endpoint/model is pre-chosen `"use"` (ported from #648 `running_models.py::scan`, carried by RFC-0225 S3, which this RFC builds on) and `selected` / `anzu_configured` / `anzu_owned` rows (RFC-0225 S3 classification) are never offers.
-4. **Cooldown + "Ask later" (UX #3):** an unanswered offer is shown/announced at most once per 24 h per key. Dismissing the card (close button, or the new "Ask later" button) = **snooze**, not a choice: `POST /api/model/running/snooze` with `{offer_keys}` writes `snoozed_until = now + 24 h` per key into the same choices file (survives restart). While snoozed the HUD card and spoken line stay silent for that key; the Model page (`showAll`) still lists the row with "Snoozed until HH:MM" and all buttons. Expiry → the offer may show once more; a second dismiss snoozes another 24 h. A real choice (use/leave/stop/replace) clears `snoozed_until`.
+4. **Cooldown + "Ask later" (UX #3):** an unanswered offer is shown/announced at most once per 24 h per key. Pressing the new "Ask later" button (added alongside the four RFC-0210 buttons on the HUD card) = **snooze**, not a choice, and it is the **only** snooze trigger: `POST /api/model/running/snooze` with `{offer_keys}` writes `snoozed_until = now + 24 h` per key into the same choices file (survives restart). While snoozed the HUD card and spoken line stay silent for that key; the Model page (`showAll`) still lists the row with "Snoozed until HH:MM" and all buttons. Expiry → the offer may show once more; a second "Ask later" snoozes another 24 h. A real choice (use/leave/stop/replace) clears `snoozed_until`. The live RFC-0210 card (`frontend/src/hud/RunningModels.tsx` on `development` @ 3f17c3d) has **no close button**, and this RFC adds none: there is no × control and no other dismiss path. Collapsing or expanding the `<details>` (rule 6), whether by the owner clicking `<summary>` or by the automatic HUD collapse, is **not** a dismiss: it sends no snooze request, writes no `snoozed_until`, and does not change `notified_at`.
 5. **Aggregate:** several new rows → one card and at most one spoken line.
-6. **Collapse (UX #1):** the card uses the `<details>` / `<summary>` collapse ported from #648 `RunningModels.tsx` ("Available local models (n)"), open by default on the Model page (`showAll`), collapsed on the HUD after the first render of an already-announced offer. No separate 60 s chip timer.
+6. **Collapse (UX #1):** the card uses the `<details>` / `<summary>` collapse ported from #648 `RunningModels.tsx` ("Available local models (n)"), open by default on the Model page (`showAll`), collapsed on the HUD after the first render of an already-announced offer. No separate 60 s chip timer. Collapse is view state only and never snoozes (rule 4); no `onToggle` handler calls the snooze endpoint.
 7. **Ask again only on a genuinely new model id** (RFC-0210's rule, now on the stable key).
 
 ### Responsiveness rules (normative)
@@ -73,7 +73,7 @@ Shared JSON fixtures in `tests/fixtures/rfc0227_taco/` (new), used by S1, S2 and
 
 | Current live behaviour | Preserved? | Added alongside |
 | --- | --- | --- |
-| RFC-0210 card: Use model / Leave alone / Stop model / Use ANZU's model per row; busy-client hints; "Stop this server in its own app…" hint | **Yes**, all four buttons and all hints | Per-row pending, inline arm step, `<details>` collapse, "Ask later" |
+| RFC-0210 card: Use model / Leave alone / Stop model / Use ANZU's model per row; busy-client hints; "Stop this server in its own app…" hint | **Yes**, all four buttons and all hints | Per-row pending, inline arm step, `<details>` collapse (view state only, never a snooze), "Ask later" (the only snooze trigger). No × / close control is added: "Ask later" covers the "not now" need, so a second dismiss path would only add ambiguity |
 | `window.confirm` on Stop / Replace | **Yes**, kept | Inline arm step before it |
 | Model page `RunningModels showAll` with "Scan running servers" and "No other local model servers found." | **Yes**, unchanged (full list, open `<details>`, no cooldown) | Job status per row; "Snoozed until" label |
 | Spoken "I found another local model server…" line | **Yes**, same text | Rate-limited per the rules |
@@ -134,8 +134,8 @@ Assign order: **S1 → S2; S3 independent.**
 
 | Path | Why |
 | --- | --- |
-| `frontend/src/hud/RunningModels.tsx` | Ported from #648 `RunningModels.tsx` (AbortController, `working`/`revision` refs, `setTimeout` chain, `<details>` summary "Available local models (n)"); then per-row pending + elapsed, job polling, inline arm step before the kept `window.confirm`, "Ask later" (snooze), pause polling during jobs |
-| `frontend/src/hud/runningModelsLogic.ts` (new) | Pure helpers (arm/disarm state, job-state reducer, snooze decision) so the JS test runs without a DOM |
+| `frontend/src/hud/RunningModels.tsx` | Ported from #648 `RunningModels.tsx` (AbortController, `working`/`revision` refs, `setTimeout` chain, `<details>` summary "Available local models (n)"); then per-row pending + elapsed, job polling, inline arm step before the kept `window.confirm`, "Ask later" (snooze; the only snooze trigger, no close/× control), pause polling during jobs; the `<details>` toggle has no snooze side effect |
+| `frontend/src/hud/runningModelsLogic.ts` (new) | Pure helpers (arm/disarm state, job-state reducer, snooze decision: returns the snooze request only for the `ask_later` action and `null` for `details_toggle` open/close) so the JS test runs without a DOM |
 | `frontend/src/hud/hud-v2.css` | Pending/armed styles (existing classes untouched) |
 | `frontend/running-models-card.test.mjs` (new); `frontend/package.json` (`test:running-models-card`, one line); `.github/workflows/pr-tests.yml` (one append-only `frontend-build` step `- name: Running models card tests (RFC-0227 S2)` / `run: npm run test:running-models-card`) | Below (UX #4) |
 
@@ -143,7 +143,9 @@ Assign order: **S1 → S2; S3 independent.**
 - [ ] Stop/replace: first press arms, second press calls the existing `window.confirm`; cancel at either step sends nothing; the `window.confirm` call is still present (test asserts both steps).
 - [ ] Poll in flight is aborted on unmount; no poll result started before an action overwrites the row (revision test); polling pauses while working.
 - [ ] Job failure shows the backend message on that row; success updates the row without a full-card flash.
-- [ ] "Ask later" / close → snooze request for the card's keys; card disappears; the Model page (`showAll`) still shows the rows, `<details>` open.
+- [ ] "Ask later" → exactly one `POST /api/model/running/snooze` with the card's `offer_keys`; card disappears; the Model page (`showAll`) still shows the rows, `<details>` open.
+- [ ] Collapse is not a dismiss: toggling the `<details>` closed and open again (owner `<summary>` click and the automatic HUD collapse) sends **no** request to `/api/model/running/snooze` (fetch spy call count 0), the card's rows and all four RFC-0210 buttons stay rendered, and the snooze-decision helper returns `null` for `details_toggle`.
+- [ ] No close / × control is rendered on the card (the only new buttons are "Ask later" and the per-row arm/cancel step).
 - [ ] **Taco:** `lmstudio_1234_selected.json` payload → no card rendered for the 9B.
 - [ ] All four actions and hints present; build + lint pass; the JS test runs in `pr-tests.yml`.
 
