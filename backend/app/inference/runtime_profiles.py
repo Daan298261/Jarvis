@@ -98,7 +98,7 @@ def _runtime_registry_path() -> Path:
 
 def _runtime_profile_from_model(profile: ModelProfile, *, endpoint: str = "127.0.0.1:8088") -> RuntimeProfile:
     # Front-lane weights are a separate llama-server, not a worker candidate.
-    front_lane = profile.name in {"front_2b", "front_4b"}
+    front_lane = profile.name in {"front_08b", "front_2b", "front_4b"}
     tags: list[str] = ["text"] if front_lane else ["llm_inference", "text"]
     if front_lane:
         tags.append("front-lane")

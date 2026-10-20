@@ -100,7 +100,7 @@ def _http(exc: NamedPersonaBindError) -> HTTPException:
 
 
 @router.get("")
-async def get_named_personas() -> dict:
+def get_named_personas() -> dict:
     return public_state()
 
 

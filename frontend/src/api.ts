@@ -227,6 +227,7 @@ export type TaskExternalWait = {
 } | null
 
 export type TaskObservability = {
+  prompt_steps?: Task["prompt_steps"]
   task_id?: string
   execution_phase?: string
   current_activity?: string
@@ -265,6 +266,7 @@ export type Task = {
   exposed_tools?: string[]
   allowed_tools?: string[]
   acceptance_criteria?: string
+  prompt_steps?: { ordinal: number; kind: string; prompt: string; status: string; result: string }[]
   current_action: string
   /** Prefer over `current_action` for owner-facing activity lines (RFC-0026). */
   current_activity?: string

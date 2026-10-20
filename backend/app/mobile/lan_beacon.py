@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
+import logging
 import socket
 from typing import Any
 from urllib.parse import urlsplit
@@ -11,6 +12,7 @@ from urllib.parse import urlsplit
 BEACON_PORT = 4782
 BEACON_MAGIC = b"JARVIS1\n"
 BEACON_SERVICE = "jarvis-companion"
+_log = logging.getLogger(__name__)
 
 
 def encode_beacon(payload: dict[str, Any]) -> bytes:
@@ -260,6 +262,8 @@ class _BeaconProtocol(asyncio.DatagramProtocol):
         self._port = int(port or BEACON_PORT)
         self._transport: asyncio.DatagramTransport | None = None
         self._broadcast_task: asyncio.Task | None = None
+        self._reply_tasks: set[asyncio.Task] = set()
+        self._closed = False
 
     def connection_made(self, transport):
         self._transport = transport
@@ -280,49 +284,83 @@ class _BeaconProtocol(asyncio.DatagramProtocol):
 
     def datagram_received(self, data, addr):
         parsed = parse_beacon(data)
-        if not parsed:
+        # Announcements are responses, including our own broadcasts. Replying
+        # to them creates an endless echo loop between desktop listeners.
+        if not parsed or parsed.get("probe") is not True or self._closed:
             return
+        if len(self._reply_tasks) >= 8:
+            return
+        task = asyncio.create_task(self._reply(addr))
+        self._reply_tasks.add(task)
+        task.add_done_callback(self._reply_tasks.discard)
+
+    def _prepare_reply(self, addr):
         peer = addr[0] if addr else ""
         payload = self._payload(str(peer or ""))
         if not payload:
-            return
+            return None
         blob = encode_beacon(payload)
         dest_port = int(addr[1]) if addr and len(addr) > 1 else self._port
         source = beacon_reply_source(str(peer or ""))
-        if source:
-            try:
-                send_beacon_datagram(blob, str(peer), dest_port, source)
+        return blob, str(peer), dest_port, source
+
+    async def _reply(self, addr):
+        try:
+            prepared = await asyncio.to_thread(self._prepare_reply, addr)
+            if prepared is None or self._closed:
                 return
-            except OSError:
-                pass
-        if self._transport:
-            self._transport.sendto(blob, addr)
+            blob, peer, dest_port, source = prepared
+            if source:
+                try:
+                    await asyncio.to_thread(send_beacon_datagram, blob, peer, dest_port, source)
+                    return
+                except OSError:
+                    pass
+            if self._transport and not self._closed:
+                self._transport.sendto(blob, addr)
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            _log.debug("LAN beacon reply failed", exc_info=True)
+
+    def _prepare_broadcast(self):
+        frames = []
+        for source, dest in beacon_send_plan():
+            payload = self._payload(str(source or ""))
+            if payload:
+                frames.append((encode_beacon(payload), dest, source))
+        payload = self._payload()
+        return frames, encode_beacon(payload) if payload else None
 
     async def _broadcast_loop(self):
         try:
-            while True:
-                for source, dest in beacon_send_plan():
-                    # Advertise the source NIC's LAN origin so a VPN default route
-                    # cannot win the lexicographic race in undirected broadcasts.
-                    payload = self._payload(str(source or ""))
-                    if not payload:
-                        continue
-                    blob = encode_beacon(payload)
-                    try:
-                        send_beacon_datagram(blob, dest, self._port, source)
-                    except OSError:
-                        continue
-                payload = self._payload()
-                if payload and self._transport:
-                    try:
-                        self._transport.sendto(encode_beacon(payload), ("255.255.255.255", self._port))
-                    except OSError:
-                        pass
+            while not self._closed:
+                try:
+                    # Payload generation reads connectivity storage and Windows
+                    # route/NIC state; none of it may run on the API thread.
+                    frames, fallback = await asyncio.to_thread(self._prepare_broadcast)
+                    for blob, dest, source in frames:
+                        if self._closed:
+                            return
+                        try:
+                            await asyncio.to_thread(send_beacon_datagram, blob, dest, self._port, source)
+                        except OSError:
+                            continue
+                    if fallback and self._transport and not self._closed:
+                        self._transport.sendto(fallback, ("255.255.255.255", self._port))
+                except Exception:
+                    _log.debug("LAN beacon broadcast failed", exc_info=True)
                 await asyncio.sleep(2)
         except asyncio.CancelledError:
             return
 
     def close(self):
+        self._closed = True
+        for task in self._reply_tasks:
+            task.cancel()
         if self._broadcast_task:
             self._broadcast_task.cancel()
             self._broadcast_task = None
+
+    def connection_lost(self, exc):
+        self.close()

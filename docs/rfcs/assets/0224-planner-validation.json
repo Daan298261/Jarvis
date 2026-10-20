@@ -1,0 +1,10 @@
+{
+  "validation": "Candidate planner against VRPC's configured local 9B provider",
+  "database": "isolated temporary SQLite database",
+  "seconds": 3.832,
+  "saved_steps": 6,
+  "kinds": ["work", "work", "work", "bugfix", "fact_check", "quality_control"],
+  "statuses": ["pending", "pending", "pending", "pending", "pending", "pending"],
+  "tools_executed": 0,
+  "note": "Read-only planning and persistence acceptance; does not prove installed application deployment."
+}

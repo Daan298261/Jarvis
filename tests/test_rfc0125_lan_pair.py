@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 
 import pytest
@@ -90,7 +91,10 @@ def test_beacon_protocol_replies_from_peer_subnet(monkeypatch):
     proto = _BeaconProtocol(
         lambda peer="": {"https": "https://192.168.1.12:4781", "server_pin": "a" * 64, "name": "Jarvis"}
     )
-    proto.datagram_received(b'JARVIS1\n{"probe":true}', ("192.168.1.40", 54321))
+    async def receive():
+        proto.datagram_received(b'JARVIS1\n{"probe":true}', ("192.168.1.40", 54321))
+        await asyncio.gather(*proto._reply_tasks)
+    asyncio.run(receive())
     assert seen == [("192.168.1.12", "192.168.1.40", 54321)]
 
 

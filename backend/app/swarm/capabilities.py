@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -182,7 +183,7 @@ def capability_to_dict(binding: NodeCapability) -> dict[str, Any]:
 
 async def register_localhost_capabilities(node_id: str) -> list[dict[str, Any]]:
     """Bind detected localhost capabilities to a Node. Idempotent across restarts."""
-    catalog = detect_localhost_capabilities()
+    catalog = await asyncio.to_thread(detect_localhost_capabilities)
     catalog_ids = {item["id"] for item in catalog}
     now = _utcnow()
 
