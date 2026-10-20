@@ -5,9 +5,10 @@
 **Author:** Jarvis Architect
 **Date:** 2026-10-20
 **Traced on:** `development` @ `11b264a7`. Drafts and RFC PRs pinned: #649 @ `edb4685` (identical to `b5c3640` for every file cited here), #652 (RFC-0225) @ `140482b`, #655 (RFC-0228) @ `973b979`, #585 (RFC-0211) @ `f412dad`, #663 (RFC-0218 delivery fix) @ `c5db314`.
+**Amended 2026-10-20 (CoS, #665 peer):** the large target `anzu-coder-27b` was assumed to exist as a runtime profile. It does not (see *Target profile: `anzu-coder-27b`*), so new slice **0231-S0** adds it and 0231-S4 hard-depends on it. Re-traced for S0 and for the `hotswap.py`, `config.py` and `main.py` citations on `development` @ `d214b6d` (#648 landed; #663 landed at `781004c`), #652 @ `916cf25`, #655 @ `971ca15`, #649 @ `edb4685`.
 
 **Owner ask (Taco, ask B, intent as relayed):** when Taco speaks or types a large or complex task, Jev/Laya decide that it is complex. Then:
-1. ANZU immediately loads the large model (anzu-coder-27b or whichever large model applies).
+1. ANZU immediately loads the large model (anzu-coder-27b or whichever large model applies). `anzu-coder-27b` is the 0231-S0 runtime profile.
 2. In parallel, the small front model says something short, such as "This is a large task, I'm loading the larger model."
 3. The prompt is split into sections, or into single questions if it asks several.
 4. Each section is checked for completeness, with iteration.
@@ -69,7 +70,7 @@ Verified on `development` @ `11b264a7`.
 
 ## Decision
 
-Ship **one RFC with six implement slices**, one named model per slice and fast mode off. Nothing waits for #649 or #585.
+Ship **one RFC with seven implement slices (S0-S6)**, one named model per slice and fast mode off. Nothing waits for #649 or #585.
 
 **Pipeline at a glance.** A large owner turn becomes one **parent task** (the one the HUD is already following) and N **child tasks**, one per section, run strictly one after another.
 
@@ -166,15 +167,17 @@ The large branch replaces only the generic ack at L547-556:
 - **Audible budget:** first ack audio ≤ **1200 ms** after the decision on Taco's PC, with the TTS voice warm. This is a live audit (S4 acceptance), not CI.
 
 **Target resolution** (`agent/large_prompt.py::resolve_target(settings) -> RuntimeProfile | None`, pure):
-1. `settings.large_prompts.target_runtime` (default `"anzu-coder-27b"`), matched against runtime profile `name`, then `model_profile`, then the provider model id.
+1. `settings.large_prompts.target_runtime` (default `"anzu-coder-27b"`, the 0231-S0 profile), matched against **enabled** runtime profiles (`list_runtime_profiles()`, `enabled is True`) by `name`, then `model_profile`, then the provider model id. A disabled row never matches, the same rule `route_runtime` applies (`runtime_router.py:284-285`).
 2. Otherwise `route_runtime` (`runtime_router.py:320`) with `minimum_answer_tier=3`, `task_specialization="coding"` when `task_class` is code/build/debug and `"reasoning"` otherwise, and `preferred_profiles=("expert", "ornith_35b")`. This is ported from `answer_routing.py:57-71`, with tier 3 as the floor and no new router.
 3. Otherwise `None`. The ack uses the "no target available" text and the pipeline runs on the current model, with `preload_status="no_target"` shown in the panel.
 
 **Preload** (`large_prompt.preload`). No new loader:
-1. Snapshot `settings.inference` (JSON) into `previous_selection_json`, because `hotswap.apply_runtime_profile_to_settings` persists what it applies (`hotswap.py:88-191`).
+1. Snapshot `settings.inference` (JSON) into `previous_selection_json`, because `hotswap.apply_runtime_profile_to_settings` persists what it applies (`hotswap.py:88-194` on `d214b6d`).
 2. Take a rewarm **hold** (see *Rewarm hold*).
-3. Call `await hotswap.activate_runtime_profile(target)` (`hotswap.py:194-235`). After RFC-0225 S3 this routes through `prepare_engine_for`: single-flight, revive or respawn, identity check, VRAM gate step 5, and owner lines. The pipeline adds no gate logic of its own.
-4. Warm with `gpu_prefer.ensure_ollama_gpu` (L124) or `ensure_lmstudio_gpu` (L67), by provider.
+3. Call `await hotswap.activate_runtime_profile(target)` (`hotswap.py:197-238` on `d214b6d`). After RFC-0225 S3 this routes through `prepare_engine_for`: single-flight, revive or respawn, identity check, VRAM gate step 5, and owner lines. The pipeline adds no gate logic of its own.
+4. Warm with `gpu_prefer.ensure_ollama_gpu` (L124) or `ensure_lmstudio_gpu` (L67), by provider. For an Ollama target (the S0 profile), the preload first reads Ollama `GET /api/ps`:
+   - model already listed → no warm call (an owner-loaded model's `keep_alive` is not touched), not recorded in `anzu_loads`, `preload_status = "already_loaded"`;
+   - model not listed → warm, then `GET /api/ps` again; listed → `engine_coexistence.record_anzu_load(engine_id="ollama@127.0.0.1:11434", model="anzu-coder-27b")` (RFC-0225 S3, #652 L43 "every model instance ANZU itself loaded into an engine it does not own"), `preload_status = "loaded"`; not listed → `failed:warm_not_resident`.
 5. Set `preload_status`: `loaded`, `already_loaded`, `failed:<reason>`, `gate_refused:<reason>` or `timeout`.
 
 **Preload outcomes (defined, never silent):**
@@ -198,6 +201,59 @@ The large branch replaces only the generic ack at L547-556:
 - Holds are in-memory. Startup recovery (§5) re-takes a hold for every pipeline still `running`.
 
 This prevents the 120 s idle restore from swapping the worker away between two parts. Only RFC-0228 S2 creates the coordinator, and this RFC adds the two methods.
+
+### 2a. Target profile: `anzu-coder-27b` (S0)
+
+**Source trace (normative).** `anzu-coder-27b` is an Ollama model on Taco's PC, not something ANZU ships:
+- `development` @ `d214b6d`: no runtime profile, model profile, specialist catalogue entry or installer asset defines it. `rg anzu-coder` over `backend/`, `config/`, `installer/` and `tests/` returns nothing. `installer/windows/model-catalog.json` does not exist yet (RFC-0228 S1/S4 create it). `config/default.json` has no runtime profiles; the registry defaults are `runtime_profiles.py:146-154` (`PROFILES` + `model_stack.recommended_specialist_runtime_profiles()`), and neither contains it.
+- The only mentions on `development` are observations and fixtures: `docs/audits/2026-10-09-model-reuse-scheduler-manager.md:13` ("Ollama exposed `anzu-coder-27b:latest` at 11434") and RFC-0227 `docs/rfcs/0227-model-chooser-and-dropdown-persistence.md:69` (HUD slot fixture, provider `ollama`, model `anzu-coder-27b`).
+- RFC-0228 (#655 @ `971ca15`): owner context L10 ("`anzu-coder-27b` (Ollama, ~12 GB GPU) is for coding"), VRAM yielding L63, and out of scope L360 ("Changing the 27B coder or its Ollama model configuration"). 0228-S1 owns the Fable 9B default and `fable_9b` (L41, L206), not the coder, and `dl_expert27b` (L31) is the separate Qwen3.5-27B GGUF for `expert`. **0228-S1 is therefore not the owner; #655 is not amended.**
+- RFC-0225 (#652 @ `916cf25`): uses the model only in the gate and in owner lines (L70, L73 "`anzu-coder-27b` ≈ 12 GB", L76, L81-82, test L382 "free VRAM < 13 GB"). It adds no profile.
+- Taco's drafts #648 (landed as `d214b6d`) and #649 @ `edb4685`: no hunk names `anzu-coder` (`gh pr diff` searched).
+
+**Owner: 0231-S0.** It adds one shipped runtime-profile template in the existing schema (`RuntimeProfile`, `runtime_profiles.py:28-50`, produced by `SpecialistModel.runtime_profile()`, `model_stack.py:47-74`), so no schema field is added:
+
+| `RuntimeProfile` field | Value | Why |
+| --- | --- | --- |
+| `id` | `recommended-anzu-coder-27b` | `model_stack.py:56` pattern |
+| `name` | `anzu-coder-27b` | `large_prompts.target_runtime` default; equals `create_runtime_profile`'s normalisation (`runtime_profiles.py:240`) |
+| `label` (display name) | `ANZU Coder 27B (Ollama)` | |
+| `model` (model key) | `anzu-coder-27b` | Ollama tag; `anzu-coder-27b:latest` resolves through the existing `resolve_advertised_model` substring match in `apply_runtime_profile_to_settings` |
+| `provider` | `ollama` | as in the RFC-0227 fixture and RFC-0228 L10 |
+| `endpoint` (runtime) | `127.0.0.1:11434` | Ollama loopback, same form as the Umi entry (`model_stack.py:93`). LM Studio `http://127.0.0.1:1234/v1` keeps serving the 9B `qwen3.5-9b-defiant-fable-uncensored`, and nothing here changes it. |
+| `context_limit` | `16384` | `RuntimeProfile.from_dict` default. A compiled part is ≤ 6000 chars plus ≤ 1800 chars carry-over, so 16k leaves room for the tool loop and keeps the footprint inside the 12 GB estimate. |
+| `quantization` | `ollama` | the Umi convention (`model_stack.py:95`); the quant is inside Taco's Ollama model |
+| `privacy_class` | `local-only` | |
+| `cost_ceiling_usd` | `0.0` | local (`model_stack.py:65`) |
+| `capability_tags` | `("llm_inference", "text", "coding", "agentic", "tool-use")` | no `high-quality`, so `_quality_score` (`runtime_router.py:155-165`) does not lift it over the preferred `expert` in answer routing |
+| `specialization_tags` | `("coding",)` | no `reasoning`, so answer routing's `task_specialization="reasoning"` bonus (`answer_routing.py:61-66`) does not go to it |
+| `model_profile` | `None` | an Ollama runtime has no `PROFILES` entry; `activate_runtime_profile` then keeps `settings.inference.profile` |
+| `is_local` | `True` | |
+| `description` | `Taco's 27B coding model in Ollama (~12 GB GPU). ANZU enables it only when Ollama lists it.` | |
+| `enabled` | `False` as shipped; set to `True` by the S0 reconcile below | specialist templates ship disabled (`tests/test_model_stack.py::test_specialist_runtime_templates_are_disabled_by_default`), so installs without the model route exactly as today |
+| `runtime_role`, `answer_tier` | `expert`, `4` | `SpecialistModel.role = "leader"` (`model_stack.py:53-54`); `profile_roles.py` is not edited (0228-S2 owns it) |
+| `gguf_path` | `""` | not a GGUF ANZU loads |
+
+The `SpecialistModel` entry is `MODEL_CATALOG["anzu-coder-27b"]` with `key`/`runtime_profile_name` `anzu-coder-27b`, `role="leader"`, `enabled_by_default=False`, `ship_runtime_template=True`, `manual_gate=False`, `inference_profile=None`, and the values above. `ROLE_SPECS["leader"].preferred_profiles` is **not** changed (`tests/test_model_stack.py::test_leader_role_prefers_qwen38_then_local_fallbacks` keeps passing).
+
+**Values outside `RuntimeProfile` (no new schema field):**
+- **VRAM estimate:** `anzu_coder.VRAM_ESTIMATE_GB = 12.0`, the total requirement at `context_limit` 16384 (Taco's figure; #652 L73, L76). `anzu_coder.vram_requirement_gb(target) -> float | None` returns `12.0` when the target provider is `ollama` and its model is `anzu-coder-27b` or `anzu-coder-27b:<tag>`, otherwise `None`. S0 adds one hunk to RFC-0225's `engine_coexistence.prepare_engine_for` step-5 requirement lookup: consult `vram_requirement_gb` first, then the existing catalogue / graded `weight_gb` lookup unchanged. With the 1 GB headroom the gate acts below 13 GB free, which is #652's test threshold (L382).
+- **`idle_unload_seconds`:** not per profile. ANZU-originated Ollama loads use RFC-0228 S2's `settings.inference.idle_unload_seconds` (default 900, so `keep_alive: "900s"`; `0` means `"-1"`, pinned; #655 L62). This profile inherits it.
+- **ANZU-loaded vs owner-loaded (RFC-0225, #652 L43-44, L74-82):**
+  - *ANZU-loaded:* ANZU's preload warmed it and `/api/ps` did not list it before (§2 preload step 4). It is recorded in `anzu_loads`, and the reverse gate (step 6) may unload it with `keep_alive: 0` when the 9B needs the VRAM back.
+  - *Owner-loaded:* listed by `/api/ps` before ANZU asked (e.g. Taco ran it from his shell). Not recorded, never unloaded by ANZU, and the reverse gate gives its "which you loaded" error line instead.
+  - With the profile enabled, Ollama on 11434 counts as `anzu_configured` under RFC-0225 S3's classification ("Ollama referenced by an enabled runtime profile"), so it is never offered for stopping.
+- **Installer catalogue size / sha256:** none. The model is Taco's own Ollama build, so it is not an installer asset: `installer/windows/model-catalog.json` (RFC-0228) gets no entry, and S0 changes no installer file. #655 L360 already excludes it.
+
+**Enable reconcile** (`backend/app/inference/anzu_coder.py::reconcile_anzu_coder_profile() -> dict`, new). It runs once per backend start as `_start_optional_step("anzu_coder_profile", reconcile_anzu_coder_profile)` in `main.py` startup, next to the existing optional steps (`main.py:140-143`, `:226`), so startup never waits on it:
+1. `probe_remote_server("127.0.0.1", 11434, timeout=3.0)` (`backends.py:159`). If Ollama is unreachable, it retries every 60 s, at most 10 attempts, then stops with outcome `ollama_unreachable`.
+2. Ollama answers but doesn't list `anzu-coder-27b` / `anzu-coder-27b:<tag>` → `not_advertised`. Nothing changes.
+3. A registry row named `anzu-coder-27b` whose id is not `recommended-anzu-coder-27b` (an owner-created row) → `owner_row`. That row is left alone and resolution uses it (`_merge_missing_defaults`, `runtime_profiles.py:157-164`, never adds the template over it).
+4. The template row is already enabled → `already_enabled`.
+5. The template row is disabled and `runtime_profiles_root()/anzu-coder-profile.json` has `auto_enabled_at` → `owner_disabled`. The owner turned it off after an earlier auto-enable, so it is not re-enabled.
+6. Otherwise → `update_runtime_profile("recommended-anzu-coder-27b", enabled=True)`, write `{"auto_enabled_at": <ISO-8601 UTC>}` to that file, outcome `enabled`.
+
+Each outcome is logged once as `anzu_coder_profile outcome=<outcome>` and returned, so `startup_health` records it. This follows the existing rule that a discovered local model becomes an enabled runtime row (`model_discovery.py:338-366`). If the model is removed from Ollama later, the next preload fails visibly through `activate_runtime_profile` ("Model 'anzu-coder-27b' is not loaded in Ollama…") and takes the "load error" fallback in §2.
 
 ### 3. Split, completeness, compile (S3)
 
@@ -369,7 +425,7 @@ This reuses the semantics of `agent/intake.py`'s chain (stable ids, advance on t
 - **Follow-ups:**
   - `/continue` on a **child** is redirected to the parent, in `continue_task` (L560-589).
   - `/continue` on the **parent** is handled in `_run`'s follow-up path, after S3b's follow-up persona block. If a part is `needs_owner`, the reply answers it (§3). Otherwise the text is appended as a new last part (content hash dedupe, the #649 `append_followup` L180-216 rule) and goes through completeness and compile.
-- **Startup recovery** (`main.py`, after `reconcile_execution_on_startup`, L208-212). For each pipeline in `running` or `waiting`:
+- **Startup recovery** (`main.py`, after `reconcile_execution_on_startup`, L213-218 on `d214b6d`). For each pipeline in `running` or `waiting`:
   - re-take the rewarm hold;
   - if the current child is terminal, run `on_child_terminal` (a missed advance);
   - if it is `queued` without a runner, dispatch it again (same id);
@@ -426,11 +482,11 @@ Every function named here ships complete, with tests. The following are not allo
 ```python
 class LargePromptSettings(BaseModel):
     enabled: bool = True
-    target_runtime: str = "anzu-coder-27b"
+    target_runtime: str = "anzu-coder-27b"  # the 0231-S0 runtime profile name
     store: Literal["db", "db_and_vault"] = "db"
 ```
 
-`AppSettings.large_prompts` is added next to `decision` (`config.py:450-512`). `api/settings.py` exposes it on the existing settings GET and PUT. No new settings UI is part of this RFC; the setting is editable through the existing advanced settings JSON.
+`AppSettings.large_prompts` is added next to `decision` (`config.py:477-519` on `d214b6d`). `api/settings.py` exposes it on the existing settings GET and PUT. No new settings UI is part of this RFC; the setting is editable through the existing advanced settings JSON.
 
 ---
 
@@ -444,6 +500,8 @@ class LargePromptSettings(BaseModel):
 | **Reflex arbitration** | One decide per owner turn, with two riders. The ack is a fixed front notice, so `keep_worker` semantics apply to the parent result (§1). |
 | **RFC-0218 S3b (+ #663)** | The parent turn's persona block runs first, unchanged. `switch_id = task_id:seq` is counted on the parent only. Children never call `apply_persona_switch`, so they publish no `persona_switched` or `persona_switch_failed`, and their `seq` counter stays empty. The 0218 test `t(acknowledgement) − t(persona_switched) < 50 ms` still holds, because the large branch publishes the `acknowledgement` event in the same position. |
 | **RFC-0225 S3** | The preload is exactly `activate_runtime_profile`, which 0225-S3 routes through `prepare_engine_for`. There is no separate VRAM gate, loader or owner-line channel. |
+| **RFC-0228 S1 / S4** | Not the owner of `anzu-coder-27b`: 0228-S1 is the Fable 9B default and 0228 L360 excludes the coder. No `model-catalog.json` entry is added (not an installer asset). |
+| **RFC-0225 S3 (gate requirement)** | 0231-S0 adds the `anzu-coder-27b` requirement (12 GB) as the first lookup in the step-5 gate. The gate logic, ledger and owner lines stay 0225's. |
 | **RFC-0228 S2** | The restore goes through `schedule_orchestrator_restore` → `NINE_B_REWARM`. The hold API is added to `rewarm.py` after 0228-S2. |
 | **`agent/intake.py`** | Left in place for `stream_owner_chat`. The large pipeline replaces its use only on the tasks path. Merging the two is out of scope. |
 | **RFC-0230** (in flight) | Unknown content at time of writing. Its slices go **first** on every shared file listed below, and 0231 slices rebase onto them. |
@@ -461,6 +519,30 @@ class LargePromptSettings(BaseModel):
 ---
 
 ## Slices (one ticket each, one developer each, fast off)
+
+### S0: `anzu-coder-27b` runtime profile, VRAM requirement, enable reconcile
+
+**Model:** Grok 4.5 · **Depends:** RFC-0225 S3 (creates `engine_coexistence.py` with `prepare_engine_for`; `main.py` chain)
+
+| File | Change |
+| --- | --- |
+| `backend/app/inference/model_stack.py` | `MODEL_CATALOG["anzu-coder-27b"]` `SpecialistModel` (§2a values); only owner in the batch |
+| `backend/app/inference/anzu_coder.py` (new) | `VRAM_ESTIMATE_GB`, `vram_requirement_gb`, `reconcile_anzu_coder_profile` |
+| `backend/app/inference/engine_coexistence.py` | Only: the step-5 requirement lookup consults `anzu_coder.vram_requirement_gb(target)` first (second owner after 0225-S3) |
+| `backend/app/main.py` | One line: `_start_optional_step("anzu_coder_profile", reconcile_anzu_coder_profile)` plus its import |
+| `tests/test_rfc0231_anzu_coder_profile.py` (new) | Below |
+
+Tests (CI: `pytest` job, step "Run full backend suite", `.github/workflows/pr-tests.yml:94-95`):
+- `test_template_fields_exact`: `default_runtime_profiles()` contains a row equal, field by field, to the §2a table (id, name, label, model, provider, endpoint, context_limit, quantization, privacy_class, cost_ceiling_usd, capability_tags, specialization_tags, model_profile, is_local, description, enabled=False, runtime_role, answer_tier, gguf_path).
+- `test_existing_routes_unchanged_when_template_disabled`: `route_runtime` and `prepare_answer_route` give the same result with and without the template, for the leader, orchestrator and tier-2/3/4 answer preference sets.
+- `test_enabled_profile_does_not_outrank_expert_for_reasoning_answers`: template enabled, tier-4 reasoning answer route → `expert`.
+- `test_reconcile_enables_when_ollama_lists_model` (`anzu-coder-27b:latest` advertised) → `enabled`, row enabled, `auto_enabled_at` written.
+- `test_reconcile_not_advertised_leaves_disabled`.
+- `test_reconcile_unreachable_retries_bounded`: fake clock, 10 attempts 60 s apart, then `ollama_unreachable`.
+- `test_reconcile_respects_owner_row_and_owner_disable`: owner-created `anzu-coder-27b` row → `owner_row`, untouched; template disabled after `auto_enabled_at` → `owner_disabled`, stays disabled.
+- `test_reconcile_runs_as_optional_startup_step`: startup reaches `/api/health` without awaiting the probe; the step name is in `startup_health.report()`.
+- `test_vram_requirement_12gb_for_coder_only`: `anzu-coder-27b` and `anzu-coder-27b:latest` on Ollama → 12.0; other models → `None`.
+- `test_gate_uses_coder_requirement`: with 12.5 GB free and an ANZU-loaded 9B, `prepare_engine_for(<S0 profile>)` takes the gate's unload path (12.0 + 1 GB > 12.5); with 13.5 GB free nothing is unloaded.
 
 ### S1: Large-prompt detection riders
 
@@ -537,11 +619,11 @@ Tests:
 
 ### S4: Ack, preload, create_task large branch, rewarm hold
 
-**Model:** Grok 4.6 · **Depends:** S1, S2, S3, RFC-0225 S3 (`prepare_engine_for` in `hotswap.py`), RFC-0228 S2 (`inference/rewarm.py`), RFC-0218 S3b (`create_task` persona block)
+**Model:** Grok 4.6 · **Depends:** **S0** (the `anzu-coder-27b` target profile and its VRAM requirement; hard dependency, S4 does not start before S0 is merged), S1, S2, S3, RFC-0225 S3 (`prepare_engine_for` in `hotswap.py`), RFC-0228 S2 (`inference/rewarm.py`), RFC-0218 S3b (`create_task` persona block)
 
 | File | Change |
 | --- | --- |
-| `backend/app/agent/large_prompt.py` (new) | `resolve_target`, `preload`, ack texts, compare-and-restore |
+| `backend/app/agent/large_prompt.py` (new) | `resolve_target` (enabled rows only), `preload` (incl. the Ollama `/api/ps` check and `record_anzu_load`), ack texts, compare-and-restore |
 | `backend/app/agent/loop.py` | Large branch in `create_task` (after S3b's block, replacing the generic ack for large turns only); parent runner entry in `_run` |
 | `backend/app/inference/rewarm.py` | `hold` and `release`, plus deferral while held (second owner after 0228-S2) |
 | `tests/test_rfc0231_ack_preload.py` (new) | Below |
@@ -552,7 +634,9 @@ Tests:
 - `test_ack_title_not_speak_reply`.
 - `test_0218_ack_after_persona_switched_still_under_50ms`.
 - `test_preload_started_not_awaited`.
-- `test_target_resolution_order`, using RFC-0228's `settings_lmstudio_9b.json` fixture plus an Ollama `anzu-coder-27b` runtime row.
+- `test_target_resolution_order`, using RFC-0228's `settings_lmstudio_9b.json` fixture plus the S0 `recommended-anzu-coder-27b` row: enabled → it is the target; disabled → step 2 (`route_runtime`); absent → step 2.
+- `test_preload_ollama_anzu_loaded_recorded`: `/api/ps` without the model → warm → listed → exactly one `record_anzu_load("ollama@127.0.0.1:11434", "anzu-coder-27b")`, `preload_status == "loaded"`.
+- `test_preload_ollama_owner_loaded_not_recorded`: `/api/ps` already lists it → no warm call, no `record_anzu_load`, `preload_status == "already_loaded"`.
 - `test_preload_uses_activate_runtime_profile_only`: no `MANAGER.load` or direct engine call.
 - `test_gate_refused_falls_back_visibly`.
 - `test_preload_timeout_180s_fallback`, with a fake clock.
@@ -617,7 +701,9 @@ Every listed RFC-0230 slice goes **first** on any file it claims. When RFC-0230 
 | `backend/app/api/tasks.py` | (0230) → 0231-S2 → 0231-S5 |
 | `backend/app/inference/rewarm.py` | 0228-S2 (creates it) → 0231-S4 |
 | `backend/app/inference/hotswap.py` | 0225-S3 → 0228-S2. 0231 does **not** edit it. |
-| `backend/app/main.py` | 0225-S1 → S2 → S3 → 0231-S5 |
+| `backend/app/main.py` | (0230-S0 → 0230-S5) → 0225-S1 → S2 → S3 → 0231-S0 → 0231-S5 |
+| `backend/app/inference/engine_coexistence.py` | 0225-S3 (creates it) → 0231-S0 |
+| `backend/app/inference/model_stack.py`, `backend/app/inference/anzu_coder.py` | 0231-S0 only |
 | `backend/app/db/models.py` | (0230) → 0231-S2 |
 | `frontend/src/api.ts` | 0218-S3 → 0231-S6 |
 | `frontend/src/components/TaskActivity.tsx` | (#649 if it lands first) → 0231-S6 |
@@ -627,14 +713,15 @@ Every listed RFC-0230 slice goes **first** on any file it claims. When RFC-0230 
 
 | ID | Title | Model | Depends |
 | --- | --- | --- | --- |
+| 0231-S0 | `anzu-coder-27b` runtime profile, VRAM requirement, enable reconcile | Grok 4.5 | 0225-S3 |
 | 0231-S1 | Large-prompt detection riders | Grok 4.5 | — |
 | 0231-S2 | Prompt-step engine port, tables, settings | Grok 4.6 | S1 (order) |
 | 0231-S3 | Split, completeness, compile, sub-tasks, persistence | Grok 4.5 | S2 |
-| 0231-S4 | Ack, preload, create_task branch, rewarm hold | Grok 4.6 | S1-S3, 0225-S3, 0228-S2, 0218-S3b |
+| 0231-S4 | Ack, preload, create_task branch, rewarm hold | Grok 4.6 | **S0**, S1-S3, 0225-S3, 0228-S2, 0218-S3b |
 | 0231-S5 | Sequential queue, lifecycle, recovery | Grok 4.6 | S4 |
 | 0231-S6 | Large-prompt sections panel | Composer 2.5 | S5, 0218-S3 |
 
-All six run with fast mode off.
+All seven run with fast mode off.
 
 ## Overall acceptance
 
@@ -642,6 +729,7 @@ All six run with fast mode off.
 - [ ] The prompt is split, every section is complete or explicitly `needs_owner` within 3 rounds, and each section becomes one detailed prompt stored in SQLite (and in the vault when enabled).
 - [ ] The parts run strictly one after another. Every part has validated deeper and quantitative sub-tasks, and the parent shows progress, can be cancelled, and ends with a combined, verified result.
 - [ ] With `large_prompts.enabled=false`, behaviour is identical to today.
+- [ ] On Taco's PC (Ollama lists `anzu-coder-27b:latest`), the S0 profile is enabled at startup and is the preload target; on an install without it, the template stays disabled and routing is unchanged.
 
 ## Out of scope
 
