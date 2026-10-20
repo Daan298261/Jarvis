@@ -46,6 +46,7 @@ import zlib
 
 from . import store
 from .tab_analyzer import TabProfiler, is_tab_path, parse_tab_header, summarize as summarize_tab_profiles
+from .tab_recovery import TableRecovery
 
 CHUNK_SIZE = 1024 * 1024  # RFC-0208: every member is hashed in 1 MiB blocks
 HEADER_MAX_BYTES = 65536  # Header inspection window for magic detection
@@ -738,6 +739,26 @@ class FFSIngest:
                                 "hashes reflect the bytes read at the time and the dump should be re-verified.")
         manifest_sha = file_sha256(index_path)
         tab = self._tab_profile(ident, index_path)
+        try:
+            recovery = TableRecovery(tab["files"]).run(
+                lambda: iter_source_entries(source_path, source_type), idx / "decoded_tables",
+                lambda: check_cancel(b""),
+            )
+        except (IngestCancelled, *MEMBER_ERRORS) as exc:
+            outcome = "cancelled" if isinstance(exc, IngestCancelled) else "interrupted"
+            row["last_error"] = f"Table recovery: {type(exc).__name__}: {exc}"[:2000]
+            self._finish_session(custody_path, custody, session, session_files, outcome)
+            return self._interrupt(row, checkpoint_path, source_path, files, total_bytes, current,
+                                   total_files_hint, total_bytes_hint, resumed, unknowns, outcome)
+        store.atomic_json(idx / "tab_recovery.json", recovery)
+        tab["summary"]["known_plaintext_recovery"] = {
+            "report": "index/tab_recovery.json",
+            "candidate_pairs_tested": recovery["candidate_pairs_tested"],
+            "matched_pairs": len(recovery["pairs"]),
+            "solved_key_ids": [g["key_id"] for g in recovery["key_ids"] if g["solved"]],
+            "decoded_files": len(recovery["decoded"]), "gaps": recovery["gaps"],
+        }
+        store.atomic_json(idx / TAB_PROFILE_FILE, tab)
         custody["manifest"] = {"index": f"{INDEX_DIR}/{INDEX_FILE}", "files": files, "bytes": total_bytes,
                                "sha256": manifest_sha}
         custody["source_sha256"] = manifest_sha
@@ -782,8 +803,18 @@ class FFSIngest:
                 "with encryption or compression and does not by itself prove either.",
             ],
         }, source_path, manifest_sha)
+        recovery_id = self._evidence(row, "ffs_tab_recovery", {
+            "derived_from": tab_id, "report": "index/tab_recovery.json",
+            "report_sha256": file_sha256(idx / "tab_recovery.json"),
+            "derivatives": "index/decoded_tables/", **tab["summary"]["known_plaintext_recovery"],
+            "key_ids": recovery["key_ids"],
+            "pairs": recovery["pairs"][:MAX_EVIDENCE_TAB_FILES],
+            "pairs_truncated": len(recovery["pairs"]) > MAX_EVIDENCE_TAB_FILES,
+            "limitations": recovery["limitations"],
+        }, source_path, manifest_sha)
         chain.append(make_chain_of_custody_entry(
-            "evidence_recorded", source_path, f"Recorded {ingest_id} (index) and {tab_id} (.tab profile).",
+            "evidence_recorded", source_path,
+            f"Recorded {ingest_id} (index), {tab_id} (.tab profile) and {recovery_id} (table recovery).",
             entry_index=len(chain) + 1,
         ))
         row["unknowns"] = list(dict.fromkeys([*row.get("unknowns", []), *unknowns]))
