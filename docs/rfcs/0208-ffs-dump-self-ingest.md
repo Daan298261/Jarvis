@@ -97,6 +97,10 @@ the 0x22 DID table writeup (later analyzer slices), promotion to main, and any c
 
 ## Notes
 
+The `.tab` container format (`AT\x00\x02`, 64-byte keyed header with a per-make key id)
+is written up in `docs/reverse-engineering/autel-tab-container.md`; `tab_analyzer.parse_tab_header`
+and `summary.container_census` in `ffs_tab_profile` implement it.
+
 The `.tab` entropy/header analyzer (RFC-0208 companion, branch re/ffs-analyzers)
 consumes the NDJSON index records and reads file bytes read-only; it is independent of
 this ingest module and integrates at report time.

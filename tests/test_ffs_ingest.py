@@ -458,3 +458,32 @@ async def test_agent_tool_ingests_in_background_and_reports_progress(ffs_env):
     assert "ffs_tab_profile" in guide.data["skill"]
     other_task = await tool.execute(action="ingest_status", investigation_id=ident, _task_id="someone-else")
     assert not other_task.success
+
+
+@pytest.mark.asyncio
+async def test_tab_container_header_and_xor_key_reach_index_and_profile(ffs_env):
+    keyed_header = bytes.fromhex("415400024e4c06010001000000000aa9300045589400010000") + b"\x00" * 39
+    tsv = b"52\tAll\t1\t31\t20\t00\t00,00,1B\tN\tY\tY\tNA\r\n" * 50
+    archive = ffs_env / "autel_at2.zip"
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr("Scan/Vehicle/Domestic/BAICMotor/nl_FunctionText.tab", keyed_header + bytes(b ^ 0x37 for b in tsv))
+        z.writestr("Scan/Vehicle/Asia/TATA/live_data/0x07_2.tab", bytes(b ^ 0xA5 for b in tsv))
+    row = await ingest_source(archive)
+    ident = row["id"]
+    lines = {e["path"]: e for e in index_lines(ident)}
+    keyed = lines["Scan/Vehicle/Domestic/BAICMotor/nl_FunctionText.tab"]
+    xored = lines["Scan/Vehicle/Asia/TATA/live_data/0x07_2.tab"]
+    assert keyed["tab_header_hex"] == keyed_header.hex() and "xor_key" not in keyed
+    assert keyed["top_byte"] == 0x09 ^ 0x37
+    assert xored["xor_key"] == 0xA5
+
+    profile = json.loads((store.directory(ident) / "index" / "tab_profile.json").read_text(encoding="utf-8"))
+    rows = {f["path"]: f for f in profile["files"]}
+    assert rows["Scan/Vehicle/Domestic/BAICMotor/nl_FunctionText.tab"]["container"]["key_id"] == 0x94
+    assert rows["Scan/Vehicle/Asia/TATA/live_data/0x07_2.tab"]["container"]["container"] == "unknown"
+    census = profile["summary"]["container_census"]
+    assert census["at2"]["key_ids"] == [{"key_id": 0x94, "files": 1, "dominant_top_byte": 0x09 ^ 0x37,
+                                         "dominant_top_byte_files": 1}]
+    assert census["single_byte_xor_text"]["files"] == 1
+    tab_ev = evidence(ident, "ffs_tab_profile")
+    assert tab_ev["result"]["summary"]["container_census"]["containers"] == {"autel-at2": 1, "unknown": 1}
