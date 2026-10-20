@@ -204,6 +204,10 @@ async def startup() -> None:
     app.state.startup_id = str(uuid.uuid4())
     startup_health.reset()
     await startup_health.run_step("database", init_db, critical=True)
+    from .agent.development_scheduler import DEVELOPMENT
+
+    # RFC-0211: the scheduler needs the database; a failure degrades startup instead of aborting it.
+    await startup_health.run_step("development_scheduler", DEVELOPMENT.start)
     try:
         from .recovery.hooks import startup_recovery
 
@@ -452,6 +456,12 @@ async def shutdown() -> None:
     for task in tasks:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
+    try:
+        from .agent.development_scheduler import DEVELOPMENT
+
+        await DEVELOPMENT.close()
+    except Exception:
+        logging.exception("RFC-0211 development scheduler shutdown failed")
     try:
         from .inference.front_runtime import FRONT_RUNTIME
 
