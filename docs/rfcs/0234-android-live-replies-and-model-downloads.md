@@ -1,8 +1,8 @@
 # RFC-0234 (part 1): Android live local replies and model download feedback
 
-**Status:** accepted
+**Status:** proposed (pending Jarvis Architect sign-off). Specs are ratified only by the Jarvis Architect; until then this text describes the implementation in its PR and does not count toward completion.
 
-**Author:** Codex, requested by Daan. Split out of #650 by the Jarvis PR fixer.
+**Author:** Codex, requested by Daan (original #650 text). Split out of #650 by the Jarvis PR fixer.
 
 **Date:** 2026-10-17 (split 2026-10-20)
 
@@ -18,7 +18,8 @@ Local Qwen replies on the phone look stalled, because generated tokens are buffe
 - While a reply is in progress, show the current stage and the elapsed seconds: loading the model, preparing the conversation, reading sections, reading context, writing the reply, and phone step N/10 or running a phone action.
 - Log queue, load, first-token and total milliseconds for every local reply, without prompt text.
 - Reuse a validated transformer prompt prefix in native llama.cpp across passes. Recurrent and hybrid models, a model change, unload, or a failed prefix removal fall back to a full reset. A cancelled or failed prefill never advertises a reusable prefix. The native log reports prompt and reused token counts.
-- Publish per-model download state immediately, before the first byte. The states are connecting, downloading, retrying, verifying, ready, error and paused, with byte counts and transfer rate. Show it through shared model cards and progress feedback on Models, first-run setup, Memory & speed, and Downloaded content.
+- Publish per-model download state immediately, before the first byte. The states are connecting, downloading, retrying, verifying, ready, error and paused, with byte counts and transfer rate. Show it through shared progress feedback and per-model cards, layered on top of the existing Models screen (status line, pack dropdown, Download/Re-download, Delete, file import), the first-run setup card (Download model, Load from file), Memory & speed, and Downloaded content. Live UI is extended, never replaced.
+- Pack install state, `.partial` sizes and storage are read on IO (`CompanionPackManager.packFileSnapshot`), never on the main thread or during composition.
 - Cancel can interrupt a blocked HTTP read. A cancelled transfer keeps its `.partial` file and resumes with an HTTP `Range` request. Duplicate starts are prevented. A download is ready only after its checksum verifies.
 
 ## Acceptance criteria
@@ -31,7 +32,7 @@ Local Qwen replies on the phone look stalled, because generated tokens are buffe
 
 ## Files
 
-CompanionModel, CompanionPackManager, LiveLocalReply, LocalInferenceEngine, jarvis_llama.cpp, MainActivity (Home live-reply line and the Models section), ModelDownloadState, ModelDownloadsUi, CompanionDeviceModelChrome, DevicePackChromePublisher, PhoneMemoryUi and DownloadedContentUi. Tests: LiveLocalReplyTest, ModelDownloadFeedbackTest and ModelDownloadsUiTest.
+CompanionModel, CompanionPackManager, LiveLocalReply, LocalInferenceEngine, jarvis_llama.cpp, MainActivity (Home live-reply line and the Models section), ModelDownloadState, ModelDownloadsUi, CompanionDeviceModelChrome, DevicePackChromePublisher, PhoneMemoryUi and DownloadedContentUi. Tests: LiveLocalReplyTest, ModelDownloadFeedbackTest, ModelDownloadsUiTest, ModelScreensLiveUiTest and PackFileSnapshotTest.
 
 ## Out of scope
 
