@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import asyncio
 
 from fastapi import APIRouter
 
@@ -18,7 +19,7 @@ router = APIRouter(prefix="/api/diagnostics", tags=["diagnostics"])
 async def get_diagnostics():
     settings = load_settings()
     model = await MANAGER.snapshot(settings)
-    payload = build_diagnostics(model_snapshot=model, backend_pid=os.getpid())
+    payload = await asyncio.to_thread(build_diagnostics, model_snapshot=model, backend_pid=os.getpid())
     return payload
 
 
@@ -26,7 +27,7 @@ async def get_diagnostics():
 async def get_diagnostics_text():
     settings = load_settings()
     model = await MANAGER.snapshot(settings)
-    payload = build_diagnostics(model_snapshot=model, backend_pid=os.getpid())
+    payload = await asyncio.to_thread(build_diagnostics, model_snapshot=model, backend_pid=os.getpid())
     return {"text": diagnostics_text(payload), "diagnostics": payload}
 
 

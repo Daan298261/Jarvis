@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import socket
 import uuid
@@ -115,7 +116,7 @@ def node_to_dict(
 async def register_localhost_node() -> Node:
     """Register or refresh this process's machine as the localhost Node."""
     node_id = load_or_create_local_node_id()
-    hardware = hardware_dict()
+    hardware = await asyncio.to_thread(hardware_dict)
     resources = default_resources(hardware)
     hostname = socket.gethostname() or "localhost"
     now = _utcnow()

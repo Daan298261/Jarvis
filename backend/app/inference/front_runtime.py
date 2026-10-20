@@ -475,7 +475,7 @@ class FrontRuntime:
             remote_error = ""
             if (app.front_responder.placement or "local") == "remote":
                 remote_ok, remote_error = await self.probe_remote(app)
-            decision = self.decide(app, remote_ok=remote_ok, remote_error=remote_error)
+            decision = await asyncio.to_thread(self.decide, app, remote_ok=remote_ok, remote_error=remote_error)
             if decision.mode == "remote":
                 self._attach_provider(app, decision)
                 self._decision = decision
