@@ -17,13 +17,18 @@ class ReverseEngineerTool(Tool):
         "prepare returns a target identity and skill; catalog returns real operation schemas; "
         "call runs an advertised operation and saves evidence; evidence retrieves it; report saves "
         "findings citing evidence IDs. Runtime execution always needs owner approval. "
+        "For a full file-system (FFS) dump too large to copy (folder, zip, tar or raw image), ingest indexes it "
+        "read-only in the background (target=dump path; investigation_id resumes an interrupted ingest), "
+        "ingest_status reports progress, and ffs_query pages through the index (arguments: path_contains, "
+        "suffix, type_contains, offset, limit). "
         "Use normal repository tools for complete source code."
     )
     risk = RiskLevel.LOW
     replay_policy = "never_auto_replay"
     parameters = {
         "type": "object", "properties": {
-            "action": {"type": "string", "enum": ["status", "prepare", "catalog", "call", "evidence", "report", "close", "cancel", "guide", "record_source"]},
+            "action": {"type": "string", "enum": ["status", "prepare", "catalog", "call", "evidence", "report", "close", "cancel", "guide", "record_source",
+                                                  "ingest", "ingest_status", "ffs_query"]},
             "target": {"type": "string"}, "question": {"type": "string"},
             "origins": {"type": "array", "items": {"type": "string"}},
             "investigation_id": {"type": "string"}, "operation": {"type": "string"},
@@ -51,6 +56,16 @@ class ReverseEngineerTool(Tool):
                 data = await asyncio.to_thread(provision.readiness)
             elif action == "prepare":
                 data = await SERVICE.prepare(kwargs["target"], kwargs["question"], context.get("allowed_directories", []), _task_id, kwargs.get("origins"))
+            elif action == "ingest":
+                options = dict(kwargs.get("arguments") or {})
+                source = kwargs.get("target") or (SERVICE.owned(ident, _task_id).get("target") if ident else "")
+                if not source:
+                    raise ValueError("ingest needs target (the dump path) or investigation_id of an interrupted ingest")
+                data = await SERVICE.ingest(
+                    source, kwargs.get("question") or "Forensic image ingest and file index",
+                    context.get("allowed_directories", []), _task_id, ident or None,
+                    options.get("source_type", "auto"), background=bool(options.get("background", True)))
+                data = {k: v for k, v in data.items() if k not in {"manifest", "snapshot", "_claim_token"}}
             else:
                 row = SERVICE.owned(ident, _task_id)
                 if action == "catalog":
@@ -67,6 +82,10 @@ class ReverseEngineerTool(Tool):
                     data["report_url"] = f"/api/investigations/{ident}/report?format=md"
                 elif action in {"close", "cancel"}:
                     data = await SERVICE.close(ident, _task_id, cancelled=action == "cancel")
+                elif action == "ingest_status":
+                    data = SERVICE.ingest_status(ident, _task_id)
+                elif action == "ffs_query":
+                    data = await SERVICE.ffs_query(ident, _task_id, dict(kwargs.get("arguments") or {}))
                 elif action == "guide":
                     from ..reverse_engineering.skill import guide
                     data = {"skill": guide(row["kind"])}
