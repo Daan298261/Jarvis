@@ -550,9 +550,11 @@ class MainActivity : FragmentActivity() {
             // RFC-0234: per-transfer stage, bytes, rate and Cancel/Resume, layered on the existing setup card.
             val transfer = devicePack.downloads.values.firstOrNull { it.active }
                 ?: devicePack.downloads[devicePack.selectedPackId]?.takeIf { it.stage != ModelDownloadStage.READY }
+            // The legacy bar and "Downloading… N%" stay exactly as before; the transfer view then skips its own bar.
+            val legacyBar = devicePack.status == DevicePackStatus.DOWNLOADING || state.modelImportBusy
             if (transfer != null) ModelTransferFeedback(transfer,
-                { chrome.cancelDownload(transfer.packId) }, { chrome.downloadPack(transfer.packId) })
-            if ((devicePack.status == DevicePackStatus.DOWNLOADING && transfer == null) || state.modelImportBusy) {
+                { chrome.cancelDownload(transfer.packId) }, { chrome.downloadPack(transfer.packId) }, showBar = !legacyBar)
+            if (legacyBar) {
                 LinearProgressIndicator(
                     progress = { (state.localPackProgress / 100f).coerceIn(0f, 1f) },
                     modifier = Modifier.fillMaxWidth(),
@@ -673,9 +675,11 @@ private fun inferenceStatus(state: CompanionState): String {
             devicePack.error?.let { Text(it, color = Color(0xFFE8A87C), fontSize = 12.sp) }
             // RFC-0234: live stage, bytes, rate and Cancel/Resume for the selected pack, on top of the status line.
             val selectedTransfer = devicePack.downloads[devicePack.selectedPackId]?.takeIf { it.stage != ModelDownloadStage.READY }
+            // The legacy bar and "N%" stay exactly as before; the transfer view then skips its own bar.
+            val legacyBar = devicePack.status == DevicePackStatus.DOWNLOADING && devicePack.downloadProgress != null
             if (selectedTransfer != null) ModelTransferFeedback(selectedTransfer,
-                { chrome.cancelDownload(selectedTransfer.packId) }, { chrome.downloadPack(selectedTransfer.packId) })
-            if (devicePack.status == DevicePackStatus.DOWNLOADING && devicePack.downloadProgress != null && selectedTransfer == null) {
+                { chrome.cancelDownload(selectedTransfer.packId) }, { chrome.downloadPack(selectedTransfer.packId) }, showBar = !legacyBar)
+            if (legacyBar) {
                 LinearProgressIndicator(
                     progress = { devicePack.downloadProgress!!.coerceIn(0f, 1f) },
                     modifier = Modifier.fillMaxWidth(),

@@ -19,9 +19,12 @@ internal fun modelDownloadBytes(bytes: Long): String = when {
     else -> "$bytes B"
 }
 
-/** The same transfer remains visible on every phone model surface. */
+/**
+ * The same transfer remains visible on every phone model surface. [showBar] is false where the
+ * surface already shows its own progress bar for this download, so one download never has two bars.
+ */
 @Composable
-fun ModelTransferFeedback(download: ModelDownloadState, onCancel: () -> Unit, onResume: () -> Unit) {
+fun ModelTransferFeedback(download: ModelDownloadState, onCancel: () -> Unit, onResume: () -> Unit, showBar: Boolean = true) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (download.active) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -30,8 +33,8 @@ fun ModelTransferFeedback(download: ModelDownloadState, onCancel: () -> Unit, on
                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
         }
         val fraction = download.fraction
-        if (fraction != null) LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
-        else if (download.active) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        if (showBar && fraction != null) LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+        else if (showBar && download.active) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         if (download.totalBytes > 0 || download.receivedBytes > 0) {
             val total = if (download.totalBytes > 0) " / ${modelDownloadBytes(download.totalBytes)}" else ""
             val speed = if (download.stage == ModelDownloadStage.DOWNLOADING && download.bytesPerSecond > 0)

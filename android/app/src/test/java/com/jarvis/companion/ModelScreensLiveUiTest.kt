@@ -8,6 +8,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -97,5 +101,49 @@ class ModelScreensLiveUiTest {
         compose.onNodeWithText("Load from file").assertExists()
         compose.onNodeWithText("Download model").performClick()
         compose.runOnIdle { assertEquals(1, downloads) }
+    }
+
+    private val determinateBar = SemanticsMatcher("determinate progress bar") {
+        val info = it.config.getOrNull(SemanticsProperties.ProgressBarRangeInfo)
+        info != null && info != ProgressBarRangeInfo.Indeterminate
+    }
+
+    /** D2 #671 item 1: development's bar and percent text stay during a tracked download; no second bar. */
+    @Test fun legacyProgressStaysVisibleDuringATrackedDownload() {
+        val chrome = CompanionDeviceModelChrome()
+        val transfer = ModelDownloadState(otherId, packs[1].label, ModelDownloadStage.DOWNLOADING,
+            receivedBytes = 166_616_056, totalBytes = 396_704_896)
+        val devicePack = DevicePackChromeState(status = DevicePackStatus.DOWNLOADING, selectedPackId = otherId,
+            selectedPackLabel = packs[1].label, availablePacks = packs, downloadProgress = 0.42f,
+            downloads = mapOf(otherId to transfer))
+        compose.setContent {
+            MaterialTheme(colorScheme = darkColorScheme()) { Surface {
+                PhoneSetupCard(CompanionState(localPackProgress = 42), devicePack, chrome, pickModelFile = {})
+            } }
+        }
+        compose.onNodeWithText("Downloading… 42%").assertExists()
+        compose.onNodeWithText("Downloading · 42%").assertExists()
+        compose.onNodeWithText("Cancel download").assertExists()
+        assertEquals(1, compose.onAllNodes(determinateBar).fetchSemanticsNodes().size)
+    }
+
+    @Test fun modelsCardKeepsLegacyPercentDuringATrackedDownload() {
+        val chrome = CompanionDeviceModelChrome()
+        val transfer = ModelDownloadState(otherId, packs[1].label, ModelDownloadStage.DOWNLOADING,
+            receivedBytes = 166_616_056, totalBytes = 396_704_896)
+        val devicePack = DevicePackChromeState(status = DevicePackStatus.DOWNLOADING, selectedPackId = otherId,
+            selectedPackLabel = packs[1].label, availablePacks = packs, downloadProgress = 0.42f,
+            nativeRuntimeBundled = true, downloads = mapOf(otherId to transfer))
+        compose.setContent {
+            MaterialTheme(colorScheme = darkColorScheme()) { Surface {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    CompanionModelsSection(chrome, devicePack, CompanionState(), pickModelFile = {})
+                }
+            } }
+        }
+        compose.onNodeWithText("42%").assertExists()
+        // One bar in the status card (development's) and one on that model's library card; the
+        // status card's transfer view adds no second bar.
+        assertEquals(2, compose.onAllNodes(determinateBar).fetchSemanticsNodes().size)
     }
 }
