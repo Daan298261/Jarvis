@@ -177,7 +177,14 @@ class ModelStatusMonitor:
     def _fail_closed_snapshot(self, settings: AppSettings, error: str) -> dict[str, Any]:
         from .manager import MANAGER
 
-        base = MANAGER.unprobed_snapshot(settings)
+        # A cache miss must not synchronously enumerate hardware/model files.
+        base = MANAGER.live_state_overlay()
+        base.update({
+            "host": settings.inference.host,
+            "port": settings.inference.port,
+            "base_url": MANAGER.base_url(settings),
+            "api_key_configured": bool((settings.inference.api_key or "").strip()),
+        })
         base["healthy"] = False
         if error:
             base["last_error"] = error
@@ -253,7 +260,7 @@ class ModelStatusMonitor:
         *,
         force_refresh: bool = False,
     ) -> dict[str, Any]:
-        """Prefer cache; block only on miss or age beyond hard TTL (or force)."""
+        """Never wait for probes on ordinary reads; force_refresh is explicit."""
         settings = settings or load_settings()
         if force_refresh:
             return await self.refresh(settings)
@@ -278,8 +285,15 @@ class ModelStatusMonitor:
             self._schedule_refresh(settings)
             return self._decorate(self._overlay_live_state(self._entry.snapshot), "stale", age=age)
 
-        # Miss, error without usable entry, or beyond hard TTL → await one refresh.
-        return await self.refresh(settings)
+        # Startup, expired health and failed probes must not queue readers behind
+        # nvidia-smi, remote health or model-directory scans. A refresh owns its
+        # own task; readers get an honest unknown/unhealthy result immediately.
+        self._schedule_refresh(settings)
+        base = (dict(self._entry.snapshot) if self._entry is not None
+                else self._fail_closed_snapshot(settings, ""))
+        base["healthy"] = False
+        base["status_refresh_pending"] = True
+        return self._decorate(self._overlay_live_state(base), status, age=age)
 
     async def _poll_loop(self) -> None:
         while self._running:

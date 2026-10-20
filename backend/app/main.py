@@ -455,6 +455,8 @@ async def shutdown() -> None:
     try:
         from .inference.front_runtime import FRONT_RUNTIME
 
+        from .api.settings import stop_front_reconfigure
+        await stop_front_reconfigure()
         await FRONT_RUNTIME.stop()
     except Exception:
         logging.debug("Front runtime shutdown skipped", exc_info=True)
@@ -469,6 +471,8 @@ async def shutdown() -> None:
         from .inference.status_monitor import STATUS_MONITOR
 
         STATUS_MONITOR.stop()
+        from .inference.model_details_cache import MODEL_DETAILS
+        MODEL_DETAILS.stop()
     except Exception:
         logging.debug("Model status monitor stop skipped", exc_info=True)
     try:

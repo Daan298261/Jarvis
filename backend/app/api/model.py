@@ -25,7 +25,7 @@ from ..inference.harness import load_last_report, run_harness
 from ..inference.manager import MANAGER
 from ..inference.running_models import RUNNING_MODELS, Action
 from ..inference.tool_capability import capability_status, probe_tool_capability
-from ..inference.profiles import available_profiles, declared_profiles, resolve_profile
+from ..inference.profiles import declared_profiles, resolve_profile
 from ..runtime_install import component_status_payload, start_component_install
 from ..persona.owner_chat import rebind_owner_conversations_after_hotswap
 
@@ -89,22 +89,12 @@ class LiveAgentSuiteBody(BaseModel):
 async def model_status():
     settings = load_settings()
     snapshot = await MANAGER.snapshot(settings)
-    profiles = await asyncio.to_thread(available_profiles)
-    snapshot["profiles"] = [
-        {
-            "name": p.name,
-            "label": p.label,
-            "quant": p.quant,
-            "thinking": p.thinking,
-            "context_size": p.context_size,
-            "description": p.description,
-            "escalation_only": p.name == "expert",
-        }
-        for p in profiles
-    ]
-    snapshot["outcomes"] = await task_outcome_stats()
-    snapshot["benchmarks"] = await list_benchmarks(limit=12)
-    snapshot["harness"] = load_last_report()
+    from ..inference.model_details_cache import MODEL_DETAILS
+    snapshot.update(MODEL_DETAILS.read())
+    snapshot.setdefault("profiles", [])
+    snapshot.setdefault("outcomes", {})
+    snapshot.setdefault("benchmarks", [])
+    snapshot.setdefault("harness", None)
     snapshot["tool_capability"] = capability_status(MANAGER.provider)
     return snapshot
 

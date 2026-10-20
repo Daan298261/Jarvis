@@ -491,6 +491,7 @@ class AppSettings(BaseModel):
     working_set_deadline_ms: int = Field(default=400, ge=50, le=8000)
     retry_limit: int = 4
     execution_mode: str = "balanced"
+    large_task_reviews: bool = True
     logging_level: str = "INFO"
     backup_enabled: bool = True
     browser: BrowserSettings = Field(default_factory=BrowserSettings)

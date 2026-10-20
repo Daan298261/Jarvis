@@ -48,7 +48,7 @@ async def test_cache_hit_avoids_reprobe(monitor, settings, monkeypatch):
         lambda: {"loaded": True, "loading": False, "last_error": ""},
     )
 
-    first = await monitor.get_snapshot(settings)
+    first = await monitor.refresh(settings)
     second = await monitor.get_snapshot(settings)
 
     assert calls["n"] == 1
@@ -76,7 +76,7 @@ async def test_stale_serves_cache_and_schedules_refresh(monitor, settings, monke
 
     monitor.fresh_ttl_seconds = 0.05
     monitor.stale_ttl_seconds = 5.0
-    await monitor.get_snapshot(settings)
+    await monitor.refresh(settings)
     assert calls["n"] == 1
 
     await asyncio.sleep(0.08)
@@ -91,7 +91,7 @@ async def test_stale_serves_cache_and_schedules_refresh(monitor, settings, monke
     assert calls["n"] == 2
 
 
-async def test_miss_beyond_hard_ttl_awaits_refresh(monitor, settings, monkeypatch):
+async def test_beyond_hard_ttl_returns_unknown_and_refreshes_in_background(monitor, settings, monkeypatch):
     calls = {"n": 0}
 
     async def fake_live(settings_arg):
@@ -104,7 +104,7 @@ async def test_miss_beyond_hard_ttl_awaits_refresh(monitor, settings, monkeypatc
         lambda: {"loaded": False, "loading": False, "last_error": ""},
     )
 
-    await monitor.get_snapshot(settings)
+    await monitor.refresh(settings)
     assert calls["n"] == 1
 
     monitor.fresh_ttl_seconds = 0.01
@@ -113,7 +113,10 @@ async def test_miss_beyond_hard_ttl_awaits_refresh(monitor, settings, monkeypatc
     assert monitor._entry is not None
     monitor._entry.probed_at_mono = time.monotonic() - 1.0
 
-    await monitor.get_snapshot(settings)
+    pending = await monitor.get_snapshot(settings)
+    assert pending["healthy"] is False
+    assert pending["status_refresh_pending"] is True
+    await monitor._refresh_task
     assert calls["n"] == 2
 
 
@@ -136,7 +139,7 @@ async def test_probe_failure_does_not_soft_pass_healthy(monitor, settings, monke
         lambda: {"loaded": False, "loading": False, "last_error": ""},
     )
 
-    snap = await monitor.get_snapshot(settings)
+    snap = await monitor.refresh(settings)
     assert snap["healthy"] is False
     assert snap["status_cache"]["probe_ok"] is False
     assert snap["status_cache"]["status"] in {"miss", "error"}
@@ -208,7 +211,7 @@ async def test_live_snapshot_bypasses_cache(settings, monkeypatch):
         "app.inference.manager.MANAGER.live_state_overlay",
         lambda: {"loaded": False, "loading": False, "last_error": ""},
     )
-    await MANAGER.snapshot(settings)
+    await STATUS_MONITOR.refresh(settings)
     assert calls["n"] == 1
     await MANAGER.snapshot(settings)
     assert calls["n"] == 1
