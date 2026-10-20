@@ -3,9 +3,11 @@ deterministically, a path with a plain or coding question must route normally, a
 inputs must never enter the model context.
 
 Detection is two-stage (RFC-0232 §Deterministic path + RE-intent router):
-  (a) a cheap wording-plus-path prefilter: EXPLICIT owner wording routes with no probe;
-      a WEAK match must pass
+  (a) a cheap wording-plus-path prefilter: EXPLICIT owner wording skips only the dump-marker
+      requirement (it still runs the allow-list gate and the source veto); a WEAK match must pass
   (b) the on-disk probe ``planning.probe_dump_target`` (allow-list first, stat only, bounded).
+The probe and ``re_intent_match`` always read the owner's allow-list from settings and never pass
+``None`` to ``store.admit_allowed_target``; an empty list admits nothing.
 
 Written xfail(strict=True) first (S1). Fix slices remove each marker:
   S2: path-form, dump-wording, explicit-wording and on-disk probe tests
@@ -61,7 +63,8 @@ DUMP_WORDING_PROMPTS = [
     ),
 ]
 
-# EXPLICIT owner wording routes with no marker and no probe (CoS amendment A).
+# EXPLICIT owner wording routes without a dump marker (CoS amendment A, narrowed: the probe still
+# runs with require_marker=False for the allow-list gate and the source veto).
 EXPLICIT_PROMPTS = [
     pytest.param(r"D:\cases\x\p1 is a full FFS of my Pixel, which apps?", id="full-ffs"),
     pytest.param(r"D:\cases\x\p1 is a full file system extraction, which accounts are on it?", id="full-file-system-extraction"),
@@ -86,16 +89,23 @@ def _dump_verdict(monkeypatch):
     """Stand in for the S2 probe (it does not exist yet; raising=False)."""
     monkeypatch.setattr(
         "app.agent.planning.probe_dump_target",
-        lambda target, allowed=None: SimpleNamespace(verdict="dump", evidence="test stand-in"),
+        lambda target, allowed=None, *, require_marker=True: SimpleNamespace(verdict="dump", evidence="test stand-in"),
         raising=False,
     )
 
 
-def _no_probe(monkeypatch):
-    def forbidden(*_a, **_k):
-        raise AssertionError("explicit wording must route without the on-disk probe")
+def _no_marker_probe(monkeypatch) -> list[bool]:
+    """Explicit wording: the probe runs only without the marker requirement (admit + stat + veto)."""
+    calls: list[bool] = []
 
-    monkeypatch.setattr("app.agent.planning.probe_dump_target", forbidden, raising=False)
+    def present(target, allowed=None, *, require_marker=True):
+        calls.append(require_marker)
+        if require_marker:
+            raise AssertionError("explicit wording must not require a dump marker")
+        return SimpleNamespace(verdict="present", evidence="test stand-in")
+
+    monkeypatch.setattr("app.agent.planning.probe_dump_target", present, raising=False)
+    return calls
 
 
 def _routes_to_re(prompt: str) -> None:
@@ -191,9 +201,10 @@ def test_dump_wordings_route_to_reverse_engineering(prompt, monkeypatch):
 
 @pytest.mark.xfail(strict=True, reason="RFC-0232 S1 repro: explicit dump wording does not route (fixed in S2)")
 @pytest.mark.parametrize("prompt", EXPLICIT_PROMPTS)
-def test_explicit_wording_routes_without_probe(prompt, monkeypatch):
-    _no_probe(monkeypatch)
+def test_explicit_wording_routes_without_marker(prompt, monkeypatch):
+    calls = _no_marker_probe(monkeypatch)
     _routes_to_re(prompt)
+    assert calls and not any(calls), calls
 
 
 @pytest.mark.xfail(strict=True, reason="RFC-0232 S1 repro: on-disk dumps are not detected (fixed in S2)")
@@ -221,8 +232,7 @@ def test_aosp_source_tree_routes_normally(jarvis_env):
     assert route.task_class != "reverse engineering", route
 
 
-def test_outside_path_with_markers_is_never_probed(jarvis_env, tmp_path_factory, monkeypatch):
-    outside = _dump_android_full(tmp_path_factory.mktemp("outside_allowed"))
+def _spy_probes(monkeypatch, outside: Path) -> list[str]:
     probed: list[str] = []
     real_stat, real_exists = os.stat, Path.exists
 
@@ -238,8 +248,28 @@ def test_outside_path_with_markers_is_never_probed(jarvis_env, tmp_path_factory,
 
     monkeypatch.setattr(os, "stat", spy_stat)
     monkeypatch.setattr(Path, "exists", spy_exists)
+    return probed
+
+
+def test_outside_path_with_markers_is_never_probed(jarvis_env, tmp_path_factory, monkeypatch):
+    outside = _dump_android_full(tmp_path_factory.mktemp("outside_allowed"))
+    probed = _spy_probes(monkeypatch, outside)
     route = route_request(f"{outside} this is the root of an Android file system - which apps are installed?")
-    assert probed == [], probed  # allow-list first: no existence oracle (#660 / #661)
+    assert probed == [], probed  # allow-list first: no existence oracle (store.admit_allowed_target)
+    assert route.task_class != "reverse engineering", route
+
+
+def test_empty_allow_list_refuses_outside_target_without_stat(jarvis_env, tmp_path_factory, monkeypatch):
+    """D1 via CoS: the probe reads the owner's list from settings and never passes None to the gate.
+
+    With an empty settings list nothing is admitted, so the target is refused and never stat'd.
+    """
+    outside = _dump_android_full(tmp_path_factory.mktemp("outside_empty_list"))
+    jarvis_env["settings"].allowed_directories = []
+    monkeypatch.setattr("app.agent.planning.load_settings", lambda: jarvis_env["settings"], raising=False)
+    probed = _spy_probes(monkeypatch, outside)
+    route = route_request(f"{outside} this is the root of an Android file system - which apps are installed?")
+    assert probed == [], probed
     assert route.task_class != "reverse engineering", route
 
 
