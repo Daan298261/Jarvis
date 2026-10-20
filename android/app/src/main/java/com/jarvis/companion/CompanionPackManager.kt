@@ -133,6 +133,7 @@ class CompanionPackManager(
     val engine: LocalInferenceEngine = LlamaCppInferenceEngine(),
     digestCache: VerifiedDigestCache? = null,
     private val fileDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+    private val stallDeadlines: LocalStallDeadlines = LocalStallDeadlines(),
 ) {
     private val app = context.applicationContext
     val digestCache: VerifiedDigestCache = digestCache ?: VerifiedDigestCache(
@@ -598,6 +599,7 @@ class CompanionPackManager(
                     var summaries = summarizeSections(
                         sections = plan.sections,
                         maxTokens = maxTokens.coerceAtMost(plan.summaryMaxTokens),
+                        model = pack.id,
                     )
                     var finalPrompt = OfflinePromptPlanner.finalPromptFromSummaries(
                         plan.history,
@@ -613,7 +615,7 @@ class CompanionPackManager(
                             plan.skeletonTokens,
                             merged.size,
                         )
-                        summaries = summarizeSections(merged, maxTokens.coerceAtMost(cap))
+                        summaries = summarizeSections(merged, maxTokens.coerceAtMost(cap), pack.id)
                         finalPrompt = OfflinePromptPlanner.finalPromptFromSummaries(
                             plan.history,
                             latestText,
@@ -630,7 +632,7 @@ class CompanionPackManager(
                 var firstTokenMs: Long? = null
                 onProgress("Reading context")
                 engine.beginPass()
-                val outcome = engine.generate(toRun, maxTokens) { chunk ->
+                val outcome = watchedGenerate(toRun, maxTokens, pack.id) { chunk ->
                     if (!produced) {
                         firstTokenMs = android.os.SystemClock.elapsedRealtime() - started
                         onProgress("Writing reply")
@@ -653,15 +655,16 @@ class CompanionPackManager(
         }
     }
 
-    private suspend fun summarizeSections(sections: List<String>, maxTokens: Int): ArrayList<String> {
+    private suspend fun summarizeSections(sections: List<String>, maxTokens: Int, model: String): ArrayList<String> {
         val summaries = ArrayList<String>()
         for (section in sections) {
             if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
             engine.beginPass()
             val piece = StringBuilder()
-            val outcome = engine.generate(
+            val outcome = watchedGenerate(
                 OfflinePromptPlanner.summarizeSectionPrompt(section),
                 maxTokens,
+                model,
             ) { piece.append(it) }
             if (outcome.cancelled) throw CancellationException("generate cancelled")
             outcome.error?.let { failGenerate(it) }
@@ -669,6 +672,50 @@ class CompanionPackManager(
         }
         return summaries
     }
+
+    /**
+     * One native pass under the first-token and idle deadlines. The watchdog runs off the llama
+     * thread (which is blocked in native decode); on a stall it asks the engine to stop and the pass
+     * ends with [LocalStreamStallError] instead of a cancellation, so the turn fails visibly.
+     */
+    private suspend fun watchedGenerate(prompt: String, maxTokens: Int, model: String, onToken: (String) -> Unit): GenerateOutcome =
+        kotlinx.coroutines.coroutineScope {
+            val clock = stallDeadlines.clockMs
+            val passStart = clock()
+            val lastToken = java.util.concurrent.atomic.AtomicLong(Long.MIN_VALUE)
+            val stall = AtomicReference<LocalStreamStallError?>(null)
+            val watchdog = launch(Dispatchers.Default) {
+                while (isActive) {
+                    kotlinx.coroutines.delay(stallDeadlines.checkEveryMs)
+                    val now = clock()
+                    val last = lastToken.get()
+                    val stalled = if (last == Long.MIN_VALUE) {
+                        (now - passStart).takeIf { it > stallDeadlines.firstTokenMs }?.let {
+                            LocalStreamStallError(LocalStreamStallError.FIRST_TOKEN, it, stallDeadlines.firstTokenMs, model)
+                        }
+                    } else {
+                        (now - last).takeIf { it > stallDeadlines.idleMs }?.let {
+                            LocalStreamStallError(LocalStreamStallError.IDLE, it, stallDeadlines.idleMs, model)
+                        }
+                    }
+                    if (stalled != null && stall.compareAndSet(null, stalled)) {
+                        Log.w(TAG, "local_reply_stall model=$model deadline=${stalled.deadline} elapsed_ms=${stalled.elapsedMs} budget_ms=${stalled.budgetMs}")
+                        engine.requestCancel()
+                        break
+                    }
+                }
+            }
+            try {
+                val outcome = engine.generate(prompt, maxTokens) { chunk ->
+                    lastToken.set(clock())
+                    onToken(chunk)
+                }
+                stall.get()?.let { throw it }
+                outcome
+            } finally {
+                watchdog.cancel()
+            }
+        }
 
     private fun failGenerate(message: String): Nothing {
         statusRef.set(CompanionPackStatus.ERROR)
