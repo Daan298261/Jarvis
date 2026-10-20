@@ -43,6 +43,8 @@ Copy [`TEMPLATE.md`](TEMPLATE.md) to `docs/rfcs/NNNN-short-slug.md` and fill it 
 
 Living spec: [`JARVIS_1.4_SPECS.md`](../../JARVIS_1.4_SPECS.md). Implement tickets:
 
+PC first-response latency (P0): [0230](0230-pc-first-response-latency.md) — measured breakdown (box + VRPC, sources per number), per-turn latency trace + one-command PC repro (S0), first audible word ≤ 1.5 s target, STT/front/worker-load/TTS/reflex slices (**accepted**; first on shared files; reuses #648/#649).
+
 | RFC | Concern |
 | --- | --- |
 | [0111](0111-kokoro-real-runtime.md) | Kokoro as real runtime (work package A) |
