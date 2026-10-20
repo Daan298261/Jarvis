@@ -175,7 +175,8 @@ def env(tmp_path, monkeypatch):
     data.mkdir()
     monkeypatch.setattr(store, "data_dir", lambda: data)
     monkeypatch.setattr(store, "resolve_allowed_path", lambda path, allowed: Path(path).resolve())
-    monkeypatch.setattr(apk_sidecar, "resolve_allowed_path", lambda path, allowed: Path(path).resolve())
+    # allowed=[] with a stubbed allow-list: stub the shared gate too (covered in test_re_prepare_allowlist.py).
+    monkeypatch.setattr(store, "admit_allowed_target", lambda target, allowed: None)
     fake = FakeWSL()
     monkeypatch.setattr(subprocess, "run", fake)
     from app.config import load_settings
