@@ -60,10 +60,14 @@ the whole index was rewritten into one `checkpoint.json` after every file (quadr
 so the RFC-0207 slice 4 FFS origin (which requires `kind == "ffs"` and that index) could not
 consume a real ingest. The `.tab` profiler had no caller. The conformance pass:
 
-- `backend/app/reverse_engineering/ffs_ingest.py`: rows are `kind == "ffs"`; the dump stays
-  in place (`target`, no snapshot). Members are yielded lazily (resume skips without reading)
-  in a deterministic order and streamed once in 64 KiB blocks. Each member appends one line
-  `{path, bytes, sha256, mtime, magic_hex, type}` to `index/files.ndjson` (flushed per line,
+- `backend/app/reverse_engineering/ffs_ingest.py`: rows are `kind == "ffs"`, prepared by
+  `store.prepare_ffs`, which references the dump in place as the read-only snapshot
+  (`target` and `snapshot` are both the dump path; nothing is copied, and `public_row` in
+  `backend/app/api/investigations.py` keeps `snapshot` out of API responses). Members are
+  yielded lazily (resume skips without reading) in a deterministic order and streamed once in
+  1 MiB blocks (`ffs_ingest.CHUNK_SIZE = 1024 * 1024`, the default for `_digest` and
+  `file_sha256`; `HEADER_MAX_BYTES` = 64 KiB is only the magic-detection window). Each
+  member appends one line `{path, bytes, sha256, mtime, magic_hex, type}` to `index/files.ndjson` (flushed per line,
   fsynced at checkpoints every 256 files or 5 s). Resume re-reads the NDJSON, drops a torn
   final line and fails closed on corruption elsewhere. `index/custody.json` records source,
   source kind, task, tool version, admission stat and every session; completion seals the
@@ -78,16 +82,30 @@ consume a real ingest. The `.tab` profiler had no caller. The conformance pass:
 - `.tab` profiling (`tab_analyzer.py`) runs inside the same pass: `.tab` lines carry
   `entropy`; `index/tab_profile.json` holds every profile plus entropy classes and shared
   header prefixes; `ffs_tab_profile` inlines up to 2,000 rows.
-- Cancel/close stops a running ingest at the next block; it checkpoints and stays resumable.
-  A second concurrent ingest of the same investigation is refused (HTTP 409).
-- Reachability: REST `POST /api/investigations/ingest`, `POST /{id}/ingest` (background
-  supported), `GET /{id}/ffs/files` (path/suffix/type filters, paged) and
+- Stopping: every stop path signals the ingest thread (`ffs_ingest.cancel`), which stops at the
+  next block, abandons the in-flight member and checkpoints (`FFSIngest._interrupt`). The
+  owner's close/cancel is final: `runtime.Investigations.close` and `release_task(...,
+  cancelled=True)` set the terminal status (`store.TERMINAL_STATUSES` = closed/cancelled) and
+  wait up to `runtime.FFS_STOP_WAIT_SECONDS` for the thread; `store.save_guarded` never lets the
+  thread downgrade it, and both `store.prepare_ffs` and `FFSIngest.run_sync` refuse to start or
+  resume a closed/cancelled investigation. Shutdown (`Investigations.shutdown`), a task
+  release without cancel, `stop_after`, a vanished source and unexpected errors leave the row
+  `interrupted` (errors also record `last_error`) and resumable. A second concurrent ingest of
+  the same investigation is refused (`RuntimeError`, HTTP 409).
+- Reachability (`backend/app/api/investigations.py`): `POST /api/investigations/ffs`
+  (`prepare_ffs`, prepares the row; start with `POST /{id}/ingest`), `POST /{id}/ingest`
+  (`ingest_into_investigation`, runs in the background unless `background: false`),
+  `POST /api/investigations/ingest` (`ingest`, prepare and run in one call; runs to completion
+  unless `background: true`), `GET /{id}/ffs/files` (path/suffix/type filters, paged) and
   `GET /{id}/ffs/tab-profile`; agent tool `reverse_engineer` actions `ingest` (background by
-  default), `ingest_status` and `ffs_query`; FFS catalog workflow and skill guide.
+  default, `options.background`), `ingest_status` and `ffs_query`; FFS catalog workflow and
+  skill guide. Background runs are the investigation's active work
+  (`Investigations.ingest(background=True)`), so close/cancel/shutdown reach them.
 - Tests (`tests/test_ffs_ingest.py`, `tests/test_tab_analyzer.py`) include an end-to-end
   folder ingest feeding `apk_sidecar.prepare_apk(source_type="ffs")`, torn-line resume,
-  cancel/resume, unreadable and duplicate members, API and agent-tool paths. Validated on
-  the real Autel MaxiSys `Root.zip` (see the PR for numbers).
+  stop-and-resume, final close/cancel (including a close before the thread starts), the
+  read-only snapshot reference, unreadable and duplicate members, API and agent-tool paths.
+  Validated on the real Autel MaxiSys `Root.zip` (see the PR for numbers).
 
 ## Out of scope
 
