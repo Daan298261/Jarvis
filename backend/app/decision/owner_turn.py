@@ -40,7 +40,7 @@ OWNER_TURN_DEADLINE_MS = 50.0
 OWNER_TURN_DEADLINE_S = 0.05
 ROUTE_CONFIDENCE_FLOOR = 0.75
 
-REPLY_SHAPES = ("literal", "self_status", "social", "ack", "clarify", "handoff")
+REPLY_SHAPES = ("literal", "self_status", "social", "ack", "clarify", "handoff", "basic_qa")
 REQUEST_ROUTES = (DIRECT_REPLY, DIRECT_LOOKUP, MANAGED_TASK)
 
 OWNER_TURN_QUESTIONS: list[Question] = [
@@ -67,6 +67,7 @@ OWNER_TURN_QUESTIONS: list[Question] = [
             "Acknowledge and continue; the worker lane must run",
             "Ask one short clarifying question; do not start the worker",
             "Hand off to the worker for a real task",
+            "Answer a short general-knowledge question without current facts, personal data or tools",
         ),
     ),
 ]
@@ -180,6 +181,21 @@ def is_explicit_action(user_message: str) -> bool:
     )
 
 
+def is_quick_knowledge_question(text: str, *, route_kind: str) -> bool:
+    """Small stable explanations can finish on the front; other requests retain the worker."""
+    if route_kind != DIRECT_REPLY or len(text) > 320:
+        return False
+    if _LIVE_FACT_HINT.search(text) or _NEEDS_STRONGER.search(text) or is_explicit_action(text):
+        return False
+    if re.search(r"\b(my|our|your|i|me|you|we|told|earlier|remember|previous|today|recent|recommend|best|buy|should|medical|medicine|dose|"
+                 r"symptom|treatment|diagnos\w*|pain|injur\w*|pregnan\w*|allerg\w*|drug|"
+                 r"legal|law|tax|invest\w*|financial|emergency|poison|safe|detailed|"
+                 r"step.by.step|comprehensive)\b", text, re.I):
+        return False
+    return bool(re.match(r"\s*(what (?:is|are)|what's|why (?:is|are|does)|how (?:does|do|is)|"
+                         r"wat (?:is|zijn)|hoe werkt|waarom)\b", text, re.I))
+
+
 def infer_rules_reply_shape(
     user_message: str,
     *,
@@ -209,6 +225,8 @@ def infer_rules_reply_shape(
         return "ack"
     if _TRIVIAL_CHAT.search(lowered):
         return "social"
+    if is_quick_knowledge_question(text, route_kind=kind):
+        return "basic_qa"
     return "ack"
 
 
@@ -238,7 +256,7 @@ def front_action_for_shape(
         return "final_basic"
     if reply_shape == "self_status":
         return "final_basic" if snapshot_covers else "ack_continue"
-    if reply_shape == "social":
+    if reply_shape in {"social", "basic_qa"}:
         return "final_basic"
     if reply_shape == "clarify":
         return "ask_clarification"
@@ -315,12 +333,14 @@ def _apply_floors(
         reply_shape = "handoff"
     if is_weather_query(user_message):
         route_kind = DIRECT_LOOKUP
-        if reply_shape in {"social", "literal", "self_status"}:
+        if reply_shape in {"social", "literal", "self_status", "basic_qa"}:
             reply_shape = "ack"
     if literal:
         reply_shape = "literal"
     if reply_shape == "self_status" and is_self_status_domain_misroute(user_message):
         reply_shape = rules_shape if rules_shape != "self_status" else "ack"
+    if reply_shape == "basic_qa" and not is_quick_knowledge_question(user_message, route_kind=route_kind):
+        reply_shape = "ack"
 
     if route_kind == DIRECT_LOOKUP:
         task_class = CONVERSATION_CLASS

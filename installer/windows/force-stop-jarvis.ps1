@@ -615,7 +615,7 @@ function Invoke-ForceStopSingleRoot {
             if ($IncludeTray) { $politeArgs += "-IncludeTray" }
             $polite = Start-Process -FilePath "powershell.exe" -ArgumentList $politeArgs -WorkingDirectory $Root -PassThru -WindowStyle Hidden
             $politeWait = [Math]::Min(15, $MaxWaitSeconds)
-            $polite.WaitForExit($politeWait * 1000)
+            $null = $polite.WaitForExit($politeWait * 1000)
             if (-not $polite.HasExited) {
                 Write-StopLog "polite stop-jarvis.ps1 still running after ${politeWait}s; continuing to force phase"
                 try { Stop-Process -Id $polite.Id -Force -ErrorAction SilentlyContinue } catch { }

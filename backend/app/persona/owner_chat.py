@@ -376,7 +376,7 @@ async def stream_owner_chat(
         return
 
     from ..agent.context_policy import profile_cap
-    from ..agent.intake import plan_owner_intake, start_sequential_chain
+    from ..agent.intake import plan_owner_intake
 
     intake = await asyncio.to_thread(
         plan_owner_intake,
@@ -392,29 +392,22 @@ async def stream_owner_chat(
             stage="owner_chat",
         )
     if intake.strategy == "sequential":
+        from ..agent.loop import AGENT
         try:
-            chain = await start_sequential_chain(intake, conversation_id=cid)
+            task = await AGENT.create_task(cleaned)
         except Exception as exc:
             yield {"type": "error", "detail": f"Could not start the long-message run: {exc}"[:500]}
             return
-        spoken = (
-            f"That's a long one (about {intake.tokens:,} tokens). I split it into "
-            f"{len(intake.segments)} parts and I'm working through them in order; "
-            "each part picks up the result of the one before."
-        )
         _conversations.setdefault(cid, [])
         _conversations[cid].append(ChatMessage(role="user", content=cleaned[:2000]))
-        _conversations[cid].append(ChatMessage(role="assistant", content=spoken))
-        await publish_owner_text(spoken, source="owner_chat", speak=True, user_prompt=cleaned[:2000])
         yield {
             "type": "task_delegated",
             "conversation_id": cid,
-            "task_id": chain["task_ids"][0],
-            "intake_chain_id": chain["id"],
+            "task_id": task.id,
             "intake": intake.as_dict(),
-            "reply": spoken,
+            "reply": "",
         }
-        yield {"type": "done", "conversation_id": cid, "reply": spoken}
+        yield {"type": "done", "conversation_id": cid, "reply": "", "ack": "loop"}
         return
     worker_text = cleaned
 
