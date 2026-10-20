@@ -186,7 +186,12 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         mutable.value = mutable.value.copy(localConversations = withContext(Dispatchers.IO) { localConversations.conversations() })
         refreshPhoneMemory()
     }
-    fun installFastPhoneModel() = downloadModelPack(CompanionPackCatalog.ABLITERATED_06B_ID)
+    /** Memory & speed's fast-model download keeps its Home status lines alongside the transfer card. */
+    fun installFastPhoneModel() = downloadModelPack(
+        CompanionPackCatalog.ABLITERATED_06B_ID,
+        onProgress = { progress -> mutable.update { it.copy(activity = "Downloading fast phone model · $progress%", localPackProgress = progress) } },
+        onReady = { mutable.update { it.copy(activity = "Fast phone model ready") } },
+    )
     private val desktopThreadIds by lazy { PhoneDesktopThreadIds(companionPrefs, localConversations) }
     var voiceLanguage by androidx.compose.runtime.mutableStateOf(VoiceLanguagePrefs.load(app))
         private set
@@ -479,11 +484,12 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
 
     fun downloadCompanionPack() = downloadModelPack(packManager.selectedPackId())
 
-    fun downloadModelPack(packId: String) = viewModelScope.launch {
+    fun downloadModelPack(packId: String, onProgress: (Int) -> Unit = {}, onReady: () -> Unit = {}) = viewModelScope.launch {
         if (packId in packManager.downloadingPackIds()) return@launch
         val pack = packManager.catalog().firstOrNull { it.id == packId } ?: return@launch
         try {
-            packManager.downloadPack(pack)
+            packManager.downloadPack(pack, onProgress)
+            onReady()
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (error: Exception) {
@@ -505,8 +511,13 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    fun selectCompanionPack(id: String) = action {
+    /** Picking a pack is side-effect free: it neither clears a visible error nor marks the screen busy. */
+    fun selectCompanionPack(id: String) {
         packManager.selectPack(id)
+        viewModelScope.launch { publishSelectedPack() }
+    }
+
+    private suspend fun publishSelectedPack() {
         packManager.refreshStatus()
         mutable.update { it.copy(localPackStatus = packManager.status(), localPackError = packManager.lastError()) }
         DevicePackChromePublisher.publish(this@CompanionModel, deviceModelChrome, mutable.value)
@@ -857,17 +868,10 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         val conversationId = withContext(Dispatchers.IO) { ensureLocalConversation(text) }
         withContext(Dispatchers.IO) { localConversations.append(conversationId, userMessage) }
         val memory = if (memoryEnabled.value) withContext(Dispatchers.IO) { phoneMemory.context(text, activeProjectId, conversationId) } else ""
-        val started = android.os.SystemClock.elapsedRealtime()
-        val stage = java.util.concurrent.atomic.AtomicReference("Preparing answer")
-        val progress: (String) -> Unit = { stage.set(it) }
-        val progressJob = viewModelScope.launch {
-            while (isActive) {
-                val elapsed = (android.os.SystemClock.elapsedRealtime() - started) / 1000
-                mutable.update { it.copy(activity = "${stage.get()} · ${elapsed}s") }
-                delay(1000)
-            }
-        }
-        val outcome = withOfflineAnswerCleanup(
+        val turn = LocalReplyTurn(mutable, prior, assistantId)
+        val progress = turn.progress
+        val outcome = turn.answer(
+            scope = viewModelScope,
             packManager = packManager,
             clearPicked = { pickedTextForPrompt = null },
             keepWarm = { keepModelWarm.value && foreground && DeviceInferenceGuard.pressureReason(getApplication()) == null },
@@ -882,7 +886,6 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                 )
             },
             onFinally = {
-                progressJob.cancel()
                 mutable.value = mutable.value.copy(
                     offlineAnswering = false,
                     activity = "Ready when you are",
@@ -917,13 +920,8 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                 StandaloneIntent.MEDIA_WAIT_DESKTOP -> StandaloneActions.mediaSavedCopy()
                 StandaloneIntent.LOCAL_FILE, StandaloneIntent.CONVERSATION -> {
                     val budget = DeviceInferenceGuard.generationBudget(getApplication()).let { if (quick) minOf(it, 128) else it }
-                    DeviceInferenceGuard.pressureReason(getApplication())?.let { reason ->
-                        mutable.value = mutable.value.copy(activity = reason)
-                    }
-                    val assistantText = LiveLocalReply(android.os.SystemClock::elapsedRealtime) { partial ->
-                        mutable.update { it.copy(liveLocalReply = partial, messages = prior +
-                            StandaloneActions.chatMessage(assistantId, "assistant", partial, StandaloneActions.ORIGIN_ASSISTANT)) }
-                    }
+                    DeviceInferenceGuard.pressureReason(getApplication())?.let { reason -> turn.pressure(reason) }
+                    val assistantText = turn.reply
                     val result = packManager.generate(
                         prompt = StandalonePrompt.build(prior, text, picked),
                         maxTokens = budget,
@@ -944,11 +942,8 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
-        val reply = outcome.getOrElse { err ->
-            val message = err.message ?: "On-device answer failed"
-            mutable.value = mutable.value.copy(error = message)
-            message
-        }
+        // A failure is already shown through `error` by the turn, never as a reply.
+        val reply = outcome.getOrElse { err -> err.message ?: "On-device answer failed" }
         val assistantMessage = StandaloneActions.chatMessage(
             assistantId,
             "assistant",
@@ -977,14 +972,12 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                 ),
             )
         }
+        if (outcome.isSuccess) turn.landed(assistantMessage)
         mutable.value = mutable.value.copy(
-            messages = prior + assistantMessage,
-            liveLocalReply = reply,
             conversationId = conversationId,
             localConversations = localConversations.conversations(),
             offlineQueueDepth = offlineQueue.pendingCount(),
             activity = if (outcome.isSuccess) "Answering on this phone." else mutable.value.activity,
-            error = if (outcome.isSuccess) mutable.value.error else (mutable.value.error ?: reply),
         )
         if (keepModelWarm.value && foreground && outcome.isSuccess) {
             idleUnload = viewModelScope.launch { delay(30_000); packManager.releaseIdle() }
