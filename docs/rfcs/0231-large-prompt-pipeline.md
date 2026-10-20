@@ -6,11 +6,12 @@
 **Date:** 2026-10-20
 **Traced on:** `development` @ `11b264a7`. Drafts and RFC PRs pinned: #649 @ `edb4685` (identical to `b5c3640` for every file cited here), #652 (RFC-0225) @ `140482b`, #655 (RFC-0228) @ `973b979`, #585 (RFC-0211) @ `f412dad`, #663 (RFC-0218 delivery fix) @ `c5db314`.
 **Amended 2026-10-20 (#649 landed):** #649 merged into `development` as `ee786dc`, so S2 no longer ports it. S2 now cites the landed engine and adds only what #649 lacks: `seed_workflow`, the two pipeline tables, and `LargePromptSettings`. Every #649 reference in §4-§6 and S1-S6 is re-traced on `development` @ `d85c9d4`, and so is every `loop.py`, `owner_turn.py`, `api/tasks.py` and `App.tsx` line number (#648 and #649 shifted them).
+**Amended 2026-10-20 (UX peer, 17 blockers at `8d713f0`; CoS rulings 1-6; D2 + CoS floor change):** RFC-0232 precedence (verbatim CoS text, §1) with 0232's RE helper consumed in the precheck and its RE floor in `_apply_floors`, one `decide()` per turn; size rules on the full prompt, outside the 50 ms window, also on deadline/exception fallbacks; candidate from the baseline route plus the final gate after floors; #649's planner skipped for a marked parent; one spoken ack on the parent's front lane, worded from the RFC-0225 gate outlook and never claiming a load; Taco's default (LM Studio 9B owner-loaded, managed off, 16 GB) runs the parts on the 9B; request lease holds the target for the whole parent, and the large-task load is never persisted, with the owner's selection restored; breaker bind, cancel races, idempotent vault, L4 length floor, S0 outlook/lease/late-reconcile; S6 extends the live "Saved plan" rows; complete ownership chains with lanes. Re-traced on `development` @ `a44da35` (`d85c9d4` plus #660 and #667, neither touching a cited file).
 **Amended 2026-10-20 (CoS, #665 peer):** the large target `anzu-coder-27b` was assumed to exist as a runtime profile. It does not (see *Target profile: `anzu-coder-27b`*), so new slice **0231-S0** adds it and 0231-S4 hard-depends on it. Re-traced for S0 and for the `hotswap.py`, `config.py` and `main.py` citations on `development` @ `d214b6d` (#648 landed; #663 landed at `781004c`), #652 @ `916cf25`, #655 @ `971ca15`, #649 @ `edb4685`.
 
 **Owner ask (Taco, ask B, intent as relayed):** when Taco speaks or types a large or complex task, Jev/Laya decide that it is complex. Then:
 1. ANZU immediately loads the large model (anzu-coder-27b or whichever large model applies). `anzu-coder-27b` is the 0231-S0 runtime profile.
-2. In parallel, the small front model says something short, such as "This is a large task, I'm loading the larger model."
+2. In parallel, the small front model says something short, such as "This is a large task, I'm loading the larger model." (as relayed; per CoS ruling 4 the shipped ack is worded from the RFC-0225 gate and never claims a load, §2)
 3. The prompt is split into sections, or into single questions if it asks several.
 4. Each section is checked for completeness, with iteration.
 5. Each section becomes one detailed prompt.
@@ -71,21 +72,26 @@ Verified on `development` @ `11b264a7`.
 
 ## Decision
 
-Ship **one RFC with seven implement slices (S0-S6)**, one named model per slice and fast mode off. Nothing waits for #649 or #585.
+Ship **one RFC with seven implement slices (S0-S6)**, one named model per slice and fast mode off. Nothing waits for #585. #649 has landed and is reused.
 
 **Pipeline at a glance.** A large owner turn becomes one **parent task** (the one the HUD is already following) and N **child tasks**, one per section, run strictly one after another.
 
 ```
-owner turn ─► decide_owner_turn (one decide, riders large_prompt / large_prompt_split)
-   │ large
-   ├─► Task row committed ─► RFC-0218 S3b persona block (unchanged)
-   ├─► preload task started (not awaited): resolve target → activate_runtime_profile (RFC-0225 prepare_engine_for / VRAM gate) → warm
-   ├─► ack: "acknowledgement" event + chat_tts on the parent stream (≤ 150 ms after the decision)
-   └─► parent runner: split → completeness rounds (≤ 3) → compile detailed prompts → persist (DB, optional vault mirror)
-          → await preload (≤ 180 s, defined fallback) → dispatch part 1 as a child task
-child terminal hook ─► completed: dispatch next │ failed: stop, parent fails visibly │ needs_owner: parent waits
-last part done ─► parent completes with the combined result ─► compare-and-restore settings ─► release rewarm hold
+owner turn ─► decide_owner_turn: large-prompt precheck on the FULL raw prompt (outside the 50 ms window)
+   │           ─► _decide_sync: one decide (riders large_prompt / large_prompt_split only when 0232's RE helper did not match)
+   │           ─► _apply_floors: 0232 RE floor, then 0231 large floor
+   │ large (and not RE)
+   ├─► create_task: 0230 prewarm_worker + route decision ─► 0232 RE dispatch (not taken) ─► Task row ─► 0218 S3b persona block
+   ├─► 0231 large branch: cancel 0230's pending 9B prewarm; read the RFC-0225 gate outlook (in memory, no probe)
+   ├─► ONE spoken ack on the front lane (_speak_front_reply, lane "front", 0230-S0 marks), worded from the gate outlook
+   ├─► preload task started (not awaited), only when the outlook allows: request lease → activate_runtime_profile(persist=False) → warm
+   └─► parent runner (after the ack): split → completeness rounds (≤ 3) → compile → persist → await preload (≤ 180 s, defined fallback)
+          → dispatch part 1 as a child task (breaker admit + bind)
+child terminal hook ─► completed: dispatch next │ failed: stop, parent fails visibly │ needs_owner: parent waits (lease kept)
+last part done ─► parent completes with the combined result ─► release lease ─► restore the owner's saved selection ─► release rewarm hold
 ```
+
+Between the ack and the parent's terminal outcome the parent speaks nothing (CoS ruling 5): progress, gate and needs_owner lines are visible events only.
 
 ### Terms
 
@@ -101,107 +107,123 @@ last part done ─► parent completes with the combined result ─► compare-a
 
 Detection follows the RFC-0218 pattern: rider questions on the existing decide, no second decide.
 
-- **Precheck (rules, sync, under 1 ms)** in `_decide_sync` (`owner_turn.py:419-469`), next to the persona precheck. It produces a candidate only when **all** of these hold:
-  - `route_kind == "managed_task"`;
+**Precedence (CoS ruling, normative, verbatim):** A turn whose prompt contains an absolute filesystem path together with RE intent (RFC-0232's narrowed dump/extraction detection) routes to reverse engineering and is never split by RFC-0231; a path with a plain or coding question routes normally.
+
+Mechanically (D2 + CoS ruling 2026-10-20): RFC-0232 S2's precedence is a **floor in `_apply_floors`** (`owner_turn.py:296-370` on `d85c9d4`), not an early return. Every turn keeps the persona precheck (L448) and **exactly one `decide()`**. RE intent is decided only by RFC-0232 S2's helper (`planning.re_intent_match(prompt)`, exact name per #664), whose two-stage detection (a wording/path prefilter, then an on-disk dump probe) is specified in #664 and is not restated or re-implemented here. 0231 consumes its result in two places:
+- **Precheck:** `large_prompt.precheck` calls the helper once on the raw text (outside the 50 ms window, so the dump probe never eats the decide budget) and stores `re_match`. When it matches there is **no candidate**: no rider is appended to the one `decide()`, and `large_prompt_floor` is not set.
+- **Floors and fallbacks:** in `_apply_floors`, 0232's RE floor runs first and 0231's large-prompt floor after it; when the RE floor applied, `large_prompt` stays `None`. `_with_deadline_large_prompt` on the deadline and exception paths returns `large_prompt=None` when `precheck.re_match` is set.
+
+RFC-0232 S2 owns the RE-side test `test_path_plus_re_intent_routes_to_re_before_large_prompt_split` (`tests/test_rfc0232_intent_and_alias.py`). 0231-S1 adds its side of the contract (S1 tests), and `test_one_decide_per_turn` (S1) asserts exactly one `decide()` for a large turn and for a path-plus-RE turn.
+
+- **Precheck on the full prompt (rules, sync).** Reflex runs the rules adapter on `compact_state(raw_state)` (`reflex.py:235`), which cuts every string over 800 chars to 800 (`decision/types.py:248`). So size rules are **never** evaluated inside `decide()`. `decision/large_prompt.py::precheck(text: str, settings) -> LargePromptPrecheck` runs in `decide_owner_turn` (`owner_turn.py:537-630`) on the raw `user_message`, next to `resolve_persona_context` (L563) and **outside** the 50 ms `wait_for`. It computes L1-L5 and the split mode and returns `rules_fired`, `floor` (`large` | `standard`) and `mode`. It is passed to `_decide_sync`, `_deadline_rules_result` (L373-400) and the new `_with_deadline_large_prompt`. Cost is linear in the prompt with one regex pass per rule: `test_precheck_bounded_on_100kb_prompt` bounds it.
+- **Candidate (inside `_decide_sync`, before the one `decide()`).** A candidate exists only when **all** of these hold:
+  - `precheck.re_match` is not set (RFC-0232 S2's helper did not match);
+  - the baseline route is managed (`baseline.kind == MANAGED_TASK`), and `infer_rules_reply_shape(text)` is none of literal, clarify, self_status, basic_qa or social (all in `REPLY_SHAPES`, `owner_turn.py:43`);
   - `security_role == ""`;
-  - the reply shape is none of literal, clarify, self_status or basic_qa (all in `REPLY_SHAPES`, `owner_turn.py:43`; `basic_qa` landed with #649);
   - `settings.large_prompts.enabled` is true;
-  - at least one floor rule L1-L5 below fires.
+  - `precheck.floor == "large"` (at least one rule below fires).
 
   Without a candidate, no rider is appended and the decision is unchanged byte for byte.
 - **Riders (appended to `OWNER_TURN_QUESTIONS` for that call only):**
   - `large_prompt`: choice `standard` | `large`, `decision_class="complexity_escalation"`.
   - `large_prompt_split`: choice `sections` | `questions`, `decision_class="workflow_branch"`.
 
-  Both classes are already in `REFLEX_DECISION_CLASSES` (`decision/types.py:14-39`), so the unlisted-class check at `reflex.py:229-234` passes.
-- **Rules floor**, in `decision/adapters/rules.py`, next to the arbitration branch (L226) and the persona rider branch (L237). `large` fires if any of these holds:
+  Both classes are already in `REFLEX_DECISION_CLASSES` (`decision/types.py:14-39`), so the unlisted-class check at `reflex.py:229-231` passes. The rules adapter's rider branches (`decision/adapters/rules.py`, next to L226/L237) read only the scalar state keys `large_prompt_floor` and `large_prompt_rules` that `_decide_sync` sets from the precheck; they never measure text.
+- **Rules (computed by the precheck on the raw text).** `large` fires if any of these holds:
   - **L1:** `len(prompt) ≥ 4000`.
   - **L2:** at least 3 list items (`^\s*(\d+[.)]|[-*•])\s+`) and `len ≥ 600`.
   - **L3:** at least 3 question sentences (ending in `?`, or starting with an interrogative word in en/nl) and `len ≥ 200`. This also sets split `questions`.
-  - **L4:** `task_workflow.is_large_request(prompt)` (landed #649, `agent/task_workflow.py:31-37`), imported and called as is, not copied. At decide time the ingress hints are not known yet, so `size_class` and `complexity` keep their defaults.
+  - **L4:** `task_workflow.is_large_request(prompt)` (landed #649, `agent/task_workflow.py:31-37`), imported and called as is, **counted only when `len ≥ 600` or another rule also fires**. "Make a quick snake game" is therefore not large.
   - **L5:** `local_complexity_tier(prompt) == 4`.
 
   Split mode: `questions` when L3 fired and fewer than 3 list items exist, otherwise `sections`.
-- **Floor semantics.** This follows the existing rule at `reflex.py:398-410`, where providers may raise a tier but never lower it.
-  - A typed provider may raise `standard → large` only at confidence ≥ 0.75, and may never lower `large → standard`.
-  - The deadline fallback (`_deadline_rules_result`, 50 ms `OWNER_TURN_DEADLINE_MS`) is the rules answer.
+- **Floor semantics** (the rule at `reflex.py:398-410`: providers may raise a tier but never lower it):
+  - `_apply_floors` (L296-370) applies `precheck.floor`. A typed provider may raise `standard → large` only at confidence ≥ 0.75, and may never lower `large → standard`.
+  - **Deadline and exception fallbacks keep the verdict and the full question.** `_deadline_rules_result` asks `OWNER_TURN_QUESTIONS` plus the riders when a candidate exists, and the outer `TimeoutError` / `Exception` paths (L585-630) call `_with_deadline_large_prompt(decision, precheck, text)` after `_with_deadline_persona`. The fallback decision carries the untruncated `user_message` into `create_task`; the precheck object is never rebuilt from the projection.
   - A provider's split answer wins only when L3 did not fire.
-- **Output.** New field `OwnerTurnDecision.large_prompt: LargePromptIntent | None`, with fields:
-  - `verdict`;
-  - `mode`;
-  - `rules_fired: tuple[str, ...]`;
-  - `decision_source`;
-  - `confidence`.
-
-  `_apply_floors` (L296-370) applies the floor. `request_routing` passes the field through unchanged.
-- **Arbitration class.** The large ack is a front notice, not an answer. The parent's final result is the combined child outcome, which matches `keep_worker` semantics (`surfaces.py:395-410`). `arbitrate_front_and_worker` is not called for the ack, because no front model text exists to arbitrate.
+- **Final gate after the floors.** The verdict is nulled when 0232's RE floor applied, and unless the final route is `managed_task` and the final reply shape is not in {literal, clarify, self_status, basic_qa, social}. A provider that answers `direct_reply` at ≥ 0.75 on a 4500-char prompt therefore leaves `large_prompt is None`, as today.
+- **Output.** New field `OwnerTurnDecision.large_prompt: LargePromptIntent | None` (`OwnerTurnDecision` L145-158), with fields `verdict`, `mode`, `rules_fired: tuple[str, ...]`, `decision_source`, `confidence`. `request_routing` passes the field through unchanged.
+- **#649's planner is not a second decision.** The landed auto-planner (`loop.py:2344-2349` `needs_workflow`, `:2686-2707` `prepare_workflow(..., planner=MANAGER.chat)`) never runs for a pipeline parent or child (S4/S5 mark and skip, §2). When `large_prompts.enabled` is false or the verdict is `None`, #649 behaves exactly as landed.
+- **Arbitration class.** The large ack is a front notice, not an answer. The parent's final result is the combined child outcome, which matches `keep_worker` semantics (`surfaces.py:395-410`). `arbitrate_front_and_worker` is not called for the ack.
 
 ### 2. Ack and preload (S4)
 
-**Insertion point.** In `AgentRuntime.create_task` (`loop.py:479-559`), in this order:
-1. the `Task` commit;
-2. RFC-0218 S3b's persona block (unchanged, including `publish_persona_switch_line` per #663);
-3. this RFC's large branch.
+**Order inside `AgentRuntime.create_task`** (`loop.py:479-559` on `d85c9d4`), matching #666 and #664 @ `1542881`:
+1. RFC-0230 S3's `prewarm_worker("turn")` and the route decision (RFC-0230 owns that position);
+2. RFC-0232's RE dispatch (an RE turn never reaches step 4, and its decision has `large_prompt=None`, §1);
+3. the `Task` commit and RFC-0218 S3b's persona block (unchanged, including `publish_persona_switch_line` per #663);
+4. **this RFC's large branch**, which replaces only the generic ack at L548-557 for a large turn.
 
-The large branch replaces only the generic ack at L548-557:
+**Marking the parent.** The large branch inserts the `large_prompt_pipelines` row (§4) in the same session as the `Task` commit, before `_start_runner`. That row is the mark: `large_prompt_queue.is_pipeline_parent(task_id)` reads it, and `_run` returns into the parent runner **before** `loop.py:2344` (#649's `needs_workflow`), so #649's planner never plans a 0231 parent (CoS ruling 2). Children are seeded (§4), so `load_workflow` finds a stored plan and #649 never auto-plans them either.
 
-1. **Start the preload** with `asyncio.create_task(large_prompt.preload(task.id, target))`. It is not awaited. The handle is stored on the runtime so cancel can reach it.
-2. **Ack.** It is a fixed template, not front-model generation, because a model generation cannot meet the budget, the front model may be cold, and the 27B load contends for the GPU. It is published with:
-   - `BUS.publish(task.id, "acknowledgement", "Acknowledged", text, stage="queued")`, the same event the 0218 S3b latency test measures;
-   - `BUS.publish(task.id, "chat_tts", "Large task", text, stage="large_prompt_ack")`.
+**The large branch, step by step** (all in-memory, no I/O probe, so the ack stays inside its budget):
+1. **Cancel 0230's 9B prewarm** when a target resolves and the gate outlook is not `refuse`: `turn_prewarm.cancel_prewarm(turn_id)` (RFC-0230 S3 exposes it; #666 S3). A prewarm that has not yet called `prepare_engine_for` is cancelled. One already inside `prepare_engine_for` finishes under its single-flight, and the preload's own gate call queues behind it. With the outlook `refuse`, the prewarm is left alone (the parts will run on the 9B).
+2. **Resolve the target** (`large_prompt.resolve_target`, below) and **ask the RFC-0225 gate before wording the ack** (CoS ruling 4): `engine_coexistence.gate_outlook(target) -> GateOutlook(verdict: "resident" | "allow" | "refuse", reason: str)`, added by 0231-S0 (§2a). It reads only RFC-0225's in-memory state:
+   - `resident`: the target is in `anzu_loaded_instances()` or the last `/api/ps` snapshot RFC-0225 keeps;
+   - `refuse`: the resident worker is owner-loaded (not in `anzu_loads`, e.g. Taco's LM Studio `127.0.0.1:1234` `qwen3.5-9b-defiant-fable-uncensored`) and `is_managed(<its engine>)` is false. That is #652 L76's refusal, predicted without a probe;
+   - `allow` otherwise. The real step-5 gate still decides in the preload.
+3. **Speak the one ack** (CoS ruling 5). The text is a module constant chosen from the outlook. **No variant says the larger model is loading**, so the ack can never claim a load the gate has not allowed:
 
-   The title is not `"Speak reply"`, so the ack never joins the reply prefix (`useTaskSpeech.ts:48`). The final combined result is still spoken in full. The ack is **never** sent through `publish_owner_text`, because that channel has no client (#663). The voice is the active persona's voice through the existing browser `queueChatSpeech`.
-3. Record `ack_ms = (t_ack − t_decision_return) × 1000` on the pipeline row.
-4. `_start_runner(task.id, self._run(task.id, continue_existing=False))`, unchanged.
+   | Outlook | Text |
+   | --- | --- |
+   | `resident` | "This is a large task. I'll split it into parts and work through them one by one with the larger model." |
+   | `allow` | "This is a large task. I'll split it into parts and work through them one by one." |
+   | `refuse` | "This is a large task. I'll split it into parts and work through them on the model you have loaded." |
+   | no target | "This is a large task. I'll split it into parts and work through them on the current model." |
 
-**Ack texts** (en, module constants, owner-reviewable):
+   **Delivery is the parent's front lane (RFC-0230 rule 1, #666 L61).** For a pipeline parent `_run` skips `_run_managed_front_lane` (L2420-2430) and the front-off fallback (`chat_tts` plus `publish_owner_text`, L2431-2445). The ack **is** the parent's front-lane line, published as `BUS.publish(task.id, "acknowledgement", "Acknowledged", text, stage="queued")` (the event the 0218 S3b latency test measures) plus `BUS.publish(task.id, "chat_tts", "Large task", text, stage="large_prompt_ack")`, and stamped with RFC-0230 S0's `mark(turn_id, "tts_enqueued", lane="front", source="large_prompt_ack")`. The client's `first_audio` mark (`chatTtsPlayer.ts`, 0230-S0) closes the clock. The title is not `"Speak reply"`, so the ack never joins the reply prefix (`useTaskSpeech.ts:48`). The ack never goes through `publish_owner_text` (no client, #663). It is a fixed text, not a front-model generation, because a generation could claim a load the gate refuses (ruling 4).
+   **Nothing else on the parent is spoken until its terminal outcome.** The gate line, preload status, "Part n of N done", needs_owner and vault lines are `BUS.publish(parent, "large_prompt", …)` events only (visible in Show work and the panel). RFC-0225 owner lines raised by the preload carry `task_id=parent` and `speak=False` (§2a), so they show as a chip and a task event but are not spoken. The terminal outcome (combined result or failure text) is the task's answer, spoken by the existing outcome path once.
+4. **Start the preload** with `asyncio.create_task(large_prompt.preload(task.id, target, outlook))` only when a target resolved and the outlook is `resident` or `allow`. It is not awaited, and the handle is stored on the runtime so cancel can reach it. With `refuse`, no preload runs, no model is touched, and the parent shows one event: "Running on <loaded model>: the larger model needs about 12 GB and would need the 9B unloaded, which ANZU only does in managed mode (Settings → Local engines → Let ANZU manage this engine)."
+5. Record `ack_ms` on the pipeline row, then `_start_runner(task.id, self._run(task.id, continue_existing=False))`, unchanged.
 
-| Case | Text |
-| --- | --- |
-| Target resolved, not yet loaded | "This is a large task. I'm loading the larger model and splitting it into parts." |
-| Target already loaded | "This is a large task. I'll split it into parts and work through them one by one." |
-| No target available | "This is a large task. I'll split it into parts and work through them on the current model." |
+**Splitting runs after the ack (normative).** No split, completeness or compile work runs in `create_task`; it all runs in the parent runner, which starts after the ack is published. `test_ack_not_delayed_by_split` holds this with a split fake that blocks for 5 s.
 
-**Latency budget (hard, normative).**
-- **Server budget:** the ack `chat_tts` is persisted **≤ 150 ms** after `evaluate_request_route` returns. A CI test checks this with fakes, and with a preload fake that blocks for 5 s. The budget covers the Task commit, the 0218 persona block and two publishes.
-- The decision itself stays under the existing 50 ms owner-turn deadline. The total is therefore ≤ 200 ms from turn start to ack event.
-- **Audible budget:** first ack audio ≤ **1200 ms** after the decision on Taco's PC, with the TTS voice warm. This is a live audit (S4 acceptance), not CI.
+**Latency budget (normative), on RFC-0230's clock.**
+- **CI:** the ack `chat_tts` is persisted ≤ 150 ms after `evaluate_request_route` returns, with a preload fake that blocks for 5 s and a split fake that blocks for 5 s.
+- **Owner-visible target:** the large turn is held to RFC-0230's target, **first audible word ≤ 1.5 s at p50 and ≤ 2.0 s at p95 from end of owner input** (#666 L53), measured with 0230-S0's marks. 0231-S4 appends three large-turn cases (fixtures from S3: 5-item list, 4 questions, 6000-char spec) to `scripts/anzu-latency-repro.ps1` (append-only, after 0230-S0 creates it). There is no separate 0231 clock.
 
-**Target resolution** (`agent/large_prompt.py::resolve_target(settings) -> RuntimeProfile | None`, pure):
-1. `settings.large_prompts.target_runtime` (default `"anzu-coder-27b"`, the 0231-S0 profile), matched against **enabled** runtime profiles (`list_runtime_profiles()`, `enabled is True`) by `name`, then `model_profile`, then the provider model id. A disabled row never matches, the same rule `route_runtime` applies (`runtime_router.py:284-285`).
-2. Otherwise `route_runtime` (`runtime_router.py:320`) with `minimum_answer_tier=3`, `task_specialization="coding"` when `task_class` is code/build/debug and `"reasoning"` otherwise, and `preferred_profiles=("expert", "ornith_35b")`. This is ported from `answer_routing.py:57-71`, with tier 3 as the floor and no new router.
-3. Otherwise `None`. The ack uses the "no target available" text and the pipeline runs on the current model, with `preload_status="no_target"` shown in the panel.
+**Target resolution** (`agent/large_prompt.py::resolve_target(settings) -> TargetResolution`, sync, in-memory):
+1. `settings.large_prompts.target_runtime` (default `"anzu-coder-27b"`, the 0231-S0 profile), matched against **enabled** runtime profiles (`list_runtime_profiles()`, `enabled is True`) by `name`, then `model_profile`, then the provider model id. A disabled row never matches (`runtime_router.py:284-285`).
+2. Otherwise `route_runtime` (`runtime_router.py:320`) with `minimum_answer_tier=3`, `task_specialization="coding"` when `task_class` is code/build/debug and `"reasoning"` otherwise, and `preferred_profiles=("expert", "ornith_35b")` (ported from `answer_routing.py:57-71`).
+3. Otherwise no target, with `reason` = S0's last reconcile outcome (`anzu_coder.last_outcome()`). The parent event names it: `ollama_unreachable` → "Ollama isn't running, so the larger model isn't available; running on the current model."; `not_advertised` → "Ollama doesn't list anzu-coder-27b; running on the current model."; `owner_disabled` → "anzu-coder-27b is turned off in your runtime profiles; running on the current model." When the outcome was `ollama_unreachable` and the template is disabled, the **preload task** (never the ack path) first runs one bounded reconcile, `reconcile_anzu_coder_profile(attempts=1, timeout_s=3.0)`. If that enables the row, it re-resolves and continues with the preload, and the event says "Found anzu-coder-27b in Ollama; using it for the parts."
 
 **Preload** (`large_prompt.preload`). No new loader:
-1. Snapshot `settings.inference` (JSON) into `previous_selection_json`, because `hotswap.apply_runtime_profile_to_settings` persists what it applies (`hotswap.py:88-194` on `d214b6d`).
-2. Take a rewarm **hold** (see *Rewarm hold*).
-3. Call `await hotswap.activate_runtime_profile(target)` (`hotswap.py:197-238` on `d214b6d`). After RFC-0225 S3 this routes through `prepare_engine_for`: single-flight, revive or respawn, identity check, VRAM gate step 5, and owner lines. The pipeline adds no gate logic of its own.
-4. Warm with `gpu_prefer.ensure_ollama_gpu` (L124) or `ensure_lmstudio_gpu` (L67), by provider. For an Ollama target (the S0 profile), the preload first reads Ollama `GET /api/ps`:
-   - model already listed → no warm call (an owner-loaded model's `keep_alive` is not touched), not recorded in `anzu_loads`, `preload_status = "already_loaded"`;
-   - model not listed → warm, then `GET /api/ps` again; listed → `engine_coexistence.record_anzu_load(engine_id="ollama@127.0.0.1:11434", model="anzu-coder-27b")` (RFC-0225 S3, #652 L43 "every model instance ANZU itself loaded into an engine it does not own"), `preload_status = "loaded"`; not listed → `failed:warm_not_resident`.
-5. Set `preload_status`: `loaded`, `already_loaded`, `failed:<reason>`, `gate_refused:<reason>` or `timeout`.
+1. **Request lease first.** `token = engine_coexistence.hold_request_lease(engine_id, model, reason=f"large-prompt:{parent}")` (§2a). The lease is held from here until the parent is terminal, across every part, every gap between parts and every `waiting` period (CoS ruling 3).
+2. Call `await hotswap.activate_runtime_profile(target, persist=False, task_id=parent)` (`hotswap.py:197`). On `d85c9d4` it applies with `persist=False` at L209, loads through `MANAGER.load`, then saves `settings.inference` at L231-232. 0231-S4 adds the keyword `persist: bool = True` (default unchanged for every caller): with `False` the L231-232 save is skipped, so **a large-task load never becomes the owner's saved selection** (ruling 3). `task_id` is forwarded to `prepare_engine_for` (RFC-0225 already accepts it). After RFC-0225 S3 this is single-flight, revive or respawn, identity check, step-5 VRAM gate and owner lines; the pipeline adds no gate logic.
+3. Warm with `gpu_prefer.ensure_ollama_gpu` (L124) or `ensure_lmstudio_gpu` (L67), by provider. For an Ollama target the preload first reads `GET /api/ps`:
+   - already listed → no warm call (an owner-loaded model's `keep_alive` is never touched), not recorded in `anzu_loads`, `preload_status = "already_loaded"`;
+   - not listed → warm with `keep_alive: "-1"` (pinned while the lease is held), then `GET /api/ps` again; listed → `engine_coexistence.record_anzu_load(engine_id="ollama@127.0.0.1:11434", model="anzu-coder-27b")`, `preload_status = "loaded"`; not listed → `failed:warm_not_resident`.
+4. Set `preload_status`: `loaded`, `already_loaded`, `failed:<reason>`, `gate_refused:<reason>` or `timeout`. On any non-loaded status the lease is released at once.
+
+**While the lease is held** (the parent is `running` or `waiting`):
+- RFC-0225 step 6 sees a held request lease and never unloads the target; step 7 never unloads during a lease (#652 L81, L86).
+- RFC-0228 S2's Ollama keep-alive does not expire it: an ANZU-loaded target was warmed with `keep_alive: "-1"`. An owner-loaded target keeps the owner's keep-alive, untouched.
+- The rewarm hold (below) defers `NINE_B_REWARM`, so the 120 s idle restore never swaps the worker between parts.
+- **Chat turns during a pipeline** route to the loaded target: `prepare_answer_route` uses the loaded runtime (`loop.py:2475`), and the front lane still speaks first per RFC-0230. A chat turn that explicitly needs the 9B (persona brain, explicit switch) waits on the lease under RFC-0225 step 7 and gets that step's visible line. Nothing unloads the target between parts.
 
 **Preload outcomes (defined, never silent):**
 
 | Outcome | Behaviour |
 | --- | --- |
 | loaded / already_loaded | Children run on the target. |
-| VRAM gate refuses (owner-loaded 9B, managed mode off; RFC-0225 step 5) | RFC-0225's owner line names the reason. The pipeline then runs on the current model, and the parent shows one event, "Running on <current> — <reason>". |
+| outlook `refuse` (no preload) | The parts run on the loaded 9B. Nothing is unloaded (ANZU never unloads a model it did not load). One event, as in step 4 above. The task does not fail. |
+| real gate refuses (step 5) | RFC-0225's owner line (with `task_id=parent`, `speak=False`) names the reason. The lease is released and the parts run on the current model, with one event "Running on <current>: <reason>". The task does not fail. |
 | load error | The same fallback, with the error text in the event. |
 | not loaded within `PRELOAD_DEADLINE_S = 180` | The preload task is cancelled, then the same fallback with "The larger model took too long to load". |
-| owner cancels the parent during preload | The preload task is cancelled. Compare-and-restore runs and the hold is released. |
+| owner cancels the parent during preload | The preload task is cancelled, the lease and hold are released, and the restore runs. |
+
+**Re-preload on resume.** `/continue` on the parent and `recover_on_startup` (§5) check `MANAGER.state` and Ollama `/api/ps`. When the target is no longer resident (backend restart, owner unloaded it, keep-alive expired before a restart), they re-run `preload` (same lease, same outcomes) before the next dispatch.
 
 **Restore at pipeline end** (any terminal parent status):
-- **Compare-and-restore:** if `settings.inference` still equals what the preload applied, restore `previous_selection_json` through `activate_runtime_profile` of the previous profile. If the owner changed the model meanwhile, leave it as it is and log.
-- Then release the hold and call `schedule_orchestrator_restore` (`model_escalation.py:73-93`). After RFC-0228 S2 that call is `NINE_B_REWARM`, which reloads the 9B only after the 27B has left VRAM.
+1. Release the request lease. For an ANZU-loaded Ollama target, send one `POST /api/generate {"model": <target>, "keep_alive": "<idle_unload_seconds>s"}` so normal RFC-0228 expiry resumes.
+2. **Restore the owner's selection.** Because the preload never persisted, `load_settings().inference` is still the owner's selection. If `MANAGER.state` still points at the target the pipeline loaded, the restore calls `engine_coexistence.prepare_engine_for(load_settings().inference, task_id=parent)` and then `MANAGER.load` of that selection, i.e. RFC-0225 step 6 unloads the ANZU-loaded target when the 9B needs the room, and never unloads an owner-loaded one. If the owner changed the model meanwhile (through settings, which merge via `_merge_settings_changes`, `config.py:589`, used at L619), `MANAGER.state` no longer points at the target and nothing is restored.
+3. Release the rewarm hold and call `schedule_orchestrator_restore` (`model_escalation.py:73-93`; after RFC-0228 S2 that is `NINE_B_REWARM`).
 
 **Rewarm hold** (S4 edits `inference/rewarm.py`, after RFC-0228 S2 creates it):
 - `NINE_B_REWARM.hold(reason: str) -> str` and `release(token)`.
 - While any hold is held, both rewarm triggers defer, the same way they defer while the 27B is resident.
 - `release` of an unknown token is a no-op.
-- Holds are in-memory. Startup recovery (§5) re-takes a hold for every pipeline still `running`.
-
-This prevents the 120 s idle restore from swapping the worker away between two parts. Only RFC-0228 S2 creates the coordinator, and this RFC adds the two methods.
+- Holds and leases are in-memory. Startup recovery (§5) re-takes both for every pipeline still `running` or `waiting`.
 
 ### 2a. Target profile: `anzu-coder-27b` (S0)
 
@@ -241,7 +263,7 @@ The `SpecialistModel` entry is `MODEL_CATALOG["anzu-coder-27b"]` with `key`/`run
 - **VRAM estimate:** `anzu_coder.VRAM_ESTIMATE_GB = 12.0`, the total requirement at `context_limit` 16384 (Taco's figure; #652 L73, L76). `anzu_coder.vram_requirement_gb(target) -> float | None` returns `12.0` when the target provider is `ollama` and its model is `anzu-coder-27b` or `anzu-coder-27b:<tag>`, otherwise `None`. S0 adds one hunk to RFC-0225's `engine_coexistence.prepare_engine_for` step-5 requirement lookup: consult `vram_requirement_gb` first, then the existing catalogue / graded `weight_gb` lookup unchanged. With the 1 GB headroom the gate acts below 13 GB free, which is #652's test threshold (L382).
 - **`idle_unload_seconds`:** not per profile. ANZU-originated Ollama loads use RFC-0228 S2's `settings.inference.idle_unload_seconds` (default 900, so `keep_alive: "900s"`; `0` means `"-1"`, pinned; #655 L62). This profile inherits it.
 - **ANZU-loaded vs owner-loaded (RFC-0225, #652 L43-44, L74-82):**
-  - *ANZU-loaded:* ANZU's preload warmed it and `/api/ps` did not list it before (§2 preload step 4). It is recorded in `anzu_loads`, and the reverse gate (step 6) may unload it with `keep_alive: 0` when the 9B needs the VRAM back.
+  - *ANZU-loaded:* ANZU's preload warmed it and `/api/ps` did not list it before (§2 preload step 3). It is recorded in `anzu_loads`, and the reverse gate (step 6) may unload it with `keep_alive: 0` when the 9B needs the VRAM back.
   - *Owner-loaded:* listed by `/api/ps` before ANZU asked (e.g. Taco ran it from his shell). Not recorded, never unloaded by ANZU, and the reverse gate gives its "which you loaded" error line instead.
   - With the profile enabled, Ollama on 11434 counts as `anzu_configured` under RFC-0225 S3's classification ("Ollama referenced by an enabled runtime profile"), so it is never offered for stopping.
 - **Installer catalogue size / sha256:** none. The model is Taco's own Ollama build, so it is not an installer asset: `installer/windows/model-catalog.json` (RFC-0228) gets no entry, and S0 changes no installer file. #655 L360 already excludes it.
@@ -254,7 +276,16 @@ The `SpecialistModel` entry is `MODEL_CATALOG["anzu-coder-27b"]` with `key`/`run
 5. The template row is disabled and `runtime_profiles_root()/anzu-coder-profile.json` has `auto_enabled_at` → `owner_disabled`. The owner turned it off after an earlier auto-enable, so it is not re-enabled.
 6. Otherwise → `update_runtime_profile("recommended-anzu-coder-27b", enabled=True)`, write `{"auto_enabled_at": <ISO-8601 UTC>}` to that file, outcome `enabled`.
 
-Each outcome is logged once as `anzu_coder_profile outcome=<outcome>` and returned, so `startup_health` records it. This follows the existing rule that a discovered local model becomes an enabled runtime row (`model_discovery.py:338-366`). If the model is removed from Ollama later, the next preload fails visibly through `activate_runtime_profile` ("Model 'anzu-coder-27b' is not loaded in Ollama…") and takes the "load error" fallback in §2.
+Each outcome is logged once as `anzu_coder_profile outcome=<outcome>` and returned, so `startup_health` records it. This follows the existing rule that a discovered local model becomes an enabled runtime row (`model_discovery.py:338-366`). If the model is removed from Ollama later, the next preload fails visibly through `activate_runtime_profile` ("Model 'anzu-coder-27b' is not loaded in Ollama…") and takes the "load error" fallback in §2; the parts then run on the current model and the task does not fail.
+
+**Taco's 16 GB card (normative statement).** `anzu-coder-27b` needs about 12 GB (`VRAM_ESTIMATE_GB`), and the resident 9B needs about 7 GB (#652 L82). 12 + 7 = 19 GB exceeds a 16 GB card, so on Taco's PC the step-5 gate **always** takes either the unload path (the 9B is ANZU-loaded, or managed mode is on) or the refuse path (the 9B is owner-loaded and managed mode is off, which is Taco's default: LM Studio `127.0.0.1:1234`, `qwen3.5-9b-defiant-fable-uncensored`, #652 L42). The S4 live audit records which path ran, once with managed mode off and once with it on.
+
+**Late Ollama start.** `reconcile_anzu_coder_profile(*, attempts: int = 10, timeout_s: float = 3.0)` keeps the startup behaviour above with its defaults. The last outcome is kept in memory and returned by `anzu_coder.last_outcome() -> str | None`. When RFC-0225 S3 starts `ollama serve` after the 10 attempts ran out, the next large turn's preload task runs one bounded reconcile (`attempts=1`, ≤ 3 s, never on the ack path; §2 target resolution step 3).
+
+**RFC-0225 additions owned by 0231-S0** (`engine_coexistence.py`, second owner after 0225-S3; #652 lists it):
+- `gate_outlook(target) -> GateOutlook` (§2 step 2): pure, in-memory only (`is_managed`, `anzu_loaded_instances()`, the last `/api/ps` snapshot, the selected engine's owner/ANZU classification). No probe, no I/O.
+- `hold_request_lease(engine_id, model, *, reason) -> str` and `release_request_lease(token) -> None`. A held token counts as a request lease in steps 6 and 7 (#652 L81, L86), exactly like a turn's lease. Release of an unknown token is a no-op. `held_leases()` lists them for diagnostics.
+- `owner_line(..., speak: bool = True)`: with `speak=False` and a `task_id`, (b) publishes the `engine_notice` task event but not the task `chat_tts`. Every existing call keeps the default, so RFC-0225 and RFC-0228 lines are unchanged. The ephemeral (a) frame carries the `task_id`, so `EngineNotices` does not speak it while that task is open (#652 "unless `task_id` equals `openTaskId`").
 
 ### 3. Split, completeness, compile (S3)
 
@@ -288,7 +319,7 @@ All of this lives in `agent/large_prompt_intake.py` (new). It runs in the parent
   Each repair is recorded in `repairs_json`.
 - **Hard bound: `MAX_COMPLETENESS_ROUNDS = 3`.** At the bound the outcome is **defined**:
   - The section status becomes `needs_owner` and `missing_json` lists the failed criteria.
-  - One `chat_tts` and one event go on the parent: `Part N isn't clear enough to start: <missing, ≤ 120 chars>. Tell me what you mean, or say "skip part N".`
+  - One parent event (not spoken; CoS ruling 5): `Part N isn't clear enough to start: <missing, ≤ 120 chars>. Tell me what you mean, or say "skip part N".` The parent's `waiting` status shows it in the panel and the task list.
   - The queue runs every part **before** the blocked one, then the parent goes to `waiting`.
   - An owner reply via `/continue` on the parent sets that part's `source_text` to the original text plus the reply, and grants exactly **one** more round. Failing that round re-asks once with the same line. "skip part N" marks the part `skipped`.
   - Nothing proceeds on an incomplete section. Nothing soft-fails.
@@ -332,9 +363,11 @@ At dispatch, the child gets `Previous part result (≤ 1800 chars)`, which is in
 
 **Persist.**
 - SQLite is **always** authoritative: `large_prompt_pipelines` plus `large_prompt_sections` (§4).
-- **Vault mirror:** applies when `public_binding_status` (`memory/obsidian_vault.py:305`) is bound and `large_prompts.store == "db_and_vault"`. `create_note` (L741) writes `_Temporal/LargePrompts/<parent_id>/part-NN.md` with frontmatter (parent, ordinal, status) and the detailed prompt. At part terminal, `edit_note` (L801) appends the result summary.
-- **Owner-edit conflict:** `edit_note` reports a conflict without `force`. The pipeline does not force. It records `vault_conflict` on the row and shows one parent event, "Part n note was edited in Obsidian; ANZU left your edit and kept the result in ANZU".
-- **Mirror failure:** produces a visible parent event. DB persistence and the run continue.
+- **Vault mirror:** applies when `public_binding_status` (`memory/obsidian_vault.py:305`) is bound and `large_prompts.store == "db_and_vault"`. It is **idempotent, keyed on the section's `vault_rel_path`** (`_Temporal/LargePrompts/<parent_id>/part-NN.md`):
+  - **get-or-create:** when the row already has `vault_rel_path` and the note exists, it is reused; only otherwise `create_note` (L741) writes it with frontmatter (parent, ordinal, status) and the detailed prompt. `create_note` raises `FileExistsError` on an existing file (L756), so a recovery re-dispatch or a follow-up recompile never calls it twice; an existing file without a row path is adopted and its path stored.
+  - **append, not replace:** `edit_note` (L801) replaces the body, so at part terminal the pipeline reads the current body, composes `<existing body>\n\n## Result\n<summary>` and passes that to `edit_note`. A recompile appends `## Prompt (revised)` the same way.
+- **Owner-edit conflict:** `edit_note` reports a conflict without `force`. The pipeline does not force. It records `vault_conflict` on the row and shows one parent event (not spoken), "Part n note was edited in Obsidian; ANZU left your edit and kept the result in ANZU".
+- **Mirror failure:** produces a visible parent event (not spoken). DB persistence and the run continue.
 - `large_prompts.store` takes the values `"db"` (default) or `"db_and_vault"`.
 
 ### 4. Storage: landed #649 engine plus seeding (S2)
@@ -379,7 +412,7 @@ At dispatch, the child gets `Previous part result (≤ 1800 chars)`, which is in
 - `status`: preparing | running | waiting | completed | failed | cancelled;
 - `target_profile`;
 - `preload_status`;
-- `previous_selection_json`;
+- `previous_selection_json` (audit only: the owner's saved selection at preload time; the preload never persists, so the restore reads the saved settings, §2);
 - `ack_ms`;
 - `store`;
 - `blob_ref`;
@@ -413,25 +446,26 @@ This reuses the semantics of `agent/intake.py`'s chain (stable ids, advance on t
   - Call `admit_automatic_trigger` (`automation/breaker.py:236-320`) with automation id `large-prompt:<parent>`, `ensure_automation` first. When the kill switch is engaged or the breaker is open, the parent fails visibly with the breaker reason. No retry loop.
   - Call `AGENT.create_task(child_prompt, request_id=uuid5(NS, f"large-prompt:{parent}:{ordinal}"), pipeline_section=section_id, profile=target)`.
   - The id is stable, so a re-dispatch after a crash reuses the same child (`loop.py:493-500` request_id reuse).
+  - **Bind the admitted run to the child:** `bind_run_to_task(run_id, child.id)` (`automation/breaker.py:322`) right after `create_task` returns, the same call the scheduler makes (`mobile/scheduler.py:112`). Without it the admitted run stays in flight and eats the failure budget (`breaker.py:225`, `:284-285`). A re-dispatch that reuses the child id re-binds the same run id.
 - **`create_task(..., pipeline_section: str | None = None)`**, keyword-only, default `None`, so every existing call is unchanged. When it is set:
   - The route is fixed to MANAGED with the parent's task class and **no decide** (the parent turn already decided; still exactly one decide per owner turn).
   - No persona block, no large branch (no recursion) and no generic ack.
   - `seed_workflow` with `work, deeper, quantitative, *REVIEW_STEPS?` runs in the same session as the Task commit, before `_start_runner`.
   - The title is `Part n of N · <section title ≤ 60 chars>`.
-- **`_run` for a child:** skip the managed front lane (L2420-2440) and its `chat_tts`. Children never speak, because the HUD follows the parent. Run the seeded workflow on the target profile. Per-child `speak_outcome` in the terminal hook is suppressed.
-- **Terminal hook** (`_update`, L800-826), placed next to `advance_intake_chain`, as `large_prompt_queue.on_child_terminal(child_id, status, result)`:
+- **`_run` for a child:** skip the managed front lane (L2420-2445) and its `chat_tts`. Children never speak, because the HUD follows the parent. Run the seeded workflow on the target profile. Per-child `speak_outcome` in the terminal hook is suppressed.
+- **Terminal hook** (`_update`, L800-826), placed next to `advance_intake_chain` (L804-813), as `large_prompt_queue.on_child_terminal(child_id, status, result)`. **First check:** when `pipeline.status == "cancelled"` (the parent was cancelled), the hook records the child's section as `cancelled` and returns; it never dispatches. Otherwise:
 
 | Child status | Effect |
 | --- | --- |
-| completed | Section `completed` with `result_summary`; vault `edit_note`; parent event "Part n of N done"; dispatch the next part. If the next part is `needs_owner`, the parent goes to `waiting` and repeats the line once. If there is no next part, the parent completes. |
-| cancelled by the owner (child cancel) | Section `skipped`; parent event "Part n skipped"; dispatch the next part. |
+| completed | Section `completed` with `result_summary`; vault append (§3); parent event "Part n of N done" (not spoken); dispatch the next part. If the next part is `needs_owner`, the parent goes to `waiting` and shows the line once as an event; the request lease stays held. If there is no next part, the parent completes. |
+| cancelled by the owner (child cancel, pipeline not cancelled) | Section `skipped`; parent event "Part n skipped"; dispatch the next part. |
 | failed | Section `failed`; remaining sections `cancelled`. The parent **fails** with "Part n of N failed: <error ≤ 200>. Parts n+1–N were not started." That text is spoken by the existing outcome path. |
 | kill switch / breaker | Same as failed, with the breaker reason. |
 
 - **Parent completion:**
   - `result` is the per-part Markdown sections ("## Part n: title" plus result).
   - `verification` has one line per part: the part's own verification, plus "deeper ✓ quantitative ✓".
-  - Status is `completed`. The existing `speak_outcome` and the `useTaskSpeech` final speech run unchanged.
+  - Status is `completed`. The existing `speak_outcome` and the `useTaskSpeech` final speech run unchanged: that is the task's answer, the only parent speech after the ack.
   - Then the restore (§2).
 - **Parent runner:**
   1. Run intake (§3).
@@ -442,17 +476,18 @@ This reuses the semantics of `agent/intake.py`'s chain (stable ids, advance on t
 
   `_update`'s terminal hook therefore never sees a parent until the pipeline itself sets it terminal.
 - **Cancel:**
-  - `AGENT.cancel(parent)` also cancels the running child and the preload task, and marks the rest `cancelled`. `cancel` (L733-738) gets one call, `large_prompt_queue.on_parent_cancel(parent)`.
-  - `POST /api/tasks/{child}/cancel` (existing, `api/tasks.py:341-352`) skips that part only.
+  - `AGENT.cancel(parent)` calls `large_prompt_queue.on_parent_cancel(parent)` (one call in `cancel`, L733-738). Under the per-parent lock it sets `pipeline.status = "cancelled"` **first**, then cancels the running child and the preload task, marks the rest `cancelled`, releases the lease and hold and runs the restore. The running child's later terminal hook sees the cancelled pipeline and never dispatches.
+  - `POST /api/tasks/{id}/cancel` (`api/tasks.py:341-352`) sets `status = "cancelled"` directly, without `_update`, so the terminal hook would never fire for a queued child with no runner. S5 adds one call after that commit: when the task is a pipeline child, `await large_prompt_queue.on_child_cancel_api(child_id)`, which runs `on_child_terminal(child_id, "cancelled", None)` (skip that part, dispatch the next). When the task is a pipeline parent the existing `AGENT.cancel` already reached `on_parent_cancel`.
 - **Follow-ups:**
   - `/continue` on a **child** is redirected to the parent, in `continue_task` (L561-590).
-  - `/continue` on the **parent** is handled in `_run`'s follow-up path, after S3b's follow-up persona block. If a part is `needs_owner`, the reply answers it (§3). Otherwise the text is appended as a new last part (content-hash dedupe, the same rule as landed `append_followup`, `task_workflow.py:182-186`; the parent has no stored workflow, so `append_followup` itself is not called) and goes through completeness and compile.
-- **Startup recovery** (`main.py`, after `reconcile_execution_on_startup`, L213-218 on `d214b6d`). For each pipeline in `running` or `waiting`:
-  - re-take the rewarm hold;
+  - `/continue` on the **parent** is handled in `_run`'s follow-up path, after S3b's follow-up persona block. It first re-preloads when the target is no longer resident (§2). If a part is `needs_owner`, the reply answers it (§3). Otherwise the text is appended as a new last part (content-hash dedupe, the same rule as landed `append_followup`, `task_workflow.py:182-186`; the parent has no stored workflow, so `append_followup` itself is not called) and goes through completeness and compile.
+- **Startup recovery** (`main.py`, after `reconcile_execution_on_startup`, L213-218 on `d85c9d4`). For each pipeline in `running` or `waiting`:
+  - re-take the rewarm hold and the request lease;
+  - when the target is not resident, re-run `preload` (§2 "Re-preload on resume");
   - if the current child is terminal, run `on_child_terminal` (a missed advance);
   - if it is `queued` without a runner, dispatch it again (same id);
   - if it is `running` without a runner, call `continue_task(child)`, which resumes the durable run (RFC-0029).
-- **Visibility:** `get_task` (`api/tasks.py:256-289`) gains a `large_prompt` object containing:
+- **Visibility:** `get_task` (`api/tasks.py:256-289`) **and** `get_task_observability` (`api/tasks.py:292-308`, which the live panel polls from `TaskActivity.tsx:208`) both gain the same `large_prompt` object (one builder, `large_prompt_queue.payload(task_id)`), containing:
   - mode;
   - status;
   - target;
@@ -465,24 +500,34 @@ This reuses the semantics of `agent/intake.py`'s chain (stable ids, advance on t
 
 ### 6. Owner UI (S6)
 
-- **`TaskActivity.tsx`:** a new `LargePromptSections` component, mounted with one line inside `TaskActivityPanel` (L185), add-alongside. It shows:
-  - one row per section: ordinal, title, status chip, completeness, and the rounds count;
-  - an "Open" link to the child, a "Cancel part" button (POST child cancel) and an "Obsidian note" path when one is mirrored;
-  - a "Cancel remaining" button (POST parent cancel);
-  - a status line with target, preload_status and ack_ms.
-- **Prompt steps UI:** landed #649 already renders a child's prompt steps (`TaskActivity.tsx:306-319`, `taskStatus.ts:207`). S6 doesn't edit or duplicate it.
-- **`api.ts`:** one add-only type, `LargePromptPayload`, plus `large_prompt?: LargePromptPayload` on `Task`. `prompt_steps` already exists (`api.ts:230`, `:269`).
+The live panel already has #649's "Saved plan and task prompts" block (`TaskActivity.tsx:306-319` on `d85c9d4`, `mergeObservability` carrying `prompt_steps` at `taskStatus.ts:207`, `prompt_steps` types at `api.ts:230`, `:269`). S6 **extends those rows add-only** and does not build a second plan list (CoS ruling 2).
+
+- **Data.** `large_prompt` arrives on both `GET /api/tasks/{id}` and `GET /api/tasks/{id}/observability` (§5). `mergeObservability` (`taskStatus.ts:203`) gains one line, `large_prompt: obs.large_prompt ?? task.large_prompt`, next to `prompt_steps`. `TaskObservability`'s field list gains `"large_prompt"`.
+- **View model, pure TS:** `frontend/src/components/largePromptSectionsView.ts` (new). `largePromptSectionsView(task: Task): LargePromptView | null` returns `null` when `task.large_prompt` is absent. Otherwise it returns:
+  - for a **parent**: one row per section (ordinal, title, status chip label and tone, completeness, rounds, missing text), each with actions `{label: "Open", taskId: child_task_id}`, `{label: "Cancel part", method: "POST", path: "/api/tasks/<child>/cancel"}` (only when queued or running) and the vault path when mirrored; one `{label: "Cancel remaining", method: "POST", path: "/api/tasks/<parent>/cancel"}`; and a status line built from target, preload_status and ack_ms;
+  - for a **child**: one line, "Part n of N of <parent title>", with an Open action to the parent.
+  Step labels come from the existing `humanizeToken` (`taskStatus.ts:12`): `deeper` → "Deeper", `quantitative` → "Quantitative". No new label table.
+- **Render (thin, add-only)** in `TaskActivity.tsx`:
+  - the existing condition `{!!view.prompt_steps?.length && (` (L306) becomes `{(!!view.prompt_steps?.length || !!largeView) && (`; the `<summary>Saved plan and task prompts</summary>` and the existing `<ol>` of prompt steps stay byte-identical, and the `<ol>` still renders only when `prompt_steps` has rows;
+  - after that `<ol>`, inside the same `<details>`, one added mount `{largeView && <LargePromptSections view={largeView} />}`;
+  - `frontend/src/components/LargePromptSections.tsx` (new) renders the view model and wires buttons to `api()` with the view model's method and path.
+  A pipeline child (which has seeded `prompt_steps`) therefore shows the live rows exactly as today plus the "Part n of N" line; a parent (no prompt steps) shows the sections list inside the same block.
+- **Tests run on the pure file.** `frontend/large-prompt-sections.test.mjs` imports `largePromptSectionsView.ts` and `taskStatus.ts` under `node --experimental-strip-types` (no `.tsx` import, like `avatar-motion.test.mjs:3`). `npm run build` (`pr-tests.yml:115-116`, "Build frontend") is the TSX type gate for `TaskActivity.tsx` and `LargePromptSections.tsx`.
 - **Not edited:** OwnerChatTranscript, HudChat, Chat, Phone, `useTaskSpeech` and every persona component.
 
 ### Live-UI add-alongside reasoning pass (2026-10-14 standing order)
 
-Touched live UI: TaskActivity panel (HudChat, Chat, Phone), task speech, Show work.
+Touched live UI: the TaskActivity panel (HudChat, Chat, Phone), task speech, Show work, the front lane.
 
-| Surface | Existing behaviour kept? | Addition |
+| Surface | Existing behaviour kept? | Addition and reasoning |
 | --- | --- | --- |
-| `TaskActivityPanel` (every existing row, ChildExecution L162, buttons) | **Yes**, untouched | One mount line for `<LargePromptSections task={task} />`, rendered only when `task.large_prompt` is present. |
-| `useTaskSpeech` | **Yes**, unchanged | The ack and needs_owner lines are ordinary `chat_tts` events with title ≠ "Speak reply". |
+| "Saved plan and task prompts" (`TaskActivity.tsx:306-319`) | **Yes.** Summary text, `<ol>`, rows, `humanizeToken` labels and the nested "Stage result" details are byte-identical. For a task without `large_prompt` the condition evaluates exactly as today (`largeView` is `null`). | One `||` in the condition and one mount after the `<ol>`. Reasoning: a non-pipeline task cannot see any change; a pipeline child gains one line; a parent gains the sections list where the owner already looks for "the plan". |
+| Rest of `TaskActivityPanel` (`ChildExecution`, `VerificationPanel`, `PhaseHistory`, buttons) | **Yes**, untouched | None. |
+| `mergeObservability` | **Yes**: every existing field still merged the same way | One added field. A test asserts all existing fields are unchanged. |
+| `useTaskSpeech` | **Yes**, unchanged | The ack is an ordinary `chat_tts` with title "Large task" (≠ "Speak reply"). Nothing else on the parent is spoken until its outcome. |
+| Parent front lane (`_run_managed_front_lane`, front-off fallback L2431-2445) | **Changed only for a pipeline parent**: skipped, because the ack is its front-lane line. Every other task runs the front lane as today. | Reasoning: two front lines (ack plus a model reply) would break ruling 5, and a model line could claim a load. Children already skip it. |
 | Show work (`OwnerChatTranscript.tsx:232-280`) | **Yes**, unchanged | Parent events are human-readable text, so no formatter is needed. |
+| `EngineNotices` (RFC-0225) | **Yes** | Preload lines carry `task_id=parent` and `speak=False`: chip and task event, no speech. |
 | RFC-0218 persona switch line, highlight, morph | **Yes** | Parent switch per S3b, before the ack. Children emit no persona events. |
 | Phone | **Yes** | Shows the parent's events and panel via its existing poll. No speech is added. |
 | Task recents (`App.tsx:223`) | **Yes** | Part children are listed with "Part n of N" titles. |
@@ -508,7 +553,7 @@ class LargePromptSettings(BaseModel):
     store: Literal["db", "db_and_vault"] = "db"
 ```
 
-`AppSettings.large_prompts` is added next to `decision` (`config.py:477-519` on `d214b6d`). `api/settings.py` exposes it on the existing settings GET and PUT. No new settings UI is part of this RFC; the setting is editable through the existing advanced settings JSON.
+`AppSettings.large_prompts` is added next to `decision` (`config.py:512` on `d85c9d4`). `api/settings.py` exposes it on the existing settings GET and PUT. No new settings UI is part of this RFC; the setting is editable through the existing advanced settings JSON.
 
 ---
 
@@ -516,18 +561,18 @@ class LargePromptSettings(BaseModel):
 
 | With | Rule |
 | --- | --- |
-| **RFC-0224 / #649 (landed `ee786dc`)** | Its engine is reused unchanged (§4). S2 adds `seed_workflow`, the pipeline tables and `LargePromptSettings`, and copies no #649 code. Pipeline parents bypass #649's model planner (S4 entry before `loop.py:2344`). Children are seeded, so they never auto-plan. Every other task keeps #649's behaviour. `tests/test_rfc0224_task_workflow.py` is not edited and must stay green. |
+| **RFC-0224 / #649 (landed `ee786dc`)** | Its engine is reused unchanged (§4). S2 adds `seed_workflow`, the pipeline tables and `LargePromptSettings`, and copies no #649 code. Pipeline parents are marked by their `large_prompt_pipelines` row and bypass #649's model planner (S4 entry before `loop.py:2344`; `test_649_planner_not_called_for_pipeline_parent_or_child`). Children are seeded, so they never auto-plan. Every other task keeps #649's behaviour. `tests/test_rfc0224_task_workflow.py` is not edited and must stay green. |
 | **RFC-0211 / #585** | Sections are rows a future scheduler can list as "upcoming tasks". When `DevelopmentScheduler` lands, its `resource_hold` (L380-411) is respected: dispatch defers while a hold names Ollama, with the parent event "Waiting for the scheduler's model hold". Nothing here waits on #585. |
 | **RFC-0026 / 0029** | Children are ordinary durable tasks created through `AgentRuntime.create_task`. Follow-ups use `/continue`, and recovery uses `continue_task`. There is no second task system. |
-| **Reflex arbitration** | One decide per owner turn, with two riders. The ack is a fixed front notice, so `keep_worker` semantics apply to the parent result (§1). |
+| **Reflex arbitration** | One decide per owner turn, with two riders only when a candidate exists. The ack is a fixed front notice worded from the gate outlook, so `keep_worker` semantics apply to the parent result (§1). |
 | **RFC-0218 S3b (+ #663)** | The parent turn's persona block runs first, unchanged. `switch_id = task_id:seq` is counted on the parent only. Children never call `apply_persona_switch`, so they publish no `persona_switched` or `persona_switch_failed`, and their `seq` counter stays empty. The 0218 test `t(acknowledgement) − t(persona_switched) < 50 ms` still holds, because the large branch publishes the `acknowledgement` event in the same position. |
-| **RFC-0225 S3** | The preload is exactly `activate_runtime_profile`, which 0225-S3 routes through `prepare_engine_for`. There is no separate VRAM gate, loader or owner-line channel. |
+| **RFC-0225 S3** | The preload goes through `activate_runtime_profile(target, persist=False, task_id=parent)`, which 0225-S3 routes through `prepare_engine_for`. There is no separate VRAM gate, loader or owner-line channel. 0231 uses 0225's own gate inputs for the ack outlook, holds a 0225 request lease on the target for the whole parent (steps 6 and 7 respect it), and never unloads a model ANZU did not load. 0231-S0 is the second owner of `engine_coexistence.py` and 0231-S4 the third of `hotswap.py`; #652's file tables name both. |
 | **RFC-0228 S1 / S4** | Not the owner of `anzu-coder-27b`: 0228-S1 is the Fable 9B default and 0228 L360 excludes the coder. No `model-catalog.json` entry is added (not an installer asset). |
 | **RFC-0225 S3 (gate requirement)** | 0231-S0 adds the `anzu-coder-27b` requirement (12 GB) as the first lookup in the step-5 gate. The gate logic, ledger and owner lines stay 0225's. |
-| **RFC-0228 S2** | The restore goes through `schedule_orchestrator_restore` → `NINE_B_REWARM`. The hold API is added to `rewarm.py` after 0228-S2. |
+| **RFC-0228 S2** | An ANZU-loaded target is warmed with `keep_alive: "-1"` while the lease is held and handed back to `idle_unload_seconds` at release. The restore goes through the owner's unchanged saved selection and `schedule_orchestrator_restore` → `NINE_B_REWARM`. The hold API is added to `rewarm.py` after 0228-S2. |
 | **`agent/intake.py`** | Left in place for `stream_owner_chat`. The large pipeline replaces its use only on the tasks path. Merging the two is out of scope. |
-| **RFC-0232 (#664)** | Shared files: its S2 (`owner_turn.py`) and S3/S4 (`loop.py`) go before 0231-S1, -S4 and -S5 (CoS ruling 2026-10-20). |
-| **RFC-0230 (#666)** | Its slices go **first** on every shared file below: `loop.py` (0230-S0 → S2 → S3), `owner_turn.py` (0230-S5), `main.py` (0230-S0 → S5). After them come RFC-0232 (#664), then 0231. 0231 slices rebase onto whatever has landed. |
+| **RFC-0232 (#664)** | **Precedence (CoS, verbatim):** A turn whose prompt contains an absolute filesystem path together with RE intent (RFC-0232's narrowed dump/extraction detection) routes to reverse engineering and is never split by RFC-0231; a path with a plain or coding question routes normally. 0232-S2's RE helper (two-stage, specified in #664) is called by 0231's precheck and suppresses the riders; 0232's RE floor in `_apply_floors` runs before 0231's; one `decide()` per turn (§1). Tests: 0232's `test_path_plus_re_intent_routes_to_re_before_large_prompt_split` (`tests/test_rfc0232_intent_and_alias.py`); 0231's `test_path_plus_re_intent_routes_to_re_not_split`, `test_plain_path_question_not_routed_to_re`, `test_ffs_word_coding_question_not_routed_to_re`, `test_one_decide_per_turn`. Files: 0232-S2 (`owner_turn.py`) before 0231-S1; 0232-S3 → S4 → S5 (`loop.py`) before 0231-S4 and -S5. |
+| **RFC-0230 (#666)** | Its slices go **first** on every shared file: `loop.py` (0230-S0 → S2 → S3), `owner_turn.py` (0230-S5), `main.py` (0230-S0 → S5), `api.ts` (0230-S0). Then RFC-0232, then 0231. The large ack is the parent's front-lane line (rule 1), marked with 0230-S0's `mark`, and is held to 0230's ≤ 1.5 s p50 / ≤ 2.0 s p95 through three large cases appended to `scripts/anzu-latency-repro.ps1`. On a large verdict 0231 calls 0230-S3's `turn_prewarm.cancel_prewarm(turn_id)`. Row 6 (the two-system-message HTTP 500) is fixed in code by landed #649 (#666). |
 
 ## Relationship to #649 and #585
 
@@ -543,15 +588,15 @@ class LargePromptSettings(BaseModel):
 
 ## Slices (one ticket each, one developer each, fast off)
 
-### S0: `anzu-coder-27b` runtime profile, VRAM requirement, enable reconcile
+### S0: `anzu-coder-27b` runtime profile, VRAM requirement, enable reconcile, gate outlook and leases
 
-**Model:** Grok 4.5 · **Depends:** RFC-0225 S3 (creates `engine_coexistence.py` with `prepare_engine_for`; `main.py` chain)
+**Model:** Grok 4.5 · **Lane:** D1 · **Depends:** RFC-0225 S3 (creates `engine_coexistence.py` with `prepare_engine_for`, `owner_line`, `anzu_loads`; `main.py` chain)
 
 | File | Change |
 | --- | --- |
 | `backend/app/inference/model_stack.py` | `MODEL_CATALOG["anzu-coder-27b"]` `SpecialistModel` (§2a values); only owner in the batch |
-| `backend/app/inference/anzu_coder.py` (new) | `VRAM_ESTIMATE_GB`, `vram_requirement_gb`, `reconcile_anzu_coder_profile` |
-| `backend/app/inference/engine_coexistence.py` | Only: the step-5 requirement lookup consults `anzu_coder.vram_requirement_gb(target)` first (second owner after 0225-S3) |
+| `backend/app/inference/anzu_coder.py` (new) | `VRAM_ESTIMATE_GB`, `vram_requirement_gb`, `reconcile_anzu_coder_profile(*, attempts=10, timeout_s=3.0)`, `last_outcome()` |
+| `backend/app/inference/engine_coexistence.py` | Second owner after 0225-S3 (listed in #652's S3 file table): the step-5 requirement lookup consults `anzu_coder.vram_requirement_gb(target)` first; `gate_outlook`; `hold_request_lease` / `release_request_lease` / `held_leases` counted as request leases in steps 6 and 7; `owner_line(..., speak=True)` keyword (§2a) |
 | `backend/app/main.py` | One line: `_start_optional_step("anzu_coder_profile", reconcile_anzu_coder_profile)` plus its import |
 | `tests/test_rfc0231_anzu_coder_profile.py` (new) | Below |
 
@@ -561,44 +606,55 @@ Tests (CI: `pytest` job, step "Run full backend suite", `.github/workflows/pr-te
 - `test_enabled_profile_does_not_outrank_expert_for_reasoning_answers`: template enabled, tier-4 reasoning answer route → `expert`.
 - `test_reconcile_enables_when_ollama_lists_model` (`anzu-coder-27b:latest` advertised) → `enabled`, row enabled, `auto_enabled_at` written.
 - `test_reconcile_not_advertised_leaves_disabled`.
-- `test_reconcile_unreachable_retries_bounded`: fake clock, 10 attempts 60 s apart, then `ollama_unreachable`.
+- `test_reconcile_unreachable_retries_bounded`: fake clock, 10 attempts 60 s apart, then `ollama_unreachable`, and `last_outcome() == "ollama_unreachable"`.
 - `test_reconcile_respects_owner_row_and_owner_disable`: owner-created `anzu-coder-27b` row → `owner_row`, untouched; template disabled after `auto_enabled_at` → `owner_disabled`, stays disabled.
 - `test_reconcile_runs_as_optional_startup_step`: startup reaches `/api/health` without awaiting the probe; the step name is in `startup_health.report()`.
 - `test_vram_requirement_12gb_for_coder_only`: `anzu-coder-27b` and `anzu-coder-27b:latest` on Ollama → 12.0; other models → `None`.
 - `test_gate_uses_coder_requirement`: with 12.5 GB free and an ANZU-loaded 9B, `prepare_engine_for(<S0 profile>)` takes the gate's unload path (12.0 + 1 GB > 12.5); with 13.5 GB free nothing is unloaded.
+- `test_gate_outlook_refuse_for_owner_loaded_9b_managed_off`: LM Studio `127.0.0.1:1234` 9B owner-loaded, `is_managed` false → `refuse`; no HTTP or NVML call is made (fakes assert zero calls).
+- `test_gate_outlook_resident_and_allow`: target in `anzu_loaded_instances()` → `resident`; ANZU-loaded 9B → `allow`.
+- `test_request_lease_blocks_step6_unload`: an ANZU-loaded `anzu-coder-27b` with a held `hold_request_lease` token is not unloaded when a 9B `prepare_engine_for` runs; after `release_request_lease` it is.
+- `test_owner_line_speak_false_publishes_event_not_tts`: `owner_line(..., task_id=t, speak=False)` publishes the `engine_notice` task event and the ephemeral frame, and no task `chat_tts`; the default still publishes `chat_tts`.
 
 ### S1: Large-prompt detection riders
 
-**Model:** Grok 4.5 · **Depends:** none in code. Merge order on `owner_turn.py`: after RFC-0230 S5 (#666) and RFC-0232 S2 (#664) (CoS ruling 2026-10-20).
+**Model:** Grok 4.5 · **Lane:** D2 · **Depends:** RFC-0232 S2 (#664: the RE-intent helper `planning.re_intent_match` and its RE floor in `_apply_floors`; hard dependency, S1 does not start before it is merged). Merge order on `owner_turn.py`: #649 → 0230-S5 → 0232-S2 → 0231-S1 (CoS ruling 2026-10-20).
 
 | File | Change |
 | --- | --- |
-| `backend/app/decision/large_prompt.py` (new) | Floor rules L1-L5, `LargePromptIntent`, split-mode rule |
-| `backend/app/decision/owner_turn.py` | Precheck plus riders in `_decide_sync`, floor in `_apply_floors`, `large_prompt` field |
-| `backend/app/decision/adapters/rules.py` | Rider branches `large_prompt` and `large_prompt_split` |
+| `backend/app/decision/large_prompt.py` (new) | `precheck` (one call to 0232's RE helper, then L1-L5 on the raw text and the split-mode rule), `LargePromptPrecheck`, `LargePromptIntent` |
+| `backend/app/decision/owner_turn.py` | Precheck in `decide_owner_turn` next to `resolve_persona_context` (L563); candidate and riders in `_decide_sync` (the one `decide()` is unchanged in count); large floor and final gate in `_apply_floors` (L296-370) **after** 0232-S2's RE floor; riders in `_deadline_rules_result` (L373-400); new `_with_deadline_large_prompt` on the Timeout and Exception paths (L585-630); `large_prompt` field on `OwnerTurnDecision` (L145-158) |
+| `backend/app/decision/adapters/rules.py` | Rider branches `large_prompt` and `large_prompt_split`, reading only the scalar keys `large_prompt_floor` and `large_prompt_rules` (0231-S1 only) |
 | `backend/app/agent/request_routing.py` | Pass-through of the field (no new decide) |
 | `tests/test_rfc0231_large_prompt_decision.py` (new) | Below |
 
-Tests (CI: `pytest` job, step "Run full backend suite"):
+Tests (CI: `pytest` job, step "Run full backend suite", `.github/workflows/pr-tests.yml:94-95`). Every test below goes through `decide_owner_turn`, not `rules.decide`:
+- `test_path_plus_re_intent_routes_to_re_not_split`: a 4500-char prompt with `D:\cases\x\ffs`, RE dump/extraction intent and 3 questions → route `managed_task` with the RE task class from 0232-S2, `large_prompt is None`, no rider appended, the persona precheck still ran, exactly one `decide`. Same result on the deadline and exception paths (blocking or raising provider). The RE helper is faked at its #664 interface, so this test does not depend on its probe internals. This is 0231's side of 0232-S2's `test_path_plus_re_intent_routes_to_re_before_large_prompt_split` (`tests/test_rfc0232_intent_and_alias.py`).
+- `test_plain_path_question_not_routed_to_re`: `C:\code\etl what does the extraction step do?` → not RE; normal routing (no `large_prompt`, since no rule fires), exactly as with the feature off.
+- `test_ffs_word_coding_question_not_routed_to_re`: `C:\Users\taco\proj ffs why does the build fail?` → not RE; normal routing. The same text padded with a 4500-char build log → not RE and `large_prompt.verdict == "large"` (0231 routing).
+- `test_size_rules_use_full_prompt_not_reflex_projection`: a 5000-char prompt (L1) and a 900-char 5-item list (L2) give `large` through `decide_owner_turn`, although `compact_state` cuts the projection to 800 chars.
+- `test_deadline_fallback_keeps_large_verdict_and_full_question`: a provider that blocks past the 50 ms `wait_for` on a 5000-char prompt → `decision_source == "deadline_fallback"`, `large_prompt.verdict == "large"`, and the decision's `user_message` is the full 5000 chars. Same for a provider that raises.
+- `test_provider_direct_reply_nulls_large_verdict`: provider `direct_reply` at 0.8 on a 4500-char prompt → `large_prompt is None`, decision equal to today's.
 - `test_rules_floor_each_rule_fires` (L1-L5, one prompt each).
 - `test_short_prompt_no_rider`: no rider appended, and the decision is equal to the decision with the feature disabled.
+- `test_short_project_prompt_not_large`: "Make a quick snake game" → `is_large_request` true, `large_prompt is None`.
+- `test_precheck_bounded_on_100kb_prompt`: `precheck` on a 100 KB paste finishes under 20 ms (`perf_counter`, generous bound) and does one pass per rule (counted regex calls).
 - `test_provider_cannot_lower_large`.
 - `test_provider_raises_only_at_075`.
-- `test_deadline_fallback_is_rules`.
-- `test_one_decide_per_turn`: `decide_owner_turn` is called exactly once for a large turn.
-- `test_security_and_literal_excluded`.
+- `test_one_decide_per_turn`: exactly one `decide()` call (counted on the Reflex fake) for a large turn, a path-plus-RE turn and a short turn; the persona precheck runs on all three.
+- `test_security_and_literal_excluded`: also social, clarify, self_status and basic_qa shapes.
 - `test_questions_mode_from_l3`.
 - `test_disabled_is_byte_identical`.
 
 ### S2: Workflow seeding on the landed #649 engine, pipeline tables, settings
 
-**Model:** Grok 4.5 · **Depends:** S1 (merge order only; no code dependency). #649 has landed (`ee786dc`), so there is no draft dependency.
+**Model:** Grok 4.5 · **Lane:** D2 · **Depends:** S1 (merge order only; no code dependency). #649 has landed (`ee786dc`), so there is no draft dependency.
 
 | File | Change |
 | --- | --- |
 | `backend/app/db/models.py` | Only: `LargePromptPipeline` and `LargePromptSection` (§4 tables), appended after `TaskPromptStep` (L75-88); the #649 models are untouched |
 | `backend/app/agent/task_workflow.py` | Only: append `StepSpec` and `seed_workflow` after `workflow_payload` (L172-177); every landed #649 function is untouched (second owner after #649) |
-| `backend/app/config.py` | Only: `LargePromptSettings` and `AppSettings.large_prompts`, next to `decision` (`config.py:511`); `large_task_reviews` (L494) is #649's and is untouched |
+| `backend/app/config.py` | Only: `LargePromptSettings` and `AppSettings.large_prompts`, next to `decision` (`config.py:512`); `large_task_reviews` (L494) is #649's and is untouched |
 | `backend/app/api/settings.py` | Only: `large_prompts` on the existing GET/PUT, next to #649's `large_task_reviews` (L72, L240-241) |
 | `tests/test_rfc0231_prompt_steps.py` (new) | Below |
 
@@ -616,7 +672,7 @@ Tests (CI: `pytest` job, step "Run full backend suite", `.github/workflows/pr-te
 
 ### S3: Split, completeness, compile, mandatory sub-tasks, persistence
 
-**Model:** Grok 4.5 · **Depends:** S2
+**Model:** Grok 4.5 · **Lane:** D2 · **Depends:** S2
 
 | File | Change |
 | --- | --- |
@@ -624,7 +680,7 @@ Tests (CI: `pytest` job, step "Run full backend suite", `.github/workflows/pr-te
 | `tests/test_rfc0231_large_prompt_intake.py` (new) | Below |
 | `tests/fixtures/rfc0231/` (new) | Prompt fixtures: 5-item list, 4 questions, 6000-char spec, dangling-reference section, 12 headings |
 
-Tests:
+Tests (CI: `pytest` job, step "Run full backend suite", `.github/workflows/pr-tests.yml:94-95`):
 - `test_split_list_sections`.
 - `test_split_questions_mode`.
 - `test_preamble_and_trailer_shared`.
@@ -637,125 +693,155 @@ Tests:
 - `test_validate_quantitative_table_numeric_sourced_acceptance`.
 - `test_validator_two_retries_then_visible_failure`.
 - `test_vault_mirror_create_and_edit`.
+- `test_vault_recovery_no_duplicate_create`: a second persist for the same section (recovery re-dispatch, follow-up recompile) never calls `create_note` again and raises nothing.
+- `test_vault_summary_appended_not_replaced`: after part terminal the note body is the original prompt body followed by `## Result` and the summary.
+- `test_needs_owner_line_is_event_not_speech`: the round-bound line is one `large_prompt` event on the parent and no `chat_tts`.
 - `test_vault_owner_edit_conflict_not_forced`.
 - `test_vault_failure_keeps_db`.
 - `test_large_ingress_blob_ref`.
 
-### S4: Ack, preload, create_task large branch, rewarm hold
+### S4: Ack, preload, create_task large branch, lease, rewarm hold
 
-**Model:** Grok 4.6 · **Depends:** **S0** (the `anzu-coder-27b` target profile and its VRAM requirement; hard dependency, S4 does not start before S0 is merged), S1, S2, S3, RFC-0225 S3 (`prepare_engine_for` in `hotswap.py`), RFC-0228 S2 (`inference/rewarm.py`), RFC-0218 S3b (`create_task` persona block)
+**Model:** Grok 4.6 · **Lane:** D1 · **Depends:** **S0** (target profile, requirement, `gate_outlook`, leases, `owner_line(speak=)`; hard dependency, S4 does not start before S0 is merged), S1, S2, S3, RFC-0225 S3 (`prepare_engine_for` in `hotswap.py`), RFC-0228 S2 (`inference/rewarm.py`, `hotswap.py`), RFC-0218 S3b (`create_task` persona block), RFC-0230 S0 (`turn_trace.mark`, `scripts/anzu-latency-repro.ps1`) and S3 (`turn_prewarm.cancel_prewarm`), RFC-0232 S3/S4 (`loop.py` order)
 
 | File | Change |
 | --- | --- |
-| `backend/app/agent/large_prompt.py` (new) | `resolve_target` (enabled rows only), `preload` (incl. the Ollama `/api/ps` check and `record_anzu_load`), ack texts, compare-and-restore |
-| `backend/app/agent/loop.py` | Large branch in `create_task` (after S3b's block, replacing the generic ack for large turns only); parent-runner entry in `_run`. For a task that has a `large_prompt_pipelines` row, it runs the parent runner and returns **before** the landed #649 workflow block (`loop.py:2344`), so #649's model planner never runs for a pipeline parent |
+| `backend/app/agent/large_prompt.py` (new) | `resolve_target` (enabled rows, no-target reason, bounded late reconcile inside the preload task), `preload` (lease, `/api/ps` check, `record_anzu_load`, `keep_alive` pin and release), ack texts by outlook, restore |
+| `backend/app/agent/loop.py` | Large branch in `create_task` after 0230's prewarm/decision, 0232's RE dispatch, the Task commit and S3b's block (replacing the generic ack L548-557 for large turns only): pipeline row (the mark), `cancel_prewarm`, `gate_outlook`, one ack with `mark(..., "tts_enqueued", lane="front")`, preload start. In `_run`: for a pipeline parent, skip `_run_managed_front_lane` and the front-off fallback (L2420-2445) and return into the parent runner **before** `loop.py:2344`, so #649's planner never runs for a pipeline parent |
+| `backend/app/inference/hotswap.py` | Only: keywords `persist: bool = True` and `task_id: str \| None = None` on `activate_runtime_profile` (L197); `persist=False` skips the save at L231-232; `task_id` is forwarded to `prepare_engine_for`. Third owner after 0225-S3 → 0228-S2 |
 | `backend/app/inference/rewarm.py` | `hold` and `release`, plus deferral while held (second owner after 0228-S2) |
+| `scripts/anzu-latency-repro.ps1` | Append three large-turn cases (S3 fixtures) to the case set (after 0230-S0 creates it) |
 | `tests/test_rfc0231_ack_preload.py` (new) | Below |
 
-Tests:
+Tests (CI: `pytest` job, step "Run full backend suite", `.github/workflows/pr-tests.yml:94-95`):
 - `test_ack_chat_tts_within_150ms_of_decision`: `BUS.publish` timestamped, preload fake blocks for 5 s, assert ≤ 150 ms.
+- `test_ack_not_delayed_by_split`: split fake blocks for 5 s; the ack is still ≤ 150 ms and the split starts after the ack event.
+- `test_parent_speaks_exactly_one_line_before_part_results`: a 3-part pipeline with the front lane enabled → exactly one `chat_tts` on the parent before its terminal outcome (the ack); no `_run_managed_front_lane` call, no front-off fallback `chat_tts`, no `publish_owner_text`; part, gate and needs_owner lines are events only.
+- `test_ack_marked_on_front_lane`: one `tts_enqueued` mark with `lane="front"` and `source="large_prompt_ack"` on the turn trace.
+- `test_large_verdict_does_not_prewarm_9b`: with an unloaded 9B and outlook `allow`, `cancel_prewarm` is called and no 9B `prepare_engine_for` is issued by the prewarm.
+- `test_ack_variant_when_gate_will_refuse`: Taco's default (LM Studio 9B owner-loaded, managed off) → the `refuse` text, which contains no "load"; no preload started; one event naming the managed-mode toggle; the parts run on the 9B and the parent completes.
+- `test_ack_never_claims_load`: no ack constant contains "loading", and the `resident` text is used only when `gate_outlook` returns `resident`.
+- `test_gate_refuses_runs_on_loaded_9b_without_failing`: real step-5 refusal after outlook `allow` → lease released, `preload_status` `gate_refused:<reason>`, owner line with `speak=False`, the parts run on the current model, parent `completed`.
+- `test_never_unloads_model_anzu_did_not_load`: owner-loaded 9B and owner-loaded 27B through a whole pipeline and its restore → zero unload calls and no `keep_alive` change for either.
 - `test_ack_never_uses_publish_owner_text`.
 - `test_ack_title_not_speak_reply`.
 - `test_0218_ack_after_persona_switched_still_under_50ms`.
 - `test_preload_started_not_awaited`.
 - `test_target_resolution_order`, using RFC-0228's `settings_lmstudio_9b.json` fixture plus the S0 `recommended-anzu-coder-27b` row: enabled → it is the target; disabled → step 2 (`route_runtime`); absent → step 2.
-- `test_preload_ollama_anzu_loaded_recorded`: `/api/ps` without the model → warm → listed → exactly one `record_anzu_load("ollama@127.0.0.1:11434", "anzu-coder-27b")`, `preload_status == "loaded"`.
+- `test_no_target_event_names_reconcile_outcome`: `ollama_unreachable` → "Ollama isn't running…"; `not_advertised` → "Ollama doesn't list anzu-coder-27b…".
+- `test_late_ollama_start_enables_on_next_large_turn`: startup ended `ollama_unreachable`; Ollama now lists the model → the preload task's one bounded reconcile (≤ 3 s, fake clock) enables the row and the preload targets it; the ack path made no probe.
+- `test_preload_ollama_anzu_loaded_recorded`: `/api/ps` without the model → warm with `keep_alive "-1"` → listed → exactly one `record_anzu_load("ollama@127.0.0.1:11434", "anzu-coder-27b")`, `preload_status == "loaded"`.
 - `test_preload_ollama_owner_loaded_not_recorded`: `/api/ps` already lists it → no warm call, no `record_anzu_load`, `preload_status == "already_loaded"`.
-- `test_preload_uses_activate_runtime_profile_only`: no `MANAGER.load` or direct engine call.
-- `test_gate_refused_falls_back_visibly`.
+- `test_preload_uses_activate_runtime_profile_only`: no `MANAGER.load` or direct engine call outside `activate_runtime_profile`.
+- `test_preload_never_persists_selection`: `settings.json` is byte-identical before and after preload and through the whole pipeline; `activate_runtime_profile` was called with `persist=False`; every existing caller still persists (default).
+- `test_owner_selection_restored_after_pipeline`: after the parent completes, `MANAGER.state` is the owner's saved selection again and the ANZU-loaded 27B got `keep_alive` back to `"<idle_unload_seconds>s"`.
+- `test_restore_with_settings_merge`: the owner saves a different model mid-pipeline through settings (`_merge_settings_changes`) → nothing is restored over it.
+- `test_target_held_across_parts_and_waiting`: between part 1 and 2, and for 20 fake minutes in `waiting`, neither RFC-0225 step 6, the RFC-0228 idle path nor the rewarm restore unloads the target; the lease is released only at parent terminal.
+- `test_chat_turn_between_parts_does_not_unload_target`: a chat turn between two parts is answered on the loaded target and the target stays resident.
+- `test_chat_turn_during_pipeline_routes_to_target`: `prepare_answer_route` for a concurrent chat turn uses the target, and the front lane still speaks first.
+- `test_resume_after_keep_alive_expiry_repreloads`: target no longer in `/api/ps` when the owner sends `/continue` (and on `recover_on_startup`) → `preload` runs again before the next dispatch.
 - `test_preload_timeout_180s_fallback`, with a fake clock.
-- `test_compare_and_restore_keeps_owner_change`.
 - `test_hold_defers_rewarm_until_release`.
-- `test_no_target_ack_text`.
+- `test_649_planner_not_called_for_pipeline_parent_or_child`: `MANAGER.chat` is never called with `PLAN_SYSTEM` for a parent (marked by its pipeline row) or a seeded child.
+- `test_649_planner_unchanged_when_large_prompts_disabled`: with `large_prompts.enabled=false`, a 4000-char prompt goes through `prepare_workflow` exactly as landed.
 
-**Live audit** (on Taco's PC; numbers recorded in the PR): first ack audio ≤ 1200 ms after the decision; the 27B is loaded via the gate and the 9B is re-warmed after the pipeline.
+**Live audit** (on Taco's PC; numbers recorded in the PR, none invented in advance): the three large-turn cases in `scripts/anzu-latency-repro.ps1` against RFC-0230's ≤ 1.5 s p50 / ≤ 2.0 s p95 first audible word; once with managed mode off (expected: `refuse` ack, parts on the LM Studio 9B, nothing unloaded) and once with it on (gate unload path, 27B used, 9B restored after the pipeline); which gate path ran in each.
 
 ### S5: Sequential queue, lifecycle, follow-ups, recovery
 
-**Model:** Grok 4.6 · **Depends:** S4
+**Model:** Grok 4.6 · **Lane:** D1 · **Depends:** S4
 
 | File | Change |
 | --- | --- |
-| `backend/app/agent/large_prompt_queue.py` (new) | `dispatch_next`, `on_child_terminal`, `on_parent_cancel`, parent completion, `recover_on_startup` |
-| `backend/app/agent/loop.py` | `pipeline_section` keyword in `create_task`; child path in `_run` (no front lane, seeded workflow, target profile); validator gate for `deeper` / `quantitative` steps before `workflow.finish_current` (L3639-3640) and before the final completion of the last stored step (S3 validators, 2 retries, then `_fail_task` with the S3 text); terminal hook call; cancel hook; `/continue` redirect and parent follow-up |
-| `backend/app/api/tasks.py` | `large_prompt` payload in `get_task` |
+| `backend/app/agent/large_prompt_queue.py` (new) | `is_pipeline_parent`, `dispatch_next` (breaker admit + bind), `on_child_terminal` (cancelled-pipeline check first), `on_parent_cancel`, `on_child_cancel_api`, parent completion, `payload`, `recover_on_startup` (lease, hold, re-preload) |
+| `backend/app/agent/loop.py` | `pipeline_section` keyword in `create_task`; child path in `_run` (no front lane, seeded workflow, target profile); validator gate for `deeper` / `quantitative` steps before `workflow.finish_current` (L3639-3640) and before the final completion of the last stored step (S3 validators, 2 retries, then `_fail_task` with the S3 text); terminal hook call (L800-826); cancel hook (L733-738); `/continue` redirect (L561-590) and parent follow-up with re-preload |
+| `backend/app/api/tasks.py` | `large_prompt` payload in `get_task` (L256-289) and `get_task_observability` (L292-308); `cancel_task` (L341-352) routes pipeline children through `large_prompt_queue.on_child_cancel_api` |
 | `backend/app/main.py` | One startup call to `recover_on_startup` |
 | `tests/test_rfc0231_large_prompt_queue.py` (new) | Below |
 
-Tests:
+Tests (CI: `pytest` job, step "Run full backend suite", `.github/workflows/pr-tests.yml:94-95`):
 - `test_parts_run_strictly_sequential`: part 2 is created only after part 1 is terminal.
 - `test_child_ids_stable_uuid5`.
 - `test_breaker_admission_and_kill_switch_stops`.
+- `test_breaker_run_bound_to_child`: every admitted run is bound with `bind_run_to_task` to its child; 8 completed parts in a row never trip the breaker or exhaust its budget.
 - `test_child_no_decide_no_persona_no_ack_no_speech`.
 - `test_failed_part_fails_parent_with_text`.
 - `test_child_cancel_skips_part`.
-- `test_parent_cancel_cancels_child_and_rest`.
+- `test_parent_cancel_cancels_child_and_rest`: after `AGENT.cancel(parent)` the running child's terminal hook sees the cancelled pipeline; no further `create_task`, every remaining section `cancelled`, lease and hold released.
+- `test_cancel_queued_child_advances`: `POST /api/tasks/{child}/cancel` on a queued child with no runner marks the part `skipped` and dispatches the next one.
 - `test_needs_owner_waits_then_continue_one_round`.
 - `test_skip_part_n`.
 - `test_followup_appends_part_dedupe`.
 - `test_continue_on_child_redirects`.
 - `test_parent_combined_result_and_verification`.
 - `test_restore_after_parent_terminal`.
-- `test_recovery_redispatch_advance_resume`.
-- `test_large_prompt_payload`.
+- `test_recovery_redispatch_advance_resume`: also re-takes lease and hold and re-preloads a non-resident target.
+- `test_large_prompt_payload`: same object on `GET /api/tasks/{id}` and `/observability`.
 - `test_validator_gate_retries_stored_step_then_fails_visibly`: a quantitative step whose result has no numeric row is retried twice with the validator message, then the child fails with "Part n of N: quantitative sub-task did not meet its format after 3 attempts", and `finish_current` is never called for it.
 
-### S6: Large-prompt sections panel
+### S6: Large-prompt sections in the live "Saved plan" block
 
-**Model:** Composer 2.5 · **Depends:** S5, RFC-0218 S3 (sequential owner of `api.ts`)
+**Model:** Composer 2.5 · **Lane:** UX · **Depends:** S5, RFC-0230 S0 and RFC-0218 S3 (sequential owners of `api.ts`)
 
 | File | Change |
 | --- | --- |
-| `frontend/src/components/LargePromptSections.tsx` (new) | Panel (§6) |
-| `frontend/src/components/TaskActivity.tsx` | One mount line inside `TaskActivityPanel` (L185). The landed #649 prompt-steps rows (L306-319) are untouched. |
-| `frontend/src/api.ts` | Add-only `LargePromptPayload` and `Task.large_prompt?` |
-| `frontend/large-prompt-sections.test.mjs` (new) | Rows render, buttons call the correct endpoints, absent payload renders nothing, existing panel rows still present |
-| `frontend/package.json` | Append `test:large-prompt-sections` |
-| `.github/workflows/pr-tests.yml` | Append the step `Large prompt sections tests (RFC-0231 S6)` → `npm run test:large-prompt-sections` after "Persona morph hook tests (RFC-0218 S5)" in `frontend-build` |
+| `frontend/src/components/largePromptSectionsView.ts` (new) | Pure view model (§6): rows, chips, actions with method and path, child line, status line |
+| `frontend/src/components/LargePromptSections.tsx` (new) | Thin render of the view model |
+| `frontend/src/components/TaskActivity.tsx` | Add-only: the `||` in the L306 condition and one mount after the existing `<ol>` (§6). The landed rows (L306-319) are otherwise byte-identical |
+| `frontend/src/taskStatus.ts` | Add-only: `large_prompt` in `mergeObservability` (L203) and in the `TaskObservability` field list |
+| `frontend/src/api.ts` | Add-only `LargePromptPayload` and `Task.large_prompt?` / `TaskObservability.large_prompt?` |
+| `frontend/large-prompt-sections.test.mjs` (new) | Imports only `.ts`: view-model rows, chips, button→endpoint mapping, child line, `null` without payload, `humanizeToken` labels for `deeper`/`quantitative`, and `mergeObservability` preserving `large_prompt` and every existing field |
+| `frontend/package.json` | Append `test:large-prompt-sections` (`node --experimental-strip-types large-prompt-sections.test.mjs`) |
+| `.github/workflows/pr-tests.yml` | Append the step `Large prompt sections tests (RFC-0231 S6)` → `npm run test:large-prompt-sections` after "Persona morph hook tests (RFC-0218 S5)" (L127) in `frontend-build`. The existing "Build frontend" step (`npm run build`, L115-116) is the TSX gate |
 
 ## Ownership chains (handoff order on shared files)
 
-Every listed RFC-0230 slice goes **first** on any file it claims. On `loop.py` and `owner_turn.py` the order is RFC-0230 (#666), then RFC-0232 (#664), then RFC-0231 (CoS ruling 2026-10-20). The 0231 tickets rebase onto whichever of those has landed.
+On `loop.py` and `owner_turn.py` the order is RFC-0230 (#666), then RFC-0232 (#664), then RFC-0231 (CoS ruling 2026-10-20), matching #664 @ `1542881` and #666. The 0231 tickets merge onto whichever of those has landed, with merge commits.
 
 | File | Order |
 | --- | --- |
-| `backend/app/agent/loop.py` | #649 (landed) → 0218-S3b → RFC-0230 (#666) → RFC-0232 (#664) S3 → S4 → 0231-S4 → 0231-S5 (S2 no longer edits it; CoS ruling 2026-10-20) |
-| `backend/app/decision/owner_turn.py` | #649 (landed) → RFC-0230 (#666) → RFC-0232 (#664) S2 → 0231-S1 (CoS ruling 2026-10-20) |
-| `backend/app/decision/adapters/rules.py` | 0231-S1 only (RFC-0230 does not edit it) |
-| `backend/app/config.py` | #649 (landed) → 0228-S1 → 0228-S2 → 0231-S2 (RFC-0230 does not edit it) |
-| `backend/app/api/tasks.py` | #649 (landed) → 0231-S5 (S2 no longer edits it; RFC-0230 does not edit it) |
+| `backend/app/agent/loop.py` | #649 (landed) → 0218-S3b → 0230-S0 → 0230-S2 → 0230-S3 → 0232-S3 → 0232-S4 → 0232-S5 → 0231-S4 → 0231-S5. In `create_task`: 0230's `prewarm_worker` and route decision, then 0232's RE dispatch (S3 FFS, S5 APK), then 0231's large branch |
+| `backend/app/decision/owner_turn.py` | #649 (landed) → 0230-S5 → 0232-S2 → 0231-S1 |
+| `backend/app/decision/adapters/rules.py` | 0231-S1 only |
+| `backend/app/config.py` | #649 (landed) → 0228-S1 → 0228-S2 → 0231-S2 → #585 (draft; rebases onto whatever has landed when it is picked up) |
+| `backend/app/main.py` | 0230-S0 → 0230-S5 → 0225-S1 → 0225-S2 → 0225-S3 → 0231-S0 → 0231-S5 → #585 (draft, same rule) |
+| `backend/app/api/tasks.py` | #649 (landed) → 0231-S5 |
+| `backend/app/inference/hotswap.py` | 0225-S3 → 0228-S2 → 0231-S4 (keywords only) |
+| `backend/app/inference/engine_coexistence.py` | 0225-S3 (creates it) → 0231-S0 (#652 S3 file table names the second owner) |
 | `backend/app/inference/rewarm.py` | 0228-S2 (creates it) → 0231-S4 |
-| `backend/app/inference/hotswap.py` | 0225-S3 → 0228-S2. 0231 does **not** edit it. |
-| `backend/app/main.py` | (0230-S0 → 0230-S5) → 0225-S1 → S2 → S3 → 0231-S0 → 0231-S5 |
-| `backend/app/inference/engine_coexistence.py` | 0225-S3 (creates it) → 0231-S0 |
 | `backend/app/inference/model_stack.py`, `backend/app/inference/anzu_coder.py` | 0231-S0 only |
-| `backend/app/db/models.py` | #649 (landed) → 0231-S2 (RFC-0230 does not edit it) |
-| `frontend/src/api.ts` | 0218-S3 → 0231-S6 |
-| `frontend/src/components/TaskActivity.tsx` | #649 (landed) → 0231-S6 |
+| `backend/app/db/models.py` | #649 (landed) → 0231-S2 |
 | `backend/app/agent/task_workflow.py` | #649 (landed, created it) → 0231-S2 |
 | `backend/app/api/settings.py` | #649 (landed) → 0231-S2 |
-| `frontend/package.json`, `.github/workflows/pr-tests.yml` | Append-only, any order, rebase on conflict |
+| `scripts/anzu-latency-repro.ps1` | 0230-S0 (creates it) → 0231-S4 (append-only) |
+| `frontend/src/api.ts` | 0230-S0 (`X-ANZU-Input-End`) → 0218-S3 → 0231-S6 |
+| `frontend/src/taskStatus.ts`, `frontend/src/components/TaskActivity.tsx` | #649 (landed) → 0231-S6 |
+| `frontend/package.json`, `.github/workflows/pr-tests.yml` | **Append-only.** The Architect owns the workflow file. Open appenders: #662 (0229-S1), 0228-S2, 0230-S0, 0230-S3, 0232-S6 and 0231-S0…S6. Rule: each ticket appends its own step, never edits another's, and on a conflict merges `development` with a merge commit and keeps both steps |
 
 ## Ticket cards
 
-| ID | Title | Model | Depends |
-| --- | --- | --- | --- |
-| 0231-S0 | `anzu-coder-27b` runtime profile, VRAM requirement, enable reconcile | Grok 4.5 | 0225-S3 |
-| 0231-S1 | Large-prompt detection riders | Grok 4.5 | — |
-| 0231-S2 | Workflow seeding on landed #649, pipeline tables, settings | Grok 4.5 | S1 (order) |
-| 0231-S3 | Split, completeness, compile, sub-tasks, persistence | Grok 4.5 | S2 |
-| 0231-S4 | Ack, preload, create_task branch, rewarm hold | Grok 4.6 | **S0**, S1-S3, 0225-S3, 0228-S2, 0218-S3b |
-| 0231-S5 | Sequential queue, lifecycle, recovery | Grok 4.6 | S4 |
-| 0231-S6 | Large-prompt sections panel | Composer 2.5 | S5, 0218-S3 |
+| ID | Title | Model | Lane | Depends |
+| --- | --- | --- | --- | --- |
+| 0231-S0 | `anzu-coder-27b` profile, VRAM requirement, reconcile, gate outlook, leases | Grok 4.5 | D1 | 0225-S3 |
+| 0231-S1 | Large-prompt detection riders (full-prompt precheck, RE precedence) | Grok 4.5 | D2 | **0232-S2** (merge order after 0230-S5) |
+| 0231-S2 | Workflow seeding on landed #649, pipeline tables, settings | Grok 4.5 | D2 | S1 (order) |
+| 0231-S3 | Split, completeness, compile, sub-tasks, persistence | Grok 4.5 | D2 | S2 |
+| 0231-S4 | Ack, preload, create_task branch, lease, rewarm hold | Grok 4.6 | D1 | **S0**, S1-S3, 0225-S3, 0228-S2, 0218-S3b, 0230-S0/S3, 0232-S3/S4 |
+| 0231-S5 | Sequential queue, lifecycle, recovery | Grok 4.6 | D1 | S4 |
+| 0231-S6 | Large-prompt sections in the live "Saved plan" block | Composer 2.5 | UX | S5, 0230-S0, 0218-S3 |
 
 All seven run with fast mode off.
 
 ## Overall acceptance
 
-- [ ] A large spoken or typed prompt has its ack persisted ≤ 150 ms after the decision (CI) and audible ≤ 1200 ms after it (live audit), while the 27B loads through the RFC-0225 gate.
-- [ ] The prompt is split, every section is complete or explicitly `needs_owner` within 3 rounds, and each section becomes one detailed prompt stored in SQLite (and in the vault when enabled).
-- [ ] The parts run strictly one after another. Every part has validated deeper and quantitative sub-tasks, and the parent shows progress, can be cancelled, and ends with a combined, verified result.
-- [ ] With `large_prompts.enabled=false`, behaviour is identical to today.
+- [ ] A large spoken or typed prompt gets exactly one spoken ack on the parent's front lane, persisted ≤ 150 ms after the decision (CI) and held to RFC-0230's ≤ 1.5 s p50 / ≤ 2.0 s p95 first audible word (live audit), worded from the RFC-0225 gate outlook so it never claims a load the gate did not allow.
+- [ ] A path plus RE intent goes to reverse engineering and is never split; a path with a plain or coding question routes normally.
+- [ ] Size detection uses the full prompt, also on the deadline and exception fallbacks.
+- [ ] The prompt is split, every section is complete or explicitly `needs_owner` within 3 rounds, and each section becomes one detailed prompt stored in SQLite (and idempotently in the vault when enabled).
+- [ ] The parts run strictly one after another on a target that nothing unloads until the parent is terminal; the large-task load is never saved as the owner's selection, and the owner's selection is back afterwards.
+- [ ] On Taco's default (LM Studio 9B owner-loaded, managed mode off, 16 GB) the parts run on the 9B with an honest ack and the task completes; nothing ANZU did not load is unloaded.
+- [ ] Every part has validated deeper and quantitative sub-tasks, and the parent shows progress, can be cancelled, and ends with a combined, verified result.
+- [ ] With `large_prompts.enabled=false`, behaviour is identical to today, including #649's planner.
 - [ ] On Taco's PC (Ollama lists `anzu-coder-27b:latest`), the S0 profile is enabled at startup and is the preload target; on an install without it, the template stays disabled and routing is unchanged.
 
 ## Out of scope
