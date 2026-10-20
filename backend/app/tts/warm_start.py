@@ -132,6 +132,14 @@ def _warmup_sync() -> None:
             _log.warning("VoiceStudio warm-start failed: %s", vs_state.last_error)
 
 
+def _warmup_guarded() -> None:
+    try:
+        _warmup_sync()
+    except (Exception, SystemExit) as exc:
+        _last_report["warmup_error"] = str(exc)[:240]
+        _log.warning("Optional voice warm-start failed: %s", exc)
+
+
 def schedule_tts_warm_start() -> None:
     """Fire-and-forget Kokoro / Pocket / VoiceStudio preload on the running event loop."""
     global _scheduled
@@ -142,4 +150,4 @@ def schedule_tts_warm_start() -> None:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-    loop.create_task(asyncio.to_thread(_warmup_sync))
+    loop.create_task(asyncio.to_thread(_warmup_guarded))

@@ -279,7 +279,8 @@ class Investigations:
                 "FFS dump investigation (RFC-0208): the dump is indexed read-only in index/files.ndjson "
                 "(path, bytes, sha256, mtime, magic_hex, type). Use reverse_engineer action=ingest_status for "
                 "progress, action=ffs_query (path_contains/suffix/type_contains/offset/limit) to find files, "
-                "action=evidence for the ffs_ingest index evidence and the ffs_tab_profile (.tab entropy/header) "
+                "action=evidence for the ffs_ingest index evidence and the ffs_tab_profile (.tab entropy/header, "
+                "AT\\x00\\x02 container census with key ids and XOR-text candidates) "
                 "evidence, and action=report citing those evidence IDs. To analyze an APK found in a folder dump, "
                 "prepare it through POST /api/investigations/apk/prepare with source_type=ffs.")}
         actor = await self.actor(ident)

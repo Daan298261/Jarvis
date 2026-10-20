@@ -1,37 +1,37 @@
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom"
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { ChatPage } from "./pages/Chat"
-import { OwnerChatPage } from "./pages/OwnerChat"
-import { HistoryPage } from "./pages/History"
-import { MemoryPage } from "./pages/Memory"
-import { ObsidianPage } from "./pages/Obsidian"
-import { ModelPage } from "./pages/Model"
-import { ToolsPage } from "./pages/Tools"
-import { McpPage } from "./pages/Mcp"
-import { SettingsPage } from "./pages/Settings"
-import { SystemPage } from "./pages/System"
-import { SwarmPage } from "./pages/Swarm"
-import { WorkflowsPage } from "./pages/Workflows"
-import { PhonePage } from "./pages/Phone"
-import { SetupPage } from "./pages/Setup"
-import { AgentsPage } from "./pages/Agents"
-import { AgentInterviewPage } from "./pages/AgentInterview"
-import { GuestPortalsPage } from "./pages/GuestPortals"
-import { GuestPage } from "./pages/Guest"
-import { PacksPage } from "./pages/Packs"
-import { AdsPage } from "./pages/Ads"
-import { WorkerEnvironmentsPage } from "./pages/WorkerEnvironments"
-import { DelegationPage } from "./pages/Delegation"
-import { LicensePage } from "./pages/License"
-import { AdvisorPage } from "./pages/Advisor"
-import { ContextRepoPage } from "./pages/ContextRepo"
-import { TrajectoriesPage } from "./pages/Trajectories"
-import { PortabilityPage } from "./pages/Portability"
-import { CodingPage } from "./pages/Coding"
-import { SkillForgePage } from "./pages/SkillForge"
-import { CapabilityLabPage } from "./pages/CapabilityLab"
-import { BlackGridStudioPage } from "./pages/BlackGridStudio"
-import { AgentRoomsPage } from "./pages/AgentRooms"
+import { lazy, useCallback, useEffect, useMemo, useState } from "react"
+const ChatPage = lazy(() => import("./pages/Chat").then(module => ({ default: module.ChatPage })))
+const OwnerChatPage = lazy(() => import("./pages/OwnerChat").then(module => ({ default: module.OwnerChatPage })))
+const HistoryPage = lazy(() => import("./pages/History").then(module => ({ default: module.HistoryPage })))
+const MemoryPage = lazy(() => import("./pages/Memory").then(module => ({ default: module.MemoryPage })))
+const ObsidianPage = lazy(() => import("./pages/Obsidian").then(module => ({ default: module.ObsidianPage })))
+const ModelPage = lazy(() => import("./pages/Model").then(module => ({ default: module.ModelPage })))
+const ToolsPage = lazy(() => import("./pages/Tools").then(module => ({ default: module.ToolsPage })))
+const McpPage = lazy(() => import("./pages/Mcp").then(module => ({ default: module.McpPage })))
+const SettingsPage = lazy(() => import("./pages/Settings").then(module => ({ default: module.SettingsPage })))
+const SystemPage = lazy(() => import("./pages/System").then(module => ({ default: module.SystemPage })))
+const SwarmPage = lazy(() => import("./pages/Swarm").then(module => ({ default: module.SwarmPage })))
+const WorkflowsPage = lazy(() => import("./pages/Workflows").then(module => ({ default: module.WorkflowsPage })))
+const PhonePage = lazy(() => import("./pages/Phone").then(module => ({ default: module.PhonePage })))
+const SetupPage = lazy(() => import("./pages/Setup").then(module => ({ default: module.SetupPage })))
+const AgentsPage = lazy(() => import("./pages/Agents").then(module => ({ default: module.AgentsPage })))
+const AgentInterviewPage = lazy(() => import("./pages/AgentInterview").then(module => ({ default: module.AgentInterviewPage })))
+const GuestPortalsPage = lazy(() => import("./pages/GuestPortals").then(module => ({ default: module.GuestPortalsPage })))
+const GuestPage = lazy(() => import("./pages/Guest").then(module => ({ default: module.GuestPage })))
+const PacksPage = lazy(() => import("./pages/Packs").then(module => ({ default: module.PacksPage })))
+const AdsPage = lazy(() => import("./pages/Ads").then(module => ({ default: module.AdsPage })))
+const WorkerEnvironmentsPage = lazy(() => import("./pages/WorkerEnvironments").then(module => ({ default: module.WorkerEnvironmentsPage })))
+const DelegationPage = lazy(() => import("./pages/Delegation").then(module => ({ default: module.DelegationPage })))
+const LicensePage = lazy(() => import("./pages/License").then(module => ({ default: module.LicensePage })))
+const AdvisorPage = lazy(() => import("./pages/Advisor").then(module => ({ default: module.AdvisorPage })))
+const ContextRepoPage = lazy(() => import("./pages/ContextRepo").then(module => ({ default: module.ContextRepoPage })))
+const TrajectoriesPage = lazy(() => import("./pages/Trajectories").then(module => ({ default: module.TrajectoriesPage })))
+const PortabilityPage = lazy(() => import("./pages/Portability").then(module => ({ default: module.PortabilityPage })))
+const CodingPage = lazy(() => import("./pages/Coding").then(module => ({ default: module.CodingPage })))
+const SkillForgePage = lazy(() => import("./pages/SkillForge").then(module => ({ default: module.SkillForgePage })))
+const CapabilityLabPage = lazy(() => import("./pages/CapabilityLab").then(module => ({ default: module.CapabilityLabPage })))
+const BlackGridStudioPage = lazy(() => import("./pages/BlackGridStudio").then(module => ({ default: module.BlackGridStudioPage })))
+const AgentRoomsPage = lazy(() => import("./pages/AgentRooms").then(module => ({ default: module.AgentRoomsPage })))
 import {
   api,
   ensureDesktopSession,
@@ -80,6 +80,8 @@ import {
   type PortalProject,
 } from "./projects"
 import { ProjectsRail } from "./projects/ProjectsRail"
+
+import { PageBoundary } from "./components/PageBoundary"
 
 const WORK_LINKS = [
   { to: "/history", label: "History" },
@@ -139,7 +141,7 @@ function activeTaskId(pathname: string): string | undefined {
 export default function App() {
   const location = useLocation()
   if (isGuestPath(location.pathname)) {
-    return <GuestPage />
+    return <PageBoundary pageKey={location.pathname}><GuestPage /></PageBoundary>
   }
   return (
     <PendingApprovalsProvider>
@@ -464,7 +466,7 @@ function OwnerPortal() {
     : "Local node"
 
   const routes = (
-    <Routes>
+    <PageBoundary pageKey={location.pathname}><Routes>
       <Route path="/" element={uiMode === "hud" ? <HudChatHome /> : <ChatPage />} />
       <Route path="/chats/:conversationId" element={<OwnerChatPage variant={uiMode === "hud" ? "hud" : "classic"} />} />
       <Route path="/phone" element={<PhonePage />} />
@@ -509,16 +511,16 @@ function OwnerPortal() {
       <Route path="/swarm" element={<SwarmPage />} />
       <Route path="/swarm/:nodeId" element={<SwarmPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    </Routes></PageBoundary>
   )
 
   if (isSetup) {
     return (
       <div className="app setup-mode">
-        <Routes>
+        <PageBoundary pageKey={location.pathname}><Routes>
           <Route path="/setup" element={<SetupPage />} />
           <Route path="*" element={<Navigate to="/setup" replace />} />
-        </Routes>
+        </Routes></PageBoundary>
       </div>
     )
   }
