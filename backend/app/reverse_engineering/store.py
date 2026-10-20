@@ -11,8 +11,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..config import data_dir
-from ..tools.safety import resolve_allowed_path
+from ..config import LOCAL_NETWORK_SCOPE, data_dir
+from ..tools.safety import _is_unc_path, reject_unsafe_path_text, resolve_allowed_path
 from .privacy import private_directory
 
 _ID = re.compile(r"^[a-f0-9]{32}$")
@@ -213,6 +213,41 @@ def prepare(target: str, question: str, allowed: list[str], task_id: str | None)
         raise
 
 
+FFS_OUTSIDE_ALLOWED = "Path is outside allowed directories"
+
+
+def _ffs_admit_lexically(target: str, allowed: list[str]) -> None:
+    """Allow-list gate for :func:`prepare_ffs` that runs before any filesystem probe of the target.
+
+    The target is judged by its lexical absolute form (``~`` expanded, ``..`` collapsed, no
+    link followed, no stat), so every path outside the allowed folders raises the same
+    ``PermissionError(FFS_OUTSIDE_ALLOWED)`` whether it exists, is missing, or is a link.
+    Allowed roots are matched both as written and as their realpath (owner config, not the target).
+    """
+    raw = reject_unsafe_path_text(target)
+    if _is_unc_path(raw):
+        try:
+            resolve_allowed_path(raw, allowed)  # lexical for UNC paths; never contacts the share
+        except PermissionError as exc:
+            raise PermissionError(FFS_OUTSIDE_ALLOWED) from exc
+        return
+    if not allowed:
+        raise PermissionError("No workspace directories are configured")
+    candidate = os.path.normcase(os.path.abspath(os.path.expanduser(raw)))
+    for root in allowed:
+        root = str(root or "")
+        if not root or root == LOCAL_NETWORK_SCOPE or "\x00" in root:
+            continue
+        expanded = os.path.expanduser(root)
+        for base in {os.path.normcase(os.path.abspath(expanded)), os.path.normcase(os.path.realpath(expanded))}:
+            try:
+                if os.path.commonpath((base, candidate)) == base:
+                    return
+            except ValueError:
+                continue
+    raise PermissionError(FFS_OUTSIDE_ALLOWED)
+
+
 def prepare_ffs(target: str, question: str, allowed: list[str] | None, task_id: str | None, *,
                 source_type: str = "auto", investigation_id: str | None = None) -> dict:
     """RFC-0208: prepare (or adopt) a ``kind == "ffs"`` investigation for a full file-system dump.
@@ -224,10 +259,21 @@ def prepare_ffs(target: str, question: str, allowed: list[str] | None, task_id: 
     """
     from . import ffs_ingest
 
+    if allowed is not None:
+        # Allow-list first, on the lexical path only: nothing about an outside target (exists,
+        # missing, link) may change the answer, so the caller cannot probe outside the folders.
+        _ffs_admit_lexically(target, allowed)
     raw = Path(target).expanduser()
     if raw.is_symlink() or (raw.exists() and getattr(raw.lstat(), "st_file_attributes", 0) & 0x400):
         raise PermissionError("Linked/reparse target is not admitted")
-    source = resolve_allowed_path(target, allowed) if allowed is not None else raw.resolve()
+    if allowed is not None:
+        try:
+            # Still enforce the realpath check, so a linked parent folder cannot escape the list.
+            source = resolve_allowed_path(target, allowed)
+        except PermissionError as exc:
+            raise PermissionError(FFS_OUTSIDE_ALLOWED) from exc
+    else:
+        source = raw.resolve()
     if not source.exists():
         raise FileNotFoundError(f"Source target does not exist: {source}")
     stype = source_type if source_type != "auto" else ffs_ingest.detect_source_type(source)
