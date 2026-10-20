@@ -10,7 +10,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -114,10 +118,22 @@ fun defaultFileSha256(file: File): String {
 }
 
 /** Pack lifecycle: missing / downloading / ready / running / error */
+/**
+ * Install and resume facts for every catalog pack plus the bytes on disk. Built by
+ * [CompanionPackManager.packFileSnapshot] off the main thread so UI publishing never stats pack files.
+ */
+data class PackFileSnapshot(
+    val installed: Map<String, Boolean> = emptyMap(),
+    val resumeBytes: Map<String, Long> = emptyMap(),
+    val storageBytes: Long = 0,
+)
+
 class CompanionPackManager(
     context: Context,
     val engine: LocalInferenceEngine = LlamaCppInferenceEngine(),
     digestCache: VerifiedDigestCache? = null,
+    private val fileDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+    private val stallDeadlines: LocalStallDeadlines = LocalStallDeadlines(),
 ) {
     private val app = context.applicationContext
     val digestCache: VerifiedDigestCache = digestCache ?: VerifiedDigestCache(
@@ -132,6 +148,15 @@ class CompanionPackManager(
     private var catalog: List<CompanionPack> = CompanionPackCatalog.builtIn
     private val llamaDispatcher = Dispatchers.IO.limitedParallelism(1)
     private val activeDownloads: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    private val downloadStates = MutableStateFlow<Map<String, ModelDownloadState>>(emptyMap())
+    val downloads = downloadStates.asStateFlow()
+    private val downloadJobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
+    fun cancelDownload(packId: String) { downloadJobs[packId]?.cancel() }
+
+    private fun publishDownload(pack: CompanionPack, change: (ModelDownloadState) -> ModelDownloadState) {
+        downloadStates.update { states -> states + (pack.id to change(states[pack.id]
+            ?: ModelDownloadState(pack.id, pack.label, totalBytes = pack.sizeBytes))) }
+    }
 
     /** Pack ids with a download running (from any screen). */
     fun downloadingPackIds(): Set<String> = activeDownloads.toSet()
@@ -203,6 +228,15 @@ class CompanionPackManager(
 
     fun storageBytes(): Long = packDir.walkTopDown().filter { it.isFile }.map { it.length() }.sum()
 
+    /** Stats every pack file and `.partial` on [fileDispatcher] (IO), never on the caller's thread. */
+    suspend fun packFileSnapshot(): PackFileSnapshot = withContext(fileDispatcher) {
+        PackFileSnapshot(
+            installed = catalog.associate { it.id to isPackInstalled(it) },
+            resumeBytes = catalog.associate { it.id to File(packDir, "${it.filename}.partial").length() },
+            storageBytes = storageBytes(),
+        )
+    }
+
     fun selectedPack(): CompanionPack? = catalog.firstOrNull { it.id == selectedPackId() }
 
     /** Current (Leader-merged) catalogue; read by the RFC-0216 S5 downloaded-content inventory. */
@@ -223,6 +257,7 @@ class CompanionPackManager(
         engine.unload()
         digestCache.invalidate(file)
         if (file.exists() && !file.delete()) error("Could not delete $name")
+        catalog.firstOrNull { it.filename == name }?.let { pack -> downloadStates.update { it - pack.id } }
         refreshStatus()
         progressRef.set(0)
     }
@@ -230,10 +265,14 @@ class CompanionPackManager(
     fun packFile(pack: CompanionPack): File = File(packDir, pack.filename)
 
     fun packCanLoad(pack: CompanionPack): Boolean {
+        return isPackInstalled(pack) && DeviceInferenceGuard.blockReason(app, pack) == null
+    }
+
+    fun isPackInstalled(pack: CompanionPack): Boolean {
         val file = packFile(pack)
         if (!file.isFile || file.length() == 0L) return false
         if (pack.sha256.isNotBlank() && !digestCache.matchesExpected(file, pack.sha256)) return false
-        return DeviceInferenceGuard.blockReason(app, pack) == null
+        return true
     }
 
     fun resolveOfflinePack(preferFast: Boolean = false): CompanionPack? =
@@ -296,12 +335,22 @@ class CompanionPackManager(
      */
     suspend fun downloadPack(pack: CompanionPack, onProgress: (Int) -> Unit = {}) {
         check(activeDownloads.add(pack.id)) { "${pack.label} is already downloading" }
+        coroutineContext[Job]?.let { downloadJobs[pack.id] = it }
+        publishDownload(pack) { ModelDownloadState(pack.id, pack.label, totalBytes = pack.sizeBytes) }
         try {
             downloadPackInternal(pack, onProgress)
+            publishDownload(pack) { it.copy(stage = ModelDownloadStage.READY, receivedBytes = packFile(pack).length(), bytesPerSecond = 0, detail = "") }
+        } catch (error: Throwable) {
+            val paused = error is CancellationException
+            val partialBytes = File(packDir, "${pack.filename}.partial").length()
+            publishDownload(pack) { it.copy(stage = if (paused) ModelDownloadStage.PAUSED else ModelDownloadStage.ERROR,
+                receivedBytes = partialBytes, bytesPerSecond = 0, detail = if (paused) "" else error.message ?: "Try again to resume the download.") }
+            throw error
         } finally {
+            downloadJobs.remove(pack.id)
             activeDownloads.remove(pack.id)
             // refreshStatus skips while the selected pack is still downloading elsewhere.
-            if (pack.id != selectedPackId()) withContext(kotlinx.coroutines.NonCancellable) { refreshStatus() }
+            withContext(kotlinx.coroutines.NonCancellable) { refreshStatus() }
         }
     }
 
@@ -330,6 +379,8 @@ class CompanionPackManager(
                 onRetry = { attempt, error ->
                     Log.w(TAG, "Pack download attempt $attempt failed, resuming: ${error.message}")
                     errorRef.set("Connection dropped — resuming download (attempt ${attempt + 1} of ${PackDownloadPlan.DOWNLOAD_ATTEMPTS})")
+                    publishDownload(pack) { it.copy(stage = ModelDownloadStage.RETRYING, bytesPerSecond = 0,
+                        detail = "Attempt ${attempt + 1} of ${PackDownloadPlan.DOWNLOAD_ATTEMPTS}") }
                 },
             ) {
                 downloadOnce(pack, partial, onProgress)
@@ -340,6 +391,7 @@ class CompanionPackManager(
             throw error
         }
         errorRef.set("")
+        publishDownload(pack) { it.copy(stage = ModelDownloadStage.VERIFYING, bytesPerSecond = 0, detail = "Checking the file before it becomes available.") }
         if (pack.sha256.isNotBlank()) {
             val digest = digestCache.digestOf(partial)
             if (!digest.equals(pack.sha256, ignoreCase = true)) {
@@ -350,6 +402,7 @@ class CompanionPackManager(
                 error("Download checksum mismatch")
             }
         }
+        coroutineContext.ensureActive()
         PackDownloadPlan.replaceWithVerified(partial, target)
         digestCache.invalidate(partial)
         if (pack.sha256.isNotBlank()) digestCache.remember(target, pack.sha256)
@@ -363,30 +416,55 @@ class CompanionPackManager(
         var offset = PackDownloadPlan.resumeFrom(partial.length(), pack.sizeBytes)
         val builder = Request.Builder().url(pack.url).get()
         if (offset > 0L) builder.header("Range", "bytes=$offset-")
-        client.newCall(builder.build()).execute().use { response ->
-            // 5xx/429 are transient on the CDN: surface them as IOException so they retry.
-            if (response.code >= 500 || response.code == 429) throw java.io.IOException("Download server returned ${response.code}")
-            if (!response.isSuccessful) error("Download failed (${response.code})")
-            val append = PackDownloadPlan.appendToPartial(offset, response.code)
-            if (!append) offset = 0L
-            val body = response.body ?: throw java.io.IOException("Empty download body")
-            val total = (offset + body.contentLength()).coerceAtLeast(pack.sizeBytes).coerceAtLeast(1L)
-            body.byteStream().use { input ->
-                java.io.FileOutputStream(partial, append).use { output ->
-                    val buffer = ByteArray(65536)
-                    var readTotal = offset
-                    while (true) {
-                        if (!coroutineContext.isActive) throw CancellationException("download cancelled; partial kept for resume")
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        output.write(buffer, 0, count)
-                        readTotal += count
-                        val pct = ((readTotal * 100) / total).toInt().coerceIn(0, 100)
-                        progressRef.set(pct)
-                        onProgress(pct)
+        publishDownload(pack) { it.copy(stage = ModelDownloadStage.CONNECTING, receivedBytes = offset, bytesPerSecond = 0) }
+        val call = client.newCall(builder.build())
+        val parentJob = coroutineContext[Job]!!
+        val cancelWatch = kotlinx.coroutines.CoroutineScope(coroutineContext).launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+            try { awaitCancellation() } finally { if (parentJob.isCancelled) call.cancel() }
+        }
+        try {
+            call.execute().use { response ->
+                // 5xx/429 are transient on the CDN: surface them as IOException so they retry.
+                if (response.code >= 500 || response.code == 429) throw java.io.IOException("Download server returned ${response.code}")
+                if (!response.isSuccessful) error("Download failed (${response.code})")
+                val append = PackDownloadPlan.appendToPartial(offset, response.code)
+                if (!append) offset = 0L
+                val body = response.body ?: throw java.io.IOException("Empty download body")
+                val total = (if (body.contentLength() >= 0) offset + body.contentLength() else 0L).coerceAtLeast(pack.sizeBytes)
+                body.byteStream().use { input ->
+                    java.io.FileOutputStream(partial, append).use { output ->
+                        val buffer = ByteArray(65536)
+                        var readTotal = offset
+                        var sampleAt = android.os.SystemClock.elapsedRealtime()
+                        var sampleBytes = readTotal
+                        var previousPercent = -1
+                        while (true) {
+                            if (!coroutineContext.isActive) throw CancellationException("download cancelled; partial kept for resume")
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            output.write(buffer, 0, count)
+                            readTotal += count
+                            val pct = if (total > 0) ((readTotal * 100) / total).toInt().coerceIn(0, 100) else 0
+                            val now = android.os.SystemClock.elapsedRealtime()
+                            if (pct != previousPercent || now - sampleAt >= 250 || (total > 0 && readTotal >= total)) {
+                                val elapsed = (now - sampleAt).coerceAtLeast(1)
+                                publishDownload(pack) { it.copy(stage = ModelDownloadStage.DOWNLOADING, receivedBytes = readTotal,
+                                    totalBytes = total, bytesPerSecond = (readTotal - sampleBytes) * 1000 / elapsed, detail = "") }
+                                sampleAt = now
+                                sampleBytes = readTotal
+                                previousPercent = pct
+                                progressRef.set(pct)
+                                onProgress(pct)
+                            }
+                        }
                     }
                 }
             }
+        } catch (error: java.io.IOException) {
+            if (!parentJob.isActive) throw CancellationException("Download paused", error)
+            throw error
+        } finally {
+            cancelWatch.cancel()
         }
         if (pack.sizeBytes > 0L && partial.length() < pack.sizeBytes) {
             throw java.io.IOException("Download ended early at ${partial.length()} of ${pack.sizeBytes} bytes")
@@ -445,6 +523,7 @@ class CompanionPackManager(
             val file = packFile(pack)
             digestCache.invalidate(file)
             file.delete()
+            downloadStates.update { it - pack.id }
         }
         statusRef.set(CompanionPackStatus.MISSING)
         errorRef.set("")
@@ -460,114 +539,132 @@ class CompanionPackManager(
         history: List<org.json.JSONObject> = emptyList(),
         latest: String = "",
         pickedText: String? = null,
+        onProgress: (String) -> Unit = {},
         onToken: (String) -> Unit,
-    ): GenerateResult = withContext(llamaDispatcher) {
-        val pack = resolveOfflinePack(preferFast) ?: selectedPack() ?: error("No pack selected")
-        check(!requireMinimalRefusal || CompanionPackCatalog.isVerifiedMinimalRefusal(pack)) {
-            "Offgrid requires a pinned Abliterated or Heretic model"
-        }
-        DeviceInferenceGuard.blockReason(app, pack)?.let { error(it) }
-        val path = packFile(pack)
-        if (!path.isFile) error("Install the companion model pack first")
-        statusRef.set(CompanionPackStatus.RUNNING)
-        val nCtx = DeviceInferenceGuard.contextTokens(app, pack)
-        val parentJob = coroutineContext[Job]!!
-        // Started UNDISPATCHED on Unconfined: the watcher is already suspended in
-        // awaitCancellation() before the engine runs, and cancel() resumes it inline on the
-        // cancelling thread. A Default-dispatched watcher could be cancelled before it ever ran
-        // (its finally then never fires) or wait behind a busy pool, leaving native decode
-        // running after the user pressed stop.
-        val cancelWatch = launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+    ): GenerateResult {
+        val received = android.os.SystemClock.elapsedRealtime()
+        return withContext(llamaDispatcher) {
+            val pack = resolveOfflinePack(preferFast) ?: selectedPack() ?: error("No pack selected")
+            check(!requireMinimalRefusal || CompanionPackCatalog.isVerifiedMinimalRefusal(pack)) {
+                "Offgrid requires a pinned Abliterated or Heretic model"
+            }
+            DeviceInferenceGuard.blockReason(app, pack)?.let { error(it) }
+            val path = packFile(pack)
+            if (!path.isFile) error("Install the companion model pack first")
+            statusRef.set(CompanionPackStatus.RUNNING)
+            val nCtx = DeviceInferenceGuard.contextTokens(app, pack)
+            val parentJob = coroutineContext[Job]!!
+            // Started UNDISPATCHED on Unconfined: the watcher is already suspended in
+            // awaitCancellation() before the engine runs, and cancel() resumes it inline on the
+            // cancelling thread. A Default-dispatched watcher could be cancelled before it ever ran
+            // (its finally then never fires) or wait behind a busy pool, leaving native decode
+            // running after the user pressed stop.
+            val cancelWatch = launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+                try {
+                    awaitCancellation()
+                } finally {
+                    if (parentJob.isCancelled) engine.requestCancel()
+                }
+            }
             try {
-                awaitCancellation()
-            } finally {
-                if (parentJob.isCancelled) engine.requestCancel()
-            }
-        }
-        try {
-            val loadError = engine.load(path.absolutePath, nCtx)
-            if (loadError != null) {
-                statusRef.set(CompanionPackStatus.ERROR)
-                errorRef.set(loadError)
-                error(loadError)
-            }
-            if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
-            val promptBudget = OfflinePromptPlanner.promptTokenBudget(nCtx, maxTokens)
-            val memory = PhoneMemoryBudget.fit(memoryContext, engine::tokenize, minOf(256, promptBudget / 4))
-            val plan = if (latest.isNotEmpty() || !pickedText.isNullOrBlank()) {
-                OfflinePromptPlanner.plan(
-                    history = history,
-                    latest = latest.ifBlank { prompt },
-                    pickedText = pickedText,
-                    tokenize = { engine.tokenize(it) },
-                    promptBudget = promptBudget,
-                    memoryContext = memory,
-                )
-            } else {
-                OfflinePromptPlanner.Plan(prompt = prompt, sectioned = false, history = history)
-            }
-            val sectioned = plan.sectioned
-            val latestText = plan.latest.ifBlank { latest.ifBlank { prompt } }
-            val toRun = if (plan.sectioned && plan.sections.isNotEmpty()) {
-                var summaries = summarizeSections(
-                    sections = plan.sections,
-                    maxTokens = maxTokens.coerceAtMost(plan.summaryMaxTokens),
-                )
-                var finalPrompt = OfflinePromptPlanner.finalPromptFromSummaries(
-                    plan.history,
-                    latestText,
-                    summaries,
-                    memory,
-                )
-                var reduceGuard = 0
-                while (engine.tokenize(finalPrompt) > promptBudget && summaries.size > 1 && reduceGuard++ < 4) {
-                    val merged = OfflinePromptPlanner.mergeAdjacent(summaries)
-                    val cap = OfflinePromptPlanner.sectionSummaryMaxTokens(
-                        promptBudget,
-                        plan.skeletonTokens,
-                        merged.size,
+                val started = android.os.SystemClock.elapsedRealtime()
+                onProgress("Loading model on this phone")
+                val loadError = engine.load(path.absolutePath, nCtx)
+                if (loadError != null) {
+                    statusRef.set(CompanionPackStatus.ERROR)
+                    errorRef.set(loadError)
+                    error(loadError)
+                }
+                if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
+                val loaded = android.os.SystemClock.elapsedRealtime()
+                onProgress("Preparing conversation")
+                val promptBudget = OfflinePromptPlanner.promptTokenBudget(nCtx, maxTokens)
+                val memory = PhoneMemoryBudget.fit(memoryContext, engine::tokenize, minOf(256, promptBudget / 4))
+                val plan = if (latest.isNotEmpty() || !pickedText.isNullOrBlank()) {
+                    OfflinePromptPlanner.plan(
+                        history = history,
+                        latest = latest.ifBlank { prompt },
+                        pickedText = pickedText,
+                        tokenize = { engine.tokenize(it) },
+                        promptBudget = promptBudget,
+                        memoryContext = memory,
                     )
-                    summaries = summarizeSections(merged, maxTokens.coerceAtMost(cap))
-                    finalPrompt = OfflinePromptPlanner.finalPromptFromSummaries(
+                } else {
+                    OfflinePromptPlanner.Plan(prompt = prompt, sectioned = false, history = history)
+                }
+                val sectioned = plan.sectioned
+                val latestText = plan.latest.ifBlank { latest.ifBlank { prompt } }
+                val toRun = if (plan.sectioned && plan.sections.isNotEmpty()) {
+                    onProgress("Reading selected text in sections")
+                    var summaries = summarizeSections(
+                        sections = plan.sections,
+                        maxTokens = maxTokens.coerceAtMost(plan.summaryMaxTokens),
+                        model = pack.id,
+                    )
+                    var finalPrompt = OfflinePromptPlanner.finalPromptFromSummaries(
                         plan.history,
                         latestText,
                         summaries,
                         memory,
                     )
+                    var reduceGuard = 0
+                    while (engine.tokenize(finalPrompt) > promptBudget && summaries.size > 1 && reduceGuard++ < 4) {
+                        val merged = OfflinePromptPlanner.mergeAdjacent(summaries)
+                        val cap = OfflinePromptPlanner.sectionSummaryMaxTokens(
+                            promptBudget,
+                            plan.skeletonTokens,
+                            merged.size,
+                        )
+                        summaries = summarizeSections(merged, maxTokens.coerceAtMost(cap), pack.id)
+                        finalPrompt = OfflinePromptPlanner.finalPromptFromSummaries(
+                            plan.history,
+                            latestText,
+                            summaries,
+                            memory,
+                        )
+                    }
+                    OfflinePromptPlanner.boundedFinal(plan.history, latestText, summaries, memory, engine::tokenize, promptBudget)
+                } else {
+                    plan.prompt
                 }
-                OfflinePromptPlanner.boundedFinal(plan.history, latestText, summaries, memory, engine::tokenize, promptBudget)
-            } else {
-                plan.prompt
+                if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
+                var produced = false
+                var firstTokenMs: Long? = null
+                onProgress("Reading context")
+                engine.beginPass()
+                val outcome = watchedGenerate(toRun, maxTokens, pack.id) { chunk ->
+                    if (!produced) {
+                        firstTokenMs = android.os.SystemClock.elapsedRealtime() - started
+                        onProgress("Writing reply")
+                    }
+                    produced = true
+                    onToken(chunk)
+                }
+                Log.i(TAG, "local_reply model=${pack.id} queue_ms=${started - received} load_ms=${loaded - started} first_token_ms=${firstTokenMs?.plus(started - received)} total_ms=${android.os.SystemClock.elapsedRealtime() - received}")
+                if (outcome.cancelled) throw CancellationException("generate cancelled")
+                if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
+                statusRef.set(CompanionPackStatus.READY)
+                outcome.error?.let { failGenerate(it) }
+                if (!produced && !outcome.truncated) {
+                    failGenerate("On-device model returned no tokens")
+                }
+                GenerateResult(truncated = outcome.truncated, sectioned = sectioned, clipped = plan.clipped)
+            } finally {
+                cancelWatch.cancel()
             }
-            if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
-            var produced = false
-            engine.beginPass()
-            val outcome = engine.generate(toRun, maxTokens) { chunk ->
-                produced = true
-                onToken(chunk)
-            }
-            if (outcome.cancelled) throw CancellationException("generate cancelled")
-            if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
-            statusRef.set(CompanionPackStatus.READY)
-            outcome.error?.let { failGenerate(it) }
-            if (!produced && !outcome.truncated) {
-                failGenerate("On-device model returned no tokens")
-            }
-            GenerateResult(truncated = outcome.truncated, sectioned = sectioned, clipped = plan.clipped)
-        } finally {
-            cancelWatch.cancel()
         }
     }
 
-    private suspend fun summarizeSections(sections: List<String>, maxTokens: Int): ArrayList<String> {
+    private suspend fun summarizeSections(sections: List<String>, maxTokens: Int, model: String): ArrayList<String> {
         val summaries = ArrayList<String>()
         for (section in sections) {
             if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
             engine.beginPass()
             val piece = StringBuilder()
-            val outcome = engine.generate(
+            val outcome = watchedGenerate(
                 OfflinePromptPlanner.summarizeSectionPrompt(section),
                 maxTokens,
+                model,
             ) { piece.append(it) }
             if (outcome.cancelled) throw CancellationException("generate cancelled")
             outcome.error?.let { failGenerate(it) }
@@ -575,6 +672,50 @@ class CompanionPackManager(
         }
         return summaries
     }
+
+    /**
+     * One native pass under the first-token and idle deadlines. The watchdog runs off the llama
+     * thread (which is blocked in native decode); on a stall it asks the engine to stop and the pass
+     * ends with [LocalStreamStallError] instead of a cancellation, so the turn fails visibly.
+     */
+    private suspend fun watchedGenerate(prompt: String, maxTokens: Int, model: String, onToken: (String) -> Unit): GenerateOutcome =
+        kotlinx.coroutines.coroutineScope {
+            val clock = stallDeadlines.clockMs
+            val passStart = clock()
+            val lastToken = java.util.concurrent.atomic.AtomicLong(Long.MIN_VALUE)
+            val stall = AtomicReference<LocalStreamStallError?>(null)
+            val watchdog = launch(Dispatchers.Default) {
+                while (isActive) {
+                    kotlinx.coroutines.delay(stallDeadlines.checkEveryMs)
+                    val now = clock()
+                    val last = lastToken.get()
+                    val stalled = if (last == Long.MIN_VALUE) {
+                        (now - passStart).takeIf { it > stallDeadlines.firstTokenMs }?.let {
+                            LocalStreamStallError(LocalStreamStallError.FIRST_TOKEN, it, stallDeadlines.firstTokenMs, model)
+                        }
+                    } else {
+                        (now - last).takeIf { it > stallDeadlines.idleMs }?.let {
+                            LocalStreamStallError(LocalStreamStallError.IDLE, it, stallDeadlines.idleMs, model)
+                        }
+                    }
+                    if (stalled != null && stall.compareAndSet(null, stalled)) {
+                        Log.w(TAG, "local_reply_stall model=$model deadline=${stalled.deadline} elapsed_ms=${stalled.elapsedMs} budget_ms=${stalled.budgetMs}")
+                        engine.requestCancel()
+                        break
+                    }
+                }
+            }
+            try {
+                val outcome = engine.generate(prompt, maxTokens) { chunk ->
+                    lastToken.set(clock())
+                    onToken(chunk)
+                }
+                stall.get()?.let { throw it }
+                outcome
+            } finally {
+                watchdog.cancel()
+            }
+        }
 
     private fun failGenerate(message: String): Nothing {
         statusRef.set(CompanionPackStatus.ERROR)
