@@ -59,6 +59,12 @@ export function dismiss(state, action) {
   return withButton(state, action, { phase: 'idle' })
 }
 
+// The pressed -> working step is scheduled from the click itself (not a free-running
+// interval), so the spinner shows exactly PRESSED_MAX_MS after the press.
+export function schedulePressedTick(setTimer, run) {
+  return setTimer(run, PRESSED_MAX_MS)
+}
+
 // Time-driven transitions: pressed becomes working after at most 100 ms; success clears after 3 s.
 export function tick(state, now) {
   let next = state

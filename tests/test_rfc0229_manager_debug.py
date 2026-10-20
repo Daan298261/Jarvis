@@ -425,3 +425,21 @@ def test_event_enum_matches_spec_including_process_view(root):
     assert "sekrit" not in json.dumps(row)
     with pytest.raises(ValueError):
         debug_log.write("INFO", "not_an_event")
+
+
+def test_unexpected_exception_in_control_logs_type_and_message(root, monkeypatch):
+    # D1 #662 peer item 2: a non-HTTP failure must still record why control_end is ok:false.
+    async def boom(action, body, token, request_id):
+        raise RuntimeError("supervisor exploded")
+
+    monkeypatch.setattr(main, "_run_control", boom)
+    client = TestClient(main.app, raise_server_exceptions=False)
+    response = client.post(
+        "/api/manager/v1/control/restart",
+        json={"confirm": True},
+        headers={**_token(client), "X-Anzu-Request-Id": "ui-boom-0001"},
+    )
+    assert response.status_code == 500
+    end = [r for r in _lines(root) if r["request_id"] == "ui-boom-0001"][-1]
+    assert end["event"] == "control_end" and end["ok"] is False and end["level"] == "WARNING"
+    assert end["detail"] == {"error": "RuntimeError: supervisor exploded"}

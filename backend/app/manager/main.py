@@ -352,6 +352,9 @@ async def manager_control(
     except HTTPException as exc:
         error = f"{exc.status_code}: {exc.detail}"
         raise
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        raise
     finally:
         debug_log.write(
             "INFO" if ok else "WARNING",

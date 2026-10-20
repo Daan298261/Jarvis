@@ -7,6 +7,7 @@ import { test } from "node:test"
 import {
   CONTROL_ACTIONS,
   PRESSED_MAX_MS,
+  schedulePressedTick,
   SUCCESS_CLEAR_MS,
   applyProgress,
   createControls,
@@ -143,4 +144,16 @@ test("live Manager UI is preserved: labels, confirm and alert texts, module scri
     "body:'{\"confirm\":true}'",
   ]) assert.ok(app.includes(fragment), fragment)
   assert.match(app, /^import \{[^}]+\} from '\.\/controls\.js';$/m)
+})
+
+test("pressed -> working tick is scheduled from the click at 100 ms, not a free-running timer", async () => {
+  const calls = []
+  let s = press(createControls(), "restart", 1000)
+  schedulePressedTick((fn, ms) => { calls.push(ms); fn(); return 1 }, () => { s = tick(s, 1000 + PRESSED_MAX_MS) })
+  assert.deepEqual(calls, [100])
+  assert.equal(s.buttons.restart.phase, "working")
+  assert.equal(view(s, "restart", 1000 + PRESSED_MAX_MS).spinner, true)
+  const app = await readFile(new URL("../backend/app/manager/static/app.js", import.meta.url), "utf8")
+  const click = app.slice(app.indexOf("controls=next;renderControls();"))
+  assert.match(click.slice(0, 200), /^controls=next;renderControls\(\);schedulePressedTick\(setTimeout,/)
 })
