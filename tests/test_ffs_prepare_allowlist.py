@@ -184,3 +184,54 @@ async def test_api_linked_parent_to_outside_gives_the_identical_422(layout, allo
         responses = [await client.post("/api/investigations/ffs", json={"target": str(t)}) for t in targets]
         assert {(r.status_code, r.text) for r in responses} == {
             (422, '{"detail":"' + store.FFS_OUTSIDE_ALLOWED + '"}')}
+
+
+def _dotdot_layout(layout):
+    """D2 #660 review 2: allowed/linkdir -> /outside/a/b, so allowed/linkdir/.. is /outside/a for the OS."""
+    a = layout.outside / "a"
+    (a / "b").mkdir(parents=True)
+    _symlink(layout.allowed / "linkdir", a / "b")
+    (a / "existing_dir").mkdir()
+    (a / "existing.bin").write_bytes(b"x")
+    _symlink(a / "leaf_link", layout.secret)
+    _symlink(a / "dangling", a / "gone")
+    _symlink(a / "root_link", layout.allowed)  # an outside link that points at the allowed root
+    via = str(layout.allowed / "linkdir") + os.sep + ".." + os.sep
+    return [via + name for name in ("leaf_link", "missing", "existing.bin", "existing_dir", "dangling",
+                                    "root_link", "missing" + os.sep + "deeper")] + [
+        via + "..", via + ".." + os.sep + "secret_dump", via + "b" + os.sep + ".." + os.sep + "leaf_link"]
+
+
+def test_dotdot_through_an_outside_link_is_judged_like_the_os(layout, monkeypatch):
+    targets = _dotdot_layout(layout)
+    assert {_refusal(t, layout.roots) for t in targets} == {(PermissionError, store.FFS_OUTSIDE_ALLOWED)}
+    probed: list[str] = []
+    real_lstat = os.lstat
+
+    def spy(path, *a, **kw):
+        if os.path.basename(os.fspath(path)) in {"leaf_link", "root_link", "dangling"}:
+            probed.append(os.fspath(path))
+        return real_lstat(path, *a, **kw)
+
+    monkeypatch.setattr(os, "lstat", spy)
+    for t in targets:
+        _refusal(t, layout.roots)
+    assert probed == []
+
+
+@pytest.mark.asyncio
+async def test_api_dotdot_through_an_outside_link_gives_the_identical_422(layout, allow_loopback_api, monkeypatch):
+    targets = _dotdot_layout(layout)
+    monkeypatch.setattr("app.api.investigations.load_settings",
+                        lambda: SimpleNamespace(allowed_directories=layout.roots))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+        responses = [await client.post("/api/investigations/ffs", json={"target": t}) for t in targets]
+    assert {(r.status_code, r.text) for r in responses} == {(422, '{"detail":"' + store.FFS_OUTSIDE_ALLOWED + '"}')}
+
+
+def test_dotdot_that_stays_inside_is_still_admitted(layout):
+    (layout.allowed / "x" / "y").mkdir(parents=True)
+    row = store.prepare_ffs(str(layout.allowed / "x" / "y" / ".." / ".." / "dump"), "q", layout.roots, None)
+    assert row["target"] == str(layout.dump.resolve())
+    row = store.prepare_ffs(str(layout.allowed / "x" / ".."), "q", layout.roots, None)
+    assert row["target"] == str(layout.allowed.resolve())
