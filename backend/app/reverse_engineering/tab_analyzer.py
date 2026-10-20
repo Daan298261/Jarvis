@@ -20,12 +20,10 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 import math
-from pathlib import Path
 from typing import Any, Iterable
 
 import numpy as np
 
-CHUNK_SIZE = 1024 * 1024
 HEADER_BYTES = 16
 TAB_SUFFIX = ".tab"
 
@@ -135,18 +133,6 @@ class TabProfiler:
             # AT2 bodies use a keyed transform that is not single-byte XOR; only test the rest.
             "xor_key": None if is_at2 else xor_text_key(self._counts, self._total),
         }
-
-
-def profile_file(path: Path) -> dict[str, Any]:
-    """Stream one local file read-only and return its size, entropy and header bytes."""
-    profiler = TabProfiler()
-    with path.open("rb") as handle:
-        while True:
-            chunk = handle.read(CHUNK_SIZE)
-            if not chunk:
-                break
-            profiler.update(chunk)
-    return profiler.result()
 
 
 def entropy_class(entropy: float, size: int) -> str:

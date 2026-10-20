@@ -38,7 +38,7 @@ def ffs_env(tmp_path, monkeypatch):
     from app.config import load_settings
     settings = load_settings()
     settings.allowed_directories = [str(tmp_path)]
-    monkeypatch.setattr("app.reverse_engineering.ffs_ingest.resolve_allowed_path", lambda path, allowed: Path(path).resolve())
+    monkeypatch.setattr("app.reverse_engineering.store.resolve_allowed_path", lambda path, allowed: Path(path).resolve())
     monkeypatch.setattr("app.api.investigations.load_settings", lambda: settings)
     return tmp_path
 
@@ -392,7 +392,7 @@ def test_api_ingest_into_existing_investigation(ffs_env, allow_loopback_api):
     folder.mkdir()
     (folder / "case.txt").write_text("Case details", encoding="utf-8")
     ident = store.prepare(str(folder), "Initial case study", [str(ffs_env)], None)["id"]
-    resp = client.post(f"/api/investigations/{ident}/ingest", json={"target": str(folder)})
+    resp = client.post(f"/api/investigations/{ident}/ingest", json={"target": str(folder), "background": False})
     assert resp.status_code == 200, resp.text
     row = resp.json()
     assert row["id"] == ident and row["status"] == "completed" and row["kind"] == "ffs"
@@ -407,7 +407,7 @@ def test_api_ingest_into_existing_investigation(ffs_env, allow_loopback_api):
 @pytest.mark.asyncio
 async def test_dump_outside_allowed_directories_is_refused(ffs_env, monkeypatch):
     from app.tools import safety
-    monkeypatch.setattr("app.reverse_engineering.ffs_ingest.resolve_allowed_path", safety.resolve_allowed_path)
+    monkeypatch.setattr("app.reverse_engineering.store.resolve_allowed_path", safety.resolve_allowed_path)
     dump = ffs_env / "outside"
     dump.mkdir()
     (dump / "a.txt").write_bytes(b"a")
@@ -458,6 +458,377 @@ async def test_agent_tool_ingests_in_background_and_reports_progress(ffs_env):
     assert "ffs_tab_profile" in guide.data["skill"]
     other_task = await tool.execute(action="ingest_status", investigation_id=ident, _task_id="someone-else")
     assert not other_task.success
+
+# ----- #651 review: sticky close/cancel, tree change detection, FFS reports, RFC-0208 Decision -----
+
+def api_client():
+    """ASGI client on the test's own event loop, so background ingests outlive the request."""
+    import httpx
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1")
+
+
+class BlockedIngest:
+    """Parks the ingest thread inside its first member read until the test releases it (no sleeps)."""
+
+    def __init__(self, monkeypatch):
+        import threading
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        real = ffs_ingest._digest
+
+        def blocking_digest(stream, *args, **kwargs):
+            if not self.entered.is_set():
+                self.entered.set()
+                assert self.release.wait(30), "test never released the ingest thread"
+            return real(stream, *args, **kwargs)
+
+        monkeypatch.setattr(ffs_ingest, "_digest", blocking_digest)
+
+    async def wait_entered(self) -> FFSIngest:
+        assert await asyncio.to_thread(self.entered.wait, 30)
+        with ffs_ingest._RUNNING_LOCK:
+            [worker] = list(ffs_ingest._RUNNING.values())
+        return worker
+
+
+def small_dump(root: Path, name: str, files: int = 3) -> Path:
+    folder = root / name
+    folder.mkdir()
+    for i in range(files):
+        (folder / f"m{i}.bin").write_bytes(os.urandom(2048))
+    return folder
+
+
+async def drain_ingest_tasks() -> None:
+    await asyncio.wait_for(asyncio.gather(*SERVICE.ingest_tasks, return_exceptions=True), timeout=30)
+
+
+@pytest.mark.asyncio
+async def test_api_cancel_of_a_running_ingest_sticks_when_the_thread_writes_last(ffs_env, allow_loopback_api, monkeypatch):
+    """D2's repro: the stale worker row used to overwrite cancelled with interrupted."""
+    from app.reverse_engineering import runtime
+    monkeypatch.setattr(runtime, "FFS_STOP_WAIT_SECONDS", 0)  # close returns before the thread's last write
+    folder = small_dump(ffs_env, "cancel_api")
+    blocked = BlockedIngest(monkeypatch)
+    try:
+        async with api_client() as client:
+            ident = (await client.post("/api/investigations/ffs", json={"target": str(folder)})).json()["id"]
+            started = await client.post(f"/api/investigations/{ident}/ingest", json={})
+            assert started.status_code == 200 and started.json()["ingest"] == "started"
+            worker = await blocked.wait_entered()
+
+            cancelled = await client.post(f"/api/investigations/{ident}/cancel")
+            assert cancelled.status_code == 200 and cancelled.json()["status"] == "cancelled"
+            assert not worker.finished.is_set()  # the thread is still inside its block
+            blocked.release.set()
+            assert await asyncio.to_thread(worker.finished.wait, 30)
+            await drain_ingest_tasks()
+
+            row = store.load(ident)
+            assert row["status"] == "cancelled"  # the thread's later save did not downgrade it
+            assert row["ffs"]["status"] == "cancelled"
+            assert [e["event"] for e in row["chain_of_custody"]][-1] == "ingest_interrupted"
+            again = await client.post(f"/api/investigations/{ident}/ingest", json={})
+            assert again.status_code == 422 and "closed" in again.json()["detail"]
+            assert store.load(ident)["status"] == "cancelled"
+            assert index_lines(ident) == []  # the in-flight member was abandoned, nothing new indexed
+    finally:
+        blocked.release.set()
+
+
+@pytest.mark.asyncio
+async def test_service_close_waits_for_the_ingest_thread_and_refuses_new_ingests(ffs_env, monkeypatch):
+    folder = small_dump(ffs_env, "close_svc")
+    blocked = BlockedIngest(monkeypatch)
+    try:
+        started = await SERVICE.ingest(str(folder), background=True)
+        ident = started["id"]
+        worker = await blocked.wait_entered()
+        closing = asyncio.create_task(SERVICE.close(ident, None))
+        assert await asyncio.to_thread(worker.cancel_event.wait, 30)  # close signalled the thread
+        blocked.release.set()
+        closed = await asyncio.wait_for(closing, 30)
+        assert worker.finished.is_set()  # close returned only after the thread exited
+        assert closed["status"] == "closed" and closed["ffs"]["status"] == "cancelled"
+        await drain_ingest_tasks()
+        assert store.load(ident)["status"] == "closed"
+        with pytest.raises(ValueError, match="closed"):
+            await SERVICE.ingest(str(folder), investigation_id=ident)
+        with pytest.raises(ValueError, match="closed"):
+            await FFSIngest(folder, investigation_id=ident).run()
+        assert store.load(ident)["status"] == "closed" and not ffs_ingest.running(ident)
+    finally:
+        blocked.release.set()
+
+
+@pytest.mark.asyncio
+async def test_release_task_cancel_sticks_over_a_running_ingest(ffs_env, monkeypatch):
+    from app.reverse_engineering import runtime
+    monkeypatch.setattr(runtime, "FFS_STOP_WAIT_SECONDS", 0)
+    folder = small_dump(ffs_env, "release_svc")
+    blocked = BlockedIngest(monkeypatch)
+    try:
+        ident = (await SERVICE.ingest(str(folder), task_id="task-rel", background=True))["id"]
+        worker = await blocked.wait_entered()
+        await SERVICE.release_task("task-rel", cancelled=True)
+        assert store.load(ident)["status"] == "cancelled"
+        blocked.release.set()
+        assert await asyncio.to_thread(worker.finished.wait, 30)
+        await drain_ingest_tasks()
+        assert store.load(ident)["status"] == "cancelled"
+    finally:
+        blocked.release.set()
+
+
+@pytest.mark.asyncio
+async def test_close_between_admission_and_start_is_honoured(ffs_env, monkeypatch):
+    """A close that lands before the thread registers (cancel() has nothing to signal) still wins."""
+    folder = small_dump(ffs_env, "close_window")
+    real_prepare = FFSIngest.prepare_investigation
+
+    def prepare_then_owner_cancels(self):
+        row = real_prepare(self)
+        store.set_status(row["id"], "cancelled")
+        return row
+
+    monkeypatch.setattr(FFSIngest, "prepare_investigation", prepare_then_owner_cancels)
+    ingest = FFSIngest(folder)
+    with pytest.raises(ValueError, match="closed"):
+        await ingest.run()
+    assert store.load(ingest.investigation_id)["status"] == "cancelled"
+    assert not (store.directory(ingest.investigation_id) / "index" / "files.ndjson").exists()
+    assert not ffs_ingest.running(ingest.investigation_id)
+
+
+@pytest.mark.asyncio
+async def test_change_in_a_subfolder_mid_ingest_is_detected_and_declared(ffs_env, monkeypatch):
+    folder = ffs_env / "tree_change"
+    (folder / "a").mkdir(parents=True)
+    (folder / "b").mkdir()
+    for name in ("a/f1.bin", "a/f2.bin", "a/f3.bin", "b/f4.bin"):
+        (folder / name).write_bytes(os.urandom(1024))
+    calls = {"n": 0}
+    real = ffs_ingest._digest
+
+    def digest_and_tamper(stream, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 3:  # a/f1.bin and a/f2.bin are already indexed
+            with (folder / "a" / "f1.bin").open("ab") as fh:
+                fh.write(b"appended after it was hashed")
+            (folder / "a" / "f2.bin").unlink()
+            (folder / "a" / "late.bin").write_bytes(b"new")  # a/ was already listed by the walk
+        return real(stream, *args, **kwargs)
+
+    monkeypatch.setattr(ffs_ingest, "_digest", digest_and_tamper)
+    row = await ingest_source(folder)
+    ident = row["id"]
+    custody = json.loads((store.directory(ident) / "index" / "custody.json").read_text(encoding="utf-8"))
+    # The root directory's own stat did not move, which is why the old check sealed this as unchanged.
+    assert custody["source_stat_at_admission"] == ffs_ingest.source_stat(folder)
+    assert row["status"] == "completed" and row["ffs"]["coverage"] == "partial"
+    assert custody["source_unchanged"] is False
+    assert custody["source_changes"] == {"modified": 1, "removed": 1, "added": 1}
+    assert "per-member" in custody["change_detection"]
+    unknowns = row["ffs"]["unknowns"]
+    assert any("changed size or modification time" in u and "a/f1.bin" in u for u in unknowns)
+    assert any("disappeared" in u and "a/f2.bin" in u for u in unknowns)
+    assert any("appeared" in u and "a/late.bin" in u for u in unknowns)
+    result = evidence(ident, "ffs_ingest")["result"]
+    assert result["source_unchanged"] is False and set(unknowns) <= set(result["unknowns"])
+    assert [e for e in row["chain_of_custody"] if e["event"] == "ingest_completed"][0]["metadata"]["source_unchanged"] is False
+
+
+@pytest.mark.asyncio
+async def test_same_size_rewrite_of_a_nested_member_is_detected(ffs_env, monkeypatch):
+    folder = ffs_env / "touch_change"
+    (folder / "deep" / "er").mkdir(parents=True)
+    (folder / "deep" / "er" / "x.tab").write_bytes(b"\x01" * 512)
+    (folder / "z.bin").write_bytes(b"z")
+    real = ffs_ingest._digest
+    calls = {"n": 0}
+
+    def digest_and_rewrite(stream, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            target = folder / "deep" / "er" / "x.tab"
+            target.write_bytes(b"\x02" * 512)  # same size, different bytes
+            st = target.stat()
+            os.utime(target, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+        return real(stream, *args, **kwargs)
+
+    monkeypatch.setattr(ffs_ingest, "_digest", digest_and_rewrite)
+    row = await ingest_source(folder)
+    assert row["ffs"]["coverage"] == "partial"
+    assert any("deep/er/x.tab" in u and "changed" in u for u in row["unknowns"])
+
+
+@pytest.mark.asyncio
+async def test_unchanged_folder_is_verified_member_by_member(ffs_env):
+    folder = small_dump(ffs_env, "steady")
+    row = await ingest_source(folder)
+    custody = json.loads((store.directory(row["id"]) / "index" / "custody.json").read_text(encoding="utf-8"))
+    assert custody["source_unchanged"] is True and custody["source_changes"] == {"modified": 0, "removed": 0, "added": 0}
+    assert row["ffs"]["coverage"] == "complete" and row["ffs"]["unknowns"] == []
+
+
+def ingest_finding(ident: str) -> list[dict]:
+    eid = evidence(ident, "ffs_ingest")["id"]
+    return [{"claim": "The dump was indexed read-only.", "kind": "observation", "evidence_ids": [eid]}]
+
+
+def test_ffs_report_cites_the_manifest_and_keeps_ingest_unknowns(ffs_env, allow_loopback_api, monkeypatch):
+    folder = ffs_env / "report_partial"
+    folder.mkdir()
+    (folder / "good.txt").write_bytes(b"ok")
+    (folder / "bad.bin").write_bytes(b"unreadable")
+    real_open = Path.open
+
+    def flaky_open(self, *args, **kwargs):
+        if self.name == "bad.bin":
+            raise PermissionError("locked by another process")
+        return real_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", flaky_open)
+    ident = asyncio.run(ingest_source(folder))["id"]
+    monkeypatch.setattr(Path, "open", real_open)
+    custody = json.loads((store.directory(ident) / "index" / "custody.json").read_text(encoding="utf-8"))
+
+    resp = TestClient(app).post(f"/api/investigations/{ident}/report", json={"findings": ingest_finding(ident)})
+    assert resp.status_code == 200, resp.text
+    row = resp.json()
+    assert row["status"] == "partial"  # analyst declared nothing, the ingest's gap still counts
+    assert any("could not be read" in u and "bad.bin" in u for u in row["unknowns"])
+    report = (store.directory(ident) / "report.md").read_text(encoding="utf-8")
+    assert f"Identity: FFS manifest SHA-256 {custody['source_sha256']}" in report
+    assert "live browser" not in report and "bad.bin" in report
+    saved = json.loads((store.directory(ident) / "report.json").read_text(encoding="utf-8"))
+    assert saved["unknowns"] == row["unknowns"]
+
+
+def test_complete_ffs_report_is_reported_and_analyst_unknowns_are_merged(ffs_env, allow_loopback_api):
+    folder = small_dump(ffs_env, "report_clean")
+    ident = asyncio.run(ingest_source(folder))["id"]
+    client = TestClient(app)
+    row = client.post(f"/api/investigations/{ident}/report", json={"findings": ingest_finding(ident)}).json()
+    assert row["status"] == "reported" and row["unknowns"] == []
+    sha = store.load(ident)["ffs"]["manifest_sha256"]
+    assert f"FFS manifest SHA-256 {sha}" in (store.directory(ident) / "report.md").read_text(encoding="utf-8")
+    row = client.post(f"/api/investigations/{ident}/report",
+                      json={"findings": ingest_finding(ident), "unknowns": ["Is m0.bin encrypted?"]}).json()
+    assert row["status"] == "partial" and row["unknowns"] == ["Is m0.bin encrypted?"]
+
+
+@pytest.mark.asyncio
+async def test_report_on_an_unfinished_ingest_is_partial_and_unsealed(ffs_env):
+    folder = small_dump(ffs_env, "report_unfinished")
+    ident = (await FFSIngest(folder, checkpoint_interval=1, stop_after=1).run())["id"]
+    with pytest.raises(ValueError):  # no evidence yet: findings cannot cite anything
+        await SERVICE.report(ident, [{"claim": "x", "kind": "observation", "evidence_ids": ["E00001"]}], [], None)
+    row = await SERVICE.report(ident, [], ["What else is in the dump?"], None)
+    assert row["status"] == "partial"
+    assert any("interrupted with 1 file(s) indexed" in u for u in row["unknowns"])
+    assert "What else is in the dump?" in row["unknowns"]
+    report = (store.directory(ident) / "report.md").read_text(encoding="utf-8")
+    assert "Identity: FFS index not sealed" in report and "live browser" not in report
+
+
+@pytest.mark.asyncio
+async def test_api_prepare_ffs_references_the_dump_as_read_only_snapshot(ffs_env, allow_loopback_api, monkeypatch):
+    folder = small_dump(ffs_env, "prepare_route")
+    before = tree_state(folder)
+    async with api_client() as client:
+        resp = await client.post("/api/investigations/ffs", json={"target": str(folder), "question": "Autel MS906BT dump",
+                                                                  "task_id": "task-prep"})
+        assert resp.status_code == 200, resp.text
+        prepared = resp.json()
+        ident = prepared["id"]
+        assert prepared["kind"] == "ffs" and prepared["status"] == "prepared" and prepared["source_type"] == "folder"
+        assert prepared["ffs"]["status"] == "prepared" and "snapshot" not in prepared
+        row = store.load(ident)
+        assert row["snapshot"] == row["target"] == str(folder.resolve())  # referenced in place, not copied
+        assert not (store.directory(ident) / "target").exists()
+        custody = json.loads((store.directory(ident) / "index" / "custody.json").read_text(encoding="utf-8"))
+        assert custody["source"] == str(folder.resolve()) and custody["task_id"] == "task-prep"
+        assert [e["event"] for e in row["chain_of_custody"]] == ["source_admitted"]
+        assert not (store.directory(ident) / "index" / "files.ndjson").exists()  # prepare does not ingest
+
+        # POST /{id}/ingest starts a background ingest by default; status comes through the detail endpoint.
+        started = await client.post(f"/api/investigations/{ident}/ingest", json={})
+        assert started.status_code == 200 and started.json()["ingest"] == "started"
+        await drain_ingest_tasks()
+        detail = (await client.get(f"/api/investigations/{ident}")).json()
+        assert detail["status"] == "completed" and detail["ffs"]["files_indexed"] == 3
+        assert detail["question"] == "Autel MS906BT dump"
+        assert len(index_lines(ident)) == 3 and tree_state(folder) == before
+
+        missing = await client.post("/api/investigations/ffs", json={"target": str(ffs_env / "nope")})
+        assert missing.status_code == 422
+        mismatch = await client.post("/api/investigations/ffs", json={"target": str(folder), "source_type": "zip"})
+        assert mismatch.status_code == 422 and "does not match" in mismatch.json()["detail"]
+        from app.tools import safety
+        monkeypatch.setattr("app.reverse_engineering.store.resolve_allowed_path", safety.resolve_allowed_path)
+        from types import SimpleNamespace
+        (ffs_env / "elsewhere").mkdir()
+        monkeypatch.setattr("app.api.investigations.load_settings",
+                            lambda: SimpleNamespace(allowed_directories=[str(ffs_env / "elsewhere")]))
+        refused = await client.post("/api/investigations/ffs", json={"target": str(folder)})
+        assert refused.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_members_are_hashed_in_1_mib_blocks(ffs_env, monkeypatch):
+    folder = ffs_env / "blocks"
+    folder.mkdir()
+    data = os.urandom(2 * 1024 * 1024 + 4096)
+    (folder / "big.img").write_bytes(data)
+    reads: list[int] = []
+    real = ffs_ingest._digest
+
+    class Recorder:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def read(self, n=-1):
+            reads.append(n)
+            return self.stream.read(n)
+
+    monkeypatch.setattr(ffs_ingest, "_digest", lambda stream, *a, **kw: real(Recorder(stream), *a, **kw))
+    row = await ingest_source(folder)
+    assert ffs_ingest.CHUNK_SIZE == 1024 * 1024
+    assert reads == [1024 * 1024] * 4  # three data blocks and the EOF read, never smaller or larger
+    [entry] = index_lines(row["id"])
+    assert entry["sha256"] == hashlib.sha256(data).hexdigest() and entry["bytes"] == len(data)
+
+
+@pytest.mark.asyncio
+async def test_provider_operations_never_touch_the_ffs_snapshot(ffs_env):
+    archive = ffs_env / "dump.zip"
+    with zipfile.ZipFile(archive, "w") as z:
+        z.writestr("a.txt", b"a")
+    ident = (await ingest_source(archive))["id"]
+    for operation in ("materialize_artifact", "open_binary"):
+        with pytest.raises(ValueError, match="no provider operations"):
+            await SERVICE.call(ident, operation, {}, None)
+    assert not (store.directory(ident) / "derived").exists()
+    assert store.load(ident)["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_legacy_forensic_rows_use_the_ffs_catalog_guide_and_report(ffs_env):
+    from app.reverse_engineering.skill import guide
+    folder = small_dump(ffs_env, "legacy")
+    ident = (await ingest_source(folder))["id"]
+    row = store.load(ident)
+    row["kind"] = "forensic"  # a row written by the pre-conformance ingest
+    row.pop("ffs")
+    store.save(row)
+    assert ffs_ingest.LEGACY_KINDS <= ffs_ingest.FFS_KINDS
+    catalog = await SERVICE.catalog(ident, None)
+    assert catalog["operations"] == [] and "ffs_query" in catalog["workflow"]
+    assert "ffs_tab_profile" in guide("forensic")
+    store.validate_snapshot(store.load(ident))  # the in-place dump is not re-fingerprinted
+    reported = await SERVICE.report(ident, ingest_finding(ident), [], None)
+    assert reported["status"] == "partial" and any("Legacy forensic ingest" in u for u in reported["unknowns"])
 
 
 @pytest.mark.asyncio

@@ -45,7 +45,15 @@ class IngestBody(BaseModel):
     question: str = Field(default="Forensic image ingest and file index", max_length=10000)
     task_id: str | None = None
     source_type: Literal["auto", "folder", "tar", "zip", "raw"] = "auto"
-    background: bool = False
+    # None: POST /ingest runs to completion, POST /{id}/ingest runs in the background (RFC-0208).
+    background: bool | None = None
+
+
+class FfsPrepareBody(BaseModel):
+    target: str = Field(min_length=1, max_length=4096)
+    question: str = Field(default="Forensic image ingest and file index", min_length=1, max_length=10000)
+    task_id: str | None = None
+    source_type: Literal["auto", "folder", "tar", "zip", "raw"] = "auto"
 
 
 class ApkPrepareBody(BaseModel):
@@ -114,20 +122,35 @@ async def prepare(body: PrepareBody):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@router.post("/ffs")
+async def prepare_ffs(body: FfsPrepareBody):
+    """RFC-0208: prepare a ``kind == "ffs"`` investigation. The dump is referenced read-only as the
+    snapshot (nothing is copied); start the ingest with POST /{id}/ingest."""
+    try:
+        row = await asyncio.to_thread(store.prepare_ffs, body.target, body.question,
+                                      load_settings().allowed_directories, body.task_id,
+                                      source_type=body.source_type)
+        return public_row(row)
+    except (ValueError, OSError) as exc:  # PermissionError/FileNotFoundError are OSError
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post("/ingest")
 async def ingest(body: IngestBody):
     source_target = body.target or body.source
     if not source_target.strip():
         raise HTTPException(status_code=422, detail="Source or target path is required")
-    return await _ingest(source_target, body, body.investigation_id, body.task_id, body.question)
+    return await _ingest(source_target, body, body.investigation_id, body.task_id, body.question,
+                         background=bool(body.background))
 
 
-async def _ingest(source: str, body: IngestBody, ident: str | None, task_id: str | None, question: str) -> dict:
+async def _ingest(source: str, body: IngestBody, ident: str | None, task_id: str | None, question: str,
+                  *, background: bool) -> dict:
     """RFC-0208 FFS ingest (start, or resume an interrupted one). ``background`` returns at once;
     progress is on GET /{id}, GET /{id}/status and the row's ``ffs`` block."""
     try:
         row = await SERVICE.ingest(source, question, load_settings().allowed_directories, task_id, ident,
-                                   body.source_type, background=body.background)
+                                   body.source_type, background=background)
         return public_row(row)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -282,7 +305,9 @@ async def ingest_into_investigation(ident: str, body: IngestBody):
     if not source_target.strip():
         raise HTTPException(status_code=422, detail="Source or target path is required")
     question = body.question if body.question != "Forensic image ingest and file index" else existing.get("question", body.question)
-    return await _ingest(source_target, body, ident, body.task_id or existing.get("task_id"), question)
+    # RFC-0208: this route starts/resumes a background ingest; background=false runs it inline.
+    return await _ingest(source_target, body, ident, body.task_id or existing.get("task_id"), question,
+                         background=body.background is not False)
 
 
 @router.get("/{ident}/catalog")
