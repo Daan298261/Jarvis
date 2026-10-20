@@ -185,7 +185,7 @@ Both events also carry `type` and `conversation_id`, as S2 landed them.
   ```
 - **Switch line on the task stream (`publish_persona_switch_line(task_id, persona_id, seq)`, new, `backend/app/tts/persona_speech.py`):** one `await BUS.publish(task_id, "chat_tts", "Persona switch", persona_switch_line(persona_id), stage=f"persona_switch:{seq}")`. It is persisted, so it reaches HUD chat and Chat through the SSE stream and the poll.
   - `useTaskSpeech` speaks it through `queueChatSpeech` (`chatTtsPlayer.ts:134`). The persona is already active, so the voice resolves to the new persona.
-  - The title is not `"Speak reply"`, so it never joins the reply prefix (`useTaskSpeech.ts:47`).
+  - The title is not `"Speak reply"`, so it never joins the reply prefix (`useTaskSpeech.ts:48`).
   - The `seq` in `stage` makes `useTaskSpeech`'s `eventKey` (`kind:title:stage:detail`) distinct per switch, so a second switch to the same persona in one task is still spoken. `stage` does not affect `phase_for_event`, because an unmatched stage falls through to the default, exactly like `"queued"`.
   - It does **not** call `publish_owner_text`, `announce_persona_switch`, `schedule_persona_switch_announcement` or `speak_text`. Synthesis and playback happen in the browser, so the server does one persisted publish and no audio work.
   - If the publish raises, a warning is logged and the task continues (Switch behaviour 6).
