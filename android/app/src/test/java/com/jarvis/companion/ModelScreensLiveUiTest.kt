@@ -25,7 +25,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * RFC-0234 download feedback is layered on top of the live Models screen and first-run setup card:
+ * RFC-0235 download feedback is layered on top of the live Models screen and first-run setup card:
  * the status line, pack dropdown, Download/Re-download, Delete and file import must all stay.
  */
 @RunWith(RobolectricTestRunner::class)
@@ -73,7 +73,7 @@ class ModelScreensLiveUiTest {
         compose.onAllNodesWithText("Pack · Qwen3 1.7B Abliterated ▾")[0].performClick()
         // The pack dropdown opens and lists the other pack (one more node than the cards alone).
         assertEquals(before + 1, compose.onAllNodesWithText("Qwen3 0.6B Abliterated").fetchSemanticsNodes().size)
-        // RFC-0234 progress layered on top, only in the render with a tracked transfer: once in the
+        // RFC-0235 progress layered on top, only in the render with a tracked transfer: once in the
         // status card and once on that model's card.
         assertEquals(2, compose.onAllNodesWithText("Downloading · 50%").fetchSemanticsNodes().size)
         assertTrue(compose.onAllNodesWithText("Cancel download").fetchSemanticsNodes().isNotEmpty())
