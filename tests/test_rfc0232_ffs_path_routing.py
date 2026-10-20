@@ -2,7 +2,7 @@
 deterministically, and large inputs must never enter the model context.
 
 Written xfail(strict=True) first (S1). Fix slices remove each marker:
-  S2 — route / intent / alias tests
+  S2 — route + dump-wording tests (all twelve cases)
   S3 — ingest dispatch + overflow test
 """
 from __future__ import annotations
@@ -31,12 +31,25 @@ TACO_PROMPTS = [
     r"Analyze D:\cases\x\app.apk: what servers does it talk to?",
 ]
 
-# D2: four dump wordings that must all route.
+# D2: dump wordings that must all route (S1 table ids). The last two are Taco's own phrasing
+# (D2 2026-10-20); neither path ends in ffs/dump/extraction, so only the new rule-2 wording
+# alternatives (`android file system`, bare `file system` + absolute path) can route them.
 DUMP_WORDING_PROMPTS = [
-    r"D:\cases\x\ffs what apps are installed?",
-    r"D:\cases\x\extraction which accounts are on the phone?",
-    r"D:\cases\x\dump what databases are present?",
-    r"D:\cases\x\phone full file system dump — which messaging apps have databases?",
+    pytest.param(r"D:\cases\x\ffs what apps are installed?", id="ffs"),
+    pytest.param(r"D:\cases\x\extraction which accounts are on the phone?", id="extraction"),
+    pytest.param(r"D:\cases\x\dump what databases are present?", id="dump"),
+    pytest.param(
+        r"D:\cases\x\phone full file system dump — which messaging apps have databases?",
+        id="full-file-system-dump",
+    ),
+    pytest.param(
+        r"D:\cases\x\phone this is the root of an Android file system - which accounts are on the phone?",
+        id="android-file-system",
+    ),
+    pytest.param(
+        r"Here is the file system at D:\cases\x\phone. What apps are installed?",
+        id="file-system-abs-path",
+    ),
 ]
 
 
@@ -70,7 +83,7 @@ def test_path_plus_question_routes_to_reverse_engineering(prompt):
 
 @pytest.mark.xfail(strict=True, reason="RFC-0232 S1 repro: dump wordings do not route (fixed in S2)")
 @pytest.mark.parametrize("prompt", DUMP_WORDING_PROMPTS)
-def test_four_dump_wordings_route_to_reverse_engineering(prompt):
+def test_dump_wordings_route_to_reverse_engineering(prompt):
     route = route_request(prompt)
     assert route.kind == "managed_task"
     assert route.task_class == "reverse engineering"
