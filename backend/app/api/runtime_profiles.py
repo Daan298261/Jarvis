@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -154,8 +156,9 @@ def _reject_generic_security_enable(
 
 @router.get("")
 async def list_profiles():
+    profiles = await asyncio.to_thread(list_runtime_profiles)
     return {
-        "profiles": [profile.as_dict() for profile in list_runtime_profiles()],
+        "profiles": [profile.as_dict() for profile in profiles],
         "policies": list(ROUTING_POLICIES),
         "security_gates": [status.as_dict() for status in list_gate_statuses()],
     }

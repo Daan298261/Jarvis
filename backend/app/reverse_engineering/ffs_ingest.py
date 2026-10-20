@@ -9,7 +9,9 @@ used by the ``.tab`` encryption review (``tab_analyzer``).
 Workspace layout (``<investigation>/index/``):
 
 - ``files.ndjson``  append-only index, one ``{path, bytes, sha256, mtime, magic_hex, type}``
-  object per line (``entropy`` added for ``.tab`` files, ``error`` for unreadable members).
+  object per line (``.tab`` files add ``entropy``, ``tab_header_hex`` (first 64 bytes),
+  ``top_byte`` (most common byte of the body, AT2 header excluded) and, for
+  single-byte-XOR text, ``xor_key``; ``error`` marks unreadable members).
   This is the index the APK sidecar's FFS origin (RFC-0207 slice 4) reads.
 - ``custody.json``  source, source kind, owning task, tool version, ISO-timestamped ingest
   sessions and, once complete, the finalized manifest digest (``source_sha256``).
@@ -43,7 +45,7 @@ import zipfile
 import zlib
 
 from . import store
-from .tab_analyzer import TabProfiler, is_tab_path, summarize as summarize_tab_profiles
+from .tab_analyzer import TabProfiler, is_tab_path, parse_tab_header, summarize as summarize_tab_profiles
 
 CHUNK_SIZE = 1024 * 1024  # RFC-0208: every member is hashed in 1 MiB blocks
 HEADER_MAX_BYTES = 65536  # Header inspection window for magic detection
@@ -661,7 +663,12 @@ class FFSIngest:
                             sha, size, magic, header = _digest(stream, on_data=on_data)
                         entry.update(bytes=size, sha256=sha, magic_hex=header[:MAGIC_HEX_BYTES].hex(), type=magic)
                         if profiler is not None:
-                            entry["entropy"] = profiler.result()["entropy"]
+                            profile = profiler.result()
+                            entry["entropy"] = profile["entropy"]
+                            entry["tab_header_hex"] = profile["container_hex"]
+                            entry["top_byte"] = profile["top_byte"]
+                            if profile["xor_key"] is not None:
+                                entry["xor_key"] = profile["xor_key"]
                     except IngestCancelled:
                         raise
                     except MEMBER_ERRORS as exc:
@@ -833,8 +840,15 @@ class FFSIngest:
             for raw in fh:
                 obj = json.loads(raw.decode("utf-8"))
                 if is_tab_path(obj["path"]) and "entropy" in obj:
+                    # Indexes written before the container parser carry only the 16-byte magic;
+                    # parse_tab_header then reports what it can (no key id) instead of guessing.
+                    # The real member size lets it flag a keyed member that ends inside its
+                    # 64-byte header, which the captured bytes alone cannot distinguish.
+                    header_raw = obj.get("tab_header_hex") or obj.get("magic_hex") or ""
                     files.append({"path": obj["path"], "bytes": obj["bytes"], "sha256": obj["sha256"],
-                                  "entropy": obj["entropy"], "header_hex": obj.get("magic_hex") or ""})
+                                  "entropy": obj["entropy"], "header_hex": obj.get("magic_hex") or "",
+                                  "container": parse_tab_header(bytes.fromhex(header_raw), obj["bytes"]),
+                                  "top_byte": obj.get("top_byte"), "xor_key": obj.get("xor_key")})
         files.sort(key=lambda item: item["path"])
         payload = {"investigation_id": ident, "summary": summarize_tab_profiles(files), "files": files}
         store.atomic_json(index_dir(ident) / TAB_PROFILE_FILE, payload)

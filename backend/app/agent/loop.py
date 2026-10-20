@@ -6,6 +6,7 @@ import contextlib
 import hashlib
 import json
 import logging
+import re
 import time
 import uuid
 from collections import OrderedDict
@@ -772,6 +773,19 @@ class AgentRuntime:
                 return
             for key, value in fields.items():
                 setattr(task, key, value)
+            from ..db.models import TaskPromptStep
+            remaining = list((await session.scalars(select(TaskPromptStep).where(
+                TaskPromptStep.task_id == task_id, TaskPromptStep.status != "completed"
+            ).order_by(TaskPromptStep.ordinal))).all())
+            if incoming_status == "completed" and len(remaining) > 1:
+                raise RuntimeError("Cannot complete task before all stored prompts run")
+            if incoming_status == "completed" and remaining and remaining[0].status != "running":
+                raise RuntimeError("Cannot complete a task prompt that has not started")
+            if remaining:
+                current = remaining[0]
+                current.status = str(incoming_status)
+                current.result = str(fields.get("result") or fields.get("error") or "")
+                current.updated_at = utcnow()
             task.updated_at = utcnow()
             if not task.started_at and fields.get("status") == "running":
                 task.started_at = utcnow()
@@ -2327,9 +2341,15 @@ class AgentRuntime:
             else None
         )
         follow_route = follow_turn.route if follow_turn is not None else None
+        from .task_workflow import is_large_request, load_workflow
+        stored_workflow = await load_workflow(task_id)
+        needs_workflow = stored_workflow is not None or (
+            working.task_class != CONVERSATION_CLASS and is_large_request(
+                prompt, size_class=working.ingress_size_class, complexity=working.ingress_complexity_hint)
+        )
         if follow_turn is not None:
             self._remember_owner_turn(task_id, follow_turn)
-        if (working.task_class == CONVERSATION_CLASS or (follow_route and follow_route.kind != "managed_task")) and not pending_tool:
+        if stored_workflow is None and (working.task_class == CONVERSATION_CLASS or (follow_route and follow_route.kind != "managed_task")) and not pending_tool:
             if follow_up_stays_conversation(extra_prompt, security_role=working.security_role):
                 working.task_class = CONVERSATION_CLASS
                 await self._run_conversation(
@@ -2345,7 +2365,7 @@ class AgentRuntime:
                 )
                 return
             working.task_class = (follow_route.task_class if follow_route else classify_task(extra_prompt or prompt))
-        if not pending_tool:
+        if not pending_tool and not needs_workflow:
             app_job = simple_app_control(extra_prompt or prompt)
             if app_job:
                 await self._run_simple_app_control(
@@ -2649,6 +2669,59 @@ class AgentRuntime:
         else:
             exposed_tools.update({"request_tools", "request_capability"})
 
+        from .task_workflow import append_followup, is_large_request, load_workflow, prepare_workflow
+
+        workflow = stored_workflow
+        if workflow is not None and extra_prompt:
+            try:
+                workflow = await append_followup(workflow, extra_prompt, reviews=settings.large_task_reviews)
+            except asyncio.CancelledError:
+                await self._update(task_id, status="cancelled", stage="cancelled")
+                raise
+            except Exception as exc:
+                await self._fail_task(task_id, str(exc), working, metrics)
+                return
+        # Existing jobs from before prompt workflows keep their committed tool
+        # history. Retrofitting a new plan would replay already completed work.
+        if workflow is None and not continue_existing and is_large_request(
+            prompt, size_class=working.ingress_size_class,
+            complexity=working.ingress_complexity_hint,
+        ):
+            await self._update(task_id, stage="plan", current_action="Saving large-task plan and prompts")
+            try:
+                from ..memory.ingress_spill import store_ingress_blob
+
+                if not working.ingress_blob_id:
+                    blob = await store_ingress_blob(body=prompt, conversation_id=task_id, task_id=task_id)
+                    working.ingress_blob_id = blob.root_id or blob.id
+                brief, _ = await condense_text(prompt)
+                workflow = await prepare_workflow(
+                    task_id, prompt, brief=brief,
+                    source_ref=f"read_ingress blob_id={working.ingress_blob_id}; full original in task.prompt",
+                    reviews=settings.large_task_reviews, planner=MANAGER.chat,
+                )
+            except asyncio.CancelledError:
+                await self._update(task_id, status="cancelled", stage="cancelled")
+                raise
+            except Exception as exc:
+                await self._fail_task(task_id, str(exc), working, metrics)
+                return
+        if workflow is not None:
+            if workflow.current is None:
+                # Never replay a completed workflow on an ambiguous continuation.
+                await self._fail_task(task_id, "Stored prompt plan is complete; submit follow-up work as a new task", working, metrics)
+                return
+            await workflow.mark_running()
+            active_prompt = workflow.prompt()
+            working.plan = [f"{s.ordinal}. {s.kind}: {s.prompt[:160]}" for s in workflow.steps]
+            working.next_action = workflow.current.prompt
+            working.goal = workflow.goal[:512]
+            max_steps = min(320, policy.max_steps * len(workflow.steps))
+            best_of_n_complete = True  # The separate no-tool planner already committed its plan.
+            plan_prompt = "Execute the current stored prompt with tools, then independently verify it."
+            if not pending_tool and not (continue_existing and workflow.owns_history(existing)):
+                existing = []  # Discard prior phases, but retain interrupted current-phase effects.
+
         if existing and continue_existing:
             messages = existing
             if extra_prompt:
@@ -2785,7 +2858,7 @@ class AgentRuntime:
                 ChatMessage(role="user", content=active_prompt),
                 internal_user_message(plan_prompt),
             ]
-            for skill in matched_skills:
+            for skill in ([] if workflow is not None else matched_skills):
                 if has_secret_parameters(skill):
                     continue
                 bound = bind_parameters(skill, working.goal)
@@ -2892,11 +2965,23 @@ class AgentRuntime:
             )
             tools_used = True
 
+        workflow_system = next((m for m in messages if m.role == "system"), None)
+        if workflow is not None:
+            # New calls after recovery get distinct durable model keys. Completed
+            # tool effects still reconcile through the existing tool runner.
+            from .durable_execution.repository import list_steps
+            previous = await list_steps(task_id)
+            model_turn_index = max([int(s.step_key.split(":")[1]) for s in previous
+                                    if re.match(r"^model:\d+:", s.step_key)] or [0])
         context_recovery_attempts = 0
+        workflow_phase_start = 0
         template_retries = 0
         work_wrap_retries = 0
         try:
             for _step in range(max_steps):
+                if workflow is not None and _step - workflow_phase_start >= policy.max_steps:
+                    await self._fail_task(task_id, f"Step limit reached for stored prompt {workflow.current.ordinal}", working, metrics)
+                    return
                 if task_id in self._cancel or kill_switch_active():
                     reason = "Stopped by emergency kill switch" if kill_switch_active() else "Cancelled"
                     await self._update(
@@ -3186,7 +3271,7 @@ class AgentRuntime:
                     if first_sentence_ready(result.content or ""):
                         note_worker_first_sentence(task_id)
 
-                if force_final:
+                if force_final and workflow is None:
                     content = (result.content or "").strip() or (
                         "Task finished. The tool log contains the actions that were taken and verified."
                     )
@@ -3198,8 +3283,8 @@ class AgentRuntime:
                     continue
 
                 parsed = parse_plan_block(result.content or "")
-                if best_of_n_complete and not awaiting_plan_selection:
-                    if parsed.get("end_state") or parsed.get("acceptance_criteria") or parsed.get("plan"):
+                if workflow is None and best_of_n_complete and not awaiting_plan_selection:
+                    if workflow is None and (parsed.get("end_state") or parsed.get("acceptance_criteria") or parsed.get("plan")):
                         working.apply_plan(parsed, prompt)
                         await self._update(
                             task_id,
@@ -3230,7 +3315,7 @@ class AgentRuntime:
                     tools_used = True
                     best_of_n_complete = True
                     awaiting_plan_selection = False
-                    if parsed.get("end_state") or parsed.get("acceptance_criteria") or parsed.get("plan"):
+                    if workflow is None and (parsed.get("end_state") or parsed.get("acceptance_criteria") or parsed.get("plan")):
                         working.apply_plan(parsed, prompt)
                         await self._update(
                             task_id,
@@ -3550,6 +3635,30 @@ class AgentRuntime:
                 if (policy.require_verify_tools or skill_requires_verify) and verify_tool_rounds == 0:
                     if not evidence_from_working(working).verified:
                         messages.append(internal_user_message(VERIFY_REQUIRED_PROMPT))
+                        continue
+                if workflow is not None and sum(s.status != "completed" for s in workflow.steps) > 1:
+                    await workflow.finish_current(content or "Stage independently verified with the recorded tool evidence.")
+                    if workflow.current is not None:
+                        await workflow.mark_running()
+                        active_prompt = workflow.prompt()
+                        # No prior assistant/tool transcript enters the next prompt.
+                        messages = ([workflow_system] if workflow_system else []) + [
+                            ChatMessage(role="user", content=active_prompt),
+                            internal_user_message(plan_prompt),
+                        ]
+                        verifying = tools_used = critic_done = force_final = False
+                        workflow_phase_start = _step + 1
+                        verify_tool_rounds = tool_rounds = 0
+                        consecutive_failures = invalid_tool_turns = same_tool_streak = 0
+                        recent_hashes.clear()
+                        working.next_action = workflow.current.prompt
+                        working.current_state = content[:2000]
+                        working.observations.clear()
+                        working.recent_tool_outputs.clear()
+                        working.verified = False
+                        await self._update(task_id, stage="act", current_action=f"Prompt {workflow.current.ordinal}/{len(workflow.steps)}: {workflow.current.kind}",
+                                           conversation_json=serialize_messages(messages), compact_memory=working.dumps())
+                        await BUS.publish(task_id, "stage", "Next stored task prompt", working.next_action, stage="act")
                         continue
                 working.verified = True
                 verification = content or "Independent verification pass completed; acceptance criteria checked."

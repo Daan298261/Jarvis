@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -99,7 +100,7 @@ def worker_binding_to_dict(binding: NodeWorker) -> dict[str, Any]:
 
 async def bind_workers_to_node(node_id: str) -> list[dict[str, Any]]:
     """Attach the current worker catalog to a Node. Idempotent across restarts."""
-    catalog = worker_catalog()
+    catalog = await asyncio.to_thread(worker_catalog)
     catalog_ids = {item["id"] for item in catalog}
     now = _utcnow()
 

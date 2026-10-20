@@ -299,7 +299,7 @@ def _fall_through_failed_self_status(
     rejected: bool,
 ) -> tuple[str, str]:
     """A failed self-status front must not become a canned terminal answer."""
-    if (reply_shape or "").strip() != "self_status":
+    if (reply_shape or "").strip() not in {"self_status", "basic_qa"}:
         return action, text
     if rejected or not (text or "").strip():
         return "ack_continue", ""
@@ -409,7 +409,7 @@ def fallback_text_for_action(
         return SAFE_CLARIFY
     if action == "silent_skip":
         return ""
-    if shape == "self_status":
+    if shape in {"self_status", "basic_qa"}:
         # Never a canned holding line. A failed self-status front falls through
         # to the worker (see _fall_through_failed_self_status).
         return ""
@@ -698,14 +698,14 @@ def small_context_envelope(
     reply_shape: str = "",
 ) -> list[ChatMessage]:
     hint = action_hint if action_hint in FRONT_ACTIONS else "ack_continue"
-    messages = [
-        ChatMessage(role="system", content=front_system_prompt()),
-        ChatMessage(role="system", content=f"Hint front_action: {hint}. Keep the reply spoken-ready."),
-    ]
+    # Qwen's shipped Jinja template rejects a second system message. Keep one
+    # leading system block or every front request fails and falls to the worker.
+    system = front_system_prompt() + f"\n\nHint front_action: {hint}. Keep the reply spoken-ready."
     if (reply_shape or "").strip() == "self_status" and snapshot:
         from .self_knowledge import snapshot_prompt_addendum
 
-        messages.append(ChatMessage(role="system", content=snapshot_prompt_addendum(snapshot)))
+        system += "\n\n" + snapshot_prompt_addendum(snapshot)
+    messages = [ChatMessage(role="system", content=system)]
     keep = max(0, int(context_turns or 0))
     prior = [
         message
