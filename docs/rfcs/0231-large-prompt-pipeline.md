@@ -871,7 +871,7 @@ On `loop.py` and `owner_turn.py` the order is RFC-0230 (#666), then RFC-0232 (#6
 | `backend/app/agent/task_workflow.py` | #649 (landed, created it) → 0231-S2 |
 | `backend/app/api/settings.py` | #649 (landed) → 0231-S2 → 0233-S1 (#668) |
 | `scripts/anzu-latency-repro.ps1`, `scripts/latency_repro.py` | 0230-S0 (creates them) → 0231-S4 (append-only: one `--cases` argument) |
-| `frontend/src/api.ts` | 0230-S0 (`X-ANZU-Input-End`) → 0218-S3 → 0227 (selection helpers) → 0231-S6 → 0233-S6 (#668) |
+| `frontend/src/api.ts` | 0230-S0 → 0218-S3 → 0227 → 0231-S6 → 0233-S6 |
 | `frontend/src/taskStatus.ts`, `frontend/src/components/TaskActivity.tsx` | #649 (landed) → 0231-S6 |
 | `frontend/package.json`, `.github/workflows/pr-tests.yml` | **Append-only.** The Architect owns the workflow file. Open appenders: #662 (0229-S1), 0228-S2, 0230-S0, 0230-S3, 0232-S6 and 0231-S0…S6. Rule: each ticket appends its own step, never edits another's, and on a conflict merges `development` with a merge commit and keeps both steps |
 
