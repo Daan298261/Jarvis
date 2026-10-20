@@ -141,7 +141,7 @@ A permanent product feature, not debug scaffolding. One `TurnTrace` per owner tu
 | `backend/app/main.py` | one `include_router` line (after 0225-S3, per CoS) |
 | `frontend/src/tts/chatTtsPlayer.ts` | `SpeakOpts.turnId?: string`; `X-ANZU-Turn` header on `/api/voice/speak`; `first_audio` POST once per turn on the first item's `playing` event. First owner: 0230-S0 → S4 |
 | `frontend/src/tts/useTaskSpeech.ts` | passes `turnId: taskId` into the `queueChatSpeech` calls at `:51` and `:93`; nothing else changes |
-| `frontend/src/api.ts` | stamp `X-ANZU-Input-End` on `POST /api/tasks`, `/continue` and `/api/voice/listen`. First owner: 0230-S0 → 0218-S3 → 0227 selection helpers → 0231-S6 |
+| `frontend/src/api.ts` | stamp `X-ANZU-Input-End` on `POST /api/tasks`, `/continue` and `/api/voice/listen`. First owner: 0230-S0 → 0218-S3 → 0227 selection helpers → 0231-S6 → 0233-S6 (erratum 2026-10-20, same as §9) |
 | `scripts/latency_repro.py` (new), `scripts/anzu-latency-repro.ps1` (new) | see *Repro* below |
 | `tests/fixtures/voice/rfc0230_hello.wav`, `tests/fixtures/voice/rfc0230_question.wav` (new) + `tests/fixtures/voice/README.md` | see *Repro* below |
 | `tests/test_rfc0230_turn_trace.py` (new); `frontend/turn-latency-marks.test.mjs` (new); `frontend/package.json` (`test:turn-latency-marks`, one line); `.github/workflows/pr-tests.yml` | see below |
@@ -302,7 +302,7 @@ All run with fast mode off.
 | `backend/app/tts/kokoro_adapter.py` | 0226-S1 (verifying state, background re-verify) → 0230-S4 (thread cap) |
 | `backend/app/api/voice.py` | 0230-S0 → 0226-S1 (`POST /api/voice/kokoro/reload`) → 0230-S1 (`stt_warm`) |
 | `backend/app/api/turn_latency.py` (new) | 0230-S0 → S3 |
-| `frontend/src/api.ts` | 0230-S0 → 0218-S3 → 0227 (selection helpers) → 0231-S6 |
+| `frontend/src/api.ts` | 0230-S0 → 0218-S3 → 0227 → 0231-S6 → 0233-S6 (erratum 2026-10-20, CoS: 0233-S6 was missing when #666 landed) |
 | `frontend/src/tts/chatTtsPlayer.ts` | 0230-S0 → 0230-S4 |
 | `frontend/src/tts/useTaskSpeech.ts` | 0230-S0 only |
 | `frontend/src/hud/HudChat.tsx` | 0230-S3 only (one effect; no JSX change) |
