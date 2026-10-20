@@ -247,3 +247,56 @@ async def test_every_prepare_route_gives_the_identical_422(layout, allow_loopbac
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
         responses = [await client.post(route, json={"target": str(t), **extra}) for t in targets]
     assert {(r.status_code, r.text) for r in responses} == {(422, '{"detail":"' + store.OUTSIDE_ALLOWED + '"}')}
+
+
+# ----- '..' through an outside link (D2 #661 review): the OS follows linkdir before applying '..' -----
+
+def _dotdot_targets(layout) -> list[str]:
+    """allowed/linkdir -> /outside/a/b, so allowed/linkdir/.. is /outside/a for the OS."""
+    a = layout.outside / "a"
+    (a / "b").mkdir(parents=True)
+    _symlink(layout.allowed / "linkdir", a / "b")
+    (a / "existing_dir").mkdir()
+    (a / "existing.bin").write_bytes(b"\x7fELF")
+    (a / "real.apk").write_bytes(b"PK\x03\x04")
+    _symlink(a / "link.apk", a / "real.apk")
+    _symlink(a / "leaf_link", layout.secret)
+    _symlink(a / "dangling", a / "gone")
+    _symlink(a / "root_link", layout.allowed)
+    via = str(layout.allowed / "linkdir") + os.sep + ".." + os.sep
+    return [via + n for n in ("leaf_link", "link.apk", "real.apk", "existing.bin", "existing_dir", "missing",
+                              "missing.apk", "missing_dir", "dangling", "root_link")] + [
+        via + "..", via + "b" + os.sep + ".." + os.sep + "leaf_link"]
+
+
+@pytest.mark.parametrize("entry", ["prepare", "prepare_ffs", "prepare_apk"])
+def test_dotdot_through_an_outside_link_is_identical_for_every_entry_point(layout, entry):
+    call = {
+        "prepare": lambda t: store.prepare(t, "What is this?", layout.roots, None),
+        "prepare_ffs": lambda t: store.prepare_ffs(t, "q", layout.roots, None),
+        "prepare_apk": lambda t: apk_sidecar.prepare_apk(t, "q", layout.roots, None),
+    }[entry]
+    results = set()
+    for t in _dotdot_targets(layout):
+        with pytest.raises(Exception) as info:
+            call(t)
+        results.add((type(info.value), str(info.value)))
+    assert results == {(PermissionError, store.OUTSIDE_ALLOWED)}
+    _no_leftover_workspaces(layout)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route,extra", [
+    ("/api/investigations", {"question": "What is this?"}),
+    ("/api/investigations/ffs", {}),
+    ("/api/investigations/ingest", {"background": False}),
+    ("/api/investigations/apk/prepare", {"source_type": "file"}),
+])
+async def test_dotdot_through_an_outside_link_gives_the_identical_422_on_every_route(
+        layout, allow_loopback_api, monkeypatch, route, extra):
+    targets = _dotdot_targets(layout)
+    monkeypatch.setattr("app.api.investigations.load_settings",
+                        lambda: SimpleNamespace(allowed_directories=layout.roots))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+        responses = [await client.post(route, json={"target": t, **extra}) for t in targets]
+    assert {(r.status_code, r.text) for r in responses} == {(422, '{"detail":"' + store.OUTSIDE_ALLOWED + '"}')}
