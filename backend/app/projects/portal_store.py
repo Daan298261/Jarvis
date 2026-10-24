@@ -25,7 +25,7 @@ def _messages_from_json(raw: str) -> list[ChatMessage]:
         if not isinstance(row, dict):
             continue
         role = str(row.get("role") or "")
-        content = str(row.get("content") or "")
+        content = str(row.get("content") or row.get("text") or "")
         if role in {"user", "assistant", "system"} and content:
             out.append(ChatMessage(role=role, content=content))
     return out
@@ -215,6 +215,10 @@ async def load_owner_conversation(conversation_id: str) -> list[ChatMessage]:
         row = await session.get(Conversation, conversation_id)
         if row is None:
             return []
+        if row.task_id:
+            from ..mobile import service
+            detail = await service.conversation_detail(conversation_id)
+            return _messages_from_json(json.dumps(detail["messages"]))
         return _messages_from_json(row.messages_json)
 
 
@@ -244,7 +248,12 @@ async def open_conversation(conversation_id: str) -> dict[str, Any]:
         row = await session.get(Conversation, conversation_id)
         if row is None:
             return {}
-        messages = _messages_from_json(row.messages_json)
+        if row.task_id:
+            from ..mobile import service
+            detail = await service.conversation_detail(conversation_id)
+            messages = _messages_from_json(json.dumps(detail["messages"]))
+        else:
+            messages = _messages_from_json(row.messages_json)
         return {
             "id": row.id,
             "title": row.title or "Chat",

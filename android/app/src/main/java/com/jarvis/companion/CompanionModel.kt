@@ -79,6 +79,9 @@ data class CompanionState(
     val notes: List<JSONObject> = emptyList(),
     val modelImportBusy: Boolean = false,
     val modelImportMessage: String = "",
+    val desktopProjects: List<JSONObject> = emptyList(),
+    val desktopProjectId: String = "",
+    val handoffText: String = "",
 )
 
 /** True when the on-device model can answer right now. */
@@ -109,6 +112,12 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     val api = jarvisApp.api
     private val deviceModelChrome = jarvisApp.deviceModelChrome
     private val companionPrefs = app.getSharedPreferences("companion_ui", Application.MODE_PRIVATE)
+    private val projectCache = EncryptedJsonFile(File(app.noBackupFilesDir, "desktop-projects"), AndroidKeystoreOutboxQueueCrypto("anzu-desktop-projects-v1"))
+    private var projectRefreshAt = 0L
+    private var voiceTaskId: String? = null
+    private var voiceTaskViaSocket = false
+    private var acknowledgmentJob: Job? = null
+    private var partialSttJob: Job? = null
     private val mutable = MutableStateFlow(CompanionState(
         selectedModel = companionPrefs.getString("inference_profile", "auto") ?: "auto",
         selectedVoice = companionPrefs.getString("voice_profile", "") ?: "",
@@ -391,6 +400,11 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
 
     /** Loads phone-held conversations and notes; an unpaired phone reopens its latest conversation. */
     private fun loadLocalLibrary() {
+        val cached = projectCache.read()
+        if (cached.optString("device") == api.deviceId) mutable.value = mutable.value.copy(
+            desktopProjects = cached.optJSONArray("projects")?.objects().orEmpty(),
+            conversations = cached.optJSONArray("conversations")?.objects().orEmpty(),
+        )
         // Import the former plaintext desktop cache once, then remove it only after a committed encrypted copy.
         companionPrefs.getString("last_synced_messages", null)?.let { cached ->
             val id = "legacy-desktop-cache"
@@ -657,7 +671,12 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             connected = true,
             error = null,
             leaderReachable = true,
-            activity = active?.optString("activity") ?: "Ready when you are",
+            activity = when {
+                mutable.value.recording -> "Listening…"
+                mutable.value.speaking -> mutable.value.activity
+                voiceTaskId != null -> "Desktop is processing your request…"
+                else -> active?.optString("activity") ?: "Ready when you are"
+            },
             tasks = payload.tasks,
             models = payload.models,
             conversations = payload.conversations,
@@ -687,6 +706,19 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             offlineQueueDepth = offlineQueue.pendingCount(),
         )
         publishVoiceRoute()
+        refreshDesktopProjects()
+        val voiceTask = voiceTaskId?.let { id -> payload.tasks.firstOrNull { it.optString("id") == id }
+            ?: runCatching { api.json("/tasks/$id") }.getOrNull() }
+        if (!voiceTaskViaSocket && voiceTask != null && voiceTask.optString("status") in setOf("completed", "failed", "cancelled")) {
+            voiceTaskId = null
+            acknowledgmentJob?.cancel()
+            stopSpeaking()
+            mutable.value = mutable.value.copy(handoffText = "")
+            val reply = voiceTask.optString("result").ifBlank {
+                payload.messages.lastOrNull { it.optString("role") == "assistant" && it.optString("task_id") == voiceTask.optString("id") }?.optString("text").orEmpty()
+            }
+            if (reply.isNotBlank()) speak(reply)
+        }
         if (CompanionRouting.shouldSyncAfterLeaderReturn(wasOffline || offlineSyncIncomplete, true, offlineQueue.pendingCount())) {
             mutable.value = mutable.value.copy(activity = CompanionOfflineStatus.desktopBackBanner())
             // A failed batch stays queued and is retried on the next poll; the desktop is still reachable.
@@ -763,6 +795,10 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             mutable.value = mutable.value.copy(conversationId = id, messages = localConversations.messages(id!!))
             return@action
         }
+        if (id != null) {
+            val project = mutable.value.conversations.firstOrNull { it.optString("id") == id }?.optString("project_id").orEmpty()
+            mutable.value = mutable.value.copy(desktopProjectId = project)
+        }
         mutable.value = mutable.value.copy(conversationId = id, messages = emptyList())
         if (mutable.value.leaderReachable) refresh()
         else if (id != null) error("That conversation lives on the ANZU desktop. It opens again when the desktop is reachable.")
@@ -789,7 +825,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         val state = mutable.value
         var quick = quickAnswers.value
         var routingSource = "local"
-        if (quick && decisionEngine.value != "local" && state.connected && (decisionEngine.value != "jev" || jevCloudAllowed.value)) {
+        if (!fromVoice && quick && decisionEngine.value != "local" && state.connected && (decisionEngine.value != "jev" || jevCloudAllowed.value)) {
             val decision = runCatching { api.quickRoute(text, decisionEngine.value, jevCloudAllowed.value) }.getOrNull()
             if (decision != null && !decision.optBoolean("fallback_used", true)) {
                 quick = decision.optString("mode") == "quick"
@@ -797,9 +833,9 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                 quickStatus.value = "${decision.optString("source").replaceFirstChar { it.uppercase() }} routing · ${if (quick) "Quick" else "Detailed"}"
             } else quickStatus.value = "Local routing · decision engine unavailable"
         } else quickStatus.value = "${if (quick) "Quick" else "Detailed"} · local routing"
-        val fast = if (quick && state.attachmentIds.isEmpty() && PhoneQuickMode.isQuestion(text)) CompanionPackCatalog.fastInstalledPack(packManager.catalog(), packManager::packCanLoad) else null
+        val fast = if (!fromVoice && quick && state.attachmentIds.isEmpty() && PhoneQuickMode.isQuestion(text)) CompanionPackCatalog.fastInstalledPack(packManager.catalog(), packManager::packCanLoad) else null
         val routing = CompanionRouting.decide(
-            leaderReachable = state.leaderReachable && !preferPhoneLocal.value && fast == null,
+            leaderReachable = state.leaderReachable && (fromVoice || (!preferPhoneLocal.value && fast == null)),
             packStatus = if (fast != null) CompanionPackStatus.READY else state.localPackStatus,
             resourceBlocked = DeviceInferenceGuard.blockReason(getApplication(), packManager.resolveOfflinePack(quick) ?: packManager.selectedPack() ?: CompanionPackCatalog.builtIn.first()),
             hasStalePendingOnlineOutbox = state.pendingMessage,
@@ -811,7 +847,8 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                     .put("attachments", JSONArray(state.attachmentIds))
                 state.conversationId?.takeUnless { LocalConversationStore.isLocal(it) }?.let { content.put("conversation_id", it) }
                 content.put("request_id", UUID.randomUUID().toString())
-                outbox.save(JSONObject().put("device", api.deviceId).put("pin", api.pin).put("body", content))
+                outbox.save(JSONObject().put("device", api.deviceId).put("pin", api.pin).put("body", content)
+                    .put("from_voice", fromVoice).put("project_id", state.desktopProjectId))
                 mutable.value = mutable.value.copy(pendingMessage = true)
                 deliverPending()
             }
@@ -1047,8 +1084,80 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         val pending = outbox.read() ?: return
         check(pending.getString("device") == api.deviceId && pending.getString("pin") == api.pin) { "This pending message belongs to a different pairing" }
         val result = api.json("/messages", "POST", pending.getJSONObject("body"))
-        outbox.clear()
         mutable.value = mutable.value.copy(conversationId = result.getString("conversation_id"), attachmentIds = emptyList())
+        if (pending.optBoolean("from_voice")) {
+            voiceTaskViaSocket = false
+            voiceTaskId = result.optString("task_id").takeIf { it.isNotBlank() }
+            startDesktopAcknowledgment()
+        }
+        pending.optString("project_id").takeIf { it.isNotBlank() }?.let { project ->
+            // Retain the same request ID until assignment commits; a dropped reply retries safely.
+            api.json("/projects/$project/conversations/${result.getString("conversation_id")}", "PUT", JSONObject())
+        }
+        outbox.clear()
+        refresh()
+    }
+
+    /** Called only after desktop acceptance; no phone inference delays submission. */
+    private fun startDesktopAcknowledgment() {
+        acknowledgmentJob?.cancel()
+        val task = voiceTaskId ?: return
+        val fallback = "I've sent your request to the desktop. A moment, please."
+        mutable.value = mutable.value.copy(handoffText = fallback, activity = "Desktop is processing your request…")
+        acknowledgmentJob = viewModelScope.launch {
+            val generated = try { if (mutable.value.localModelReady) withTimeoutOrNull(1500) {
+                val output = StringBuilder()
+                packManager.generate(
+                    prompt = "Write one brief acknowledgment that the request was sent to the desktop for processing. Do not answer the request or claim it is finished. Reply with only that sentence.\nassistant:",
+                    maxTokens = 32, preferFast = true, onToken = { output.append(it) },
+                )
+                output.toString().substringBefore("<").trim().take(180).takeIf { it.length >= 12 }
+            } else null } catch (exc: kotlinx.coroutines.CancellationException) { throw exc } catch (_: Exception) { null }
+            if (voiceTaskId == task) {
+                val text = generated ?: fallback
+                mutable.value = mutable.value.copy(handoffText = text)
+                if (voicePackManager.isTtsReady()) startOnDeviceSpeak(text)
+                else if (platformVoice.ttsReady) speakWithPlatform(text)
+            }
+        }
+    }
+
+    private suspend fun refreshDesktopProjects() {
+        if (android.os.SystemClock.elapsedRealtime() - projectRefreshAt < 5000) return
+        val projects = runCatching { api.json("/projects").optJSONArray("projects")?.objects().orEmpty() }.getOrNull() ?: return
+        projectRefreshAt = android.os.SystemClock.elapsedRealtime()
+        mutable.value = mutable.value.copy(desktopProjects = projects)
+        withContext(Dispatchers.IO) { projectCache.update { it.put("device", api.deviceId).put("projects", JSONArray(projects)).put("conversations", JSONArray(mutable.value.conversations)) } }
+    }
+
+    fun selectDesktopProject(id: String) {
+        mutable.value = mutable.value.copy(desktopProjectId = id)
+        if (id.isNotBlank() && mutable.value.connected) action {
+            val chats = api.array("/projects/$id/conversations").objects()
+            mutable.value = mutable.value.copy(conversations = (chats + mutable.value.conversations).distinctBy { it.optString("id") })
+        }
+    }
+
+    fun createDesktopProject(name: String) = action {
+        val result = api.json("/projects", "POST", JSONObject().put("name", name))
+        selectDesktopProject(result.getString("id"))
+        openConversation(null)
+        projectRefreshAt = 0
+        refreshDesktopProjects()
+    }
+
+    fun renameDesktopProject(id: String, name: String) = action {
+        api.json("/projects/$id", "PATCH", JSONObject().put("name", name))
+        projectRefreshAt = 0
+        refreshDesktopProjects()
+    }
+
+    fun moveChatToProject(project: String) = action {
+        val id = mutable.value.conversationId ?: return@action
+        check(!LocalConversationStore.isLocal(id)) { "Sync this phone chat before moving it to a desktop project" }
+        api.json("/projects/$project/conversations/$id", "PUT", JSONObject())
+        mutable.value = mutable.value.copy(desktopProjectId = project)
+        projectRefreshAt = 0
         refresh()
     }
     fun upload(uri: Uri) = action { uploadNow(uri) }
@@ -1257,6 +1366,15 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         refresh()
     }
     fun toggleRecord() {
+        if (mutable.value.recording && !platformVoice.listening && audioRecord == null && recorder == null) return
+        if (mutable.value.connected && platformVoice.sttAvailable()) {
+            togglePlatformListen()
+            return
+        }
+        if (onDeviceListening || voicePackManager.isSttReady()) {
+            if (onDeviceListening) stopOnDeviceListen() else startOnDeviceListen()
+            return
+        }
         val voiceCaps = mutable.value.capabilities.optJSONObject("voice")
         val route = currentVoiceRoute()
         if (route.stt == SttVoiceRoute.PLATFORM) {
@@ -1302,7 +1420,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             try {
                 recorder?.stop()
                 val result = JSONObject(api.raw("/voice/transcribe", "POST", recordingFile!!.readBytes(), contentType = "audio/mp4").toString(Charsets.UTF_8))
-                sendNow(result.getString("text"))
+                sendNow(result.getString("text"), fromVoice = true)
             } finally {
                 recorder?.release(); recorder = null; recordingFile?.delete()
                 mutable.value = mutable.value.copy(recording = false)
@@ -1333,6 +1451,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             error = null,
         )
         platformVoice.startListening(
+            onCaptureEnd = { mutable.value = mutable.value.copy(recording = false, activity = "Finishing transcript…") },
             onPartial = { partial -> mutable.value = mutable.value.copy(liveTranscript = partial) },
             onResult = { text ->
                 mutable.value = mutable.value.copy(recording = false, liveTranscript = text, activity = "Transcript ready")
@@ -1392,34 +1511,51 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         )
         captureJob = viewModelScope.launch(Dispatchers.IO) {
             val buffer = ByteArray(minBuf.coerceAtLeast(3200))
+            val endpoint = VoiceEndpoint()
             while (isActive && onDeviceListening && audioRecord != null) {
-                val read = record.read(buffer, 0, buffer.size)
-                if (read > 0) onDevicePcm?.write(buffer, 0, read)
+                val read = runCatching { record.read(buffer, 0, minOf(buffer.size, 640)) }.getOrDefault(-1)
+                if (read > 0) {
+                    onDevicePcm?.write(buffer, 0, read)
+                    if (endpoint.accept(buffer, read)) { withContext(Dispatchers.Main) { stopOnDeviceListen(noSpeech = !endpoint.heardSpeech) }; break }
+                } else if (read < 0) { withContext(Dispatchers.Main) { stopOnDeviceListen() }; break }
+            }
+        }
+        partialSttJob = viewModelScope.launch {
+            while (isActive && onDeviceListening) {
+                delay(900)
+                val pcm = onDevicePcm?.toByteArray() ?: break
+                if (pcm.size < 16000) continue
+                try {
+                    val text = voicePackManager.transcribePcm16le(pcm.takeLast(384000).toByteArray(), 16000)
+                    if (onDeviceListening) mutable.value = mutable.value.copy(liveTranscript = text)
+                } catch (exc: kotlinx.coroutines.CancellationException) { throw exc } catch (_: Exception) { /* Final decode reports actionable errors. */ }
             }
         }
     }
 
-    private fun stopOnDeviceListen() = action {
+    private fun stopOnDeviceListen(noSpeech: Boolean = false) = action {
+        if (!onDeviceListening) return@action
         onDeviceListening = false
         captureJob?.cancel(); captureJob = null
         runCatching { audioRecord?.stop() }
         audioRecord?.release(); audioRecord = null
         mutable.value = mutable.value.copy(recording = false)
+        partialSttJob?.cancel(); partialSttJob?.join(); partialSttJob = null
         val pcm = onDevicePcm?.toByteArray() ?: ByteArray(0)
         onDevicePcm = null
-        if (pcm.isEmpty()) {
+        if (pcm.isEmpty() || noSpeech) {
             mutable.value = mutable.value.copy(error = "No audio captured for on-device STT")
             voicePackManager.unloadIdle()
             return@action
         }
-        try {
-            val text = voicePackManager.transcribePcm16le(pcm, 16_000)
-            mutable.value = mutable.value.copy(liveTranscript = text, activity = "On-device transcript ready")
-            sendNow(text, fromVoice = true)
+        val text = try {
+            voicePackManager.transcribePcm16le(pcm, 16_000)
         } finally {
             voicePackManager.unloadIdle()
             publishVoiceRoute()
         }
+        mutable.value = mutable.value.copy(liveTranscript = text, activity = "On-device transcript ready")
+        sendNow(text, fromVoice = true)
     }
 
     private fun hasRecordAudioPermission(): Boolean =
@@ -1434,8 +1570,9 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         stopSpeaking()
         val session = RealtimeVoiceSession(api, mutable.value.conversationId, mutable.value.selectedVoice, mutable.value.selectedModel)
         realtime = session
-        session.connect()
-        session.startTurn()
+        try {
+            check(withTimeoutOrNull(10000) { session.connect(); session.startTurn(); true } == true) { "Desktop voice connection timed out" }
+        } catch (exc: Exception) { session.close(); realtime = null; throw exc }
         val minBuf = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val record = try {
             AudioRecord(AudioSource.VOICE_COMMUNICATION, 16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, minBuf * 2)
@@ -1467,11 +1604,23 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         ensureTtsWorker()
         captureJob = viewModelScope.launch(Dispatchers.IO) {
             val buffer = ByteArray(minBuf.coerceAtLeast(3200))
+            val endpoint = VoiceEndpoint()
             while (isActive && audioRecord != null) {
-                val read = record.read(buffer, 0, buffer.size)
+                val read = runCatching { record.read(buffer, 0, minOf(buffer.size, 640)) }.getOrDefault(-1)
                 if (read > 0) {
-                    try { session.sendPcm(buffer.copyOf(read)) } catch (_: Exception) { break }
-                }
+                    try { session.sendPcm(buffer.copyOf(read)) } catch (_: Exception) {
+                        withContext(Dispatchers.Main) { stopRealtimeTalk() }; break
+                    }
+                    if (endpoint.accept(buffer, read)) {
+                        withContext(Dispatchers.Main) {
+                            if (endpoint.heardSpeech) stopRealtimeTalk() else {
+                                session.close(); listenJob?.cancel()
+                                mutable.value = mutable.value.copy(recording = false, error = "No speech detected. Tap the mic to try again.")
+                            }
+                        }
+                        break
+                    }
+                } else if (read < 0) { withContext(Dispatchers.Main) { stopRealtimeTalk() }; break }
             }
         }
         listenJob = viewModelScope.launch {
@@ -1479,12 +1628,24 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                 while (isActive) {
                     val event = session.nextEvent()
                     when (event.optString("type")) {
+                        "accepted" -> {
+                            voiceTaskId = event.optString("task_id")
+                            voiceTaskViaSocket = true
+                            mutable.value = mutable.value.copy(conversationId = event.optString("conversation_id"))
+                            startDesktopAcknowledgment()
+                        }
                         "partial", "final" -> mutable.value = mutable.value.copy(
                             liveTranscript = event.optString("text"),
                             activity = if (event.optString("type") == "final") "Thinking…" else "Listening…",
                         )
                         "tts" -> {
                             if (event.optBoolean("final")) continue
+                            if (acknowledgmentJob != null) {
+                                acknowledgmentJob?.cancel()
+                                acknowledgmentJob = null
+                                stopSpeaking()
+                            }
+                            mutable.value = mutable.value.copy(handoffText = "")
                             val data = event.optString("data")
                             if (data.isNotEmpty()) {
                                 ttsQueue.offer(Base64.decode(data, Base64.DEFAULT))
@@ -1492,6 +1653,10 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                             }
                         }
                         "done" -> {
+                            acknowledgmentJob?.cancel()
+                            voiceTaskId = null
+                            voiceTaskViaSocket = false
+                            mutable.value = mutable.value.copy(handoffText = "")
                             event.optString("conversation_id").takeIf { it.isNotEmpty() }?.let {
                                 mutable.value = mutable.value.copy(conversationId = it)
                             }
@@ -1509,11 +1674,19 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (exc: Exception) {
                 mutable.value = mutable.value.copy(error = exc.message)
+                voiceTaskViaSocket = false
+            } finally {
+                captureJob?.cancel(); captureJob = null
+                runCatching { audioRecord?.stop() }; audioRecord?.release(); audioRecord = null
+                session.close()
+                if (realtime === session) realtime = null
+                mutable.value = mutable.value.copy(recording = false)
             }
         }
     }
 
     private fun stopRealtimeTalk() = action {
+        if (audioRecord == null) return@action
         captureJob?.cancel(); captureJob = null
         runCatching { audioRecord?.stop() }
         audioRecord?.release(); audioRecord = null
@@ -1723,6 +1896,8 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        partialSttJob?.cancel()
+        acknowledgmentJob?.cancel()
         getApplication<Application>().unregisterComponentCallbacks(memoryPressure)
         idleUnload?.cancel()
         networkCallback?.let { callback ->
