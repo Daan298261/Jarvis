@@ -1366,6 +1366,8 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         refresh()
     }
     fun toggleRecord() {
+        if (onDeviceListening) { stopOnDeviceListen(); return }
+        if (audioRecord != null || realtime != null) { stopRealtimeTalk(); return }
         if (mutable.value.recording && !platformVoice.listening && audioRecord == null && recorder == null) return
         if (mutable.value.connected && platformVoice.sttAvailable()) {
             togglePlatformListen()
@@ -1451,6 +1453,14 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             error = null,
         )
         platformVoice.startListening(
+            onUnavailable = { message ->
+                mutable.value = mutable.value.copy(recording = false, onDeviceVoiceActive = false)
+                when {
+                    voicePackManager.isSttReady() -> startOnDeviceListen()
+                    mutable.value.connected && mutable.value.capabilities.optJSONObject("voice")?.optBoolean("realtime") == true -> startRealtimeTalk()
+                    else -> mutable.value = mutable.value.copy(activity = "Ready when you are", error = message)
+                }
+            },
             onCaptureEnd = { mutable.value = mutable.value.copy(recording = false, activity = "Finishing transcript…") },
             onPartial = { partial -> mutable.value = mutable.value.copy(liveTranscript = partial) },
             onResult = { text ->
