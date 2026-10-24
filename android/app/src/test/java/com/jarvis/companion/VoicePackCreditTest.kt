@@ -6,9 +6,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
@@ -112,7 +112,7 @@ class VoicePackCreditTest {
         }
         val sentence = VoicePackCredit.sentence(CompanionVoicePackCatalog.POCKET_VOICE_ATTRIBUTION)
         compose.onNodeWithText("Licenses").assertIsDisplayed()
-        compose.onNodeWithText(sentence).assertDoesNotExist()
+        assertTrue(compose.onAllNodesWithText(sentence).fetchSemanticsNodes().isEmpty())
         compose.onNodeWithText("Open").performClick()
         compose.onNodeWithText("Pocket TTS").assertIsDisplayed()
         compose.onNodeWithText(sentence).assertIsDisplayed()
