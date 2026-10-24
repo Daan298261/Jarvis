@@ -6,6 +6,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -85,5 +86,49 @@ class VoicePackCreditTest {
             assertEquals(Intent.ACTION_VIEW, started.action)
             assertEquals(url, started.dataString)
         }
+    }
+
+    @Test fun licenseNoticesFallBackToPinnedPocketCreditAndKeepOtherText() {
+        val notices = VoicePackCredit.licenseNotices()
+        val pocketNotice = notices.first { it.packId == pocket }
+        assertNull(pocketNotice.attribution)
+        assertEquals(
+            CompanionVoicePackCatalog.POCKET_VOICE_ATTRIBUTION,
+            VoicePackCredit.creditText(pocketNotice.packId, pocketNotice.attribution),
+        )
+        val others = notices.filter { it.packId != pocket }
+        assertTrue(others.isNotEmpty())
+        others.forEach { notice ->
+            assertEquals(notice.attribution?.trim(), VoicePackCredit.creditText(notice.packId, notice.attribution))
+            assertTrue(notice.attribution!!.contains("https://"))
+        }
+    }
+
+    @Test fun licenseScreenStaysClosedUntilOpenedThenShowsPocketCredit() {
+        compose.setContent {
+            PhoneSettingsSection(title = "Licenses", summary = "Third-party notices, including Pocket TTS") {
+                LicenseScreen(color = Color.Gray, errorColor = Color.Red)
+            }
+        }
+        val sentence = VoicePackCredit.sentence(CompanionVoicePackCatalog.POCKET_VOICE_ATTRIBUTION)
+        compose.onNodeWithText("Licenses").assertIsDisplayed()
+        compose.onNodeWithText(sentence).assertDoesNotExist()
+        compose.onNodeWithText("Open").performClick()
+        compose.onNodeWithText("Pocket TTS").assertIsDisplayed()
+        compose.onNodeWithText(sentence).assertIsDisplayed()
+        val url = pocketUrls.first()
+        val label = app.getString(VoicePackCredit.linkLabel(url))
+        compose.onNodeWithText("$label: $url").assertIsDisplayed().performClick()
+        val started = shadowOf(app).nextStartedActivity
+        assertEquals(Intent.ACTION_VIEW, started.action)
+        assertEquals(url, started.dataString)
+    }
+
+    @Test fun pocketTtsIsTheOnlySynthesizableOnDeviceVoice() {
+        val tts = CompanionVoicePackCatalog.builtIn.filter { it.role == "tts" }
+        assertEquals(listOf(pocket), tts.map { it.id })
+        assertEquals(CompanionVoicePackCatalog.POCKET_TTS_ENGINE, tts.single().engine)
+        assertTrue(CompanionVoicePackCatalog.canSynthesize(tts.single()))
+        assertFalse(tts.single().attribution.isBlank())
     }
 }
