@@ -1295,6 +1295,14 @@ private fun formatStorageBytes(bytes: Long): String {
             Text(stringResource(R.string.about), fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
             SponsorCreditRow()
         }
+        item {
+            PhoneSettingsSection(
+                stringResource(R.string.licenses),
+                stringResource(R.string.licenses_summary),
+            ) {
+                LicenseScreen(color = Muted, errorColor = ErrorText)
+            }
+        }
         item { Spacer(Modifier.height(20.dp)) }
     }
 }
