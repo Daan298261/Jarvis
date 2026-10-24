@@ -60,6 +60,7 @@ android {
     kotlinOptions { jvmTarget = "17" }
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("bootstrap"))
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("wake-assets"))
+    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/mobile-presence"))
     packaging {
         jniLibs {
             excludes += "**/libonnxruntime4j_jni.so"
@@ -68,6 +69,19 @@ android {
         }
     }
 }
+
+val mobilePresence by tasks.registering(Exec::class) {
+    workingDir(rootProject.file("../frontend"))
+    inputs.dir(rootProject.file("../frontend/src/presence"))
+    inputs.dir(rootProject.file("../frontend/src/tts"))
+    inputs.dir(rootProject.file("../frontend/public/presence/jarvis-original"))
+    inputs.file(rootProject.file("../frontend/mobile-presence.html"))
+    inputs.file(rootProject.file("../frontend/vite.mobile-presence.config.ts"))
+    outputs.dir(layout.buildDirectory.dir("generated/mobile-presence"))
+    if (System.getProperty("os.name").startsWith("Windows")) commandLine("cmd", "/c", "npm", "run", "build:android-presence")
+    else commandLine("npm", "run", "build:android-presence")
+}
+tasks.named("preBuild") { dependsOn(mobilePresence) }
 
 val bootstrap by tasks.registering {
     val source = providers.gradleProperty("bootstrapFile").orElse(rootProject.file("bootstrap.json").absolutePath)

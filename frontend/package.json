@@ -4,6 +4,7 @@
   "version": "1.5.3-beta",
   "type": "module",
   "scripts": {
+    "build:android-presence": "vite build --config vite.mobile-presence.config.ts",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
