@@ -146,7 +146,8 @@ class AnzuWakeService : Service() {
     override fun onDestroy() {
         scope.cancel()
         releaseMic()
-        if (WakeAudioState.status.value.startsWith("Listening") || WakeAudioState.status.value.startsWith("Wake listening paused"))
+        if (WakeAudioState.status.value.startsWith("Listening") || WakeAudioState.status.value.startsWith("Wake listening paused") ||
+            WakeAudioState.status.value == "Wake listening cooling down")
             WakeAudioState.status.value = "Wake word off"
         super.onDestroy()
     }

@@ -15,7 +15,7 @@ android {
         minSdk = 29
         targetSdk = 35
         versionCode = providers.gradleProperty("releaseCode").orElse("9").get().toInt()
-        versionName = "1.5.3-beta"
+        versionName = "1.6.0-beta"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
