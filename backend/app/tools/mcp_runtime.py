@@ -507,7 +507,12 @@ class MCPRuntime:
                     session = await self._connect(server)
                     result = await session.call_tool(name, call_args or {})
                 is_error = bool(getattr(result, "is_error", False) or getattr(result, "isError", False))
-                return ToolResult(not is_error, str(getattr(result, "content", result)))
+                content = getattr(result, "content", [])
+                structured = getattr(result, "structuredContent", None)
+                data = {"mcp_text": "\n".join(str(getattr(block, "text", "")) for block in content if getattr(block, "type", "") == "text")}
+                if isinstance(structured, dict):
+                    data["structuredContent"] = structured
+                return ToolResult(not is_error, str(getattr(result, "content", result)), data=data)
             except Exception as exc:
                 last_error = str(exc)
                 log.debug("MCP call %s attempt %s failed: %s", tool_key, attempt + 1, exc)
