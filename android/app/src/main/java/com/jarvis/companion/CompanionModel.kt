@@ -248,6 +248,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             state.collect { companionState ->
+                WakeAudioState.busy = companionState.recording || companionState.speaking
                 DevicePackChromePublisher.publish(this@CompanionModel, deviceModelChrome, companionState)
             }
         }
@@ -1906,6 +1907,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        WakeAudioState.busy = false
         partialSttJob?.cancel()
         acknowledgmentJob?.cancel()
         getApplication<Application>().unregisterComponentCallbacks(memoryPressure)
