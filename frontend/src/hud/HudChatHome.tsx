@@ -20,6 +20,7 @@ import { supportsHumanoidRuntime } from "../presence/renderers/humanoidRuntime"
 import { resolvePresenceShapeId } from "../presence/resolvePresenceShapeId"
 import type { PresencePhase } from "../presence/presenceTypes"
 import { SETTINGS_CLOUD_SHAPE_ID } from "../presence/mythicPersonaVariant"
+import { usesDaybreakAppearance } from "../presence/appearanceModes"
 
 const MOOD_COPY: Record<OrbMood, { label: string; detail: string }> = {
   idle: { label: "Ready", detail: "Local intelligence standing by" },
@@ -68,7 +69,8 @@ function taskDetail(
 export function HudChatHome() {
   const { hasPending: approvalQueuePending } = usePendingApprovals()
   const presentation = usePresentationSettings()
-  const { active: hexStrikeActive } = useHexStrikeSuiteActive()
+  const { active: suiteActive } = useHexStrikeSuiteActive()
+  const hexStrikeActive = usesDaybreakAppearance(presentation, suiteActive)
   const namedPersonas = useNamedPersonas()
   const customPresence = useCustomPresence()
   const { hexSuiteExpanded, setHexSuiteExpanded } = useHudOverlay()

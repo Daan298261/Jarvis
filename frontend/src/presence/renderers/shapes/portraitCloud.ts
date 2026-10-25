@@ -2,7 +2,7 @@ import { registerPresenceShape } from "./catalog"
 import { buildHumanoidBustField } from "./humanoidBust"
 import type { ParticleOrb } from "../particleTypes"
 import { buildPortraitVolume } from "./portraitVolume"
-import { buildLivingBird } from "./livingBird"
+import { buildPersonaBody } from "./personaBody"
 import { calibratedPortraitExposure } from "./portraitLighting"
 
 const pending = new Map<string, Promise<string>>()
@@ -95,15 +95,17 @@ export function preparePortraitCloud(url: string, persona: string, volumetric = 
     }
     if (!points.length) throw new Error("Avatar artwork contains no visible particles")
     const head = volumetric ? buildPortraitVolume(pixels, resolution, height) : points
-    const hasBody = living && (persona === "anzu" || persona === "nabu")
-    const figure = hasBody ? buildLivingBird(head, persona) : head
+    const hasBody = living && persona !== "humanoid" && persona !== "humanoid_muscular"
+    const body = hasBody ? buildPersonaBody(head, persona) : undefined
+    const figure = body?.points || head
     const field = persona === "humanoid" ? await prepareTerrain().catch(() => undefined) : undefined
-    const id = `portrait_${persona}${hasBody ? "_living_b" : volumetric ? "_b" : ""}`
+    const id = `portrait_${persona}${hasBody ? "_fullbody_b" : volumetric ? "_b" : ""}`
     registerPresenceShape({
       id, label: `${persona} particle avatar`,
       buildFigure: () => figure,
       buildField: field ? () => field : buildHumanoidBustField,
-      framing: { yaw: 0, position: [0, 0, 0], fitMargin: hasBody ? 0.9 : 0.83, ...(hasBody ? { cropBelow: -2.3 } : {}) },
+      framing: { yaw: 0, position: [0, hasBody ? 0.04 : 0, 0], fitMargin: hasBody ? 0.8 : 0.83 },
+      ...(body ? { rig: { headPivot: body.headPivot, anatomy: body.anatomy } } : {}),
       appearance: {
         pointScale: 1, depthSoftness: 1, bloomStrength: volumetric ? 0.14 : undefined,
         portraitExposure: persona === "humanoid" || persona === "humanoid_muscular" ? 1 : calibratedPortraitExposure(head),
