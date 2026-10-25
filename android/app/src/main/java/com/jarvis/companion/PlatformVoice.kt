@@ -75,7 +75,7 @@ class PlatformVoice(
         defaultAvailable = externalRecognizer() != null,
     )
 
-    fun startListening(onPartial: (String) -> Unit, onResult: (String) -> Unit, onError: (String) -> Unit, onCaptureEnd: () -> Unit = {}) {
+    fun startListening(onPartial: (String) -> Unit, onResult: (String) -> Unit, onError: (String) -> Unit, onCaptureEnd: () -> Unit = {}, onUnavailable: ((String) -> Unit)? = null) {
         // Cancel + destroy any previous recognizer first: its late onResults/onError must not reach this session.
         cancelListening()
         stopRequested = false
@@ -87,11 +87,11 @@ class PlatformVoice(
         }
         val candidates = recognizerCandidates()
         if (candidates.isEmpty()) {
-            onError(PlatformSttPlan.NO_RECOGNIZER_COPY)
+            (onUnavailable ?: onError)(PlatformSttPlan.NO_RECOGNIZER_COPY)
             return
         }
         listening = true
-        attempt(current, languageTag, candidates, 0, onPartial, onResult, onError, onCaptureEnd)
+        attempt(current, languageTag, candidates, 0, onPartial, onResult, onError, onCaptureEnd, onUnavailable)
     }
 
     private fun attempt(
@@ -103,6 +103,7 @@ class PlatformVoice(
         onResult: (String) -> Unit,
         onError: (String) -> Unit,
         onCaptureEnd: () -> Unit,
+        onUnavailable: ((String) -> Unit)?,
     ) {
         val kind = candidates[index]
         val next = when (kind) {
@@ -167,11 +168,12 @@ class PlatformVoice(
                 release()
                 Log.w(TAG, "Built-in speech recognition error $error from $kind recognizer")
                 if (listening && !stopRequested && PlatformSttPlan.shouldFallBack(error, heardSpeech, hasNext = index + 1 < candidates.size)) {
-                    attempt(current, languageTag, candidates, index + 1, onPartial, onResult, onError, onCaptureEnd)
+                    attempt(current, languageTag, candidates, index + 1, onPartial, onResult, onError, onCaptureEnd, onUnavailable)
                     return
                 }
                 listening = false
-                onError(errorCopy(error, languageTag))
+                val unavailable = !stopRequested && PlatformSttPlan.shouldFallBack(error, heardSpeech, hasNext = true)
+                (if (unavailable) onUnavailable ?: onError else onError)(errorCopy(error, languageTag))
             }
         })
         recognizer = next
