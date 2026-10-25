@@ -14,6 +14,12 @@ import org.robolectric.annotation.Config
 class WakeSettingsTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
     @Before fun reset() { context.getSharedPreferences("anzu_assistant", 0).edit().clear().commit() }
+    @Test fun stoppingDuringCooldownReportsWakeOff() {
+        val service = org.robolectric.Robolectric.buildService(AnzuWakeService::class.java).create()
+        WakeAudioState.status.value = "Wake listening cooling down"
+        service.destroy()
+        assertEquals("Wake word off", WakeAudioState.status.value)
+    }
     @Test fun allRequestedAliasesUsePackagedModelTokens() {
         val keywords = WakeSettings(context).keywords(context)
         for (name in listOf("ANZU", "ANOE", "ENZO", "ANZOO", "AANZO", "JARVIS", "HEY_ANZU", "HEY_JARVIS")) {
