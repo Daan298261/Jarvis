@@ -197,6 +197,8 @@ def _dotdot_layout(layout):
     _symlink(a / "dangling", a / "gone")
     _symlink(a / "root_link", layout.allowed)  # an outside link that points at the allowed root
     via = str(layout.allowed / "linkdir") + os.sep + ".." + os.sep
+    if Path(via).resolve() != a.resolve():
+        pytest.skip("filesystem normalizes '..' before traversing the symlink (Win32 semantics)")
     return [via + name for name in ("leaf_link", "missing", "existing.bin", "existing_dir", "dangling",
                                     "root_link", "missing" + os.sep + "deeper")] + [
         via + "..", via + ".." + os.sep + "secret_dump", via + "b" + os.sep + ".." + os.sep + "leaf_link"]
