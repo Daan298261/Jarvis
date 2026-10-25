@@ -35,6 +35,7 @@ struct HostRuntime {
     vault_path: String,
     host_hwnd: Option<isize>,
     obsidian_hwnd: Option<isize>,
+    original_style: Option<isize>,
 }
 
 static RUNTIME: Mutex<HostRuntime> = Mutex::new(HostRuntime {
@@ -43,6 +44,7 @@ static RUNTIME: Mutex<HostRuntime> = Mutex::new(HostRuntime {
     vault_path: String::new(),
     host_hwnd: None,
     obsidian_hwnd: None,
+    original_style: None,
 });
 
 pub fn read_bound_vault_path(data_root: &Path) -> Option<String> {
@@ -130,9 +132,9 @@ mod win {
         OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, EnumWindows, GetClientRect, GetWindowLongPtrW, GetWindowThreadProcessId,
-        IsWindowVisible, MoveWindow, SetParent, SetWindowLongPtrW, ShowWindow,
-        GWL_STYLE, SW_SHOW, WINDOW_EX_STYLE, WINDOW_STYLE, WS_CHILD, WS_CLIPCHILDREN,
+        CreateWindowExW, DestroyWindow, EnumWindows, GetClientRect, GetWindowLongPtrW, GetWindowThreadProcessId,
+        IsWindow, IsWindowVisible, MoveWindow, SetParent, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+        GWL_STYLE, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_SHOW, WINDOW_EX_STYLE, WINDOW_STYLE, WS_CHILD, WS_CLIPCHILDREN, WS_POPUP,
         WS_VISIBLE,
     };
 
@@ -329,12 +331,18 @@ mod win {
         None
     }
 
+    fn hosted_style(style: u32) -> u32 {
+        (style & !(0x00CF0000 | WS_POPUP.0)) | WS_CHILD.0 | WS_VISIBLE.0
+    }
+
     fn reparent_obsidian(obsidian: HWND, host: HWND) -> Result<(), String> {
         unsafe {
             let style = GetWindowLongPtrW(obsidian, GWL_STYLE) as u32;
-            let child_style = (style & !0x00CF0000) | WS_CHILD.0 | WS_VISIBLE.0;
+            let child_style = hosted_style(style);
             SetWindowLongPtrW(obsidian, GWL_STYLE, child_style as isize);
             SetParent(obsidian, host).map_err(|e| e.to_string())?;
+            SetWindowPos(obsidian, HWND::default(), 0, 0, 0, 0,
+                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER).map_err(|e| e.to_string())?;
             let mut rect = windows::Win32::Foundation::RECT::default();
             GetClientRect(host, &mut rect).map_err(|e| e.to_string())?;
             let w = rect.right - rect.left;
@@ -360,6 +368,43 @@ mod win {
     mod sizing_tests {
         use super::*;
         use windows::Win32::UI::WindowsAndMessaging::DestroyWindow;
+
+        #[test]
+        fn popup_becomes_child_without_conflicting_window_style() {
+            let style = hosted_style(WS_POPUP.0 | WS_VISIBLE.0 | 0x00CF0000);
+            assert_eq!(style & WS_POPUP.0, 0);
+            assert_ne!(style & WS_CHILD.0, 0);
+            assert_ne!(style & WS_VISIBLE.0, 0);
+        }
+
+        #[test]
+        fn stopping_host_preserves_obsidian_and_restores_original_style() {
+            unsafe {
+                let host = CreateWindowExW(WINDOW_EX_STYLE::default(), windows::core::w!("STATIC"),
+                    windows::core::w!("detach-host-test"), WINDOW_STYLE::default(),
+                    0, 0, 640, 480, None, None, None, None).unwrap();
+                let child = CreateWindowExW(WINDOW_EX_STYLE::default(), windows::core::w!("STATIC"),
+                    windows::core::w!("detach-child-test"), WS_POPUP,
+                    0, 0, 320, 240, None, None, None, None).unwrap();
+                let original = GetWindowLongPtrW(child, GWL_STYLE);
+                reparent_obsidian(child, host).unwrap();
+                {
+                    let mut guard = RUNTIME.lock().unwrap();
+                    guard.host_hwnd = Some(hwnd_to_isize(host));
+                    guard.obsidian_hwnd = Some(hwnd_to_isize(child));
+                    guard.original_style = Some(original);
+                }
+                let status = embed_stop();
+                let child_survived = IsWindow(child).as_bool();
+                let restored = GetWindowLongPtrW(child, GWL_STYLE);
+                let host_survived = IsWindow(host).as_bool();
+                let _ = DestroyWindow(child);
+                assert_eq!(status.state, ObsidianEmbedState::Idle);
+                assert!(child_survived);
+                assert!(!host_survived);
+                assert_eq!(original, restored);
+            }
+        }
 
         #[test]
         fn resizing_child_preserves_host_size() {
@@ -391,6 +436,8 @@ mod win {
         width: i32,
         height: i32,
     ) -> ObsidianEmbedStatus {
+        let previous = embed_stop();
+        if previous.state == ObsidianEmbedState::Failed { return previous; }
         let mut guard = RUNTIME.lock().expect("obsidian runtime");
         guard.state = ObsidianEmbedState::Launching;
         guard.vault_path = vault_path.to_string();
@@ -447,6 +494,9 @@ mod win {
         }
         let obsidian = obsidian.unwrap();
 
+        guard.obsidian_hwnd = Some(hwnd_to_isize(obsidian));
+        guard.original_style = Some(unsafe { GetWindowLongPtrW(obsidian, GWL_STYLE) });
+
         if let Err(err) = reparent_obsidian(obsidian, host) {
             guard.state = ObsidianEmbedState::Failed;
             guard.message = err;
@@ -486,15 +536,26 @@ mod win {
 
     pub fn embed_stop() -> ObsidianEmbedStatus {
         let mut guard = RUNTIME.lock().expect("obsidian runtime");
-        if let Some(obsidian) = guard.obsidian_hwnd.map(hwnd_from_isize) {
+        if let Some(obsidian) = guard.obsidian_hwnd.map(hwnd_from_isize).filter(|h| unsafe { IsWindow(*h).as_bool() }) {
             unsafe {
-                let _ = SetParent(obsidian, HWND::default());
+                if let Err(error) = SetParent(obsidian, HWND::default()) {
+                    guard.state = ObsidianEmbedState::Failed;
+                    guard.message = format!("Could not detach Obsidian safely: {error}");
+                    return ObsidianEmbedStatus { state: guard.state.clone(), message: guard.message.clone(), obsidian_hwnd: guard.obsidian_hwnd };
+                }
+                if let Some(style) = guard.original_style {
+                    SetWindowLongPtrW(obsidian, GWL_STYLE, style);
+                    let _ = SetWindowPos(obsidian, HWND::default(), 0, 0, 0, 0,
+                        SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
+                }
             }
         }
+        if let Some(host) = guard.host_hwnd.map(hwnd_from_isize) { unsafe { let _ = DestroyWindow(host); } }
         guard.state = ObsidianEmbedState::Idle;
         guard.message.clear();
         guard.host_hwnd = None;
         guard.obsidian_hwnd = None;
+        guard.original_style = None;
         ObsidianEmbedStatus {
             state: guard.state.clone(),
             message: guard.message.clone(),
