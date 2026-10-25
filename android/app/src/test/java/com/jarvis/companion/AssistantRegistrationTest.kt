@@ -15,6 +15,22 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34])
 class AssistantRegistrationTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
+    @Test fun assistContextExcludesAllPasswordInputKinds() {
+        val text = android.text.InputType.TYPE_CLASS_TEXT
+        for (variation in listOf(0x80, 0x90, 0xe0)) assertTrue(isSensitiveAssistInput(text or variation))
+        assertTrue(isSensitiveAssistInput(android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD))
+        assertFalse(isSensitiveAssistInput(text or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS))
+    }
+    @Test fun assistantOptionsResolveToRealPreferencesActivity() {
+        val intent = Intent(Intent.ACTION_APPLICATION_PREFERENCES).setPackage(context.packageName)
+        val match = context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        assertEquals(AssistantSettingsActivity::class.java.name, match?.activityInfo?.name)
+        val activity = org.robolectric.Robolectric.buildActivity(AssistantSettingsActivity::class.java).create().get()
+        val forwarded = org.robolectric.Shadows.shadowOf(activity).nextStartedActivity
+        assertEquals(MainActivity::class.java.name, forwarded.component?.className)
+        assertTrue(forwarded.getBooleanExtra("anzu_assistant_settings", false))
+        assertTrue(activity.isFinishing)
+    }
     @Test fun systemVoiceButtonResolvesToAnzu() {
         val match = context.packageManager.resolveActivity(Intent(ANZU_VOICE_ASSIST_ACTION).setPackage(context.packageName), PackageManager.MATCH_DEFAULT_ONLY)
         assertNotNull(match)

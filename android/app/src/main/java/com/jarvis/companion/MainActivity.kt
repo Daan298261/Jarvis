@@ -61,6 +61,10 @@ class MainActivity : FragmentActivity() {
     override fun onResume() {
         super.onResume()
         if (::secureScreen.isInitialized) secureScreen.apply()
+        if (WakeSettings(this).enabled && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            runCatching { startForegroundService(Intent(this, AnzuWakeService::class.java).setAction("enable")) }
+                .onFailure { WakeAudioState.status.value = "Could not resume wake listening: ${it.message}" }
+        }
     }
     override fun onStop() {
         if (::accessLock.isInitialized) accessLock.background()
@@ -96,7 +100,6 @@ class MainActivity : FragmentActivity() {
             }
             val model: CompanionModel = viewModel()
             val state by model.state.collectAsStateWithLifecycle()
-            LaunchedEffect(state.recording, state.speaking) { WakeAudioState.busy = state.recording || state.speaking }
             val app = application as JarvisApp
             val deviceChrome = app.deviceModelChrome
             val devicePack by deviceChrome.state.collectAsStateWithLifecycle()
@@ -189,7 +192,10 @@ class MainActivity : FragmentActivity() {
             val postPairVoiceOffer = remember(showPostPairVoiceOffer, state.voiceSttStatus) { recommendedVoicePackOffer(model) }
             LaunchedEffect(latestIntent) {
                 val delivered = latestIntent ?: return@LaunchedEffect
-                if (delivered.component?.className?.endsWith("AssistantSettingsActivity") == true) tab = "Assistant"
+                if (delivered.getBooleanExtra("anzu_assistant_settings", false)) {
+                    tab = "Assistant"
+                    delivered.removeExtra("anzu_assistant_settings")
+                }
                 delivered.getStringExtra("incoming_call")?.let { incomingCall = it }
                 if (delivered.action == Intent.ACTION_ASSIST || delivered.action == ANZU_VOICE_ASSIST_ACTION || delivered.getBooleanExtra("anzu_assist", false)) {
                     tab = "Chat"

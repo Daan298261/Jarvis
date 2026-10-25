@@ -101,6 +101,7 @@ val wakeRuntime = tasks.register("prepareWakeRuntime") {
     val model = layout.buildDirectory.file("wake/model.tar.bz2")
     outputs.file(aar)
     outputs.dir(layout.buildDirectory.dir("wake-assets"))
+    inputs.property("wakeAssetsVersion", 2)
     doLast {
         fun hashedDownload(url: String, destination: File, expected: String) {
             fun digest(file: File): String {
@@ -127,7 +128,7 @@ val wakeRuntime = tasks.register("prepareWakeRuntime") {
         val prefix = "sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/"
         val files = mapOf("encoder-epoch-13-avg-2-chunk-8-left-64.int8.onnx" to "encoder.onnx",
             "decoder-epoch-13-avg-2-chunk-8-left-64.onnx" to "decoder.onnx",
-            "joiner-epoch-13-avg-2-chunk-8-left-64.int8.onnx" to "joiner.onnx", "tokens.txt" to "tokens.txt")
+            "joiner-epoch-13-avg-2-chunk-8-left-64.int8.onnx" to "joiner.onnx", "tokens.txt" to "tokens.txt", "en.phone" to "en.phone")
         exec { commandLine(listOf("tar", "-xf", model.get().asFile.absolutePath, "-C", extracted.absolutePath) + files.keys.map { prefix + it }) }
         val assets = layout.buildDirectory.dir("wake-assets/wake").get().asFile.apply { mkdirs() }
         files.forEach { (source, name) -> File(extracted, prefix + source).copyTo(File(assets, name), overwrite = true) }
