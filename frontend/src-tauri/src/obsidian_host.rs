@@ -125,14 +125,14 @@ mod win {
     use std::thread;
     use std::time::{Duration, Instant};
     use windows::core::PCWSTR;
-    use windows::Win32::Foundation::{BOOL, HWND, LPARAM, LRESULT, TRUE, WPARAM};
+    use windows::Win32::Foundation::{CloseHandle, BOOL, HWND, LPARAM, LRESULT, TRUE, WPARAM};
     use windows::Win32::System::Threading::{
         OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, EnumWindows, GetClientRect, GetWindowLongPtrW, GetWindowThreadProcessId,
-        IsWindowVisible, MoveWindow, SetParent, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-        GWL_STYLE, SWP_NOZORDER, SW_SHOW, WINDOW_EX_STYLE, WINDOW_STYLE, WS_CHILD, WS_CLIPCHILDREN,
+        IsWindowVisible, MoveWindow, SetParent, SetWindowLongPtrW, ShowWindow,
+        GWL_STYLE, SW_SHOW, WINDOW_EX_STYLE, WINDOW_STYLE, WS_CHILD, WS_CLIPCHILDREN,
         WS_VISIBLE,
     };
 
@@ -282,6 +282,7 @@ mod win {
                 windows::core::PWSTR(buf.as_mut_ptr()),
                 &mut len,
             );
+            let _ = CloseHandle(handle);
             if ok.is_err() {
                 return None;
             }
@@ -351,7 +352,33 @@ mod win {
                 let w = rect.right - rect.left;
                 let h = rect.bottom - rect.top;
                 let _ = MoveWindow(obsidian, 0, 0, w, h, true);
-                let _ = SetWindowPos(host, HWND::default(), 0, 0, 0, 0, SWP_NOZORDER);
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod sizing_tests {
+        use super::*;
+        use windows::Win32::UI::WindowsAndMessaging::DestroyWindow;
+
+        #[test]
+        fn resizing_child_preserves_host_size() {
+            unsafe {
+                // Hidden native windows exercise Win32 sizing without touching the owner UI.
+                let host = CreateWindowExW(WINDOW_EX_STYLE::default(), windows::core::w!("STATIC"),
+                    windows::core::w!("host-size-test"), WINDOW_STYLE::default(),
+                    0, 0, 640, 480, None, None, None, None).unwrap();
+                let child = CreateWindowExW(WINDOW_EX_STYLE::default(), windows::core::w!("STATIC"),
+                    windows::core::w!("child-size-test"), WS_CHILD,
+                    0, 0, 20, 20, host, None, None, None).unwrap();
+                let mut before = windows::Win32::Foundation::RECT::default();
+                GetClientRect(host, &mut before).unwrap();
+                resize_embedded(host, child);
+                let mut after = windows::Win32::Foundation::RECT::default();
+                GetClientRect(host, &mut after).unwrap();
+                let _ = DestroyWindow(host);
+                assert!(before.right > 0 && before.bottom > 0);
+                assert_eq!((before.right, before.bottom), (after.right, after.bottom));
             }
         }
     }
