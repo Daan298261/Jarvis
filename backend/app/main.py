@@ -531,8 +531,19 @@ async def _autoload_model(current) -> None:
                 )
                 if not boot.get("ok"):
                     raise RuntimeError(boot.get("detail") or "The selected LM Studio model did not load")
+        if current.inference.backend == "ollama":
+            from .inference.ollama_runtime import ensure_local_ollama, is_loopback_host
+
+            if is_loopback_host(current.inference.host):
+                boot = await ensure_local_ollama(
+                    host=current.inference.host, port=current.inference.port,
+                    model=current.inference.remote_model, pull_if_missing=False,
+                )
+                if not boot.get("ok"):
+                    raise RuntimeError(boot.get("detail") or "The selected Ollama model did not load")
         await MANAGER.load(current, context_size=current.inference.context_size)
-    except Exception:
+    except Exception as exc:
+        MANAGER.state.last_error = str(exc)[:500]
         fallback = local_lmstudio_fallback_settings(current)
         if fallback is None:
             logging.exception("Model auto-load failed; it can be loaded from the Model page")
