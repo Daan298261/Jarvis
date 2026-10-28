@@ -47,6 +47,7 @@ from .prompt_budget import (
     is_context_overflow,
     prepare_inference,
     recover_context_after_overflow,
+    server_context_limit,
 )
 from .request_lease import RequestLease
 from .stream_deadlines import compute_chat_call_deadline_ms, compute_chat_stream_deadlines
@@ -510,9 +511,13 @@ class InferenceManager:
                     max_tokens=max_tokens,
                     thinking=thinking,
                     extra=extra_payload,
-                    **self._chat_call_budget(app_settings, prepared),
+                    **self._chat_call_budget(app_settings, prepared, max_tokens),
                 )
             except APIStatusError as exc:
+                reported_limit = server_context_limit(exc)
+                if reported_limit:
+                    self.adopt_server_n_ctx(reported_limit)
+                    typed = self.prepare_chat_messages(typed, max_tokens=max_tokens)
                 if is_n_keep_overflow(getattr(exc, "body", None)) or is_n_keep_overflow(exc):
                     if not self._adopt_n_keep_overflow(exc):
                         raise
@@ -541,7 +546,7 @@ class InferenceManager:
                         max_tokens=max_tokens,
                         thinking=thinking,
                         extra=extra_payload,
-                        **self._chat_call_budget(app_settings, prepared),
+                        **self._chat_call_budget(app_settings, prepared, max_tokens),
                     )
                 if is_context_overflow(exc) and overflow_retries < 1:
                     overflow_retries += 1
@@ -558,7 +563,7 @@ class InferenceManager:
                         continue
                 raise
 
-    def _chat_call_budget(self, settings: AppSettings, messages: list[ChatMessage]) -> dict[str, Any]:
+    def _chat_call_budget(self, settings: AppSettings, messages: list[ChatMessage], max_tokens: int | None = None) -> dict[str, Any]:
         """Deadline for one non-streaming completion, scaled like the stream budgets."""
         prompt_tokens = estimate_prompt_tokens(messages)
         return {
@@ -566,6 +571,8 @@ class InferenceManager:
                 settings.inference,
                 prompt_tokens=prompt_tokens,
                 prompt_tps=self.state.prompt_tps,
+                max_tokens=max_tokens if max_tokens is not None else 1024,
+                generation_tps=self.state.generation_tps,
             ),
             "stream_lane": "worker",
             "prompt_token_estimate": prompt_tokens,
@@ -663,6 +670,10 @@ class InferenceManager:
                     yield delta
                 return
             except APIStatusError as exc:
+                reported_limit = server_context_limit(exc)
+                if reported_limit:
+                    self.adopt_server_n_ctx(reported_limit)
+                    typed = self.prepare_chat_messages(typed, max_tokens=max_tokens)
                 if is_n_keep_overflow(getattr(exc, "body", None)) or is_n_keep_overflow(exc):
                     if not self._adopt_n_keep_overflow(exc):
                         raise
@@ -1309,9 +1320,13 @@ class InferenceManager:
     async def record_timings(self, timings: dict[str, Any]) -> None:
         if not timings:
             return
-        predicted = timings.get("predicted_per_second") or timings.get("predicted_n")
+        predicted = timings.get("predicted_per_second")
+        if not predicted:
+            count, elapsed_ms = timings.get("predicted_n"), timings.get("predicted_ms")
+            if isinstance(count, (int, float)) and isinstance(elapsed_ms, (int, float)) and elapsed_ms > 0:
+                predicted = count * 1000.0 / elapsed_ms
         prompt = timings.get("prompt_per_second")
-        if isinstance(predicted, (int, float)):
+        if isinstance(predicted, (int, float)) and predicted > 0:
             self.state.generation_tps = round(float(predicted), 2)
         if isinstance(prompt, (int, float)):
             self.state.prompt_tps = round(float(prompt), 2)

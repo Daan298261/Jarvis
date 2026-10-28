@@ -17,6 +17,7 @@ import { MediaComposerBar } from "../components/MediaComposerBar"
 import { TaskActivityPanel } from "../components/TaskActivity"
 import { TaskStatusMeta } from "../components/TaskStatusMeta"
 import { useMediaUploads } from "../chat/useMediaUploads"
+import { useChatBackground } from "../chat/chatAppearance"
 
 type HudChatProps = {
   onMoodChange?: (opts: { recording: boolean; speaking: boolean; task: Task | null; backendUnavailable: boolean }) => void
@@ -44,6 +45,7 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   const [backendUnavailable, setBackendUnavailable] = useState(false)
   const [connectionMessage, setConnectionMessage] = useState("")
   const [speaking, setSpeaking] = useState(false)
+  const [chatBackground, setChatBackground] = useChatBackground()
   const [speakChatReplies, setSpeakChatReplies] = useSpeakChatReplies()
   const threadRef = useRef<HTMLDivElement | null>(null)
   const { active: hexStrikeActive } = useHexStrikeSuiteActive()
@@ -231,7 +233,14 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   const showThread = !!id
 
   return (
-    <div className="hud-chat">
+    <div className="hud-chat" data-chat-background={chatBackground ? "on" : "off"}>
+      <div className="hud-chat-tools">
+        <button type="button" className="hud-icon-btn hud-chat-background-toggle"
+          aria-pressed={chatBackground} onClick={() => setChatBackground(!chatBackground)}
+          title="Add a translucent background behind the conversation">
+          Chat background: {chatBackground ? "On" : "Off"}
+        </button>
+      </div>
       {showSetupProblem && (
         <div className="hud-auth-card" role="status">
           <strong>Setup problem</strong>
