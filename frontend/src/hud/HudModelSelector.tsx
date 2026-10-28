@@ -384,7 +384,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
   }
 
   function renderGradedRow(profile: LmStudioGradedProfile) {
-    const active = localRowActive(profile, selectedId)
+    const active = !!model?.loaded && localRowActive(profile, selectedId)
     const busy = busyLocalId === profile.id
     return (
       <li key={profile.id} className={`hud-model-local-row${active ? " active" : ""}${profile.matched ? "" : " unavailable"}`}>
@@ -526,7 +526,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
             aria-disabled={transferring || pinning}
           >
             {slotsState.slots.map((slot, index) => {
-              const active = selectionMatchesSlot(slot.profileId, selectedId, profiles)
+              const active = !!model?.loaded && selectionMatchesSlot(slot.profileId, selectedId, profiles)
               const filled = !!slot.profileId
               const label = slotLabel(slot, profiles)
               return (
