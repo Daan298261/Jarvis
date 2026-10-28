@@ -2001,3 +2001,52 @@ html[data-session-mode] .hud-app {
 .running-model-row { margin-top: 16px; }
 .running-model-row small { display: block; overflow-wrap: anywhere; opacity: .75; }
 .running-model-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+
+/* Keep dialogue together even when presence fills an ultrawide stage. */
+.hud-home > .hud-chat,
+.hud-home:has(.jarvis-presence-stage) > .hud-chat {
+  width: min(820px, calc(100% - 24px));
+  max-width: 820px;
+  justify-self: center;
+  gap: 8px;
+}
+
+.hud-chat-tools {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.hud-chat-tools .hud-chat-background-toggle {
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid var(--hud-line-strong);
+  background: rgba(6, 12, 19, 0.65);
+  color: #d6e7ef;
+}
+
+.hud-chat-background-toggle[aria-pressed="true"] {
+  border-color: var(--hud-cyan-dim);
+}
+
+.hud-chat .hud-thread {
+  max-height: min(40dvh, 420px);
+  padding: 12px;
+  border: 1px solid transparent;
+  border-radius: 16px;
+  mask-image: none;
+}
+
+.hud-chat[data-chat-background="on"] .hud-thread {
+  border-color: var(--hud-line-strong);
+  background: rgba(5, 11, 18, 0.82);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.2);
+}
+
+.hud-chat .hud-chat-thread { gap: 6px; }
+.hud-chat .hud-bubble {
+  margin-bottom: 0;
+  padding: 9px 12px;
+  font-size: clamp(14px, 0.8vw, 16px);
+  line-height: 1.5;
+  background: rgba(7, 14, 22, 0.65);
+}
