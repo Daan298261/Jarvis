@@ -3,7 +3,8 @@
   "profiles": [
     {
       "id": "lm-qwen38-9b-uncensored",
-      "display_name": "Primary candidate — Qwen3.8 9B Uncensored",
+      "refusal_reduced": true,
+      "display_name": "Qwen3.8 Distill 9B - general reasoning",
       "overall": 9.0,
       "axes": {
         "coding": 9,
@@ -18,13 +19,15 @@
       "weakness": "Community distill/uncensor; must pass Jarvis local benchmark before promotion",
       "weight_gb": 7.7,
       "quantization": "Q6_K",
+      "match_identity_any": ["Qwen3.8-9B-Distill"],
       "match_substrings": ["Qwen3.8-9B-Distill", "uncensored-heretic", "Heretic-Uncensored"],
       "specialization_tags": ["general", "agentic", "low-vram", "uncensored"],
       "source_notes": "RFC-0063 provisional ranking; Q6 weight estimate from current GGUF family; replace ranking with local Jarvis benchmark"
     },
     {
       "id": "lm-lfm25-fast-primary",
-      "display_name": "Fast primary candidate — LFM2.5 8B-A1B",
+      "refusal_reduced": true,
+      "display_name": "LFM2.5 8B-A1B - fast general assistant",
       "overall": 8.8,
       "axes": {
         "coding": 8,
@@ -39,13 +42,14 @@
       "weakness": "LFM license needs redistribution review; runtime support must be current",
       "weight_gb": 6.96,
       "quantization": "Q6_K",
+      "match_identity_any": ["LFM2.5-8B-A1B"],
       "match_substrings": ["LFM2.5-8B-A1B-Uncensored", "LFM2.5-8B-A1B"],
       "specialization_tags": ["general", "agentic", "moe", "low-latency"],
       "source_notes": "RFC-0063 provisional ranking; promote only after local tool-loop and license gates"
     },
     {
       "id": "lm-minicpm5-2b-small",
-      "display_name": "Small worker candidate — MiniCPM5 2B",
+      "display_name": "MiniCPM5 2B - lightweight tasks",
       "overall": 8.2,
       "axes": {
         "coding": 8,
@@ -60,13 +64,15 @@
       "weakness": "Not intended to replace the main brain for difficult general reasoning",
       "weight_gb": 2.7,
       "quantization": "Q8-class",
+      "match_identity_any": ["MiniCPM5-2B"],
       "match_substrings": ["MiniCPM5-2B", "MiniCPM5-2B-abliterated"],
       "specialization_tags": ["agentic", "micro", "low-latency"],
       "source_notes": "RFC-0063 provisional ranking; benchmark against MiniCPM5-1B for always-on role"
     },
     {
       "id": "lm-nemotron3-nano-4b",
-      "display_name": "Compact general candidate — Nemotron3 Nano 4B",
+      "refusal_reduced": true,
+      "display_name": "Nemotron3 Nano 4B - compact general assistant",
       "overall": 7.9,
       "axes": {
         "coding": 7,
@@ -81,13 +87,14 @@
       "weakness": "Must prove tool-loop reliability against MiniCPM/Qwen candidates",
       "weight_gb": 4.4,
       "quantization": "Q8_K_P",
+      "match_identity_any": ["Nemotron3-Nano-4B"],
       "match_substrings": ["Nemotron3-Nano-4B-Uncensored", "HauhauCS-Aggressive"],
       "specialization_tags": ["general", "small", "uncensored"],
       "source_notes": "RFC-0063 provisional ranking; local benchmark required"
     },
     {
       "id": "lm-best-overall",
-      "display_name": "Best overall",
+      "display_name": "Qwen3.8 27B - general reasoning",
       "overall": 9.2,
       "axes": {
         "coding": 9,
@@ -102,13 +109,14 @@
       "weakness": "~16 GB VRAM; slower than 9B",
       "weight_gb": 15.9,
       "quantization": "Q4",
+      "match_identity_any": ["Qwen3.8-27B"],
       "match_substrings": ["Qwen3.8-27B", "TurboFCFusion"],
       "specialization_tags": ["general"],
       "source_notes": "SWE-bench proxy; LMSYS Qwen3.8 trend — provisional estimate"
     },
     {
       "id": "lm-coding-heavy",
-      "display_name": "Coding heavy",
+      "display_name": "Qwen3.6 40B - advanced coding",
       "overall": 8.9,
       "axes": {
         "coding": 10,
@@ -123,13 +131,14 @@
       "weakness": "21 GB footprint; slow on 16 GB cards",
       "weight_gb": 21.2,
       "quantization": "Q4_K_S",
+      "match_identity_any": ["Qwen3.6-40B"],
       "match_substrings": ["Qwen3.6-40B", "NEO-CODE"],
       "specialization_tags": ["coding"],
       "source_notes": "HumanEval/SWE-bench coding proxy — provisional estimate"
     },
     {
       "id": "lm-coding-moe",
-      "display_name": "Coding MoE",
+      "display_name": "Qwen3.6 35B-A3B - coding (MoE)",
       "overall": 8.4,
       "axes": {
         "coding": 9,
@@ -144,13 +153,14 @@
       "weakness": "Q2 quality loss; MoE runtime quirks",
       "weight_gb": 14.0,
       "quantization": "Q2",
+      "match_identity_any": ["Qwen3.6-35B-A3B"],
       "match_substrings": ["Qwen3.6-35B-A3B"],
       "specialization_tags": ["coding", "moe"],
       "source_notes": "MoE coding proxy — provisional estimate"
     },
     {
       "id": "lm-balanced-27b",
-      "display_name": "Balanced 27B",
+      "display_name": "Qwen3.6 27B - general assistant",
       "overall": 8.1,
       "axes": {
         "coding": 8,
@@ -165,13 +175,14 @@
       "weakness": "Superseded by 3.8 Turbo on same VRAM",
       "weight_gb": 15.4,
       "quantization": "Q4",
+      "match_identity_any": ["Qwen3.6-27B"],
       "match_substrings": ["Qwen3.6-27B", "stock"],
       "specialization_tags": ["general"],
       "source_notes": "MMLU-style reasoning proxy — provisional estimate"
     },
     {
       "id": "lm-creative",
-      "display_name": "Creative / marketing",
+      "display_name": "Gemma 4 31B Ortenzya - creative writing",
       "overall": 7.8,
       "axes": {
         "coding": 6,
@@ -186,13 +197,14 @@
       "weakness": "Weaker coding vs Qwen 27B/40B",
       "weight_gb": 16.5,
       "quantization": "Q4",
+      "match_identity_any": ["Gemma4-31B", "gemma-4-Ortenzya"],
       "match_substrings": ["Gemma4-31B", "Ortenzya"],
       "specialization_tags": ["creative", "writing"],
       "source_notes": "MT-Bench writing proxy — provisional estimate"
     },
     {
       "id": "lm-cheap-coding-9b",
-      "display_name": "Cheap coding 9B",
+      "display_name": "Qwen3.5 9B Defiant - everyday coding",
       "overall": 7.2,
       "axes": {
         "coding": 8,
@@ -207,13 +219,14 @@
       "weakness": "Not for hardest reasoning",
       "weight_gb": 6.1,
       "quantization": "Q4",
+      "match_identity_any": ["Qwen3.5-9B"],
       "match_substrings": ["Qwen3.5-9B", "Defiant", "Q4"],
       "specialization_tags": ["coding", "low-latency"],
       "source_notes": "Small-model coding proxy — provisional estimate"
     },
     {
       "id": "lm-agent-9b",
-      "display_name": "Agent 9B",
+      "display_name": "Ornith 1.0 9B - tools and automation",
       "overall": 7.0,
       "axes": {
         "coding": 7,
@@ -228,13 +241,14 @@
       "weakness": "Smaller context/world knowledge",
       "weight_gb": 6.9,
       "quantization": "Q6",
+      "match_identity_any": ["Ornith-1.0-9B"],
       "match_substrings": ["Ornith-1.0-9B"],
       "specialization_tags": ["agentic"],
       "source_notes": "Agent/tool-loop proxy — provisional estimate"
     },
     {
       "id": "lm-legacy-cheap",
-      "display_name": "Legacy cheap",
+      "display_name": "Llama 3.1 8B - legacy general assistant",
       "overall": 5.5,
       "axes": {
         "coding": 5,
@@ -249,6 +263,7 @@
       "weakness": "Clearly below modern Qwen tiers",
       "weight_gb": 4.4,
       "quantization": "Q4",
+      "match_identity_any": ["Llama-3.1-8B"],
       "match_substrings": ["Llama-3.1-8B"],
       "specialization_tags": ["legacy"],
       "source_notes": "Legacy baseline — provisional estimate"
@@ -374,6 +389,38 @@
         "filename": "DistilQwen3-1.7B-uncensored-Q4_K_M.gguf",
         "revision": "643a98295edc18f5ea615309c6f041f192d1864a",
         "sha256": "93e3bd8d7e9964c68cdbe49faef9935bd23a48a4a4e69951b7388f63ac0f3b7f",
+        "verified_at": "2026-10-28"
+      }
+    },
+    {
+      "id": "lm-dolphin-nemo-12b-q4",
+      "refusal_reduced": true,
+      "display_name": "Dolphin Nemo 12B - research and analysis",
+      "overall": 0,
+      "axes": {},
+      "strength": "Publisher trained with alignment-filtered instruction data; Apache-2.0",
+      "weakness": "Older model; no ANZU refusal, factuality, Dutch-language or tool benchmark yet",
+      "weight_gb": 6.96,
+      "quantization": "Q4_K_M",
+      "match_substrings": [
+        "dolphin-2.9.3-mistral-nemo-12b.Q4_K_M.gguf"
+      ],
+      "source_notes": "Publisher describes reduced refusals; zero refusals are not guaranteed. https://huggingface.co/dphn/dolphin-2.9.3-mistral-nemo-12b",
+      "huggingface": {
+        "key": "dolphin-nemo-12b-q4",
+        "label": "Dolphin Nemo 12B Q4_K_M",
+        "model_id": "dphn/dolphin-2.9.3-mistral-nemo-12b-gguf",
+        "role": "primary",
+        "runtime": "llama.cpp/lm-studio",
+        "quantization": "Q4_K_M",
+        "weight_gb": 6.96,
+        "context_limit": 8192,
+        "uncensored": true,
+        "license_id": "apache-2.0",
+        "notes": "Publisher-described refusal-reduced training; unbenchmarked locally. Weights only; context and runtime overhead additional.",
+        "filename": "dolphin-2.9.3-mistral-nemo-12b.Q4_K_M.gguf",
+        "revision": "3060031394eb8ea97c82a219ec26c574c99298fe",
+        "sha256": "654d033bd2ce70dc09e8a64067bc858cf15978598494142d67a48d35a4c4c521",
         "verified_at": "2026-10-28"
       }
     }

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import {
+  bindDiscoveredGguf,
+  bindLmStudioProfile,
   getLmStudioCatalog,
   getSelectedRuntimeProfileId,
   listRuntimeProfiles,
@@ -28,6 +30,8 @@ export type HudModelSelectorProps = {
   model: { loaded?: boolean; loading?: boolean; active_model?: string; last_error?: string } | null
   onOpenChange?: (open: boolean) => void
 }
+
+type PinTarget = { label: string; catalogId?: string; path?: string }
 
 function profileMatches(profile: RuntimeProfile, id: string): boolean {
   if (!id) return false
@@ -79,6 +83,8 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
   const [busyLocalId, setBusyLocalId] = useState<string | null>(null)
   const [msg, setMsg] = useState("")
   const [assignIndex, setAssignIndex] = useState<number | null>(null)
+  const [pinTarget, setPinTarget] = useState<PinTarget | null>(null)
+  const [pinning, setPinning] = useState(false)
 
   const transferring = busySlot !== null || busyLocalId !== null || !!model?.loading
   const [loadElapsed, setLoadElapsed] = useState(0)
@@ -152,6 +158,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
         setOpen(false)
         setConfigure(false)
         setAssignIndex(null)
+        setPinTarget(null)
       }
     }
     document.addEventListener("mousedown", onDoc)
@@ -177,10 +184,15 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
   const headline = useMemo(() => {
     if (transferring) return "Loading model…"
     if (model?.loading) return "Loading…"
+    if (hexstrikeActive && selectedProfile) return selectedProfile.label || selectedProfile.name
+    // The server's identity wins over a stale shortcut/catalog label.
+    if (model?.active_model) {
+      const parts = model.active_model.split(/[\\/]/)
+      return parts.find((part) => /\d+(?:\.\d+)?b(?:$|[-_@])/i.test(part)) || parts.at(-1) || model.active_model
+    }
     if (selectedProfile) return selectedProfile.label || selectedProfile.name
-    if (model?.active_model) return model.active_model
     return "Model"
-  }, [model?.active_model, model?.loading, selectedProfile, transferring])
+  }, [hexstrikeActive, model?.active_model, model?.loading, selectedProfile, transferring])
 
   const subline = useMemo(() => {
     if (transferring) return "Loading model"
@@ -196,6 +208,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
     if (!next) {
       setConfigure(false)
       setAssignIndex(null)
+      setPinTarget(null)
     }
   }
 
@@ -253,39 +266,30 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
     }
   }
 
-  async function onPinLocalToSlot(profile: LmStudioGradedProfile) {
-    if (assignIndex == null) return
-    setBusyLocalId(profile.id)
+  async function pinModelToSlot(target: PinTarget, index: number) {
+    setPinning(true)
     setMsg("")
     try {
-      let runtimeId = profile.runtime_profile_id
-      if (!runtimeId) {
-        const runtime = await playLmStudioCatalogProfile(profile.id)
-        runtimeId = runtime.id || runtime.name
-      } else {
-        const next = setSlotProfile(slotsState, assignIndex, runtimeId, profile.display_name)
-        persistSlots(next)
-        setAssignIndex(null)
-        setMsg(`Pinned ${profile.display_name} to slot ${assignIndex + 1}.`)
-        setBusyLocalId(null)
-        return
-      }
-      const next = setSlotProfile(
-        slotsState,
-        assignIndex,
-        runtimeId,
-        profile.display_name,
-      )
+      const runtime = target.catalogId
+        ? await bindLmStudioProfile(target.catalogId)
+        : await bindDiscoveredGguf(target.path!)
+      const next = setSlotProfile(slotsState, index, runtime.id || runtime.name, target.label)
       persistSlots(next)
       setAssignIndex(null)
-      setMsg(`Pinned ${profile.display_name} to slot ${assignIndex + 1}.`)
+      setPinTarget(null)
+      setMsg(`Pinned ${target.label} to slot ${index + 1}. Current model unchanged.`)
       void refreshProfiles()
       void refreshCatalog()
-    } catch {
-      setMsg("Could not pin this local model.")
+    } catch (err: unknown) {
+      setMsg(err instanceof Error ? err.message : "Could not pin this local model.")
     } finally {
-      setBusyLocalId(null)
+      setPinning(false)
     }
+  }
+
+  function choosePinTarget(target: PinTarget) {
+    if (configure && assignIndex != null) void pinModelToSlot(target, assignIndex)
+    else setPinTarget(target)
   }
 
   function onAssignProfile(profile: RuntimeProfile) {
@@ -334,19 +338,27 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
             {item.filename}
           </span>
           <span className="hud-model-local-meta">
-            {item.weight_gb.toFixed(1)} GB · {item.quantization || "—"}
+            {item.weight_gb.toFixed(1)} GiB weights · {item.quantization || "Quant unknown"}
           </span>
+          <span className="hud-model-local-meta">{item.speed_label || "Speed unmeasured"}</span>
+          <span className="hud-model-local-meta">{item.restriction_label || "Restrictions unverified"}</span>
         </div>
         <div className="hud-model-local-actions">
+          <button type="button" className="hud-icon-btn hud-model-pin-btn"
+            disabled={transferring || pinning}
+            onClick={() => choosePinTarget({ label: item.filename, path: item.path })}
+            title={`Save ${item.filename} to a shortcut without loading`} aria-label={`Pin ${item.filename}`}>
+            Pin
+          </button>
           <button
             type="button"
             className="hud-icon-btn hud-model-play-btn"
-            disabled={transferring || busy}
+            disabled={transferring || busy || pinning}
             onClick={() => void onPlayUngraded(item)}
-            title={`Play ${item.filename}`}
-            aria-label={`Play ${item.filename}`}
+            title={`Load ${item.filename} now`}
+            aria-label={`Load ${item.filename}`}
           >
-            ▶
+            ▶ Load
           </button>
         </div>
       </li>
@@ -357,39 +369,44 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
     const active = localRowActive(profile, selectedId)
     const busy = busyLocalId === profile.id
     return (
-      <li key={profile.id} className={`hud-model-local-row${active ? " active" : ""}`}>
+      <li key={profile.id} className={`hud-model-local-row${active ? " active" : ""}${profile.matched ? "" : " unavailable"}`}>
         <div className="hud-model-local-text">
           <span className="hud-model-local-name">
-            <span className="hud-model-local-badge">local</span>
+            <span className="hud-model-local-badge">{profile.matched ? "Installed" : "Not installed"}</span>
             {profile.pinned ? "★ " : ""}
             {profile.display_name}
           </span>
           <span className="hud-model-local-meta">
-            {profile.matched ? `Overall ${profile.overall.toFixed(1)} · ` : ""}
-            {profile.weight_gb.toFixed(1)} GB · {profile.quantization}
+            {profile.weight_gb.toFixed(1)} GiB weights{profile.matched ? "" : " (estimate)"} · {profile.quantization}
           </span>
+          <span className="hud-model-local-meta">{profile.speed_label || "Speed unmeasured"}</span>
+          <span className="hud-model-local-meta" title={profile.source_notes}>
+            {profile.restriction_label || "Restrictions unverified"}
+          </span>
+          {profile.path && <span className="hud-model-artifact" title={profile.path}>
+            File: {profile.filename || profile.path.split(/[\\/]/).pop()}
+          </span>}
         </div>
         <div className="hud-model-local-actions">
-          {configure && assignIndex != null && (
             <button
               type="button"
-              className="hud-icon-btn"
-              disabled={transferring || busy}
-              onClick={() => void onPinLocalToSlot(profile)}
-              title="Pin to slot"
+              className="hud-icon-btn hud-model-pin-btn"
+              disabled={transferring || pinning || !profile.matched}
+              onClick={() => choosePinTarget({ label: profile.display_name, catalogId: profile.id })}
+              title="Save a shortcut without loading"
+              aria-label={`Pin ${profile.display_name}`}
             >
               Pin
             </button>
-          )}
           <button
             type="button"
             className="hud-icon-btn hud-model-play-btn"
-            disabled={transferring || busy}
+            disabled={transferring || busy || pinning || !profile.matched}
             onClick={() => void onPlayLocal(profile)}
-            title={`Play ${profile.display_name}`}
-            aria-label={`Play ${profile.display_name}`}
+            title={profile.matched ? `Load ${profile.display_name} now` : "Download this model first"}
+            aria-label={`Load ${profile.display_name}`}
           >
-            ▶
+            ▶ Load
           </button>
         </div>
       </li>
@@ -422,14 +439,21 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
             <button
               type="button"
               className="hud-icon-btn hud-model-config-toggle"
+              disabled={pinning}
               onClick={() => {
                 setConfigure((c) => !c)
                 setAssignIndex(null)
               }}
             >
-              {configure ? "Done" : "Pin"}
+              {configure ? "Done" : "Edit shortcuts"}
             </button>
           </div>
+
+          <p className="hud-model-action-hint">▶ Load switches model now. Pin saves a shortcut.</p>
+          <p className="hud-model-action-hint">Speed is estimated. Refusal-reduced models can still refuse.</p>
+          {model?.loaded && model.active_model && !hexstrikeActive && (
+            <p className="hud-model-serving" title={model.active_model}>Serving: {model.active_model}</p>
+          )}
 
           {transferring && (
             <p className="hud-model-transferring" role="status">
@@ -473,7 +497,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
             className="hud-model-slots"
             role="group"
             aria-label="Pinned runtime slots"
-            aria-disabled={transferring}
+            aria-disabled={transferring || pinning}
           >
             {slotsState.slots.map((slot, index) => {
               const active = selectionMatchesSlot(slot.profileId, selectedId, profiles)
@@ -486,7 +510,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
                       <button
                         type="button"
                         className="hud-icon-btn"
-                        disabled={index === 0 || transferring}
+                        disabled={index === 0 || transferring || pinning}
                         onClick={() => onMoveSlot(index, -1)}
                         title="Move left"
                       >
@@ -495,7 +519,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
                       <button
                         type="button"
                         className="hud-icon-btn"
-                        disabled={index === HUD_MODEL_SLOT_COUNT - 1 || transferring}
+                        disabled={index === HUD_MODEL_SLOT_COUNT - 1 || transferring || pinning}
                         onClick={() => onMoveSlot(index, 1)}
                         title="Move right"
                       >
@@ -504,7 +528,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
                       <button
                         type="button"
                         className="hud-icon-btn"
-                        disabled={!filled || transferring}
+                        disabled={!filled || transferring || pinning}
                         onClick={() => onClearSlot(index)}
                         title="Clear slot"
                       >
@@ -513,7 +537,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
                       <button
                         type="button"
                         className="hud-icon-btn"
-                        disabled={transferring}
+                        disabled={transferring || pinning}
                         onClick={() => setAssignIndex(index)}
                         title="Assign profile"
                       >
@@ -524,17 +548,34 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
                   <button
                     type="button"
                     className={`hud-model-slot${active ? " active" : ""}${filled ? "" : " empty"}${transferring ? " disabled" : ""}`}
-                    disabled={transferring || busySlot === index}
+                    disabled={transferring || pinning || busySlot === index}
                     onClick={() => (configure ? setAssignIndex(index) : onSwapSlot(index))}
-                    title={filled ? label : `Empty slot ${index + 1}`}
+                    title={configure ? `Edit shortcut ${index + 1}` : filled ? `Load ${label}` : `Empty slot ${index + 1}`}
                   >
-                    <span className="hud-model-slot-idx">{index + 1}</span>
+                    <span className="hud-model-slot-idx">{configure ? "Pin" : filled ? "▶ Load" : "Pin"} {index + 1}</span>
                     <span className="hud-model-slot-label">{filled ? label : "+"}</span>
                   </button>
                 </div>
               )
             })}
           </div>
+
+          {pinTarget && (
+            <div className="hud-model-pin-target" role="group" aria-label="Choose shortcut slot">
+              <p className="hud-model-assign-hint">Pin {pinTarget.label} to a slot:</p>
+              <div className="hud-model-pin-slots">
+                {slotsState.slots.map((slot, index) => (
+                  <button type="button" className="hud-icon-btn" key={index}
+                    disabled={transferring || pinning}
+                    title={slot.profileId ? `Replace ${slotLabel(slot, profiles)}` : "Empty slot"}
+                    onClick={() => void pinModelToSlot(pinTarget, index)}>
+                    Slot {index + 1}{slot.profileId ? " (replace)" : ""}
+                  </button>
+                ))}
+              </div>
+              <button type="button" className="hud-icon-btn" disabled={pinning} onClick={() => setPinTarget(null)}>Cancel</button>
+            </div>
+          )}
 
           {configure && assignIndex != null && (
             <div className="hud-model-assign" aria-label="Pick runtime profile">
@@ -548,7 +589,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
                     <button
                       type="button"
                       className="hud-model-assign-row"
-                      disabled={transferring}
+                      disabled={transferring || pinning}
                       onClick={() => onAssignProfile(profile)}
                     >
                       <span>{profile.label || profile.name}</span>

@@ -910,6 +910,10 @@ export type LmStudioGradedProfile = {
   vram_state: LmStudioVramState
   source_notes?: string
   matched: boolean
+  filename?: string
+  speed_label?: string
+  restriction_label?: string
+  rating_label?: string
 }
 
 export type LmStudioUngradedModel = {
@@ -917,6 +921,8 @@ export type LmStudioUngradedModel = {
   path: string
   weight_gb: number
   quantization: string
+  speed_label?: string
+  restriction_label?: string
 }
 
 export type LmStudioCatalogResponse = {
@@ -972,6 +978,17 @@ export async function selectLmStudioProfile(profileId: string): Promise<RuntimeP
       method: "POST",
     },
   )
+}
+
+export async function bindLmStudioProfile(profileId: string): Promise<RuntimeProfile> {
+  return api<RuntimeProfile>(`/api/lmstudio/catalog/${encodeURIComponent(profileId)}/bind`, { method: "POST" })
+}
+
+export async function bindDiscoveredGguf(path: string): Promise<RuntimeProfile> {
+  return api<RuntimeProfile>("/api/lmstudio/discovery/bind", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  })
 }
 
 export async function selectDiscoveredGguf(path: string): Promise<RuntimeProfile & { load?: Record<string, unknown> }> {

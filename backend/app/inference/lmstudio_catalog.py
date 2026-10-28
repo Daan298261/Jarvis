@@ -35,7 +35,7 @@ AXIS_KEYS = (
     "uncensored",
 )
 QUANT_RE = re.compile(
-    r"(IQ\d+(?:_XS)?|Q\d+(?:_K(?:_[SM])?)?|FP\d+)",
+    r"(?<![A-Za-z0-9])((?:IQ|Q)\d+(?:_[A-Z0-9]+)*|(?:BF|FP|F)\d+)(?![A-Za-z0-9])",
     re.IGNORECASE,
 )
 
@@ -513,12 +513,15 @@ def _save_user_state_unlocked(state: dict[str, Any]) -> None:
 
 def _match_profile(seed: dict[str, Any], discovered: list[DiscoveredGguf]) -> DiscoveredGguf | None:
     needles = [str(item).lower() for item in (seed.get("match_substrings") or [])]
+    identities = [str(item).lower() for item in (seed.get("match_identity_any") or needles)]
     if not needles:
         return None
     best: DiscoveredGguf | None = None
     best_score = -1
     for item in discovered:
         hay = f"{item.filename} {item.path}".lower()
+        if not any(identity in hay for identity in identities):
+            continue
         score = sum(1 for needle in needles if needle in hay)
         if score > best_score:
             best_score = score
@@ -526,6 +529,19 @@ def _match_profile(seed: dict[str, Any], discovered: list[DiscoveredGguf]) -> Di
     if best_score <= 0:
         return None
     return best
+
+
+def restriction_label(identity: str) -> str:
+    """Artifact naming is a publisher claim, never a measured refusal guarantee."""
+    reduced = any(tag in identity.lower() for tag in ("uncensored", "abliterated", "heretic", "unfiltered"))
+    return "Refusal-reduced (publisher claim)" if reduced else "Restrictions unverified"
+
+
+def speed_label(score: int) -> str:
+    if score <= 0:
+        return "Speed unmeasured"
+    tier = "Very fast" if score >= 9 else "Fast" if score >= 8 else "Moderate" if score >= 6 else "Slower"
+    return f"{tier} (estimate)"
 
 
 def vram_state_for_weight(weight_gb: float) -> str:
@@ -598,6 +614,10 @@ def _build_graded_profile(
         "runtime_profile_id": runtime_profile_id,
         "vram_state": vram_state_for_weight(weight_gb),
         "matched": discovered_match is not None,
+        "filename": discovered_match.filename if discovered_match else "",
+        "speed_label": speed_label(axes["speed_cost"]),
+        "restriction_label": restriction_label("uncensored" if merged.get("refusal_reduced") else path or str(merged.get("display_name") or "")),
+        "rating_label": "Provisional rating; local benchmark required",
     }
     if merged.get("huggingface"):
         result["huggingface"] = dict(merged["huggingface"])
@@ -640,6 +660,8 @@ def build_catalog(*, show_hidden: bool = False, models_root: Path | None = None)
                 "path": item.path,
                 "weight_gb": item.weight_gb,
                 "quantization": item.quantization,
+                "speed_label": "Speed unmeasured",
+                "restriction_label": restriction_label(item.path),
                 **_local_catalog_fields(kind="ungraded"),
             }
             for item in discovered
@@ -742,6 +764,8 @@ def select_catalog_profile(profile_id: str, *, models_root: Path | None = None) 
     graded = get_graded_profile(key, models_root=models_root)
     if graded is None:
         raise KeyError(f"catalog profile not found: {key}")
+    if not graded.get("matched") or not graded.get("path"):
+        raise ValueError("Model is not installed. Download its GGUF before loading or pinning it.")
 
     endpoint = _lmstudio_endpoint()
     model = _model_stem_from_path(str(graded.get("path") or ""), key)

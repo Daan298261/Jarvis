@@ -371,17 +371,25 @@ html[data-session-mode] .hud-app {
 }
 
 .hud-model-menu {
+  display: flex;
+  flex-direction: column;
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
   z-index: 120;
-  width: min(360px, calc(100vw - 24px));
+  width: min(520px, calc(100vw - 24px));
+  max-height: calc(100dvh - 110px);
+  overflow-y: auto;
   padding: 10px;
   border: 1px solid var(--hud-line-strong);
   border-radius: 14px;
   background: rgba(8, 12, 17, 0.97);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(20px);
+}
+
+.hud-model-menu > :not(.hud-model-local) {
+  flex-shrink: 0;
 }
 
 .hud-model-menu-head {
@@ -422,6 +430,34 @@ html[data-session-mode] .hud-app {
   gap: 6px;
 }
 
+.hud-model-slot-wrap {
+  min-width: 0;
+}
+
+.hud-model-action-hint,
+.hud-model-serving {
+  margin: 4px 0 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(190, 215, 230, 0.8);
+}
+
+.hud-model-serving {
+  overflow-wrap: anywhere;
+  color: var(--hud-cyan);
+}
+
+.hud-model-pin-target {
+  padding: 10px 0;
+}
+
+.hud-model-pin-slots {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
 .hud-model-slot-wrap.configuring {
   display: flex;
   flex-direction: column;
@@ -442,6 +478,8 @@ html[data-session-mode] .hud-app {
 
 .hud-model-slot {
   display: flex;
+  width: 100%;
+  min-width: 0;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -553,6 +591,10 @@ html[data-session-mode] .hud-app {
 }
 
 .hud-model-local {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 130px;
   margin-top: 10px;
   padding-top: 8px;
   border-top: 1px solid var(--hud-line);
@@ -586,10 +628,12 @@ html[data-session-mode] .hud-app {
 }
 
 .hud-model-local-list {
+  flex: 1 1 auto;
+  min-height: 0;
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: 200px;
+  max-height: min(380px, 42dvh);
   overflow: auto;
 }
 
@@ -623,12 +667,25 @@ html[data-session-mode] .hud-app {
   line-height: 1.25;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .hud-model-local-meta {
-  font-size: 9px;
-  color: rgba(170, 195, 210, 0.55);
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(185, 210, 225, 0.8);
+}
+
+.hud-model-artifact {
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  color: rgba(170, 195, 210, 0.7);
+}
+
+.hud-model-local-row.unavailable {
+  opacity: 0.65;
 }
 
 .hud-model-local-badge {
@@ -651,12 +708,27 @@ html[data-session-mode] .hud-app {
   flex-shrink: 0;
   gap: 4px;
   align-items: center;
+  flex-direction: column;
 }
 
-.hud-model-play-btn {
-  min-width: 32px;
+.hud-model-local-actions .hud-model-play-btn {
+  min-width: 66px;
+  min-height: 30px;
+  border: 1px solid var(--hud-cyan-dim);
+  background: rgba(103, 220, 255, 0.08);
   font-size: 11px;
   color: var(--hud-cyan);
+}
+
+.hud-model-local-actions .hud-model-pin-btn {
+  min-width: 66px;
+  min-height: 30px;
+  border: 1px solid var(--hud-line);
+}
+
+.hud-model-local-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .hud-model-slot.disabled,

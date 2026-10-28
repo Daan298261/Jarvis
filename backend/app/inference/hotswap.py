@@ -169,19 +169,19 @@ async def apply_runtime_profile_to_settings(runtime: RuntimeProfile, *, persist:
             )
         advertised = list(probe.get("models") or [])
         resolved = resolve_advertised_model(hint, advertised)
+        if provider == "lmstudio" and hint and resolved not in advertised:
+            from .lmstudio_server import resolve_lmstudio_artifact
+
+            resolved = await resolve_lmstudio_artifact(
+                host, port, hint, runtime.quantization, advertised, settings.inference.api_key,
+            ) or resolved
         if hint and advertised and resolved == hint and hint not in advertised:
-            if not any(hint.lower() in name.lower() for name in advertised):
-                shown = ", ".join(advertised[:5])
-                suffix = (
-                    f" Currently loaded: {shown}."
-                    if shown
-                    else " No models are loaded on that server."
-                )
-                server_label = "Ollama" if provider == "ollama" else "LM Studio"
-                raise RuntimeError(
-                    f"Model '{hint}' is not loaded in {server_label} at {host}:{port}.{suffix} "
-                    f"Use the installer to fetch the brain model, then press Play again."
-                )
+            shown = ", ".join(advertised[:5])
+            server_label = "Ollama" if provider == "ollama" else "LM Studio"
+            raise RuntimeError(
+                f"Model '{hint}' is not loaded or is ambiguous in {server_label} at {host}:{port}. "
+                f"Available models: {shown}. Select the exact model identifier and try Load again."
+            )
         settings.inference.remote_model = resolved
 
     if runtime.model_profile and runtime.model_profile in PROFILES:
