@@ -181,7 +181,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
   )
   const hexstrikeActive = !!(selectedProfile && isHexStrikeSuiteProfile(selectedProfile))
 
-  const headline = useMemo(() => {
+  const headline = (() => {
     if (transferring) return "Loading model…"
     if (model?.loading) return "Loading…"
     if (hexstrikeActive && selectedProfile) return selectedProfile.label || selectedProfile.name
@@ -192,7 +192,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
     }
     if (selectedProfile) return selectedProfile.label || selectedProfile.name
     return "Model"
-  }, [hexstrikeActive, model?.active_model, model?.loading, selectedProfile, transferring])
+  })()
 
   const subline = useMemo(() => {
     if (transferring) return "Loading model"

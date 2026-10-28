@@ -514,13 +514,14 @@ def _save_user_state_unlocked(state: dict[str, Any]) -> None:
 def _match_profile(seed: dict[str, Any], discovered: list[DiscoveredGguf]) -> DiscoveredGguf | None:
     needles = [str(item).lower() for item in (seed.get("match_substrings") or [])]
     identities = [str(item).lower() for item in (seed.get("match_identity_any") or needles)]
+    required = [str(item).lower() for item in (seed.get("match_required_substrings") or [])]
     if not needles:
         return None
     best: DiscoveredGguf | None = None
     best_score = -1
     for item in discovered:
         hay = f"{item.filename} {item.path}".lower()
-        if not any(identity in hay for identity in identities):
+        if not any(identity in hay for identity in identities) or not all(tag in hay for tag in required):
             continue
         score = sum(1 for needle in needles if needle in hay)
         if score > best_score:

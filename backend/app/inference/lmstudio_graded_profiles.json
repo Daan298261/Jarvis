@@ -198,6 +198,7 @@
       "weight_gb": 16.5,
       "quantization": "Q4",
       "match_identity_any": ["Gemma4-31B", "gemma-4-Ortenzya"],
+      "match_required_substrings": ["Ortenzya"],
       "match_substrings": ["Gemma4-31B", "Ortenzya"],
       "specialization_tags": ["creative", "writing"],
       "source_notes": "MT-Bench writing proxy — provisional estimate"
@@ -220,6 +221,7 @@
       "weight_gb": 6.1,
       "quantization": "Q4",
       "match_identity_any": ["Qwen3.5-9B"],
+      "match_required_substrings": ["Defiant"],
       "match_substrings": ["Qwen3.5-9B", "Defiant", "Q4"],
       "specialization_tags": ["coding", "low-latency"],
       "source_notes": "Small-model coding proxy — provisional estimate"
@@ -421,6 +423,38 @@
         "filename": "dolphin-2.9.3-mistral-nemo-12b.Q4_K_M.gguf",
         "revision": "3060031394eb8ea97c82a219ec26c574c99298fe",
         "sha256": "654d033bd2ce70dc09e8a64067bc858cf15978598494142d67a48d35a4c4c521",
+        "verified_at": "2026-10-28"
+      }
+    },
+    {
+      "id": "lm-hauhau-qwen35-9b-q6",
+      "display_name": "Qwen3.5 9B HauhauCS Aggressive - research and analysis",
+      "refusal_reduced": true,
+      "overall": 0,
+      "axes": {},
+      "strength": "Publisher reports 0/465 refusals; native Qwen3.5 architecture; Apache-2.0",
+      "weakness": "Publisher evaluation only; factuality, Dutch, tool calling and local performance untested",
+      "weight_gb": 6.85,
+      "quantization": "Q6_K",
+      "match_substrings": [
+        "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q6_K.gguf"
+      ],
+      "source_notes": "Publisher reports 0/465 refusals; finite test, not a universal guarantee or local certification. https://huggingface.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive",
+      "huggingface": {
+        "key": "hauhau-qwen35-9b-q6",
+        "label": "Qwen3.5 9B HauhauCS Aggressive Q6_K",
+        "model_id": "HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive",
+        "role": "primary",
+        "runtime": "llama.cpp/lm-studio",
+        "quantization": "Q6_K",
+        "weight_gb": 6.85,
+        "context_limit": 32768,
+        "uncensored": true,
+        "license_id": "apache-2.0",
+        "notes": "Publisher reports 0/465 refusals; unbenchmarked in ANZU. Weights only; runtime/context overhead additional.",
+        "filename": "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q6_K.gguf",
+        "revision": "0a41c68809d375475f954be12ba7c40efa56c2a9",
+        "sha256": "c0ba7beb68fd3fe47891bd549486d38dcf62d00817296ea314ad37017f5a4986",
         "verified_at": "2026-10-28"
       }
     }

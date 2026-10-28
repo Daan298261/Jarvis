@@ -77,6 +77,14 @@ def test_generic_refusal_and_quant_tags_cannot_substitute_model_identity(catalog
         select_catalog_profile("lm-qwen38-9b-uncensored", models_root=root)
 
 
+def test_named_variants_do_not_match_another_variant_in_the_same_family(catalog_env):
+    root = catalog_env["models_root"]
+    _write_gguf(root, "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q6_K.gguf")
+    rows = {row["id"]: row for row in build_catalog(show_hidden=True, models_root=root)["profiles"]}
+    assert not rows["lm-cheap-coding-9b"]["matched"]
+    assert rows["lm-hauhau-qwen35-9b-q6"]["matched"]
+
+
 def test_exact_family_gets_artifact_and_honest_behavior_metadata(catalog_env):
     root = catalog_env["models_root"]
     _write_gguf(root, "petruhonk/Qwen3.8-9B-Distill-uncensored-heretic/model-Q6_K.gguf")

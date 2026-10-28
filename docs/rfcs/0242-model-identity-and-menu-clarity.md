@@ -25,7 +25,7 @@ Require model-family identity before ranking GGUF matches, reject absent catalog
 
 | Area | Paths |
 | --- | --- |
-| Backend | `backend/app/inference/lmstudio_catalog.py`, `lmstudio_graded_profiles.json`, `backends.py`, `hotswap.py`, `backend/app/api/lmstudio.py` |
+| Backend | `backend/app/inference/lmstudio_catalog.py`, `lmstudio_graded_profiles.json`, `backends.py`, `hotswap.py`, `lmstudio_server.py`, `backend/app/api/lmstudio.py` |
 | Frontend | `frontend/src/api.ts`, `frontend/src/hud/HudModelSelector.tsx`, `hud-v2.css` |
 | Tests | `tests/test_lmstudio_catalog.py`, focused browser validation |
 | Docs | This RFC and model comparison under `docs/` |
