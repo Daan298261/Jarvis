@@ -3014,7 +3014,7 @@ class AgentRuntime:
             tools_used = True
 
         workflow_system = next((m for m in messages if m.role == "system"), None)
-        if workflow is not None:
+        if workflow is not None or continue_existing:
             # New calls after recovery get distinct durable model keys. Completed
             # tool effects still reconcile through the existing tool runner.
             from .durable_execution.repository import list_steps
@@ -3149,6 +3149,14 @@ class AgentRuntime:
                             "tool_rounds": tool_rounds,
                             "verifying": verifying,
                             "force_final": force_final,
+                            "messages": serialize_messages(messages),
+                            "tools": turn_tools,
+                            "model": getattr(MANAGER.provider, "model", profile.name),
+                            "thinking": think,
+                            "max_tokens": turn_max_tokens,
+                            "temperature": profile.temperature,
+                            "top_p": profile.top_p,
+                            "top_k": profile.top_k,
                         }
 
                         def _model_cost(chat: ChatResult) -> tuple[int, float, float]:
@@ -3230,7 +3238,7 @@ class AgentRuntime:
                             max_tokens=turn_max_tokens,
                             active_context=MANAGER.live_context_size(),
                         )
-                        err = context_capacity_error(budget)
+                        err = context_capacity_error(budget, server_error=str(exc))
                         await self._update(
                             task_id,
                             status="failed",
