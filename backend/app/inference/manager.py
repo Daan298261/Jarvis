@@ -71,6 +71,7 @@ def resolve_vision(settings: AppSettings, requested: bool | None = None) -> bool
 @dataclass
 class InferenceState:
     loaded: bool = False
+    manually_unloaded: bool = False
     loading: bool = False
     profile: str = "balanced"
     quant: str = ""
@@ -710,12 +711,15 @@ class InferenceManager:
         force: bool = False,
         vision: bool | None = None,
         gguf_path: str | None = None,
+        manual_resume: bool = False,
     ) -> InferenceState:
         if profile_name is None:
             profile_name = settings.inference.profile
             if gguf_path is None:
                 gguf_path = settings.inference.gguf_path or None
         async with self._lock:
+            if self.state.manually_unloaded and not manual_resume:
+                raise RuntimeError("Model was manually unloaded. Use Load to start a model again.")
             profile = await asyncio.to_thread(self._active_profile,
                 settings,
                 profile_name,
@@ -736,8 +740,9 @@ class InferenceManager:
                 and (not vision or self.state.vision_loaded)
             )
             if same:
+                self.state.manually_unloaded = False
                 return self.state
-            return await self._load_locked(
+            result = await self._load_locked(
                 settings,
                 profile.name,
                 context_size=context_size or profile.context_size,
@@ -745,6 +750,8 @@ class InferenceManager:
                 force=force,
                 gguf_path=gguf_path if gguf_path is not None else (profile.absolute_path or None),
             )
+            self.state.manually_unloaded = False
+            return result
 
     def _same_endpoint(self, settings: AppSettings) -> bool:
         return bool(
@@ -1023,8 +1030,18 @@ class InferenceManager:
         if live > 0:
             self.adopt_server_n_ctx(live)
 
-    async def unload(self) -> InferenceState:
+    async def unload(self, *, release_external: bool = False) -> InferenceState:
         async with self._lock:
+            if release_external and self.state.loaded:
+                if not self.backend:
+                    raise RuntimeError("No model runtime is attached; refresh model status before unloading")
+                if not self.backend.manages_process:
+                    from .model_release import release_external_model
+
+                    await release_external_model(
+                        self.backend.settings, self.backend.name,
+                        self.provider.model if self.provider else self.state.remote_model,
+                    )
             if self.backend:
                 await self.backend.stop()
             self.provider = None
@@ -1033,6 +1050,10 @@ class InferenceManager:
             self.state.pid = None
             self.state.vision_loaded = False
             self.state.mmproj_path = ""
+            self.state.server_n_ctx = 0
+            if release_external:
+                self.state.manually_unloaded = True
+                self.state.last_error = ""
             self._invalidate_status_cache()
             return self.state
 
@@ -1176,6 +1197,7 @@ class InferenceManager:
             )
         return {
             "loaded": self.state.loaded,
+            "manually_unloaded": self.state.manually_unloaded,
             "loading": self.state.loading,
             "last_error": self.state.last_error,
             "profile": self.state.profile or profile.name,
@@ -1221,6 +1243,7 @@ class InferenceManager:
             )
         return {
             "loaded": self.state.loaded,
+            "manually_unloaded": self.state.manually_unloaded,
             "loading": self.state.loading,
             "healthy": bool(healthy),
             "active_model": (

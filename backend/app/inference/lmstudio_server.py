@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -21,6 +22,39 @@ _log = logging.getLogger(__name__)
 LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 SERVER_WAIT_SECONDS = 45.0
 POLL_SECONDS = 1.0
+
+
+async def resolve_lmstudio_artifact(
+    host: str, port: int, hint: str, quantization: str, advertised: list[str], api_key: str = "",
+) -> str | None:
+    """Map renamed GGUFs using an exact native display name AND quantization.
+
+    LM Studio can expose a repository alias different from the local filename.
+    Never compensate with a family-only or first-model fallback.
+    """
+    if not hint or not quantization:
+        return None
+    filename = hint.replace("\\", "/").rsplit("/", 1)[-1].removesuffix(".gguf")
+    base = re.sub(rf"[-_. @]*{re.escape(quantization)}$", "", filename, flags=re.IGNORECASE)
+    normalize = lambda value: re.sub(r"[^a-z0-9]", "", str(value).lower())
+    from .backends import inference_headers
+
+    try:
+        async with httpx.AsyncClient(timeout=2.0, trust_env=False, headers=inference_headers(api_key)) as client:
+            response = await client.get(f"http://{host}:{port}/api/v1/models")
+            response.raise_for_status()
+            rows = response.json().get("models", [])
+        matches = {
+            str(row["key"]) for row in rows
+            if isinstance(row, dict) and row.get("type") == "llm"
+            and row.get("key") in advertised
+            and isinstance(row.get("quantization"), dict)
+            and normalize(row["quantization"].get("name")) == normalize(quantization)
+            and normalize(row.get("display_name")) == normalize(base)
+        }
+        return next(iter(matches)) if len(matches) == 1 else None
+    except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+        return None
 
 
 def is_loopback_host(host: str) -> bool:
@@ -101,7 +135,7 @@ async def ensure_local_lmstudio(
 
     probe = await probe_remote_server(host, port, timeout=2.0, retry=False)
     loaded = await _loaded_model_ids(host, port) if probe.get("ok") and model else None
-    model_ready = not model or (model in loaded if loaded is not None else model in (probe.get("models") or []))
+    model_ready = not model or (loaded is not None and model in loaded)
     if probe.get("ok") and model_ready:
         return {"ok": True, "method": "already-up", "detail": "LM Studio was already serving"}
 
@@ -160,7 +194,7 @@ async def ensure_local_lmstudio(
         ready = await probe_remote_server(host, port, timeout=4.0, retry=True)
 
     loaded = await _loaded_model_ids(host, port) if model else None
-    model_ready = not model or (model in loaded if loaded is not None else model in (ready.get("models") or []))
+    model_ready = not model or (loaded is not None and model in loaded)
     return {
         "ok": bool(ready.get("ok") and model_ready),
         "method": "auto-start",

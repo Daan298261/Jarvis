@@ -108,8 +108,30 @@ async def select_profile(profile_id: str):
     return payload
 
 
+@router.post("/catalog/{profile_id}/bind")
+async def bind_profile(profile_id: str):
+    """Register a shortcut target without activating or selecting inference."""
+    try:
+        return select_catalog_profile(profile_id).as_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 class DiscoverSelectBody(BaseModel):
     path: str
+
+
+@router.post("/discovery/bind")
+async def bind_discovered(body: DiscoverSelectBody):
+    """Register an owner GGUF shortcut without loading the model."""
+    try:
+        return select_discovered_gguf(body.path).as_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/discovery")

@@ -16,6 +16,9 @@ const state = {
   selectedId: "",
   selectedMode: "",
   events: [],
+  unloadCalls: 0,
+  unloadError: null,
+  unloadSnapshot: { loaded: false, loading: false, manually_unloaded: true, active_model: null },
 }
 
 export function __resetApiStub(overrides = {}) {
@@ -34,6 +37,9 @@ export function __resetApiStub(overrides = {}) {
   state.selectedId = ""
   state.selectedMode = ""
   state.events = []
+  state.unloadCalls = 0
+  state.unloadError = overrides.unloadError ?? null
+  state.unloadSnapshot = overrides.unloadSnapshot ?? { loaded: false, loading: false, manually_unloaded: true, active_model: null }
 }
 
 export function __apiStubState() {
@@ -54,6 +60,11 @@ export function isApiError(err) {
 }
 
 export async function api(path, init) {
+  if (path === "/api/model/unload" && init?.method === "POST") {
+    state.unloadCalls += 1
+    if (state.unloadError) throw state.unloadError
+    return state.unloadSnapshot
+  }
   if (path === "/api/permissions/cyber.hexstrike") {
     if (state.permissionError) throw state.permissionError
     return { id: "cyber.hexstrike", status: state.permissionStatus }

@@ -11,12 +11,65 @@ from app.main import app
 
 
 def test_resolve_advertised_model_single_listing():
-    assert resolve_advertised_model("qwen-stem", ["lmstudio-model-id"]) == "lmstudio-model-id"
+    assert resolve_advertised_model("qwen-stem", ["lmstudio-model-id"]) == "qwen-stem"
+    assert resolve_advertised_model("", ["lmstudio-model-id"]) == "lmstudio-model-id"
+
+
+def test_explicit_9b_hint_does_not_resolve_to_other_qwen_versions_or_sizes():
+    hint = "Qwen3.8-9B-Distill-uncensored-heretic-Q6_K"
+    unrelated = ["0bserverx/qwen3.8-27b-heretic-abliterated-uncensored-gguf/rvn-q3_k_s.gguf", "Qwen3.5-9B-Defiant-Q4"]
+    assert resolve_advertised_model(hint, unrelated) == hint
+    assert resolve_advertised_model(hint, unrelated[:1]) == hint
+    exact = "petruhonk/" + hint + ".gguf"
+    assert resolve_advertised_model(hint, unrelated + [exact]) == exact
+
+
+def test_ambiguous_partial_hint_is_not_silently_resolved():
+    assert resolve_advertised_model("qwen", ["qwen-9b", "qwen-27b"]) == "qwen"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rows,expected", [
+    ([{"type": "llm", "key": "exact-alias", "display_name": "Qwen3.5 9B Defiant", "quantization": {"name": "Q4_K_S"}}], "exact-alias"),
+    ([{"type": "llm", "key": "exact-alias", "display_name": "Qwen3.5 9B Defiant", "quantization": {"name": "Q8_0"}}], None),
+    ([{"type": "llm", "key": "exact-alias", "display_name": "Qwen3.8 27B Defiant", "quantization": {"name": "Q4_K_S"}}], None),
+])
+async def test_native_lmstudio_alias_requires_exact_display_identity_and_quant(monkeypatch, rows, expected):
+    import httpx
+    from app.inference.lmstudio_server import resolve_lmstudio_artifact
+
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"models": rows}))
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr("app.inference.lmstudio_server.httpx.AsyncClient", lambda **kwargs: original_client(transport=transport, **kwargs))
+    assert await resolve_lmstudio_artifact("127.0.0.1", 1234, "Qwen3.5-9B-Defiant-Q4_K_S", "Q4_K_S", ["exact-alias"]) == expected
 
 
 def test_resolve_advertised_model_stem_match():
     advertised = ["Qwen3.5-9B-Defiant-Q4_K_M"]
     assert resolve_advertised_model("Qwen3.5-9B-Defiant-Q4", advertised) == advertised[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("hint,names", [
+    ("Qwen3.8-9B-Distill-Q6_K", ["Qwen3.8-27B-Heretic-Q3_K_S"]),
+    ("qwen", ["qwen-9b", "qwen-27b"]),
+])
+async def test_wrong_or_ambiguous_model_never_changes_settings(jarvis_env, monkeypatch, hint, names):
+    settings = jarvis_env["settings"]
+    saved = []
+
+    async def fake_probe(*args, **kwargs):
+        return {"ok": True, "models": names}
+
+    monkeypatch.setattr("app.inference.hotswap.probe_remote_server", fake_probe)
+    monkeypatch.setattr("app.inference.hotswap.load_settings", lambda: settings)
+    monkeypatch.setattr("app.inference.hotswap.save_settings", saved.append)
+    monkeypatch.setattr("app.inference.runtime_profiles.data_dir", lambda: jarvis_env["tmp"])
+    runtime = create_runtime_profile(name="explicit-identity", model=hint, provider="lmstudio", endpoint="127.0.0.1:1234", is_local=True)
+    with pytest.raises(RuntimeError, match="not loaded or is ambiguous"):
+        await apply_runtime_profile_to_settings(runtime)
+    assert saved == []
+    assert settings.inference.backend == "llama.cpp"
 
 
 @pytest.mark.asyncio
@@ -35,7 +88,7 @@ async def test_apply_runtime_profile_probes_lmstudio_and_sets_remote_model(jarvi
     runtime = create_runtime_profile(
         name="lm-probe-test-unique",
         label="Probe test",
-        model="catalog-stem",
+        model="my-loaded-model",
         provider="lmstudio",
         endpoint="127.0.0.1:1234",
         context_limit=8192,
@@ -113,7 +166,7 @@ async def test_unreachable_local_lmstudio_is_started_then_saved(jarvis_env, monk
     monkeypatch.setattr("app.inference.lmstudio_server.ensure_local_lmstudio", fake_start)
     runtime = create_runtime_profile(
         name="lm-autostart-test",
-        model="catalog-stem",
+        model="my-loaded-model",
         provider="lmstudio",
         endpoint="127.0.0.1:1234",
         is_local=True,

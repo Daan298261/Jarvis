@@ -192,9 +192,18 @@ function OwnerPortal() {
   }, [])
 
   useEffect(() => {
-    const tick = () =>
-      api<any>("/api/model")
+    let generation = 0
+    const onModelState = (event: Event) => {
+      generation += 1
+      const detail = (event as CustomEvent).detail
+      setModel((previous: any) => ({ ...previous, ...detail }))
+    }
+    window.addEventListener("jarvis:model-state-changed", onModelState)
+    const tick = () => {
+      const requestedGeneration = generation
+      return api<any>("/api/model")
         .then((snap) => {
+          if (requestedGeneration !== generation) return
           setModel(snap)
           setPortalApiError(null)
         })
@@ -207,9 +216,14 @@ function OwnerPortal() {
             setPortalApiError(err.message)
           }
         })
+    }
     tick()
     const id = window.setInterval(tick, 8000)
-    return () => window.clearInterval(id)
+    return () => {
+      generation += 1
+      window.clearInterval(id)
+      window.removeEventListener("jarvis:model-state-changed", onModelState)
+    }
   }, [])
 
   useEffect(() => {

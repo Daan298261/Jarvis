@@ -9,6 +9,7 @@ from app.inference.lmstudio_catalog import (
     build_catalog,
     default_models_root,
     discover_ggufs,
+    parse_quantization,
     discovery_payload,
     resolve_models_root,
     select_catalog_profile,
@@ -62,12 +63,75 @@ def test_discover_skips_mmproj_and_non_gguf(catalog_env):
     assert len(found) == 1
 
 
+def test_generic_refusal_and_quant_tags_cannot_substitute_model_identity(catalog_env):
+    root = catalog_env["models_root"]
+    _write_gguf(root, "0bserverx/Qwen3.8-27B-Heretic-Uncensored/RVN-Q3_K_S.gguf")
+    _write_gguf(root, "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf")
+    _write_gguf(root, "unrelated-stock-Q4.gguf")
+    catalog = build_catalog(show_hidden=True, models_root=root)
+    rows = {row["id"]: row for row in catalog["profiles"]}
+    for key in ("lm-qwen38-9b-uncensored", "lm-nemotron3-nano-4b", "lm-cheap-coding-9b", "lm-balanced-27b"):
+        assert not rows[key]["matched"], rows[key]
+    assert rows["lm-best-overall"]["matched"]
+    with pytest.raises(ValueError, match="not installed"):
+        select_catalog_profile("lm-qwen38-9b-uncensored", models_root=root)
+
+
+def test_named_variants_do_not_match_another_variant_in_the_same_family(catalog_env):
+    root = catalog_env["models_root"]
+    _write_gguf(root, "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q6_K.gguf")
+    rows = {row["id"]: row for row in build_catalog(show_hidden=True, models_root=root)["profiles"]}
+    assert not rows["lm-cheap-coding-9b"]["matched"]
+    assert rows["lm-hauhau-qwen35-9b-q6"]["matched"]
+
+
+def test_exact_family_gets_artifact_and_honest_behavior_metadata(catalog_env):
+    root = catalog_env["models_root"]
+    _write_gguf(root, "petruhonk/Qwen3.8-9B-Distill-uncensored-heretic/model-Q6_K.gguf")
+    catalog = build_catalog(show_hidden=True, models_root=root)
+    row = next(row for row in catalog["profiles"] if row["id"] == "lm-qwen38-9b-uncensored")
+    assert row["matched"]
+    assert row["filename"] == "model-Q6_K.gguf"
+    assert row["restriction_label"] == "Refusal-reduced (publisher claim)"
+    assert "estimate" in row["speed_label"]
+    assert "benchmark required" in row["rating_label"]
+
+
+def test_binding_shortcuts_never_activates_inference(catalog_env, monkeypatch):
+    root = catalog_env["models_root"]
+    _write_gguf(root, "Qwen3.5-9B-Defiant-Q4.gguf")
+    other = _write_gguf(root, "owner-model-Q4.gguf")
+    monkeypatch.setattr("app.inference.lmstudio_catalog.resolve_models_root", lambda: root)
+
+    async def forbidden(*args, **kwargs):
+        pytest.fail("Pinning must never activate inference")
+
+    monkeypatch.setattr("app.api.lmstudio.activate_runtime_profile", forbidden)
+    client = TestClient(app)
+    catalog_bind = client.post("/api/lmstudio/catalog/lm-cheap-coding-9b/bind")
+    assert catalog_bind.status_code == 200
+    assert catalog_bind.json()["model"] == "Qwen3.5-9B-Defiant-Q4"
+    assert "load" not in catalog_bind.json()
+    discovered_bind = client.post("/api/lmstudio/discovery/bind", json={"path": str(other)})
+    assert discovered_bind.status_code == 200
+    assert discovered_bind.json()["gguf_path"] == str(other)
+    assert "load" not in discovered_bind.json()
+    assert client.post("/api/lmstudio/catalog/lm-qwen38-9b-uncensored/bind").status_code == 400
+    assert client.post("/api/lmstudio/catalog/lm-qwen38-9b-uncensored/select").status_code == 400
+    assert client.post("/api/lmstudio/discovery/bind", json={"path": str(root / "absent.gguf")}).status_code == 404
+
+
 def test_vram_state_thresholds():
     assert vram_state_for_weight(10.0) == "ok"
     assert vram_state_for_weight(12.0) == "warn"
     assert vram_state_for_weight(15.9) == "warn"
     assert vram_state_for_weight(16.1) == "hidden"
     assert vram_state_for_weight(21.2) == "hidden"
+
+
+@pytest.mark.parametrize("quant", ["Q8_0", "IQ2_M", "IQ3_XXS", "Q4_K_S", "BF16"])
+def test_quantization_keeps_full_variant(quant):
+    assert parse_quantization(f"Qwen3.8-9B-{quant}.gguf") == quant
 
 
 def test_catalog_merge_match_sort_and_hide(catalog_env, monkeypatch):

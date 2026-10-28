@@ -169,19 +169,19 @@ async def apply_runtime_profile_to_settings(runtime: RuntimeProfile, *, persist:
             )
         advertised = list(probe.get("models") or [])
         resolved = resolve_advertised_model(hint, advertised)
+        if provider == "lmstudio" and hint and resolved not in advertised:
+            from .lmstudio_server import resolve_lmstudio_artifact
+
+            resolved = await resolve_lmstudio_artifact(
+                host, port, hint, runtime.quantization, advertised, settings.inference.api_key,
+            ) or resolved
         if hint and advertised and resolved == hint and hint not in advertised:
-            if not any(hint.lower() in name.lower() for name in advertised):
-                shown = ", ".join(advertised[:5])
-                suffix = (
-                    f" Currently loaded: {shown}."
-                    if shown
-                    else " No models are loaded on that server."
-                )
-                server_label = "Ollama" if provider == "ollama" else "LM Studio"
-                raise RuntimeError(
-                    f"Model '{hint}' is not loaded in {server_label} at {host}:{port}.{suffix} "
-                    f"Use the installer to fetch the brain model, then press Play again."
-                )
+            shown = ", ".join(advertised[:5])
+            server_label = "Ollama" if provider == "ollama" else "LM Studio"
+            raise RuntimeError(
+                f"Model '{hint}' is not loaded or is ambiguous in {server_label} at {host}:{port}. "
+                f"Available models: {shown}. Select the exact model identifier and try Load again."
+            )
         settings.inference.remote_model = resolved
 
     if runtime.model_profile and runtime.model_profile in PROFILES:
@@ -211,12 +211,23 @@ async def activate_runtime_profile(runtime: RuntimeProfile, *, force: bool = Fal
     context_size = int(runtime.context_limit or settings.inference.context_size or 0) or None
     label = (runtime.label or runtime.name or "runtime profile").strip()
     try:
+        if settings.inference.backend == "lmstudio" and settings.inference.host in {"127.0.0.1", "localhost", "::1"}:
+            from .lmstudio_server import ensure_local_lmstudio
+
+            ready = await ensure_local_lmstudio(
+                host=settings.inference.host, port=settings.inference.port,
+                model=settings.inference.remote_model,
+                context_size=context_size or settings.inference.context_size,
+            )
+            if not ready.get("ok"):
+                raise RuntimeError(ready.get("detail") or "The selected LM Studio model did not load")
         await MANAGER.load(
             settings,
             profile_name,
             context_size=context_size,
             force=force,
             gguf_path=(runtime.gguf_path or "").strip() or None,
+            manual_resume=True,
         )
     except FileNotFoundError as exc:
         raise RuntimeError(
