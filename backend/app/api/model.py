@@ -247,6 +247,16 @@ async def load_model(body: LoadBody | None = None):
     target = resolve_profile(profile)
     target_context = int(target.context_size or settings.inference.context_size or 0)
     try:
+        if settings.inference.backend == "ollama":
+            from ..inference.ollama_runtime import ensure_local_ollama, is_loopback_host
+
+            if is_loopback_host(settings.inference.host):
+                boot = await ensure_local_ollama(
+                    host=settings.inference.host, port=settings.inference.port,
+                    model=settings.inference.remote_model, pull_if_missing=False,
+                )
+                if not boot.get("ok"):
+                    raise RuntimeError(boot.get("detail") or "The selected Ollama model did not load")
         await MANAGER.load(settings, profile)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)[:500])
