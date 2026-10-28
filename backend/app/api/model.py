@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import httpx
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -257,7 +258,7 @@ async def load_model(body: LoadBody | None = None):
                 )
                 if not boot.get("ok"):
                     raise RuntimeError(boot.get("detail") or "The selected Ollama model did not load")
-        await MANAGER.load(settings, profile)
+        await MANAGER.load(settings, profile, manual_resume=True)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)[:500])
     if body and body.profile:
@@ -275,11 +276,18 @@ async def load_model(body: LoadBody | None = None):
 
 @router.post("/unload")
 async def unload_model():
-    await MANAGER.unload()
-    settings = load_settings()
-    from ..inference.status_monitor import STATUS_MONITOR
+    async with MANAGER._request_lease.exclusive() as acquired:
+        if not acquired:
+            raise HTTPException(409, "ANZU is answering or switching models; try Unload when it finishes")
+        try:
+            await MANAGER.unload(release_external=True)
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(502, f"Runtime unload could not be verified: {exc}") from exc
+    from ..inference.hotswap import runtime_activation_snapshot
 
-    return await STATUS_MONITOR.get_snapshot(settings, force_refresh=True)
+    return runtime_activation_snapshot()
 
 
 class DiscoverLocalBody(BaseModel):

@@ -27,6 +27,35 @@ before(() => {
   installWindow()
 })
 
+describe("manual model unload", () => {
+  test("verified unload publishes unloaded state and preserves shortcut selection", async () => {
+    const events = installWindow()
+    apiStub.__resetApiStub()
+    apiStub.setSelectedRuntimeProfileId("previous-shortcut")
+    await applyMod.unloadCurrentModel()
+    assert.equal(apiStub.__apiStubState().unloadCalls, 1)
+    assert.equal(apiStub.__apiStubState().selectedId, "previous-shortcut")
+    assert.equal(apiStub.__apiStubState().activateCalls, 0)
+    assert.equal(events[0].type, "jarvis:model-state-changed")
+    assert.equal(events[0].detail.loaded, false)
+    assert.equal(events[0].detail.active_model, null)
+  })
+
+  test("a still-loaded response never publishes unloaded state", async () => {
+    const events = installWindow()
+    apiStub.__resetApiStub({ unloadSnapshot: { loaded: true, loading: false } })
+    await assert.rejects(applyMod.unloadCurrentModel(), /did not confirm/)
+    assert.equal(events.length, 0)
+  })
+
+  test("runtime failure stays visible instead of claiming success", async () => {
+    const events = installWindow()
+    apiStub.__resetApiStub({ unloadError: new Error("Model is busy") })
+    await assert.rejects(applyMod.unloadCurrentModel(), /Model is busy/)
+    assert.equal(events.length, 0)
+  })
+})
+
 describe("hexStrikePermissionAllowsAutostart", () => {
   test("allow is granted", () => {
     assert.equal(autostart.hexStrikePermissionAllowsAutostart("allow"), true)

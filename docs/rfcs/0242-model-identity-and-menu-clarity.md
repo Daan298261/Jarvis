@@ -14,11 +14,15 @@ Require model-family identity before ranking GGUF matches, reject absent catalog
 
 ## Acceptance criteria
 
+Owner follow-up: add Unload to release the selected local model, verify native LM Studio/Ollama release, and keep it unloaded for this session until explicit Load. Model switching must verify the selected LM Studio instance is loaded; advertising a downloaded model is insufficient. Preserve unrelated models and runtime applications.
+
 - [ ] A 27B Heretic, Gemma Aggressive or arbitrary Q4 file cannot match a different 9B/4B family; absent candidates cannot load or pin.
 - [ ] Pinning discovered and graded models creates a shortcut without loading, changing runtime selection or starting tools.
 - [ ] Load and Pin are visibly distinct; slot tiles fill their grid width and model names wrap.
 - [ ] Menu shows actual artifact, GiB weights, quantization, speed estimates and honest refusal labels; live runtime identity takes precedence over a stale label.
 - [ ] Primary-source model comparison records exact artifacts, published evidence and local validation limits.
+- [ ] Unload releases and verifies the selected local model, refuses during inference, and never claims success on failure. Explicit Load resumes a manually unloaded model.
+- [ ] Switching to a downloaded LM Studio model verifies its loaded instance before reporting success.
 - [ ] Backend regressions, full pytest, frontend build/lint and browser interaction/layout checks run; installed app status is reported separately.
 
 ## Likely files

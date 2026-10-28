@@ -16,6 +16,8 @@ type ModelPollSnapshot = {
   loaded?: boolean
   loading?: boolean
   last_error?: string
+  active_model?: string | null
+  manually_unloaded?: boolean
 }
 
 const MODEL_POLL_INTERVAL_MS = 500
@@ -61,8 +63,16 @@ async function finishModelActivation(load?: Record<string, unknown>): Promise<vo
   if (err) throw new Error(err)
   // Runtime activation is synchronous and already returns a fresh status
   // snapshot. Avoid another expensive /api/model probe when it is ready.
-  if (snapshot?.loaded && !snapshot.loading) return
-  await waitForModelLoaded()
+  const ready = snapshot?.loaded && !snapshot.loading ? snapshot : await waitForModelLoaded()
+  window.dispatchEvent(new CustomEvent("jarvis:model-state-changed", { detail: ready }))
+}
+
+export async function unloadCurrentModel(): Promise<void> {
+  const snapshot = await api<ModelPollSnapshot>("/api/model/unload", { method: "POST" })
+  if (snapshot.loaded || snapshot.loading || !snapshot.manually_unloaded) {
+    throw new Error("The runtime did not confirm that the model was unloaded.")
+  }
+  window.dispatchEvent(new CustomEvent("jarvis:model-state-changed", { detail: snapshot }))
 }
 
 export type ApplyRuntimeProfileResult = RuntimeProfile & {

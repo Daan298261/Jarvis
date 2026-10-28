@@ -37,6 +37,7 @@ DEFAULT_POLL_INTERVAL_SECONDS = 5.0
 # immediately without inventing progress %.
 _LIVE_STATE_KEYS = (
     "loaded",
+    "manually_unloaded",
     "loading",
     "last_error",
     "profile",

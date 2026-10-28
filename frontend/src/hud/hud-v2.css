@@ -451,6 +451,26 @@ html[data-session-mode] .hud-app {
   padding: 10px 0;
 }
 
+.hud-model-unload-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 11px;
+}
+
+.hud-model-unload-row .hud-model-unload-btn {
+  border: 1px solid rgba(239, 158, 111, 0.6);
+  color: #efbd9b;
+  padding: 5px 12px;
+}
+
+.hud-model-unload-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .hud-model-pin-slots {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

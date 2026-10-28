@@ -211,12 +211,23 @@ async def activate_runtime_profile(runtime: RuntimeProfile, *, force: bool = Fal
     context_size = int(runtime.context_limit or settings.inference.context_size or 0) or None
     label = (runtime.label or runtime.name or "runtime profile").strip()
     try:
+        if settings.inference.backend == "lmstudio" and settings.inference.host in {"127.0.0.1", "localhost", "::1"}:
+            from .lmstudio_server import ensure_local_lmstudio
+
+            ready = await ensure_local_lmstudio(
+                host=settings.inference.host, port=settings.inference.port,
+                model=settings.inference.remote_model,
+                context_size=context_size or settings.inference.context_size,
+            )
+            if not ready.get("ok"):
+                raise RuntimeError(ready.get("detail") or "The selected LM Studio model did not load")
         await MANAGER.load(
             settings,
             profile_name,
             context_size=context_size,
             force=force,
             gguf_path=(runtime.gguf_path or "").strip() or None,
+            manual_resume=True,
         )
     except FileNotFoundError as exc:
         raise RuntimeError(

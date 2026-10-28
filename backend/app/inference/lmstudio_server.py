@@ -135,7 +135,7 @@ async def ensure_local_lmstudio(
 
     probe = await probe_remote_server(host, port, timeout=2.0, retry=False)
     loaded = await _loaded_model_ids(host, port) if probe.get("ok") and model else None
-    model_ready = not model or (model in loaded if loaded is not None else model in (probe.get("models") or []))
+    model_ready = not model or (loaded is not None and model in loaded)
     if probe.get("ok") and model_ready:
         return {"ok": True, "method": "already-up", "detail": "LM Studio was already serving"}
 
@@ -194,7 +194,7 @@ async def ensure_local_lmstudio(
         ready = await probe_remote_server(host, port, timeout=4.0, retry=True)
 
     loaded = await _loaded_model_ids(host, port) if model else None
-    model_ready = not model or (model in loaded if loaded is not None else model in (ready.get("models") or []))
+    model_ready = not model or (loaded is not None and model in loaded)
     return {
         "ok": bool(ready.get("ok") and model_ready),
         "method": "auto-start",

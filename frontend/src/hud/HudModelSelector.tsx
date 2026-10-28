@@ -12,7 +12,7 @@ import {
   type LmStudioUngradedModel,
   type RuntimeProfile,
 } from "../api"
-import { applyRuntimeProfile, playDiscoveredGguf, playLmStudioCatalogProfile } from "./applyRuntimeProfile"
+import { applyRuntimeProfile, playDiscoveredGguf, playLmStudioCatalogProfile, unloadCurrentModel } from "./applyRuntimeProfile"
 import { hexStrikeSelectMessage } from "./hexstrikeAutostart"
 import {
   clearSlot,
@@ -85,8 +85,9 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
   const [assignIndex, setAssignIndex] = useState<number | null>(null)
   const [pinTarget, setPinTarget] = useState<PinTarget | null>(null)
   const [pinning, setPinning] = useState(false)
+  const [unloading, setUnloading] = useState(false)
 
-  const transferring = busySlot !== null || busyLocalId !== null || !!model?.loading
+  const transferring = unloading || busySlot !== null || busyLocalId !== null || !!model?.loading
   const [loadElapsed, setLoadElapsed] = useState(0)
 
   useEffect(() => {
@@ -182,9 +183,11 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
   const hexstrikeActive = !!(selectedProfile && isHexStrikeSuiteProfile(selectedProfile))
 
   const headline = (() => {
+    if (unloading) return "Unloading model…"
     if (transferring) return "Loading model…"
     if (model?.loading) return "Loading…"
     if (hexstrikeActive && selectedProfile) return selectedProfile.label || selectedProfile.name
+    if (model?.loaded === false && !model.loading) return "No model loaded"
     // The server's identity wins over a stale shortcut/catalog label.
     if (model?.active_model) {
       const parts = model.active_model.split(/[\\/]/)
@@ -195,13 +198,15 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
   })()
 
   const subline = useMemo(() => {
+    if (unloading) return "Releasing model memory"
     if (transferring) return "Loading model"
     if (model?.loading) return "Switching runtime"
     if (hexstrikeActive) return "Cybersecurity suite"
+    if (model?.loaded === false) return "Choose Load to start a model"
     if (model?.loaded && model.active_model) return model.active_model
     if (selectedProfile) return selectedProfile.model
     return profilesError ? "Offline" : "Pick a slot"
-  }, [hexstrikeActive, model, profilesError, selectedProfile, transferring])
+  }, [hexstrikeActive, model, profilesError, selectedProfile, transferring, unloading])
 
   function setOpenState(next: boolean) {
     setOpen(next)
@@ -209,6 +214,19 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
       setConfigure(false)
       setAssignIndex(null)
       setPinTarget(null)
+    }
+  }
+
+  async function onUnload() {
+    setUnloading(true)
+    setMsg("")
+    try {
+      await unloadCurrentModel()
+      setMsg("Model unloaded. Use Load when you want to start one again.")
+    } catch (err: unknown) {
+      setMsg(err instanceof Error ? err.message : "Could not unload the model.")
+    } finally {
+      setUnloading(false)
     }
   }
 
@@ -449,6 +467,14 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
             </button>
           </div>
 
+          <div className="hud-model-unload-row">
+            <span>{model?.loaded ? "Current model" : "No model loaded"}</span>
+            <button type="button" className="hud-icon-btn hud-model-unload-btn"
+              disabled={transferring || pinning || !model?.loaded}
+              onClick={() => void onUnload()} title="Unload the current model and release its memory">
+              {unloading ? "Unloading…" : "■ Unload"}
+            </button>
+          </div>
           <p className="hud-model-action-hint">▶ Load switches model now. Pin saves a shortcut.</p>
           <p className="hud-model-action-hint">Speed is estimated. Refusal-reduced models can still refuse.</p>
           {model?.loaded && model.active_model && !hexstrikeActive && (
@@ -457,7 +483,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
 
           {transferring && (
             <p className="hud-model-transferring" role="status">
-              Loading model{loadElapsed > 0 ? ` (${loadElapsed}s)` : ""}… You can close this menu.
+              {unloading ? "Unloading model" : "Loading model"}{loadElapsed > 0 ? ` (${loadElapsed}s)` : ""}… You can close this menu.
             </p>
           )}
 
