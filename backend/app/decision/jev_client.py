@@ -68,6 +68,9 @@ def post_systemone(
     questions: dict[str, Any],
     timeout: float = DECIDE_TIMEOUT_S,
 ) -> dict[str, Any]:
+    from ..engine_mode import decision_engines_enabled
+    if not decision_engines_enabled():
+        raise JevHttpError("JEV is bypassed in Model only mode", status_code=409)
     key = str(api_key or "").strip()
     if not key:
         raise JevHttpError("TypeSafe API key is missing", status_code=401)

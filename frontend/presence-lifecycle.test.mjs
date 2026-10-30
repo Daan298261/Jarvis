@@ -705,12 +705,12 @@ test("attention controller fails closed to the pointer without a webcam", () => 
 })
 
 
-test("all five persona versions persist across persona selection", () => {
-  assert.equal(variants.MYTHIC_AVATAR_CHOICES.length, 5)
+test("supported persona versions persist and legacy selections migrate to full body", () => {
+  assert.equal(variants.MYTHIC_AVATAR_CHOICES.length, 3)
   for (const choice of variants.MYTHIC_AVATAR_CHOICES) {
     assert.equal(variants.mythicAvatarForSelection(choice.id), choice.id)
   }
-  assert.equal(variants.mythicAvatarForSelection("jarvis_base"), variants.MYTHIC_LIVE_B_AVATAR_ID)
+  assert.equal(variants.mythicAvatarForSelection("jarvis_base"), variants.MYTHIC_LIVING_AVATAR_ID)
   for (const { shapeId } of Object.values(personas.PERSONA_VISUALS)) {
     for (const avatar of [variants.MYTHIC_LEGACY_C_AVATAR_ID, variants.MYTHIC_LEGACY_D_AVATAR_ID]) {
       const shape = variants.legacyPersonaShapeId(avatar, shapeId)

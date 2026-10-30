@@ -64,7 +64,7 @@ test("reason is forwarded and unknown avatars fall back to the mythic default va
   stubs.resetStubs({ activeId: "nabu", avatarId: "not_a_mythic_avatar" })
   const { calls, hook } = recorder()
   await activateNamedPersona("veles", { morphHook: hook, reason: "intent" })
-  assert.deepEqual(calls, [["nabu", "veles", { reason: "intent", layout: "A", variant: "mythic_live_b" }]])
+  assert.deepEqual(calls, [["nabu", "veles", { reason: "intent", layout: "A", variant: "mythic_living_b" }]])
 })
 
 test("re-selecting the active persona does not run the morph", async () => {

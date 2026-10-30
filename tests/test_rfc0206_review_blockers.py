@@ -99,10 +99,12 @@ async def test_late_provider_records_one_timeout_result(tmp_path, monkeypatch):
     monkeypatch.setattr(reflex.laya_adapter, "available", lambda **kwargs: (True, ""))
     def slow(**kwargs):
         time.sleep(.12)
-        return decision("social")
+        result = decision("social")
+        result.answers["persona_intent"] = Answer("persona_intent", "choice", "stay", .95)
+        return result
     monkeypatch.setattr(reflex.laya_adapter, "decide", slow)
     monkeypatch.setattr(reflex.quartermaster, "select_provider_order", lambda *args, **kwargs: ["laya"])
-    turn = await owner_turn.decide_owner_turn("Hello")
+    turn = await owner_turn.decide_owner_turn("Hello", settings=AppSettings())
     assert turn.reflex.source == "deadline_fallback"
     await asyncio.sleep(.2)
     events = [e for e in audit.list_events(80) if e.get("request_id") == turn.reflex.request_id]
