@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import time
+from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Literal
 
@@ -64,15 +65,17 @@ async def optional_metadata(client: httpx.AsyncClient, url: str):
         return None
 
 
-async def probe(port: int, *, api_key: str = "", host: str = "127.0.0.1", include_embeddings: bool = False) -> dict | None:
+async def probe(port: int, *, api_key: str = "", host: str = "127.0.0.1", include_embeddings: bool = False,
+                client: httpx.AsyncClient | None = None) -> dict | None:
     """Require actual model metadata, never a successful unrelated health page."""
     if host not in {"127.0.0.1", "::1"}:
         raise ValueError("Discovery probes are loopback only")
     base = f"http://{'[::1]' if host == '::1' else host}:{port}"
     try:
         async with asyncio.timeout(2.5):
-            async with httpx.AsyncClient(timeout=1.0, trust_env=False, follow_redirects=False,
-                                         headers=inference_headers(api_key)) as client:
+            async with AsyncExitStack() as stack:
+                client = client or await stack.enter_async_context(httpx.AsyncClient(
+                    timeout=1.0, trust_env=False, follow_redirects=False, headers=inference_headers(api_key)))
                 # Ollama's /v1/models includes unloaded downloads. /api/ps is authoritative.
                 body = await optional_metadata(client, base + "/api/ps")
                 if isinstance(body, dict) and isinstance(body.get("models"), list):

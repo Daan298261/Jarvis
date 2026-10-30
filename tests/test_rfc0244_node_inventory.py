@@ -145,6 +145,23 @@ async def test_remote_credentials_never_sent_to_local_discovery(inventory, monke
     assert all(call.kwargs["api_key"] == "" for call in probe.call_args_list)
 
 
+async def test_multiport_scan_shares_client_setup_without_starving_network_deadlines(inventory, monkeypatch):
+    service, _, _ = inventory
+    client_type = httpx.AsyncClient
+    constructions = []
+    def client(**kw):
+        constructions.append(threading.get_ident())
+        time.sleep(.05)
+        def handle(request):
+            return httpx.Response(200, json={"data": [{"id": f"model-{request.url.port}"}]}) if request.url.path == "/v1/models" else httpx.Response(404)
+        return client_type(transport=httpx.MockTransport(handle), **kw)
+    monkeypatch.setattr(ni.httpx, "AsyncClient", client)
+    result = await service.scan()
+    assert len(constructions) == 1
+    assert constructions[0] != threading.get_ident()
+    assert {row["port"] for row in result["models"]} == {1234, 8089, 8000}
+
+
 async def test_native_metadata_preserves_multiple_instances_and_embedding_inventory(monkeypatch):
     client_type = httpx.AsyncClient
     def handle(request):

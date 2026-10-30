@@ -9,6 +9,7 @@ import time
 from urllib.parse import urlparse
 
 import psutil
+import httpx
 
 from ..config import load_settings
 from .running_models import KNOWN_PORTS, probe
@@ -118,18 +119,21 @@ class NodeInventory:
             warnings = list(system["warnings"])
             if len(all_ports) > 40:
                 warnings.append("The 40-port scan limit was reached; detection is incomplete.")
-            async def inspect(port):
+            async def inspect(port, shared_client):
                 key = settings.inference.api_key if port == settings.inference.port and settings.inference.host in {"localhost", "127.0.0.1", "::1"} else ""
                 try:
                     if listeners.get(port, {}).get("address") == "::1":
-                        return await probe(port, api_key=key, host="::1", include_embeddings=True)
-                    return await probe(port, api_key=key, include_embeddings=True)
+                        return await probe(port, api_key=key, host="::1", include_embeddings=True, client=None if key else shared_client)
+                    return await probe(port, api_key=key, include_embeddings=True, client=None if key else shared_client)
                 except Exception:
                     warnings.append(f"Port {port} could not be inspected.")
                     return None
             # HTTP client setup, JSON parsing and native probes must not block the portal loop.
             async def inspect_all():
-                return await asyncio.gather(*(inspect(port) for port in ports))
+                # One client avoids serial TLS-context initialization starving
+                # the network deadlines of concurrently inspected ports.
+                async with httpx.AsyncClient(timeout=1.0, trust_env=False, follow_redirects=False) as client:
+                    return await asyncio.gather(*(inspect(port, client) for port in ports))
             results = await asyncio.to_thread(lambda: asyncio.run(inspect_all()))
             models, servers = [], []
             front_model = FRONT_RUNTIME.model_id(settings)
