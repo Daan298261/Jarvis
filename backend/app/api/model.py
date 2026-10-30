@@ -32,6 +32,12 @@ from ..persona.owner_chat import rebind_owner_conversations_after_hotswap
 router = APIRouter(prefix="/api/model", tags=["model"])
 
 
+@router.get("/node-inventory")
+async def node_ai_inventory(refresh: bool = False):
+    from ..inference.node_inventory import NODE_INVENTORY
+    return await NODE_INVENTORY.scan(force=refresh)
+
+
 class LoadBody(BaseModel):
     profile: str | None = None
 

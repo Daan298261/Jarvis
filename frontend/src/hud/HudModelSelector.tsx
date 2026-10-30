@@ -1,600 +1,126 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
-import { EngineModeControl } from "../components/EngineModeControl"
 import { Link } from "react-router-dom"
-import {
-  getLmStudioCatalog,
-  getSelectedRuntimeProfileId,
-  listRuntimeProfiles,
-  sortLmStudioProfiles,
-  type LmStudioCatalogResponse,
-  type LmStudioGradedProfile,
-  type LmStudioUngradedModel,
-  type RuntimeProfile,
-} from "../api"
+import { api, getLmStudioCatalog, getSelectedRuntimeProfileId, listRuntimeProfiles, type LmStudioCatalogResponse, type RuntimeProfile } from "../api"
+import { EngineModeControl } from "../components/EngineModeControl"
 import { applyRuntimeProfile, playDiscoveredGguf, playLmStudioCatalogProfile } from "./applyRuntimeProfile"
 import { hexStrikeSelectMessage } from "./hexstrikeAutostart"
-import {
-  clearSlot,
-  HUD_MODEL_SLOT_COUNT,
-  loadHudModelSlots,
-  moveSlot,
-  saveHudModelSlots,
-  setSlotProfile,
-  type HudModelSlotsV1,
-} from "./modelSlots"
 import { isHexStrikeSuiteProfile } from "./hexstrikeSuite"
+import { NodeAiInventory } from "./NodeAiInventory"
+import { modelName, nodeModelOptions, selectedModelOption, type NodeAiInventory as Inventory } from "./nodeModelOptions"
 import "./hexstrike.css"
+import "./nodeModels.css"
 
-export type HudModelSelectorProps = {
-  model: { loaded?: boolean; loading?: boolean; active_model?: string; last_error?: string } | null
-  onOpenChange?: (open: boolean) => void
-}
-
-function profileMatches(profile: RuntimeProfile, id: string): boolean {
-  if (!id) return false
-  return profile.id === id || profile.name === id
-}
-
-function selectionMatchesSlot(
-  slotProfileId: string,
-  selected: string,
-  profiles: RuntimeProfile[],
-): boolean {
-  if (!slotProfileId || !selected) return false
-  if (slotProfileId === selected) return true
-  const slotProfile = profiles.find((p) => profileMatches(p, slotProfileId))
-  const selectedProfile = profiles.find((p) => profileMatches(p, selected))
-  if (slotProfile && selectedProfile) return slotProfile.id === selectedProfile.id
-  return false
-}
-
-function slotLabel(
-  slot: { profileId: string; label?: string },
-  profiles: RuntimeProfile[],
-): string {
-  if (!slot.profileId) return "—"
-  if (slot.label?.trim()) return slot.label.trim()
-  const profile = profiles.find((p) => profileMatches(p, slot.profileId))
-  if (profile) return profile.label || profile.name
-  return slot.profileId.slice(0, 8)
-}
-
-function localRowActive(profile: LmStudioGradedProfile, selectedId: string): boolean {
-  if (!selectedId) return false
-  if (profile.runtime_profile_id && profile.runtime_profile_id === selectedId) return true
-  return false
-}
+type ModelState = { loaded?: boolean; loading?: boolean; active_model?: string; remote_model?: string; last_error?: string }
+export type HudModelSelectorProps = { model: ModelState | null; onOpenChange?: (open: boolean) => void }
 
 export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps) {
-  const menuId = useId()
-  const rootRef = useRef<HTMLDivElement>(null)
-  const [open, setOpen] = useState(false)
-  const [configure, setConfigure] = useState(false)
-  const [slotsState, setSlotsState] = useState<HudModelSlotsV1>(() => loadHudModelSlots())
+  const menuId = useId(), root = useRef<HTMLDivElement>(null)
+  const revision = useRef(0), working = useRef(false)
+  const [open, setOpen] = useState(false), [more, setMore] = useState(false)
   const [profiles, setProfiles] = useState<RuntimeProfile[]>([])
-  const [profilesError, setProfilesError] = useState(false)
   const [catalog, setCatalog] = useState<LmStudioCatalogResponse | null>(null)
-  const [catalogUnavailable, setCatalogUnavailable] = useState(false)
   const [selectedId, setSelectedId] = useState(getSelectedRuntimeProfileId)
-  const [busySlot, setBusySlot] = useState<number | null>(null)
-  const [busyLocalId, setBusyLocalId] = useState<string | null>(null)
-  const [msg, setMsg] = useState("")
-  const [assignIndex, setAssignIndex] = useState<number | null>(null)
+  const [draft, setDraft] = useState("")
+  const [snapshot, setSnapshot] = useState<ModelState | null>(null)
+  const [engineMode, setEngineMode] = useState("hybrid")
+  const [busy, setBusy] = useState(false), [refreshing, setRefreshing] = useState(false)
+  const [message, setMessage] = useState(""), [error, setError] = useState(""), [refreshError, setRefreshError] = useState("")
+  const options = useMemo(() => nodeModelOptions(profiles.filter((p) => !isHexStrikeSuiteProfile(p)), catalog), [profiles, catalog])
+  const suite = profiles.find(isHexStrikeSuiteProfile)
+  const state = open ? snapshot || model : model || snapshot
+  const serving = state?.loaded ? state.remote_model || state.active_model || "Identity unavailable" : "No model serving"
+  const value = options.some((option) => option.key === draft) ? draft : selectedModelOption(options, selectedId)
+  const choice = options.find((option) => option.key === value)
 
-  const transferring = busySlot !== null || busyLocalId !== null || !!model?.loading
-  const [loadElapsed, setLoadElapsed] = useState(0)
-
-  useEffect(() => {
-    if (!transferring) {
-      setLoadElapsed(0)
-      return
-    }
-    const started = Date.now()
-    const timer = window.setInterval(() => {
-      setLoadElapsed(Math.floor((Date.now() - started) / 1000))
-    }, 1000)
-    return () => window.clearInterval(timer)
-  }, [transferring])
-
-  const persistSlots = useCallback((next: HudModelSlotsV1) => {
-    setSlotsState(next)
-    saveHudModelSlots(next)
+  const refresh = useCallback(async () => {
+    if (working.current) return
+    const current = ++revision.current
+    setRefreshing(true)
+    const results = await Promise.allSettled([listRuntimeProfiles(), getLmStudioCatalog(), api<ModelState>("/api/model"), api<{ engine_mode?: string }>("/api/settings")])
+    if (current !== revision.current || working.current) return
+    const [runtime, files, live, settings] = results
+    if (runtime.status === "fulfilled") setProfiles(runtime.value.profiles)
+    if (files.status === "fulfilled") setCatalog(files.value)
+    if (live.status === "fulfilled") setSnapshot(live.value)
+    if (settings.status === "fulfilled") setEngineMode(settings.value.engine_mode || "hybrid")
+    setRefreshError(live.status === "rejected" ? "Serving status could not refresh." : runtime.status === "rejected" || files.status === "rejected" ? "Some model choices could not refresh." : "")
+    setRefreshing(false)
   }, [])
-
-  const refreshProfiles = useCallback(async () => {
-    try {
-      const data = await listRuntimeProfiles()
-      setProfiles(data.profiles || [])
-      setProfilesError(false)
-    } catch {
-      setProfiles([])
-      setProfilesError(true)
-    }
-  }, [])
-
-  const refreshCatalog = useCallback(async () => {
-    try {
-      const data = await getLmStudioCatalog(false)
-      setCatalog(data)
-      setCatalogUnavailable(false)
-    } catch {
-      setCatalog(null)
-      setCatalogUnavailable(true)
-    }
-  }, [])
-
-  useEffect(() => {
-    void refreshProfiles()
-  }, [refreshProfiles])
-
+  useEffect(() => { onOpenChange?.(open) }, [open, onOpenChange])
   useEffect(() => {
     if (!open) return
-    void refreshProfiles()
-    void refreshCatalog()
-  }, [open, refreshCatalog, refreshProfiles])
-
+    void refresh()
+    const outside = (event: MouseEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false) }
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false) }
+    const timer = window.setInterval(() => void refresh(), 8000)
+    document.addEventListener("mousedown", outside); document.addEventListener("keydown", escape)
+    window.addEventListener("anzu-engine-mode", refresh)
+    return () => { ++revision.current; clearInterval(timer); document.removeEventListener("mousedown", outside); document.removeEventListener("keydown", escape); window.removeEventListener("anzu-engine-mode", refresh) }
+  }, [open, refresh])
   useEffect(() => {
-    onOpenChange?.(open)
-  }, [open, onOpenChange])
+    const changed = () => { setSelectedId(getSelectedRuntimeProfileId()); if (!working.current) { setDraft(""); void refresh() } }
+    window.addEventListener("jarvis:runtime-profile-changed", changed)
+    return () => window.removeEventListener("jarvis:runtime-profile-changed", changed)
+  }, [refresh])
 
-  useEffect(() => {
-    const onRuntimeChange = (event: Event) => {
-      const detail = (event as CustomEvent<{ id?: string }>).detail
-      setSelectedId(detail?.id ?? getSelectedRuntimeProfileId())
-    }
-    window.addEventListener("jarvis:runtime-profile-changed", onRuntimeChange)
-    return () => window.removeEventListener("jarvis:runtime-profile-changed", onRuntimeChange)
-  }, [])
-
-  useEffect(() => {
-    if (!open) return
-    const onDoc = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        setOpen(false)
-        setConfigure(false)
-        setAssignIndex(null)
+  async function activate(suiteOnly = false) {
+    if (busy || state?.loading || (!suiteOnly && !choice) || (suiteOnly && !suite)) return
+    working.current = true; ++revision.current; setBusy(true); setError(""); setMessage("")
+    try {
+      const applied = suiteOnly ? await applyRuntimeProfile(suite!.id)
+        : choice!.kind === "catalog" ? await playLmStudioCatalogProfile(choice!.id)
+          : choice!.kind === "file" ? await playDiscoveredGguf(choice!.id) : await applyRuntimeProfile(choice!.id)
+      setSelectedId(applied.id); setDraft("")
+      const live = await api<ModelState>("/api/model")
+      setSnapshot(live)
+      setMessage(suiteOnly ? hexStrikeSelectMessage("hexStrikeAutoStarted" in applied && !!applied.hexStrikeAutoStarted)
+        : live.loaded ? `Serving: ${live.remote_model || live.active_model || "identity unavailable"}` : "Selection saved; no model is serving yet.")
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not load model") }
+    finally { working.current = false; setBusy(false); void refresh() }
+  }
+  async function unload() {
+    if (busy || state?.loading || !state?.loaded) return
+    working.current = true; ++revision.current; setBusy(true); setError(""); setMessage("")
+    const previous = serving
+    try {
+      setSnapshot(await api<ModelState>("/api/model/unload", { method: "POST" }))
+      const inventory = await api<Inventory>("/api/model/node-inventory?refresh=true")
+      if (inventory.models.some((item) => item.verified_loaded && (item.model === previous || item.model_key === previous))) {
+        setMore(true)
+        throw new Error("ANZU disconnected, but this model is still resident. Unload is not verified; see More.")
       }
-    }
-    document.addEventListener("mousedown", onDoc)
-    return () => document.removeEventListener("mousedown", onDoc)
-  }, [open])
-
-  const localGraded = useMemo(
-    () => (catalog ? sortLmStudioProfiles(catalog.profiles) : []),
-    [catalog],
-  )
-  const localUngraded = catalog?.ungraded ?? []
-
-  const selectedProfile = useMemo(
-    () => profiles.find((p) => profileMatches(p, selectedId)) || null,
-    [profiles, selectedId],
-  )
-  const hexstrikeProfile = useMemo(
-    () => profiles.find((profile) => isHexStrikeSuiteProfile(profile)) || null,
-    [profiles],
-  )
-  const hexstrikeActive = !!(selectedProfile && isHexStrikeSuiteProfile(selectedProfile))
-
-  const headline = useMemo(() => {
-    if (transferring) return "Loading model…"
-    if (model?.loading) return "Loading…"
-    if (selectedProfile) return selectedProfile.label || selectedProfile.name
-    if (model?.active_model) return model.active_model
-    return "Model"
-  }, [model?.active_model, model?.loading, selectedProfile, transferring])
-
-  const subline = useMemo(() => {
-    if (transferring) return "Loading model"
-    if (model?.loading) return "Switching runtime"
-    if (hexstrikeActive) return "Cybersecurity suite"
-    if (model?.loaded && model.active_model) return model.active_model
-    if (selectedProfile) return selectedProfile.model
-    return profilesError ? "Offline" : "Pick a slot"
-  }, [hexstrikeActive, model, profilesError, selectedProfile, transferring])
-
-  function setOpenState(next: boolean) {
-    setOpen(next)
-    if (!next) {
-      setConfigure(false)
-      setAssignIndex(null)
-    }
+      setMessage("ANZU is disconnected. More shows the node’s resident models.")
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not verify model unload") }
+    finally { working.current = false; setBusy(false); void refresh() }
   }
 
-  async function onSwapSlot(index: number) {
-    const slot = slotsState.slots[index]
-    if (!slot.profileId) {
-      setConfigure(true)
-      setAssignIndex(index)
-      return
-    }
-    setBusySlot(index)
-    setMsg("")
-    try {
-      const applied = await applyRuntimeProfile(slot.profileId)
-      setSelectedId(applied.id || applied.name)
-      setMsg(`Loaded ${applied.label || applied.name}.`)
-    } catch (err: unknown) {
-      const text = err instanceof Error ? err.message : "Could not load this slot."
-      setMsg(text.length > 180 ? `${text.slice(0, 177)}…` : text)
-    } finally {
-      setBusySlot(null)
-    }
-  }
-
-  async function onSwapSuite() {
-    if (!hexstrikeProfile) return
-    setBusySlot(-1)
-    setMsg("")
-    try {
-      const applied = await applyRuntimeProfile(hexstrikeProfile.id || hexstrikeProfile.name)
-      setSelectedId(applied.id || applied.name)
-      setMsg(hexStrikeSelectMessage(!!applied.hexStrikeAutoStarted))
-      setOpenState(false)
-    } catch {
-      setMsg("Could not open HexStrike.")
-    } finally {
-      setBusySlot(null)
-    }
-  }
-
-  async function onPlayLocal(profile: LmStudioGradedProfile) {
-    setBusyLocalId(profile.id)
-    setMsg("")
-    try {
-      const applied = await playLmStudioCatalogProfile(profile.id)
-      setSelectedId(applied.id || applied.name)
-      setMsg(`Loaded ${profile.display_name}.`)
-      void refreshProfiles()
-      void refreshCatalog()
-    } catch (err: unknown) {
-      const text = err instanceof Error ? err.message : "Could not load model."
-      setMsg(text.length > 96 ? `${text.slice(0, 93)}…` : text)
-    } finally {
-      setBusyLocalId(null)
-    }
-  }
-
-  async function onPinLocalToSlot(profile: LmStudioGradedProfile) {
-    if (assignIndex == null) return
-    setBusyLocalId(profile.id)
-    setMsg("")
-    try {
-      let runtimeId = profile.runtime_profile_id
-      if (!runtimeId) {
-        const runtime = await playLmStudioCatalogProfile(profile.id)
-        runtimeId = runtime.id || runtime.name
-      } else {
-        const next = setSlotProfile(slotsState, assignIndex, runtimeId, profile.display_name)
-        persistSlots(next)
-        setAssignIndex(null)
-        setMsg(`Pinned ${profile.display_name} to slot ${assignIndex + 1}.`)
-        setBusyLocalId(null)
-        return
-      }
-      const next = setSlotProfile(
-        slotsState,
-        assignIndex,
-        runtimeId,
-        profile.display_name,
-      )
-      persistSlots(next)
-      setAssignIndex(null)
-      setMsg(`Pinned ${profile.display_name} to slot ${assignIndex + 1}.`)
-      void refreshProfiles()
-      void refreshCatalog()
-    } catch {
-      setMsg("Could not pin this local model.")
-    } finally {
-      setBusyLocalId(null)
-    }
-  }
-
-  function onAssignProfile(profile: RuntimeProfile) {
-    if (assignIndex == null) return
-    const next = setSlotProfile(slotsState, assignIndex, profile.id, profile.label || profile.name)
-    persistSlots(next)
-    setAssignIndex(null)
-    setMsg(`Pinned ${profile.label || profile.name} to slot ${assignIndex + 1}.`)
-  }
-
-  function onClearSlot(index: number) {
-    persistSlots(clearSlot(slotsState, index))
-    setMsg(`Cleared slot ${index + 1}.`)
-  }
-
-  function onMoveSlot(index: number, direction: -1 | 1) {
-    const to = index + direction
-    if (to < 0 || to >= HUD_MODEL_SLOT_COUNT) return
-    persistSlots(moveSlot(slotsState, index, to))
-  }
-
-  async function onPlayUngraded(item: LmStudioUngradedModel) {
-    setBusyLocalId(item.path)
-    setMsg("")
-    try {
-      const applied = await playDiscoveredGguf(item.path)
-      setSelectedId(applied.id || applied.name)
-      setMsg(`Loaded ${item.filename}.`)
-      void refreshProfiles()
-      void refreshCatalog()
-    } catch (err: unknown) {
-      const text = err instanceof Error ? err.message : "Could not load model."
-      setMsg(text.length > 96 ? `${text.slice(0, 93)}…` : text)
-    } finally {
-      setBusyLocalId(null)
-    }
-  }
-
-  function renderUngradedRow(item: LmStudioUngradedModel) {
-    const busy = busyLocalId === item.path
-    return (
-      <li key={item.path} className="hud-model-local-row ungraded">
-        <div className="hud-model-local-text">
-          <span className="hud-model-local-name">
-            <span className="hud-model-local-badge">local</span>
-            {item.filename}
-          </span>
-          <span className="hud-model-local-meta">
-            {item.weight_gb.toFixed(1)} GB · {item.quantization || "—"}
-          </span>
-        </div>
-        <div className="hud-model-local-actions">
-          <button
-            type="button"
-            className="hud-icon-btn hud-model-play-btn"
-            disabled={transferring || busy}
-            onClick={() => void onPlayUngraded(item)}
-            title={`Play ${item.filename}`}
-            aria-label={`Play ${item.filename}`}
-          >
-            ▶
-          </button>
-        </div>
-      </li>
-    )
-  }
-
-  function renderGradedRow(profile: LmStudioGradedProfile) {
-    const active = localRowActive(profile, selectedId)
-    const busy = busyLocalId === profile.id
-    return (
-      <li key={profile.id} className={`hud-model-local-row${active ? " active" : ""}`}>
-        <div className="hud-model-local-text">
-          <span className="hud-model-local-name">
-            <span className="hud-model-local-badge">local</span>
-            {profile.pinned ? "★ " : ""}
-            {profile.display_name}
-          </span>
-          <span className="hud-model-local-meta">
-            {profile.matched ? `Overall ${profile.overall.toFixed(1)} · ` : ""}
-            {profile.weight_gb.toFixed(1)} GB · {profile.quantization}
-          </span>
-        </div>
-        <div className="hud-model-local-actions">
-          {configure && assignIndex != null && (
-            <button
-              type="button"
-              className="hud-icon-btn"
-              disabled={transferring || busy}
-              onClick={() => void onPinLocalToSlot(profile)}
-              title="Pin to slot"
-            >
-              Pin
-            </button>
-          )}
-          <button
-            type="button"
-            className="hud-icon-btn hud-model-play-btn"
-            disabled={transferring || busy}
-            onClick={() => void onPlayLocal(profile)}
-            title={`Play ${profile.display_name}`}
-            aria-label={`Play ${profile.display_name}`}
-          >
-            ▶
-          </button>
-        </div>
-      </li>
-    )
-  }
-
-  const localEmpty =
-    catalog && localGraded.length === 0 && localUngraded.length === 0 && !catalogUnavailable
-
-  return (
-    <div className="hud-model-selector" ref={rootRef}>
-      <button
-        type="button"
-        className={`hud-model-trigger${open ? " open" : ""}${transferring ? " transferring" : ""}`}
-        aria-expanded={open}
-        aria-haspopup="true"
-        aria-controls={menuId}
-        aria-busy={transferring}
-        onClick={() => setOpenState(!open)}
-        title="Switch local model"
-      >
-        <span className="hud-model-trigger-label">{headline}</span>
-        <span className="hud-model-trigger-meta">{subline}</span>
-      </button>
-
-      {open && (
-        <div className="hud-model-menu" id={menuId} role="dialog" aria-label="Switch local model">
-          <div className="hud-model-menu-head">
-            <span className="hud-model-menu-title">Model</span>
-            <button
-              type="button"
-              className="hud-icon-btn hud-model-config-toggle"
-              onClick={() => {
-                setConfigure((c) => !c)
-                setAssignIndex(null)
-              }}
-            >
-              {configure ? "Done" : "Pin"}
-            </button>
-          </div>
-
-          {transferring && (
-            <p className="hud-model-transferring" role="status">
-              Loading model{loadElapsed > 0 ? ` (${loadElapsed}s)` : ""}… You can close this menu.
-            </p>
-          )}
-
-          <EngineModeControl />
-
-          {msg && <p className="hud-model-msg">{msg}</p>}
-          {(profilesError || catalogUnavailable) && !transferring && (
-            <button
-              type="button"
-              className="hud-icon-btn hud-model-retry"
-              onClick={() => {
-                setMsg("Checking local models…")
-                void Promise.all([refreshProfiles(), refreshCatalog()]).then(() => setMsg(""))
-              }}
-            >
-              Retry local models
-            </button>
-          )}
-          {model?.last_error && !transferring && (
-            <p className="hud-model-error">{model.last_error}</p>
-          )}
-
-          {hexstrikeProfile && (
-            <button
-              type="button"
-              className={`hud-model-suite-row${hexstrikeActive ? " active" : ""}`}
-              disabled={transferring}
-              onClick={() => void onSwapSuite()}
-            >
-              <span className="mark" aria-hidden>
-                ⬡
-              </span>
-              <span>{hexstrikeProfile.label || "HexStrike AI"}</span>
-              <span className="meta">Cyber suite</span>
-            </button>
-          )}
-
-          <div
-            className="hud-model-slots"
-            role="group"
-            aria-label="Pinned runtime slots"
-            aria-disabled={transferring}
-          >
-            {slotsState.slots.map((slot, index) => {
-              const active = selectionMatchesSlot(slot.profileId, selectedId, profiles)
-              const filled = !!slot.profileId
-              const label = slotLabel(slot, profiles)
-              return (
-                <div key={index} className={`hud-model-slot-wrap${configure ? " configuring" : ""}`}>
-                  {configure && (
-                    <div className="hud-model-slot-tools">
-                      <button
-                        type="button"
-                        className="hud-icon-btn"
-                        disabled={index === 0 || transferring}
-                        onClick={() => onMoveSlot(index, -1)}
-                        title="Move left"
-                      >
-                        ←
-                      </button>
-                      <button
-                        type="button"
-                        className="hud-icon-btn"
-                        disabled={index === HUD_MODEL_SLOT_COUNT - 1 || transferring}
-                        onClick={() => onMoveSlot(index, 1)}
-                        title="Move right"
-                      >
-                        →
-                      </button>
-                      <button
-                        type="button"
-                        className="hud-icon-btn"
-                        disabled={!filled || transferring}
-                        onClick={() => onClearSlot(index)}
-                        title="Clear slot"
-                      >
-                        ×
-                      </button>
-                      <button
-                        type="button"
-                        className="hud-icon-btn"
-                        disabled={transferring}
-                        onClick={() => setAssignIndex(index)}
-                        title="Assign profile"
-                      >
-                        …
-                      </button>
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    className={`hud-model-slot${active ? " active" : ""}${filled ? "" : " empty"}${transferring ? " disabled" : ""}`}
-                    disabled={transferring || busySlot === index}
-                    onClick={() => (configure ? setAssignIndex(index) : onSwapSlot(index))}
-                    title={filled ? label : `Empty slot ${index + 1}`}
-                  >
-                    <span className="hud-model-slot-idx">{index + 1}</span>
-                    <span className="hud-model-slot-label">{filled ? label : "+"}</span>
-                  </button>
-                </div>
-              )
-            })}
-          </div>
-
-          {configure && assignIndex != null && (
-            <div className="hud-model-assign" aria-label="Pick runtime profile">
-              <p className="hud-model-assign-hint">
-                Slot {assignIndex + 1}
-                {profilesError ? " — runtimes unavailable" : ""}
-              </p>
-              <ul className="hud-model-assign-list">
-                {profiles.map((profile) => (
-                  <li key={profile.id}>
-                    <button
-                      type="button"
-                      className="hud-model-assign-row"
-                      disabled={transferring}
-                      onClick={() => onAssignProfile(profile)}
-                    >
-                      <span>{profile.label || profile.name}</span>
-                      <span className="hud-model-assign-meta">{profile.model}</span>
-                    </button>
-                  </li>
-                ))}
-                {!profiles.length && !profilesError && <li className="hud-model-assign-empty">No runtimes</li>}
-              </ul>
-            </div>
-          )}
-
-          <section className="hud-model-local" aria-label="Local LM Studio models">
-              <div className="hud-model-local-head">
-                <span className="hud-model-local-title">Local</span>
-                {catalog?.vram_gb != null && (
-                  <span className="hud-model-local-vram">~{catalog.vram_gb} GB VRAM</span>
-                )}
-              </div>
-              {catalogUnavailable && (
-                <p className="hud-model-local-hint">Local catalog unavailable.</p>
-              )}
-              {!catalog && !catalogUnavailable && (
-                <p className="hud-model-local-hint">Loading local models…</p>
-              )}
-              {localEmpty && (
-                <p className="hud-model-local-hint">No local GGUFs found under LM Studio models.</p>
-              )}
-              {(localGraded.length > 0 || localUngraded.length > 0) && (
-                <ul className="hud-model-local-list">
-                  {localGraded.map(renderGradedRow)}
-                  {localUngraded.map(renderUngradedRow)}
-                </ul>
-              )}
-            </section>
-
-          <div className="hud-model-menu-foot">
-            <Link to="/model" className="hud-model-more" onClick={() => setOpenState(false)}>
-              More →
-            </Link>
-          </div>
-        </div>
-      )}
-    </div>
-  )
+  return <div className="hud-model-selector" ref={root}>
+    <button type="button" className={`hud-model-trigger${open ? " open" : ""}${busy || state?.loading ? " transferring" : ""}`} aria-expanded={open} aria-controls={menuId} title="Model for current node" onClick={() => setOpen(!open)}>
+      <span className="hud-model-trigger-label">{busy || state?.loading ? "Switching model…" : modelName(serving)}</span>
+      <span className="hud-model-trigger-meta">Current node · Models ▾</span>
+    </button>
+    {open && <div id={menuId} className="hud-model-menu node-model-menu" role="dialog" aria-label="Model for current node">
+      <div className="hud-model-menu-head"><span>Model for this node</span><button type="button" onClick={() => setOpen(false)}>Close</button></div>
+      <div className="node-model-serving" role="status"><strong>Serving now</strong><span>{serving}</span></div>
+      <label htmlFor={`${menuId}-choice`} className="node-model-label">Choose a model</label>
+      <select id={`${menuId}-choice`} className="node-model-select" value={value} disabled={busy} onChange={(event) => { setDraft(event.target.value); setMessage("") }}>
+        <option value="">Choose a model…</option>
+        <optgroup label="GGUF files on this node">{options.filter((option) => option.kind !== "runtime").map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}</optgroup>
+        <optgroup label="Configured runtimes">{options.filter((option) => option.kind === "runtime").map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}</optgroup>
+      </select>
+      <p className="node-model-detail">{choice?.detail || "Select a model, then press Load."}</p>
+      <div className="node-model-actions">
+        <button type="button" disabled={busy || state?.loading || !choice || engineMode === "reflex_only"} onClick={() => void activate()}>Load</button>
+        <button type="button" disabled={busy || state?.loading || !state?.loaded} onClick={() => void unload()}>Unload</button>
+        <button type="button" disabled={busy || refreshing} onClick={() => void refresh()}>{refreshing ? "Refreshing…" : "Refresh"}</button>
+        <button type="button" aria-expanded={more} onClick={() => setMore(!more)}>{more ? "Less" : "More"}</button>
+      </div>
+      {message && <p role="status" className="node-model-detail">{message}</p>}
+      {(error || refreshError) && <p role="alert" className="node-model-error">{error || refreshError}</p>}
+      <EngineModeControl />
+      {suite && <button type="button" className="hexstrike-model-entry" disabled={busy} onClick={() => void activate(true)}>HexStrike AI · Cyber suite</button>}
+      {more && <NodeAiInventory />}
+      <div className="hud-model-menu-foot"><Link to="/model" onClick={() => setOpen(false)}>All model settings →</Link></div>
+    </div>}
+  </div>
 }
