@@ -38,28 +38,29 @@ function phaseLabel(phase: PresencePhase): string {
 export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }: HumanoidPresenceProps) {
   const galaxy = settings.requestedPresence === "galaxy"
   const mythic = settings.requestedPresence === "particle_bust"
+  const personaMode = mythic || galaxy
   const settingsCloud = shapeId === SETTINGS_CLOUD_SHAPE_ID
   const liveVariantB = usesMythicLiveVariantB(settings.avatarId)
   const muscular = !mythic && settings.avatarId === MUSCULAR_HUMANOID_AVATAR_ID
-  const portraitUrl = mythic && personaVisual?.portraitUrl
+  const portraitUrl = personaMode && personaVisual?.portraitUrl
     ? personaVisual.portraitUrl
     : muscular
       ? MUSCULAR_HUMANOID_ARTWORK
       : CURRENT_HUMANOID_ARTWORK
-  const portraitId = mythic
+  const portraitId = personaMode
     ? personaVisual?.personaId || "anzu"
     : muscular
       ? MUSCULAR_HUMANOID_AVATAR_ID
       : "humanoid"
-  const volumetric = mythic && liveVariantB
-  const living = volumetric && settings.avatarId === MYTHIC_LIVING_AVATAR_ID
+  const volumetric = personaMode && (liveVariantB || galaxy)
+  const living = volumetric && (settings.avatarId === MYTHIC_LIVING_AVATAR_ID || galaxy)
   const artworkKey = `${portraitId}:${portraitUrl}:${volumetric}:${living}`
   const [artwork, setArtwork] = useState<{ key: string; shapeId: string }>()
   const [failedArtworkKey, setFailedArtworkKey] = useState<string>()
   const legacyShape = mythic
     ? legacyPersonaShapeId(settings.avatarId, PERSONA_VISUALS[personaVisual?.personaId as NamedPersonaId]?.shapeId || "stormbird")
     : settings.avatarId === LEGACY_HUMANOID_AVATAR_ID ? "humanoid_bust" : undefined
-  const portraitBacked = !galaxy && !settingsCloud && !legacyShape
+  const portraitBacked = !settingsCloud && !legacyShape && !(personaMode && shapeId?.startsWith("custom_"))
   const preparing = portraitBacked && mythic && artwork?.key !== artworkKey && failedArtworkKey !== artworkKey
   const prepareError = portraitBacked && mythic && failedArtworkKey === artworkKey
   useEffect(() => {
@@ -107,9 +108,7 @@ export function HumanoidPresence({ snapshot, settings, shapeId, personaVisual }:
       settings={settings}
       shapeId={settingsCloud
         ? SETTINGS_CLOUD_SHAPE_ID
-        : galaxy
-            ? shapeId
-            : portraitBacked
+        : portraitBacked
               ? artwork?.shapeId || "humanoid_bust"
               : legacyShape || shapeId || "humanoid_bust"}
       personaVisual={personaVisual}

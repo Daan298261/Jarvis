@@ -53,7 +53,9 @@
             <intent-filter><action android:name="android.intent.action.VOICE_ASSIST" /><category android:name="android.intent.category.DEFAULT" /></intent-filter>
             <intent-filter><action android:name="android.intent.action.ASSIST" /><category android:name="android.intent.category.DEFAULT" /></intent-filter>
         </activity>
-        <activity-alias android:name=".AssistantSettingsActivity" android:targetActivity=".MainActivity" android:exported="true" android:label="ANZU assistant options" />
+        <activity android:name=".AssistantSettingsActivity" android:exported="true" android:label="ANZU assistant options">
+            <intent-filter><action android:name="android.intent.action.APPLICATION_PREFERENCES" /><category android:name="android.intent.category.DEFAULT" /></intent-filter>
+        </activity>
         <service android:name=".AnzuAccessibilityService" android:exported="true" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
             <meta-data android:name="android.accessibilityservice" android:resource="@xml/anzu_accessibility" />
@@ -64,6 +66,7 @@
         </service>
         <service android:name=".AnzuRecognitionService" android:exported="true" android:permission="android.permission.BIND_SPEECH_RECOGNITION_SERVICE">
             <intent-filter><action android:name="android.speech.RecognitionService" /></intent-filter>
+            <meta-data android:name="android.speech" android:resource="@xml/anzu_recognition" />
         </service>
         <service android:name=".AnzuVoiceSessionService" android:exported="true" android:permission="android.permission.BIND_VOICE_INTERACTION" />
         <service android:name=".AnzuWakeService" android:exported="false" android:foregroundServiceType="microphone" />
