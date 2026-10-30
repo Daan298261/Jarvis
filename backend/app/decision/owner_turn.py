@@ -450,14 +450,16 @@ def _decide_sync(
             questions.append(precheck.question)
             state["current_persona"] = precheck.current
             state["pinned"] = bool(persona.pinned)
-    result = decide(
-        state,
-        questions,
-        "request_routing",
-        OWNER_TURN_DEADLINE_MS,
-        privacy_for_tier(tier),
-        clock=clock,
-    )
+    from ..engine_mode import engine_mode_scope
+    with engine_mode_scope(settings):
+        result = decide(
+            state,
+            questions,
+            "request_routing",
+            OWNER_TURN_DEADLINE_MS,
+            privacy_for_tier(tier),
+            clock=clock,
+        )
     turn = _apply_floors(
         user_message=user_message,
         baseline=baseline,

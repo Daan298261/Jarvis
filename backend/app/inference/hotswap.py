@@ -89,6 +89,8 @@ async def apply_runtime_profile_to_settings(runtime: RuntimeProfile, *, persist:
     # Only save after the external runtime has answered its probe. A failed
     # click must never leave a stale LM Studio server as the next boot target.
     settings = load_settings().model_copy(deep=True)
+    from ..engine_mode import require_model
+    require_model(settings)
     provider = _normalize_provider(runtime.provider or "")
     if provider == "lmstudio":
         settings.inference.backend = "lmstudio"
@@ -201,6 +203,8 @@ async def activate_runtime_profile(runtime: RuntimeProfile, *, force: bool = Fal
         await HEXSTRIKE.ensure_started()
         return MANAGER.state
 
+    from ..engine_mode import require_model
+    require_model(load_settings())
     if HEXSTRIKE.is_running:
         await HEXSTRIKE.stop()
 

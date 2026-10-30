@@ -245,6 +245,9 @@ def _jev_answers_if_available():
 
 
 def _start_load() -> None:
+    from ...engine_mode import decision_engines_enabled
+    if not decision_engines_enabled():
+        return
     global _LOAD_THREAD
     with _LOCK:
         if _STATE.loading or (_STATE.warm and _AGENT is not None):
@@ -264,6 +267,9 @@ def wait_until_warm(timeout_s: float = 120.0) -> bool:
 
 
 def enable(*, warm: bool = True, allow_fixture: bool = True) -> dict[str, Any]:
+    from ...engine_mode import decision_engines_enabled
+    if not decision_engines_enabled():
+        raise RuntimeError("Laya is bypassed in Model only mode")
     ok, reason, manifest = pins.verify_installed(allow_fixture=allow_fixture)
     if not ok:
         raise RuntimeError(reason or "Laya install invalid")
@@ -304,6 +310,9 @@ def disable() -> dict[str, Any]:
 
 def restore_on_startup() -> dict[str, Any] | None:
     """Re-enable and warm a managed install the owner previously enabled."""
+    from ...engine_mode import decision_engines_enabled
+    if not decision_engines_enabled():
+        return None
     flag = pins.install_root() / _ENABLED_FLAG
     if not flag.is_file():
         return None
@@ -552,6 +561,9 @@ def decide_local(
     decision_class: str,
     deadline_ms: float,
 ) -> tuple[dict[str, Answer], float, bool]:
+    from ...engine_mode import decision_engines_enabled
+    if not decision_engines_enabled():
+        raise RuntimeError("Laya is bypassed in Model only mode")
     if not is_ready():
         raise RuntimeError("Laya runtime is not warm/enabled or is busy")
     started = time.perf_counter()

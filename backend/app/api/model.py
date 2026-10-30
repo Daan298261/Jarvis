@@ -32,6 +32,12 @@ from ..persona.owner_chat import rebind_owner_conversations_after_hotswap
 router = APIRouter(prefix="/api/model", tags=["model"])
 
 
+@router.get("/node-inventory")
+async def node_ai_inventory(refresh: bool = False):
+    from ..inference.node_inventory import NODE_INVENTORY
+    return await NODE_INVENTORY.scan(force=refresh)
+
+
 class LoadBody(BaseModel):
     profile: str | None = None
 
@@ -242,6 +248,9 @@ async def run_model_harness():
 @router.post("/load")
 async def load_model(body: LoadBody | None = None):
     settings = load_settings()
+    from ..engine_mode import model_enabled
+    if not model_enabled(settings):
+        raise HTTPException(status_code=409, detail="JEV/Laya only is active. Enable a model mode before loading.")
     profile = (body.profile if body else None) or settings.inference.profile
     previous_context = int(MANAGER.state.context_size or settings.inference.context_size or 0)
     target = resolve_profile(profile)

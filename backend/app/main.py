@@ -336,7 +336,8 @@ async def startup() -> None:
         asyncio.create_task(_auto_start_blackgrid())
     except Exception:
         logging.debug("Supermemory auto-start scheduling skipped", exc_info=True)
-    if current.inference.auto_load and not os.environ.get("JARVIS_SKIP_MODEL"):
+    from .engine_mode import model_enabled
+    if model_enabled(current) and current.inference.auto_load and not os.environ.get("JARVIS_SKIP_MODEL"):
         asyncio.create_task(_autoload_model(current))
 
     launch_prompt = os.environ.get("JARVIS_LAUNCH_PROMPT")
@@ -373,7 +374,7 @@ async def startup() -> None:
         schedule_tts_warm_start()
     except Exception:
         logging.debug("TTS warm-start scheduling skipped", exc_info=True)
-    if not os.environ.get("PYTEST_CURRENT_TEST"):
+    if model_enabled(current) and not os.environ.get("PYTEST_CURRENT_TEST"):
         try:
             from .inference.front_runtime import FRONT_RUNTIME
 
@@ -517,6 +518,9 @@ async def shutdown() -> None:
 
 
 async def _autoload_model(current) -> None:
+    from .engine_mode import model_enabled
+    if not model_enabled(current):
+        return
     # Discovery offers are independent of the saved boot choice. New servers
     # must neither take it over nor leave autoload waiting for a modal choice.
     try:

@@ -356,14 +356,18 @@ async def test_laya_fixture_via_set_decide_fn_is_labelled(jarvis_env, monkeypatc
         return {
             "request_route": Answer("request_route", "choice", DIRECT_REPLY, 0.95),
             "reply_shape": Answer("reply_shape", "choice", "social", 0.95),
+            "persona_intent": Answer("persona_intent", "choice", "stay", 0.95),
         }
 
     laya_runtime.set_decide_fn(fixture_decide)
+    from app.decision import cache
+    cache.clear()
     try:
         turn = await decide_owner_turn(
             "Hello there",
             baseline=route_request("Hello there"),
             decision_tier="local",
+            settings=jarvis_env["settings"],
         )
         assert turn.reflex is not None
         assert turn.reflex.source == "laya"
@@ -443,6 +447,7 @@ async def test_cold_laya_does_not_stall_the_turn(jarvis_env, monkeypatch):
             "Hello there",
             baseline=route_request("Hello there"),
             decision_tier="local",
+            settings=jarvis_env["settings"],
         )
         assert not loader.finished.is_set(), "turn waited for the cold Laya load"
         assert laya_runtime.is_ready() is False
@@ -480,11 +485,14 @@ async def test_slow_laya_fixture_falls_back_inside_deadline(jarvis_env, monkeypa
         }
 
     laya_runtime.set_decide_fn(slow_decide)
+    from app.decision import cache
+    cache.clear()
     try:
         turn = await decide_owner_turn(
             "Hello there",
             baseline=route_request("Hello there"),
             decision_tier="local",
+            settings=jarvis_env["settings"],
         )
         assert blocker.started.is_set(), "slow Laya fixture was never called"
         assert not blocker.finished.is_set(), "turn waited for the slow Laya fixture"
