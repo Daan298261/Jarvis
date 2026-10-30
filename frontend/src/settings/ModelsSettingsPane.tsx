@@ -1,4 +1,5 @@
 import { LocalModelDiscovery } from "./LocalModelDiscovery"
+import { EngineModeControl } from "../components/EngineModeControl"
 import { CollapsibleSection } from "../components/CollapsibleSection"
 import { Link } from "react-router-dom"
 import { DecisionTierSettings } from "./DecisionTierSettings"
@@ -30,6 +31,7 @@ export function ModelsSettingsPane({
 
   return (
     <>
+      <EngineModeControl />
       <CollapsibleSection className="card grid settings-pane-card" storageKey="ModelsSettingsPane-Models-Inference" title={<span>Models / Inference</span>}>
 
         <p className="lede" style={{ margin: "0 0 12px" }}>

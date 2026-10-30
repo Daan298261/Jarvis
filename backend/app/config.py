@@ -475,6 +475,7 @@ class DecisionSettings(BaseModel):
 
 
 class AppSettings(BaseModel):
+    engine_mode: Literal["hybrid", "model_only", "reflex_only"] = "hybrid"
     _saved_snapshot: dict[str, Any] | None = PrivateAttr(default=None)
     bind_host: str = "127.0.0.1"
     bind_port: int = 4780

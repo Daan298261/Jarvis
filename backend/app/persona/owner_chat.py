@@ -349,6 +349,18 @@ async def stream_owner_chat(
     cid = _ensure_conversation(conversation_id)
     yield {"type": "start", "conversation_id": cid}
 
+    from ..engine_mode import model_enabled, reflex_only_reply
+    engine_settings = load_settings()
+    if not model_enabled(engine_settings):
+        reply, source = await reflex_only_reply(cleaned, engine_settings)
+        _conversations.setdefault(cid, []).extend([
+            ChatMessage(role="user", content=cleaned), ChatMessage(role="assistant", content=reply),
+        ])
+        yield {"type": "delta", "text": reply}
+        yield {"type": "done", "conversation_id": cid, "text": reply, "reply": reply,
+               "engine_mode": "reflex_only", "decision_source": source}
+        return
+
     from ..agent.planning import simple_app_control, simple_file_control
 
     # Delegate only when the owner clearly asked for tools / app / file control.

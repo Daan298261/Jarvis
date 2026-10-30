@@ -242,6 +242,9 @@ async def run_model_harness():
 @router.post("/load")
 async def load_model(body: LoadBody | None = None):
     settings = load_settings()
+    from ..engine_mode import model_enabled
+    if not model_enabled(settings):
+        raise HTTPException(status_code=409, detail="JEV/Laya only is active. Enable a model mode before loading.")
     profile = (body.profile if body else None) or settings.inference.profile
     previous_context = int(MANAGER.state.context_size or settings.inference.context_size or 0)
     target = resolve_profile(profile)

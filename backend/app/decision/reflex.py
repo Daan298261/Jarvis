@@ -258,16 +258,23 @@ def decide(
         quartermaster.record_outcome(dclass, "rules", latency_ms=guarded.latency.total_ms, quality=_quality(guarded))
         return guarded
 
-    laya_ready = laya_runtime.is_ready()
+    from ..engine_mode import engine_mode
+    mode = engine_mode()
+    typed_enabled = mode != "model_only"
+    generation_enabled = mode != "reflex_only"
+    laya_ready = typed_enabled and laya_runtime.is_ready()
     # Jev is only a candidate here. Check its entitlement/key/WAN gate when
     # actually trying it, after a warm Laya result has had the first chance.
-    jev_ready = privacy == "allow_cloud"
+    jev_ready = typed_enabled and privacy == "allow_cloud"
     order = quartermaster.select_provider_order(
         dclass,
         privacy=privacy,
         laya_ready=laya_ready,
         jev_ready=jev_ready,
     )
+    order = [provider for provider in order
+             if (typed_enabled or provider not in {"laya", "jev"})
+             and (generation_enabled or provider != "generative")]
 
     last_error = ""
     for provider in order:
@@ -432,9 +439,19 @@ def decide(
         )
         return guarded
 
+    if not generation_enabled:
+        rules_result.fallback_used = True
+        rules_result.fallback_reason = last_error or "No configured JEV/Laya provider answered; generative model disabled"
+        rules_result.fallback_source = "rules"
+        rules_result.request_id = rid
+        guarded = _apply_policy_guard(state=projection, decision_class=dclass, result=rules_result)
+        metrics.record(guarded)
+        audit.record_event("reflex_decision", guarded.as_dict())
+        return guarded
+
     # Exhausted providers → generative, then rules deadline fallback.
     remaining = deadline - (clock() - started) * 1000.0
-    if remaining > 1.0:
+    if remaining > 1.0 and generation_enabled:
         try:
             gen = generative.decide(
                 state=projection,

@@ -223,6 +223,9 @@ class RunningModels:
 
     async def decide(self, identifier: str, action: Action) -> dict:
         from .manager import MANAGER
+        from ..engine_mode import require_model, model_enabled
+        if action in {"use", "replace"}:
+            require_model(load_settings())
         from ..persona.owner_chat import rebind_owner_conversations_after_hotswap
 
         async with self._choice_lock:
@@ -242,7 +245,7 @@ class RunningModels:
                 await asyncio.to_thread(self._save, choices)
                 row["choice"] = "leave"
                 # Startup waits for this owner choice instead of competing for VRAM.
-                if not MANAGER.state.loaded and not MANAGER.state.loading and settings.inference.auto_load:
+                if model_enabled(settings) and not MANAGER.state.loaded and not MANAGER.state.loading and settings.inference.auto_load:
                     await MANAGER.load(settings)
                 return self.snapshot()
             async with MANAGER._request_lease.exclusive() as acquired:
@@ -328,6 +331,10 @@ class RunningModels:
                 from .manager import MANAGER
 
                 settings = load_settings()
+                from ..engine_mode import model_enabled
+                if not model_enabled(settings):
+                    await asyncio.sleep(10)
+                    continue
                 selected = next((r for r in self.rows if r["choice"] == "use"
                                  and r["port"] == settings.inference.port
                                  and r["model"] == settings.inference.remote_model

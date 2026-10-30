@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
+import { EngineModeControl } from "../components/EngineModeControl"
 import { Link } from "react-router-dom"
 import {
   getLmStudioCatalog,
@@ -436,6 +437,8 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
               Loading model{loadElapsed > 0 ? ` (${loadElapsed}s)` : ""}… You can close this menu.
             </p>
           )}
+
+          <EngineModeControl />
 
           {msg && <p className="hud-model-msg">{msg}</p>}
           {(profilesError || catalogUnavailable) && !transferring && (
