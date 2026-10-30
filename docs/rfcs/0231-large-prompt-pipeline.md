@@ -860,6 +860,8 @@ On `loop.py` and `owner_turn.py` the order is RFC-0230 (#666), then RFC-0232 (#6
 | `backend/app/agent/loop.py` | #649 (landed) → 0218-S3b → 0230-S0 → 0230-S2 → 0230-S3 → 0232-S3 → 0232-S4 → 0232-S5 → 0231-S4 → 0231-S5 → 0233-S3 → 0233-S4 (#668; #670, RFC-0211, does not edit `loop.py`). In `create_task`: 0230's `prewarm_worker` and route decision, then 0232's RE dispatch (S3 FFS, S5 APK), then 0231's large branch |
 | `backend/app/decision/owner_turn.py` | #649 (landed) → 0218-S3b (not landed) → 0230-S5 → 0232-S2 → 0231-S1 → 0233-S1 (#668) |
 | `backend/app/decision/adapters/rules.py` | 0231-S1 → 0233-S1 (#668; `capability_gap` rider branch) |
+| `backend/app/agent/request_routing.py` | 0231-S1 → 0233-S1 (#668 (RFC-0233; final head in this PR's body); pass-through of the new field only; 0230 and 0232 do not edit it) |
+| `backend/app/agent/large_prompt_queue.py` | 0231-S5 (creates it) → 0233-S4 (#668 (RFC-0233; final head in this PR's body); `dispatch_next` waits on the capability queue and the part-ask hooks) |
 | `backend/app/config.py` | #649 (landed) → 0228-S1 → 0228-S2 → 0231-S2 → 0233-S1 (#668) → #670 (RFC-0211, supersedes #585; draft, merges `development` in when it is picked up, never rebases) |
 | `backend/app/main.py` | 0225-S2 → 0225-S3 → 0230-S0 → 0230-S5 → 0231-S0 → 0231-S5 → 0233-S4 (#668) → #670 (RFC-0211, supersedes #585; draft, same rule). RFC-0225 goes first on `main.py` (CoS) |
 | `backend/app/api/tasks.py` | #649 (landed) → 0231-S5 → 0233-S3 → 0233-S4 (#668) |
