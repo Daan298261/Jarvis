@@ -6,7 +6,8 @@
 **Aligns with:** [`ANZU_PRODUCT_NORTH_STAR.md`](../../ANZU_PRODUCT_NORTH_STAR.md) §8 (ANZU must verify its own work; "confidence should come from evidence rather than cheerful completion messages"), §9 (local-first, owner-controlled infrastructure), §19 ("Do expose state when the user needs confidence in what ANZU is doing"; "Do not mark something finished merely because its backend exists"), §20.
 **Traced on:** `development` @ `a62bd454` (#685 landed on top of RFC-0244, #684). Every citation below is by file and symbol or by section name; no line numbers.
 **Builds on:** [RFC-0244](0244-three-engine-modes.md) sections "Decision" (including its owner follow-up) and "Acceptance criteria". Not affected: [RFC-0241](0241-model-startup-upgrade-reuse-catalog.md) (startup upgrade and catalog reuse).
-**Open batch PRs reconciled (final heads in this PR's body):** #652 (RFC-0225; final head in this PR's body), #655 (RFC-0228; final head in this PR's body), #664 (RFC-0232; final head in this PR's body), #665 (RFC-0245; final head in this PR's body), #668 (RFC-0233; final head in this PR's body). #682 (RFC-0242; final head in this PR's body) is the code PR this rescope reworks.
+**Open batch PRs reconciled (final heads in this PR's body):** #652 (RFC-0225; final head in this PR's body), #655 (RFC-0228; final head in this PR's body), #664 (RFC-0232; final head in this PR's body), #665 (RFC-0245; final head in this PR's body), #668 (RFC-0233; final head in this PR's body). #682 (RFC-0242; final head in this PR's body) is the code PR this rescope reworks, and it stays the single code PR (reworked by D2, one commit per ticket).
+**Ordering (CoS, 2026-10-30):** RFC-0242's tickets go **last** on every file they share with the batch, after each file's existing chain. The tickets assume the batch (#652, #655, #664, #665, #668 and #670) has landed; D2 merges `development` into #682 once it has. The batch specs need no edit for this RFC.
 **Astra boundary:** personas, WebGL and presence are not touched. The model dropdown is shared HUD chrome, not an Astra system; it is changed add-alongside only (see *Live-UI add-alongside reasoning pass*).
 
 ## Supersession notice (read first)
@@ -55,6 +56,10 @@ Keep the four items above, implemented on top of the RFC-0244 dropdown, never re
 - **R4. A mode switch never claims VRAM was released and never unloads (RFC-0244 "Decision": "Switching mode does not … claim VRAM was released").** Only an explicit Unload verifies a release, and only that action may say "released" or "unloaded". See *Reconciling Unload with RFC-0244*.
 - **R5. No success is reported without evidence (north star §8).** Load success needs the runtime's own loaded-instance evidence (T5). Unload success needs the runtime's own post-unload inventory (T3). A response that merely says OK is never enough.
 - **R6. Security gates, approval checks, system prompts and routing policy are unchanged.** This RFC adds no download, no default promotion and no installer change.
+
+### RFC-0244 erratum: explicit Load under `reflex_only` (CoS ruling, 2026-10-30)
+
+RFC-0244 section "Decision" says `reflex_only` "excludes generative providers, front/worker model calls and model autoload", and its "Acceptance criteria" bullet "Reflex only cannot start/call front or worker generation, including startup and fallback paths" is about generation and automatic starts. Nothing in either section says an **explicit owner Load** is excluded. The RFC-0244 implementation nevertheless guards loading with the generation guard (`engine_mode.require_model`): `POST /api/model/load` answers 409, the activation helpers raise `ModelDisabledError`, and the dropdown's Load button is disabled under `reflex_only`. That is an implementation overreach, not a specified behaviour. **Erratum:** under `reflex_only` an explicit owner Load (the dropdown Load button, the activate and select routes, and the running-models offer card's "Use model" action) loads weights and nothing else; the resident model is still never called, and autoload stays excluded exactly as the "Decision" sentence says. T6 changes the guard, the button, the offer-card route and the two RFC-0244 tests that asserted the overreach (named in T6). This erratum is recorded here, in the RFC that carries the change; RFC-0244's own text is not edited.
 
 ### 1. Family identity and absent candidates (T1)
 
@@ -114,9 +119,10 @@ Row text (frontend, `nodeModelOptions`):
 | `MANAGER.load` call site | Behaviour while `manually_unloaded` |
 | --- | --- |
 | `main.py` startup restore (`_autoload_model`) | unaffected: a fresh process has the flag false |
-| `inference/running_models.py` autoload branches (`RUNNING_MODELS._poll`, `decide`) | **skip silently**: T3 adds the one guard; no error, no notice |
+| `inference/running_models.py` autoload branches (`RUNNING_MODELS._poll` and the `leave` branch of `decide`) | **skip silently**: T3 adds the guard; no error, no notice |
+| `inference/running_models.py::RunningModels.decide` for the owner's `use` and `replace` actions | explicit owner click: T3 passes `manual_resume=True` on its `MANAGER.load`, which clears the flag |
 | `agent/loop.py`, `inference/model_escalation.py`, `inference/live_agent_suite.py`, `persona/owner_chat.py`, `persona/inference_context.py` | **propagate** `ModelManuallyUnloaded`; the existing handlers surface the text. The owner sees an honest "use Load" message instead of a hidden reload. These files are not edited. |
-| explicit entry points (`api/model.py::load_model`, the activate and select routes via `hotswap.activate_runtime_profile`) | pass `manual_resume=True`; clear the flag |
+| explicit entry points (`api/model.py::load_model`, `api/model.py::choose_running_model` with action `use`, the activate and select routes via `hotswap.activate_runtime_profile`) | pass `manual_resume=True`; clear the flag |
 
 **Frontend (T4).** The dropdown's Unload calls a new `unloadCurrentModel()` in `applyRuntimeProfile.ts`; it throws unless the snapshot says `loaded` false, `loading` false and `manually_unloaded` true **and** `release.verified` is true, and then dispatches `jarvis:model-state-changed` with the snapshot. `App.tsx` listens, applies the snapshot, and bumps a generation counter so an older in-flight `/api/model` poll that resolves afterwards cannot overwrite it. The RFC-0244 inventory cross-check after Unload (`/api/model/node-inventory?refresh=true`, "still resident … see More") **stays** as a second, independent check; its message is only reached when the runtime check and the inventory disagree. Success text: `Unloaded and verified: <model>. Other models on this node were left running.`
 
@@ -142,8 +148,9 @@ RFC-0244 says "Switching mode does not download models, silently enable cloud ac
 **Explicit Load in every mode (T6, CoS ruling).** Today `engine_mode.require_model` guards both generation and loading, so under `reflex_only` `POST /api/model/load` answers 409, the activation helpers raise `ModelDisabledError` and the dropdown's Load button is disabled. T6 separates the two uses:
 
 - `engine_mode.py` adds `explicit_owner_load()` (a context manager over a `ContextVar`) and `require_model_for_load(settings=None)`, which returns when the scope is active and otherwise behaves exactly as `require_model`.
-- The load-class guards switch to `require_model_for_load`: `InferenceManager.load` and `_load_locked`, `hotswap.apply_runtime_profile_to_settings` and `hotswap.activate_runtime_profile`. The generation guards (`InferenceManager.chat`, `chat_stream` and `ensure_runtime`, the front lanes, owner chat, the loop's `_run` early return) stay on `require_model`/`model_enabled`.
-- **Only four route handlers enter the scope:** `api/model.py::load_model`, `api/runtime_profiles.py::activate_profile`, `api/lmstudio.py::select_profile` and `api/lmstudio.py::select_discovered`. Because the scope is entered in the handler and exits with it, autoload paths running in other tasks never see it. Calling the helpers directly without the scope (startup, `RUNNING_MODELS`, persona brain activation, the agent loop) is blocked exactly as in RFC-0244.
+- The load-class guards switch to `require_model_for_load`: `InferenceManager.load` and `_load_locked`, `hotswap.apply_runtime_profile_to_settings`, `hotswap.activate_runtime_profile` and the `use` branch of `running_models.RunningModels.decide`. The generation guards (`InferenceManager.chat`, `chat_stream` and `ensure_runtime`, the front lanes, owner chat, the loop's `_run` early return) stay on `require_model`/`model_enabled`.
+- **Only five route handlers enter the scope:** `api/model.py::load_model`, `api/model.py::choose_running_model` (only when the choice action is `use`), `api/runtime_profiles.py::activate_profile`, `api/lmstudio.py::select_profile` and `api/lmstudio.py::select_discovered`. Because the scope is entered in the handler and exits with it, autoload paths running in other tasks never see it. Calling the helpers directly without the scope (startup, `RUNNING_MODELS`, persona brain activation, the agent loop) is blocked exactly as in RFC-0244.
+- **The running-models offer card's "Use model" is an explicit owner Load (CoS ruling).** It is an owner click, so it works under `reflex_only` through the same scope: `choose_running_model` enters `explicit_owner_load()` for action `use`, and `RunningModels.decide` calls `require_model_for_load` for `use` only. `replace` (stop another server, then load ANZU's own model) and the `leave` branch's autoload stay on `require_model`/`model_enabled`, blocked exactly as RFC-0244 ships. The card (`RunningModels.tsx`) is unchanged: it has no mode disable and its error text still comes from the backend. If the offer choice runs as a background job (RFC-0227 S1, see *Handoff order*), the job is started inside the handler, inherits the scope through the task's context copy, and a named test pins that.
 - The dropdown's Load button is enabled in every mode. After a Load under `reflex_only` it says: `Loaded <identity>. Generation stays off in JEV/Laya only mode.` The model is resident and never called (R2).
 - RFC-0244's two tests that assert the old blanket block are amended, not deleted: `test_reflex_only_load_controls_cannot_start_external_runtime` is split so its direct helper calls (`hotswap.activate_runtime_profile`, `hotswap.apply_runtime_profile_to_settings`, `RUNNING_MODELS.decide(..., "use")`) still raise `ModelDisabledError` when called without the scope, and its `model.load_model()` assertion moves to the new explicit-Load test. `test_reflex_only_blocks_model_entrypoints_and_explicit_front_provider` is unchanged (its `manager.load(engines)` is an unscoped call).
 
@@ -159,6 +166,7 @@ The model dropdown is live UI on `development` (RFC-0244, #685). Nothing below r
 | Detail line under the select | text extended with speed and restriction labels | Same element. |
 | Load | enabled in every mode (R2); request path unchanged except the verified resolution in T5 | CoS ruling; the only RFC-0244 behaviour that changes, and it changes because the ruling says so. |
 | Unload | same button, same position; the request is now a verified release; the inventory cross-check stays | The RFC-0244 safety net is kept; the new check is added in front of it. |
+| Running-models offer card (`RunningModels.tsx`) | unchanged UI; the backend now lets "Use model" through under `reflex_only` | The button never had a mode disable; only the 409 behind it changes (CoS ruling). `Leave alone`, `Stop model` and `Use ANZU's model` behave as today. |
 | Refresh, More, `NodeAiInventory` | unchanged | Read-only (R3). |
 | `EngineModeControl` | unchanged | R4: a mode switch still never unloads or claims release. |
 | HexStrike suite row, "All model settings →" link | unchanged | Not related. |
@@ -175,36 +183,37 @@ Lane for every ticket: **D2** (the #682 code rework is a development merge into 
 1. In the #682 branch, merge `origin/development` (a merge commit; no rebase, no force-push).
 2. `docs/rfcs/0242-model-identity-and-menu-clarity.md` conflicts add/add: **take `development`'s file** (this RFC). #682's original text is superseded.
 3. `frontend/src/hud/HudModelSelector.tsx` conflicts: **take `development`'s dropdown** and re-apply only the T2, T4 and T6 edits below. Delete `frontend/src/hud/modelSlots.ts`, the bind endpoints, `bindLmStudioProfile` / `bindDiscoveredGguf`, and their tests.
-4. Land by ticket (T1 → T2, T3 → T4, T5 → T6), each as its own PR or commit group; the PR may stay #682 or be split, as CoS decides. Every ticket must pass its own CI step alone.
+4. Start only after the batch has landed (see *Handoff order*): merge `development` in again at that point, so every shared file is on top of its batch chain.
+5. **#682 stays the single code PR.** Land the rework as **one commit per ticket** on its branch (T1 → T2, T3 → T4, T5 → T6; the pairs are ordered). Every commit must pass its own ticket's CI step alone. No rebase, no force-push, no split PRs.
 
 ### Handoff order on shared files
 
-"A → B" means A merges first. `.github/workflows/pr-tests.yml` and `frontend/package.json` are append-only for every ticket and batch PR, in any order; on a conflict, merge `development` in (merge commit). RFC-0242 is implementable now and the batch PRs are specs only, so RFC-0242's tickets go **first** on every file they share; the batch RFCs' "first owner" statements for these files read "first owner after RFC-0242" (a one-line follow-up in each batch spec, listed in the PR body).
+"A → B" means A merges first. **RFC-0242's tickets go last on every shared file** (CoS ruling, 2026-10-30), after each file's chain as the batch specs currently read it. The batch PRs are #652 (RFC-0225; final head in this PR's body), #655 (RFC-0228; final head in this PR's body), #664 (RFC-0232; final head in this PR's body), #665 (RFC-0245; final head in this PR's body), #668 (RFC-0233; final head in this PR's body) and #670 (RFC-0211; final head in this PR's body). No batch spec is edited by this RFC: each already names its own chain, and RFC-0242 appends after it. The tickets assume those chains have landed on `development`; D2 merges `development` into #682 once they have and works on top of the merged files. `.github/workflows/pr-tests.yml` and `frontend/package.json` are append-only for every ticket and batch PR, in any order; on a conflict, merge `development` in (merge commit).
 
-| File | Chain | Notes |
+| File | Chain (batch chain as each spec reads today, then 0242) | Notes |
 | --- | --- | --- |
-| `backend/app/inference/lmstudio_catalog.py` | 0242-T1 → 0242-T2 | No open batch PR edits it. |
-| `backend/app/inference/lmstudio_graded_profiles.json` | 0242-T1 → 0228-S1 (#655 (RFC-0228; final head in this PR's body)) | 0228-S1 re-reads the Defiant row after T1's identity fields. |
-| `backend/app/inference/backends.py` | 0242-T5 → 0230-S2 → 0225-S2 (#652 (RFC-0225; final head in this PR's body)) | T5 touches only `resolve_advertised_model`; 0230-S2 and 0225-S2 touch `LlamaCppBackend` and the registry. |
-| `backend/app/inference/lmstudio_server.py` | 0242-T5 → 0225-S3 → 0228-S2 | T5 touches the readiness decision and adds `resolve_lmstudio_artifact`. |
-| `backend/app/inference/hotswap.py` | 0242-T5 → 0242-T6 → 0225-S3 | #652's "only owner in this batch" reads "first owner after 0242-T6". |
-| `backend/app/inference/manager.py` | 0242-T3 → 0242-T6 → 0225-S3 → 0228-S2 | T3: `manually_unloaded`, `manual_resume`, `unload(release_external=)`. T6: `require_model_for_load` at the load-class guards. |
-| `backend/app/inference/running_models.py` | 0242-T3 → 0225-S3 → 0227-S1 | T3 adds one skip guard at the autoload branches; nothing else changes. |
-| `backend/app/api/model.py` | 0242-T3 → 0242-T6 → 0225-S3 | T3: `unload_model` and `manual_resume` in `load_model`. T6: scope in `load_model`. 0225-S3 appends its engines routes. |
-| `backend/app/api/lmstudio.py`, `backend/app/api/runtime_profiles.py`, `backend/app/engine_mode.py` | 0242-T6 only | No open batch PR edits them (batch specs cite `engine_mode.py` read-only). |
-| `backend/app/inference/status_monitor.py`, `backend/app/inference/model_release.py` (new) | 0242-T3 only | |
-| `frontend/src/api.ts` | 0242-T2 → 0230-S0 → 0218-S3 → 0227 → 0245-S6 → 0233-S6 | Same chain as #665/#668, with T2 first. T2 adds type fields only. |
-| `frontend/src/hud/HudModelSelector.tsx` | 0242-T2 → 0242-T4 → 0242-T6 | No open batch PR edits it (0225 keeps it unchanged). |
-| `frontend/src/hud/nodeModelOptions.ts`, `frontend/src/hud/nodeModels.css` | 0242-T2 only | |
+| `backend/app/inference/lmstudio_catalog.py` | 0242-T1 → 0242-T2 | No batch spec edits it. |
+| `backend/app/inference/lmstudio_graded_profiles.json` | 0228-S1 → 0242-T1 | 0228-S1 binds the existing Defiant row to `fable_9b`; T1 adds identity fields to every seed on top of that. |
+| `backend/app/inference/backends.py` | 0230-S2 → 0225-S2 → 0242-T5 | T5 touches only `resolve_advertised_model`. |
+| `backend/app/inference/lmstudio_server.py` | 0225-S3 → 0228-S2 → 0242-T5 | T5 touches the readiness decision and adds `resolve_lmstudio_artifact`. |
+| `backend/app/inference/hotswap.py` | 0225-S3 → 0242-T5 → 0242-T6 | 0225-S3 is the batch's only owner. |
+| `backend/app/inference/manager.py` | 0225-S3 → 0228-S2 → 0242-T3 → 0242-T6 | T3: `manually_unloaded`, `manual_resume`, `unload(release_external=)`. T6: `require_model_for_load` at the load-class guards. |
+| `backend/app/inference/running_models.py` | 0225-S3 → 0227-S1 → 0242-T3 → 0242-T6 | T3: skip guard on autoload branches, `manual_resume=True` on the `use`/`replace` load. T6: `require_model_for_load` for `use`. |
+| `backend/app/api/model.py` | 0225-S3 → 0227-S1 → 0242-T3 → 0242-T6 | T3: `unload_model` and `manual_resume` in `load_model` and `choose_running_model`. T6: scope in `load_model` and `choose_running_model`. |
+| `backend/app/api/runtime_profiles.py` | 0227-S3 → 0242-T6 | T6 enters the scope in `activate_profile` only. |
+| `backend/app/api/lmstudio.py`, `backend/app/engine_mode.py` | 0242-T6 only | No batch spec edits them (the batch cites `engine_mode.py` read-only). |
+| `backend/app/inference/status_monitor.py`, `backend/app/inference/model_release.py` (new) | 0242-T3 only | RFC-0230 lists `status_monitor.py` as read-only. |
+| `frontend/src/api.ts` | 0230-S0 → 0218-S3 → 0227 → 0245-S6 → 0233-S6 → 0242-T2 | T2 adds type fields only. |
+| `frontend/src/hud/HudModelSelector.tsx` | 0227-S3 → 0242-T2 → 0242-T4 → 0242-T6 | 0227-S3's row there is a slot-restore edit that RFC-0244 made obsolete; D2 works on whatever `development` holds after the batch, and does not re-add slots. |
+| `frontend/src/hud/nodeModelOptions.ts`, `frontend/src/hud/nodeModels.css`, `frontend/src/hud/applyRuntimeProfile.ts`, `frontend/apply-runtime-profile-api-stub.mjs` | 0242 only (T2, T2, T4, T4) | No batch spec edits them. |
 | `frontend/src/hud/modelMenuStatus.ts` | 0242-T4 → 0242-T6 | |
-| `frontend/src/hud/applyRuntimeProfile.ts`, `frontend/apply-runtime-profile-api-stub.mjs` | 0242-T4 only | |
-| `frontend/src/App.tsx` | 0242-T4 → 0225-S5 → 0225-S3 → #670 (RFC-0211; final head in this PR's body) | T4 and 0225-S5 edit the same `/api/model` poll effect: 0225-S5 builds on T4's generation guard. |
+| `frontend/src/App.tsx` | 0225-S5 → 0225-S3 → #670 (RFC-0211; final head in this PR's body) → 0242-T4 | T4's generation guard goes into the `/api/model` poll effect on top of 0225-S5's state-machine edit. |
 | `tests/test_rfc0244_engine_modes.py` | 0242-T6 only | Amends two tests as stated in §4. |
 | `docs/rfcs/README.md` | this PR adds one row; no ticket edits it | |
 
 ### T1: Family identity and absent candidates
 
-**Model:** Grok 4.5 · **fast mode off** · **Lane:** D2 · **Depends:** none.
+**Model:** Grok 4.5 · **fast mode off** · **Lane:** D2 · **Depends:** 0228-S1 on the graded JSON (batch landed).
 
 | File | Change |
 | --- | --- |
@@ -264,7 +273,7 @@ Tests:
 
 ### T3: Verified native release and "stays unloaded" (backend)
 
-**Model:** Grok 4.6 · **fast mode off** · **Lane:** D2 · **Depends:** none (T1/T2 independent).
+**Model:** Grok 4.6 · **fast mode off** · **Lane:** D2 · **Depends:** 0225-S3, 0228-S2 and 0227-S1 on `manager.py`, `running_models.py` and `api/model.py` (batch landed).
 
 | File | Change |
 | --- | --- |
@@ -272,7 +281,7 @@ Tests:
 | `backend/app/inference/manager.py` | `InferenceState.manually_unloaded`; `load(..., manual_resume=False)` raising `ModelManuallyUnloaded`; `unload(*, release_external=False)`; live-state keys |
 | `backend/app/api/model.py` | `unload_model`: exclusive lease, 409 and 502 mapping, `release` object in the response; `load_model` passes `manual_resume=True` |
 | `backend/app/inference/status_monitor.py` | `manually_unloaded` added to the live keys |
-| `backend/app/inference/running_models.py` | one guard: autoload branches skip while `MANAGER.state.manually_unloaded` |
+| `backend/app/inference/running_models.py` | autoload branches (`_poll`, the `leave` branch of `decide`) skip while `MANAGER.state.manually_unloaded`; the `use`/`replace` load passes `manual_resume=True` |
 | `tests/test_rfc0242_model_unload.py` (existing file), `tests/test_rfc0242_load_callers.py` (new) | named tests below |
 
 Tests (`tests/test_rfc0242_model_unload.py` unless noted):
@@ -290,6 +299,7 @@ Tests (`tests/test_rfc0242_model_unload.py` unless noted):
 - `test_mode_switch_never_unloads_or_claims_release` (`PUT /api/settings` with each `engine_mode`: zero calls to `MANAGER.unload` and `release_external_model`, `manually_unloaded` unchanged, no "unloaded" or "released" in the response)
 - `test_running_models_autoload_skips_while_manually_unloaded`
 - `test_explicit_load_clears_manual_unload` (`POST /api/model/load` passes `manual_resume=True`)
+- `test_offer_use_clears_manual_unload` (`POST /api/model/running/{id}/choice` with `use` loads and clears the flag)
 - `tests/test_rfc0242_load_callers.py::test_every_manager_load_caller_is_classified` (static scan of `backend/app`: each `MANAGER.load(` call site is in the §3 table; a new unclassified site fails)
 
 **CI:** **"Run model and security regression tests"** (append `tests/test_rfc0242_model_unload.py` and `tests/test_rfc0242_load_callers.py`) and **"Run full backend suite"**.
@@ -331,7 +341,7 @@ Tests (`frontend/model-unload-state.test.mjs`):
 
 ### T5: Verified Load (instance evidence before success)
 
-**Model:** Grok 4.6 · **fast mode off** · **Lane:** D2 · **Depends:** none (T3 only for `api/model.py` ordering).
+**Model:** Grok 4.6 · **fast mode off** · **Lane:** D2 · **Depends:** 0230-S2, 0225-S2, 0225-S3 and 0228-S2 on `backends.py`, `lmstudio_server.py` and `hotswap.py` (batch landed).
 
 | File | Change |
 | --- | --- |
@@ -358,14 +368,15 @@ Tests (`tests/test_runtime_activate.py`):
 
 ### T6: Explicit owner Load in every engine mode
 
-**Model:** Grok 4.6 · **fast mode off** · **Lane:** D2 · **Depends:** T3 and T5 (shared `manager.py`, `hotswap.py`, `api/model.py`).
+**Model:** Grok 4.6 · **fast mode off** · **Lane:** D2 · **Depends:** T3 and T5 (shared `manager.py`, `hotswap.py`, `api/model.py`, `running_models.py`), and 0227-S3 on `runtime_profiles.py` (batch landed).
 
 | File | Change |
 | --- | --- |
 | `backend/app/engine_mode.py` | `explicit_owner_load()`, `require_model_for_load()` |
 | `backend/app/inference/manager.py` | `load` and `_load_locked` call `require_model_for_load` (generation guards untouched) |
 | `backend/app/inference/hotswap.py` | `apply_runtime_profile_to_settings` and `activate_runtime_profile` call `require_model_for_load` |
-| `backend/app/api/model.py`, `backend/app/api/runtime_profiles.py`, `backend/app/api/lmstudio.py` | enter `explicit_owner_load()` in `load_model`, `activate_profile`, `select_profile`, `select_discovered` and only there; replace `load_model`'s `model_enabled` 409 |
+| `backend/app/inference/running_models.py` | `RunningModels.decide`: `require_model_for_load` for action `use` only (`replace` and the `leave` autoload stay blocked) |
+| `backend/app/api/model.py`, `backend/app/api/runtime_profiles.py`, `backend/app/api/lmstudio.py` | enter `explicit_owner_load()` in `load_model`, `choose_running_model` (action `use` only), `activate_profile`, `select_profile`, `select_discovered` and only there; replace `load_model`'s `model_enabled` 409 |
 | `frontend/src/hud/HudModelSelector.tsx` | Load no longer disabled by `reflex_only`; the `reflex_only` note after Load |
 | `frontend/src/hud/modelMenuStatus.ts` | `reflexLoadNote()` |
 | `tests/test_rfc0242_explicit_load.py` (new), `tests/test_rfc0244_engine_modes.py` (two tests amended), `frontend/hud-model-selector-render.test.mjs` | named tests below |
@@ -374,19 +385,22 @@ Tests:
 - `tests/test_rfc0242_explicit_load.py::test_explicit_load_endpoint_works_in_every_engine_mode` (parametrized `hybrid`, `model_only`, `reflex_only`)
 - `tests/test_rfc0242_explicit_load.py::test_activate_and_select_routes_work_in_reflex_only` (`activate_profile`, `select_profile`, `select_discovered`)
 - `tests/test_rfc0242_explicit_load.py::test_reflex_only_explicit_load_never_enables_generation` (after Load, `MANAGER.chat`, `chat_stream`, the front lane and `_run` raise or answer with `reflex_only_reply`; zero provider calls)
+- `tests/test_rfc0242_explicit_load.py::test_offer_use_works_under_reflex_only_via_route` (`POST /api/model/running/{id}/choice` with `use`, in `reflex_only`: 200, the model loads, `MANAGER.state.loaded` true, zero generation calls)
+- `tests/test_rfc0242_explicit_load.py::test_offer_use_scope_reaches_a_background_job` (if the choice runs as a job, the job's load sees the scope; written against whichever `decide` shape `development` holds)
+- `tests/test_rfc0242_explicit_load.py::test_offer_replace_and_leave_stay_blocked_in_reflex_only` (`replace` raises `ModelDisabledError`; the `leave` autoload does not load)
 - `tests/test_rfc0242_explicit_load.py::test_autoload_paths_stay_blocked_in_reflex_only` (startup `_autoload_model`, `RUNNING_MODELS` autoload, `ensure_runtime`, persona and agent callers: each raises `ModelDisabledError` or skips; zero load calls)
 - `tests/test_rfc0242_explicit_load.py::test_explicit_scope_does_not_leak_to_other_tasks` (an autoload attempt running concurrently with an explicit Load is still blocked; the `ContextVar` is reset after the handler)
 - `tests/test_rfc0242_explicit_load.py::test_mode_switch_never_loads_a_model` (R4 mirror: no load on `PUT /api/settings`)
 - `tests/test_rfc0244_engine_modes.py::test_reflex_only_helpers_blocked_without_the_explicit_scope` (the split-out half of `test_reflex_only_load_controls_cannot_start_external_runtime`)
 - `frontend/hud-model-selector-render.test.mjs`: `Load is enabled under reflex_only and says generation stays off after loading`; `Load stays disabled while a load is in progress`
 
-**CI:** **"Run model and security regression tests"** (append `tests/test_rfc0242_explicit_load.py` and `tests/test_rfc0244_engine_modes.py`), **"Run full backend suite"**, and the existing **"HUD model menu status tests (RFC-0244 restore)"** step for the render test.
+**CI:** **"Run model and security regression tests"** (append `tests/test_rfc0242_explicit_load.py` and `tests/test_rfc0244_engine_modes.py`; `tests/test_rfc0210_running_models.py` is not edited), **"Run full backend suite"**, and the existing **"HUD model menu status tests (RFC-0244 restore)"** step for the render test.
 
 **Acceptance:**
-- [ ] An explicit Load (the dropdown button, the activate route, both LM Studio select routes) works in `hybrid`, `model_only` and `reflex_only`.
+- [ ] An explicit Load (the dropdown button, the activate route, both LM Studio select routes, and the running-models offer card's "Use model") works in `hybrid`, `model_only` and `reflex_only`.
 - [ ] Under `reflex_only` the loaded model is never called and no generation lane starts (RFC-0244 acceptance bullets "Reflex only cannot start/call front or worker generation" and "Reflex-only chat/task requests provide a bounded response" still pass).
 - [ ] Every autoload path stays blocked as RFC-0244 ships it.
-- [ ] No RFC-0244 element other than the Load disable and the two amended tests changes.
+- [ ] No RFC-0244 element other than the Load disable, the offer-card `use` block and the two amended tests changes.
 
 ## Ticket cards
 
@@ -398,6 +412,8 @@ Tests:
 | 0242-T4 | Composer 2.5 | D2 | T3 | n/a | Verified Unload state tests (RFC-0242 T4) |
 | 0242-T5 | Grok 4.6 | D2 | none | same | n/a |
 | 0242-T6 | Grok 4.6 | D2 | T3, T5 | same | HUD model menu status tests (RFC-0244 restore) |
+
+Every ticket starts only after the batch chain for each of its files has landed on `development` (see *Handoff order*); each lands as one commit on #682.
 
 ## Overall acceptance
 
@@ -414,11 +430,12 @@ Tests:
 
 ## Out of scope
 
-Security-gate changes, automatic model downloads or promotion, installer replacement, removing the backend pin flag, routing policy, unrelated model or voice architecture, Astra-owned systems (personas, WebGL, presence), the RFC-0244 engine-mode semantics other than the explicit-Load ruling, and the batch RFCs' own content (only the "first owner after RFC-0242" one-line follow-ups named above).
+Security-gate changes, automatic model downloads or promotion, installer replacement, removing the backend pin flag, routing policy, unrelated model or voice architecture, Astra-owned systems (personas, WebGL, presence), the RFC-0244 engine-mode semantics other than the explicit-Load ruling, and the batch RFCs' own content (none of them is edited).
 
 ## Risks
 
 - **#682 add/add conflict on this file.** Resolved by the rework procedure (take `development`'s file). Merge-tree against #682 shows exactly that conflict plus the stale-base noise.
-- **`reflex_only` explicit Load changes two RFC-0244 tests** (named in T6). CoS ruling; if it is withdrawn, T6 is dropped and nothing else depends on it.
+- **`reflex_only` explicit Load changes two RFC-0244 tests** (named in T6). CoS ruling; if it is withdrawn, T6 is dropped (including the offer-card change) and nothing else depends on it.
 - **LM Studio inventory shape.** `loaded_instances` is read from the native API; a runtime version without it makes Unload and Load fail closed with a message (never a false success).
-- **Ordering with the batch.** The chains above put RFC-0242 first on shared files; if CoS prefers the opposite on a file, only that row changes.
+- **Ordering with the batch.** RFC-0242 goes last on every shared file, so D2 cannot start a ticket until its files' batch chains have landed; that is the cost of leaving #652 and #655 untouched. If a batch PR slips, only the tickets on its files wait.
+- **`replace` stays blocked under `reflex_only`.** The offer card's "Use ANZU's model" stops another server first; CoS ruled on "Use" only. If it should also work, it is a one-line change in T6.
