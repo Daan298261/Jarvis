@@ -240,6 +240,7 @@ async def stream_reply(turn: VoiceTurn, text: str) -> AsyncIterator[dict[str, An
         raise HTTPException(503, str(getattr(exc, "detail", exc))[:200]) from exc
     turn.conversation_id = result.get("conversation_id") or turn.conversation_id
     turn.active_task_id = result.get("task_id")
+    yield {"type": "accepted", "turn_id": turn.turn_id, "task_id": turn.active_task_id, "conversation_id": turn.conversation_id}
     spoken = ""
     while not turn.cancelled:
         snapshot = await service.task_snapshot(result["task_id"])

@@ -1,0 +1,21 @@
+.hud-model-menu.node-model-menu { width: min(480px, calc(100vw - 24px)); max-height: calc(100dvh - 130px); overflow: auto; }
+.node-model-menu button { color: #d7edf4; background: #10232f; border: 1px solid #438da088; border-radius: 7px; padding: 6px 10px; cursor: pointer; font: inherit; font-size: 12px; }
+.node-model-menu button:hover { background: #173342; border-color: #7ac5db; }
+.node-model-menu button:disabled { opacity: .5; cursor: not-allowed; }
+.node-model-menu :focus-visible { outline: 2px solid #79d8f2; outline-offset: 2px; }
+.node-model-serving { display: flex; flex-direction: column; gap: 5px; margin: 10px 0 14px; padding: 10px; background: #07131c; border: 1px solid #3c839655; border-radius: 8px; }
+.node-model-serving strong, .node-model-label { font-size: 12px; color: #d7edf4; }
+.node-model-serving span, .node-model-detail { overflow-wrap: anywhere; font-size: 12px; line-height: 1.45; }
+.node-model-label { display: block; margin-bottom: 6px; }
+.node-model-select { width: 100%; min-width: 0; min-height: 42px; padding: 8px; color: #edfaff; background: #0b1c27; border: 1px solid #438da0; border-radius: 8px; font-size: 13px; }
+.node-model-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.node-model-actions button, .node-ai-heading button { min-height: 36px; padding: 6px 12px; }
+.node-model-error, .node-ai-warning { color: #ffbd9c; font-size: 12px; line-height: 1.5; }
+.node-ai-inventory { margin-top: 12px; border-top: 1px solid #438da055; padding-top: 10px; }
+.node-ai-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.node-ai-heading h3 { font-size: 14px; overflow-wrap: anywhere; }
+.node-ai-inventory h4 { margin: 16px 0 6px; font-size: 12px; color: #a5e5f6; }
+.node-ai-inventory ul { margin: 0; padding: 0; list-style: none; }
+.node-ai-inventory li { display: flex; flex-direction: column; gap: 4px; padding: 9px 0; border-bottom: 1px solid #438da033; font-size: 12px; overflow-wrap: anywhere; }
+.node-ai-inventory li span, .node-ai-inventory small, .node-ai-meta { font-size: 11px; color: #b5cbd5; line-height: 1.45; overflow-wrap: anywhere; }
+.node-ai-inventory p { font-size: 12px; line-height: 1.5; }

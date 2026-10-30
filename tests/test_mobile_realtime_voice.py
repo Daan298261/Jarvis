@@ -132,7 +132,8 @@ async def test_stream_reply_emits_tts_before_final_and_uses_profile(mobile_env, 
     monkeypatch.setattr(realtime_voice, "speak_text", synthesize)
 
     events = [event async for event in realtime_voice.stream_reply(turn, "Hello")]
-    assert events[0]["type"] == "tts" and events[0]["final"] is False and events[0]["data"]
+    assert events[0]["type"] == "accepted" and events[0]["task_id"] == "t1"
+    assert events[1]["type"] == "tts" and events[1]["final"] is False and events[1]["data"]
     assert any(event["type"] == "tts" and event["final"] for event in events)
     assert any(event["type"] == "done" for event in events)
     assert spoken and all(lane == "worker" for _, lane, _model in spoken)

@@ -1,0 +1,392 @@
+{
+ "what": "RFC-0230 box-measured evidence. Box = shared 8 vCPU Intel Xeon Linux VM, no GPU, other agents running (loadavg recorded). NOT Taco's PC. Engines stubbed where noted.",
+ "measured_at": "2026-10-20 (Europe/Amsterdam)",
+ "repo_tip": "development 11b264a",
+ "turn_code_path_with_instant_fake_engines": {
+  "host": "box (8 vCPU Xeon, shared; see loadavg)",
+  "loadavg_start": [
+   "3.12",
+   "6.82",
+   "12.73"
+  ],
+  "reflex_decide_owner_turn_ms": {
+   "first_call": 7.18,
+   "n": 300,
+   "p50": 3.45,
+   "p95": 4.11,
+   "max": 5.72
+  },
+  "route_request_ms": {
+   "p50": 0.01,
+   "p95": 0.03,
+   "max": 0.06
+  },
+  "hud_turn_what_is_ram_front_ok": [
+   {
+    "post_returned_ms": 48.2,
+    "stage:Understanding the request_ms": 57.0,
+    "ingress_size_classified_ms": 63.7,
+    "fastpath_ms": 107.8,
+    "fastpath_detail": "{\"admitted\": false, \"hit\": false, \"reason\": \"front_requires_worker\", \"route_kind\": \"direct_reply\", \"front_action\": \"ack_continue\", \"stages_skipped\": []}",
+    "assistant_delta_ms": 110.2,
+    "model_lane_ms": 110.2,
+    "front_response_started_ms": 111.6,
+    "front_response_skipped_ms": 120.4,
+    "front_response_skipped_detail": "",
+    "chat_tts:Speak reply_ms": 121.3,
+    "worker_response_started_ms": 122.7,
+    "worker_response_completed_ms": 123.4,
+    "response_timing_ms": 126.2,
+    "response_timing_detail": "First word 0.04s \u00b7 completed 0.08s\n{\"front_model\": \"front-fake\", \"front_action\": \"ack_continue\", \"queue_ms\": 59.1, \"router_ms\": 0.0, \"front_first_text_ms\": 39.2, \"front_first_audio_ms\": 59.9, \"front_complete_ms\": 39.3, \"router_ms_complete\": 0.0, \"worker_first_text_ms\": 59.8, \"worker_complete_ms\": 73.0, \"tts_first_audio_ms\": 59.9, \"first_word_s\": 0.04, \"completed_s\": 0.08}",
+    "completed_ms": 144.5,
+    "runner_done_ms": 144.5
+   },
+   {
+    "post_returned_ms": 7.9,
+    "stage:Understanding the request_ms": 12.1,
+    "ingress_size_classified_ms": 17.2,
+    "fastpath_ms": 28.8,
+    "fastpath_detail": "{\"admitted\": false, \"hit\": false, \"reason\": \"front_requires_worker\", \"route_kind\": \"direct_reply\", \"front_action\": \"ack_continue\", \"stages_skipped\": []}",
+    "assistant_delta_ms": 30.5,
+    "model_lane_ms": 30.5,
+    "chat_tts:Speak reply_ms": 31.7,
+    "front_response_started_ms": 33.4,
+    "front_response_skipped_ms": 34.5,
+    "front_response_skipped_detail": "",
+    "worker_response_started_ms": 35.3,
+    "worker_response_completed_ms": 35.9,
+    "response_timing_ms": 38.4,
+    "response_timing_detail": "First word 0.01s \u00b7 completed 0.03s\n{\"front_model\": \"front-fake\", \"front_action\": \"ack_continue\", \"queue_ms\": 20.4, \"router_ms\": 0.0, \"front_first_text_ms\": 12.7, \"front_first_audio_ms\": 59.9, \"front_complete_ms\": 12.8, \"router_ms_complete\": 0.0, \"worker_first_text_ms\": 21.0, \"worker_complete_ms\": 23.7, \"tts_first_audio_ms\": 59.9, \"first_word_s\": 0.01, \"completed_s\": 0.03}",
+    "completed_ms": 49.4,
+    "runner_done_ms": 49.4
+   },
+   {
+    "post_returned_ms": 6.5,
+    "stage:Understanding the request_ms": 11.1,
+    "ingress_size_classified_ms": 15.7,
+    "fastpath_ms": 27.1,
+    "fastpath_detail": "{\"admitted\": false, \"hit\": false, \"reason\": \"front_requires_worker\", \"route_kind\": \"direct_reply\", \"front_action\": \"ack_continue\", \"stages_skipped\": []}",
+    "assistant_delta_ms": 28.8,
+    "model_lane_ms": 28.8,
+    "front_response_started_ms": 30.2,
+    "chat_tts:Speak reply_ms": 31.8,
+    "front_response_skipped_ms": 32.8,
+    "front_response_skipped_detail": "",
+    "worker_response_started_ms": 33.7,
+    "worker_response_completed_ms": 34.3,
+    "response_timing_ms": 36.6,
+    "response_timing_detail": "First word 0.01s \u00b7 completed 0.03s\n{\"front_model\": \"front-fake\", \"front_action\": \"ack_continue\", \"queue_ms\": 20.3, \"router_ms\": 0.0, \"front_first_text_ms\": 12.4, \"front_first_audio_ms\": 59.9, \"front_complete_ms\": 12.5, \"router_ms_complete\": 0.0, \"worker_first_text_ms\": 20.8, \"worker_complete_ms\": 25.2, \"tts_first_audio_ms\": 59.9, \"first_word_s\": 0.01, \"completed_s\": 0.03}",
+    "completed_ms": 45.9,
+    "runner_done_ms": 45.9
+   },
+   {
+    "post_returned_ms": 7.2,
+    "stage:Understanding the request_ms": 10.8,
+    "ingress_size_classified_ms": 14.9,
+    "fastpath_ms": 26.4,
+    "fastpath_detail": "{\"admitted\": false, \"hit\": false, \"reason\": \"front_requires_worker\", \"route_kind\": \"direct_reply\", \"front_action\": \"ack_continue\", \"stages_skipped\": []}",
+    "assistant_delta_ms": 27.7,
+    "model_lane_ms": 27.7,
+    "chat_tts:Speak reply_ms": 29.3,
+    "front_response_started_ms": 32.5,
+    "front_response_skipped_ms": 34.4,
+    "front_response_skipped_detail": "",
+    "worker_response_started_ms": 36.3,
+    "worker_response_completed_ms": 37.5,
+    "response_timing_ms": 40.1,
+    "response_timing_detail": "First word 0.01s \u00b7 completed 0.03s\n{\"front_model\": \"front-fake\", \"front_action\": \"ack_continue\", \"queue_ms\": 18.9, \"router_ms\": 0.0, \"front_first_text_ms\": 11.6, \"front_first_audio_ms\": 59.9, \"front_complete_ms\": 11.6, \"router_ms_complete\": 0.0, \"worker_first_text_ms\": 19.4, \"worker_complete_ms\": 22.1, \"tts_first_audio_ms\": 59.9, \"first_word_s\": 0.01, \"completed_s\": 0.03}",
+    "completed_ms": 49.1,
+    "runner_done_ms": 49.2
+   }
+  ],
+  "hud_turn_what_is_ram_front_http500": [
+   {
+    "post_returned_ms": 7.0,
+    "stage:Understanding the request_ms": 11.7,
+    "ingress_size_classified_ms": 16.8,
+    "fastpath_ms": 28.7,
+    "fastpath_detail": "{\"admitted\": false, \"hit\": false, \"reason\": \"front_requires_worker\", \"route_kind\": \"direct_reply\", \"front_action\": \"ack_continue\", \"stages_skipped\": []}",
+    "assistant_delta_ms": 30.3,
+    "model_lane_ms": 30.3,
+    "front_response_started_ms": 32.0,
+    "chat_tts:Speak reply_ms": 33.5,
+    "front_response_skipped_ms": 34.4,
+    "front_response_skipped_detail": "",
+    "worker_response_started_ms": 35.3,
+    "worker_response_completed_ms": 36.0,
+    "response_timing_ms": 38.5,
+    "response_timing_detail": "First word 0.01s \u00b7 completed 0.03s\n{\"front_model\": \"front-fake\", \"front_action\": \"ack_continue\", \"queue_ms\": 21.2, \"router_ms\": 0.0, \"front_first_text_ms\": 13.7, \"front_first_audio_ms\": 59.9, \"front_complete_ms\": 13.7, \"router_ms_complete\": 0.0, \"worker_first_text_ms\": 21.9, \"worker_complete_ms\": 26.4, \"tts_first_audio_ms\": 59.9, \"first_word_s\": 0.01, \"completed_s\": 0.03}",
+    "completed_ms": 47.9,
+    "runner_done_ms": 48.0
+   },
+   {
+    "post_returned_ms": 6.8,
+    "stage:Understanding the request_ms": 10.8,
+    "ingress_size_classified_ms": 15.2,
+    "fastpath_ms": 26.0,
+    "fastpath_detail": "{\"admitted\": false, \"hit\": false, \"reason\": \"front_requires_worker\", \"route_kind\": \"direct_reply\", \"front_action\": \"ack_continue\", \"stages_skipped\": []}",
+    "assistant_delta_ms": 27.7,
+    "model_lane_ms": 27.7,
+    "front_response_started_ms": 29.2,
+    "chat_tts:Speak reply_ms": 30.5,
+    "front_response_skipped_ms": 31.8,
+    "front_response_skipped_detail": "",
+    "worker_response_started_ms": 32.9,
+    "worker_response_completed_ms": 33.7,
+    "response_timing_ms": 38.3,
+    "response_timing_detail": "First word 0.01s \u00b7 completed 0.03s\n{\"front_model\": \"front-fake\", \"front_action\": \"ack_continue\", \"queue_ms\": 18.8, \"router_ms\": 0.0, \"front_first_text_ms\": 11.6, \"front_first_audio_ms\": 59.9, \"front_complete_ms\": 11.6, \"router_ms_complete\": 0.0, \"worker_first_text_ms\": 19.4, \"worker_complete_ms\": 23.6, \"tts_first_audio_ms\": 59.9, \"first_word_s\": 0.01, \"completed_s\": 0.03}",
+    "completed_ms": 50.5,
+    "runner_done_ms": 50.5
+   }
+  ],
+  "hud_turn_social_hi_front_ok": [
+   {
+    "post_returned_ms": 6.5,
+    "stage:Understanding the request_ms": 11.7,
+    "ingress_size_classified_ms": 16.2,
+    "front_response_started_ms": 20.6,
+    "front_response_completed_ms": 21.9,
+    "chat_tts:Speak reply_ms": 22.7,
+    "fastpath_ms": 26.5,
+    "fastpath_detail": "{\"admitted\": true, \"hit\": true, \"reason\": \"direct_reply_terminal_front\", \"route_kind\": \"direct_reply\", \"front_action\": \"final_basic\", \"stages_skipped\": [\"prepare_answer_route\", \"worker_stream\", \"progress_watchdog\", \"ensure_context\", \"background_verify\", \"tool_catalog\", \"plan_verify_loop\"]}",
+    "response_timing_ms": 27.4,
+    "response_timing_detail": "First word 0.01s \u00b7 completed 0.01s\n{\"fastpath\": true, \"fastpath_reason\": \"direct_reply_terminal_front\", \"first_word_s\": 0.01, \"completed_s\": 0.01, \"front_action\": \"final_basic\", \"stages_skipped\": [\"prepare_answer_route\", \"worker_stream\", \"progress_watchdog\", \"ensure_context\", \"background_verify\", \"tool_catalog\", \"plan_verify_loop\"]}",
+    "completed_ms": 37.2,
+    "runner_done_ms": 37.2
+   },
+   {
+    "post_returned_ms": 5.9,
+    "stage:Understanding the request_ms": 9.7,
+    "ingress_size_classified_ms": 15.1,
+    "front_response_started_ms": 19.9,
+    "front_response_completed_ms": 21.6,
+    "chat_tts:Speak reply_ms": 23.8,
+    "fastpath_ms": 28.3,
+    "fastpath_detail": "{\"admitted\": true, \"hit\": true, \"reason\": \"direct_reply_terminal_front\", \"route_kind\": \"direct_reply\", \"front_action\": \"final_basic\", \"stages_skipped\": [\"prepare_answer_route\", \"worker_stream\", \"progress_watchdog\", \"ensure_context\", \"background_verify\", \"tool_catalog\", \"plan_verify_loop\"]}",
+    "response_timing_ms": 29.3,
+    "response_timing_detail": "First word 0.01s \u00b7 completed 0.01s\n{\"fastpath\": true, \"fastpath_reason\": \"direct_reply_terminal_front\", \"first_word_s\": 0.01, \"completed_s\": 0.01, \"front_action\": \"final_basic\", \"stages_skipped\": [\"prepare_answer_route\", \"worker_stream\", \"progress_watchdog\", \"ensure_context\", \"background_verify\", \"tool_catalog\", \"plan_verify_loop\"]}",
+    "completed_ms": 39.4,
+    "runner_done_ms": 39.4
+   },
+   {
+    "post_returned_ms": 6.6,
+    "stage:Understanding the request_ms": 12.1,
+    "ingress_size_classified_ms": 17.1,
+    "front_response_started_ms": 22.1,
+    "front_response_completed_ms": 23.8,
+    "chat_tts:Speak reply_ms": 24.9,
+    "fastpath_ms": 28.7,
+    "fastpath_detail": "{\"admitted\": true, \"hit\": true, \"reason\": \"direct_reply_terminal_front\", \"route_kind\": \"direct_reply\", \"front_action\": \"final_basic\", \"stages_skipped\": [\"prepare_answer_route\", \"worker_stream\", \"progress_watchdog\", \"ensure_context\", \"background_verify\", \"tool_catalog\", \"plan_verify_loop\"]}",
+    "response_timing_ms": 29.6,
+    "response_timing_detail": "First word 0.01s \u00b7 completed 0.01s\n{\"fastpath\": true, \"fastpath_reason\": \"direct_reply_terminal_front\", \"first_word_s\": 0.01, \"completed_s\": 0.01, \"front_action\": \"final_basic\", \"stages_skipped\": [\"prepare_answer_route\", \"worker_stream\", \"progress_watchdog\", \"ensure_context\", \"background_verify\", \"tool_catalog\", \"plan_verify_loop\"]}",
+    "completed_ms": 41.9,
+    "runner_done_ms": 41.9
+   },
+   {
+    "post_returned_ms": 6.8,
+    "stage:Understanding the request_ms": 13.3,
+    "ingress_size_classified_ms": 19.2,
+    "front_response_started_ms": 25.5,
+    "front_response_completed_ms": 28.2,
+    "chat_tts:Speak reply_ms": 30.1,
+    "fastpath_ms": 35.3,
+    "fastpath_detail": "{\"admitted\": true, \"hit\": true, \"reason\": \"direct_reply_terminal_front\", \"route_kind\": \"direct_reply\", \"front_action\": \"final_basic\", \"stages_skipped\": [\"prepare_answer_route\", \"worker_stream\", \"progress_watchdog\", \"ensure_context\", \"background_verify\", \"tool_catalog\", \"plan_verify_loop\"]}",
+    "response_timing_ms": 36.9,
+    "response_timing_detail": "First word 0.02s \u00b7 completed 0.02s\n{\"fastpath\": true, \"fastpath_reason\": \"direct_reply_terminal_front\", \"first_word_s\": 0.02, \"completed_s\": 0.02, \"front_action\": \"final_basic\", \"stages_skipped\": [\"prepare_answer_route\", \"worker_stream\", \"progress_watchdog\", \"ensure_context\", \"background_verify\", \"tool_catalog\", \"plan_verify_loop\"]}",
+    "completed_ms": 48.5,
+    "runner_done_ms": 48.5
+   }
+  ],
+  "hud_turn_social_hi_front_http500": [
+   {
+    "post_returned_ms": 7.8,
+    "stage:Understanding the request_ms": 12.3,
+    "ingress_size_classified_ms": 17.4,
+    "front_response_started_ms": 24.7,
+    "front_response_completed_ms": 26.2,
+    "fastpath_ms": 30.3,
+    "fastpath_detail": "{\"admitted\": true, \"hit\": true, \"reason\": \"direct_reply_terminal_front\", \"route_kind\": \"direct_reply\", \"front_action\": \"final_basic\", \"stages_skipped\": [\"prepare_answer_route\", \"worker_stream\", \"progress_watchdog\", \"ensure_context\", \"background_verify\", \"tool_catalog\", \"plan_verify_loop\"]}",
+    "response_timing_ms": 31.3,
+    "response_timing_detail": "First word 0.01s \u00b7 completed 0.01s\n{\"fastpath\": true, \"fastpath_reason\": \"direct_reply_terminal_front\", \"first_word_s\": 0.01, \"completed_s\": 0.01, \"front_action\": \"final_basic\", \"stages_skipped\": [\"prepare_answer_route\", \"worker_stream\", \"progress_watchdog\", \"ensure_context\", \"background_verify\", \"tool_catalog\", \"plan_verify_loop\"]}",
+    "completed_ms": 41.6,
+    "runner_done_ms": 41.7
+   },
+   {
+    "post_returned_ms": 6.9,
+    "stage:Understanding the request_ms": 10.6,
+    "ingress_size_classified_ms": 14.6,
+    "front_response_started_ms": 18.9,
+    "front_response_completed_ms": 20.5,
+    "fastpath_ms": 24.3,
+    "fastpath_detail": "{\"admitted\": true, \"hit\": true, \"reason\": \"direct_reply_terminal_front\", \"route_kind\": \"direct_reply\", \"front_action\": \"final_basic\", \"stages_skipped\": [\"prepare_answer_route\", \"worker_stream\", \"progress_watchdog\", \"ensure_context\", \"background_verify\", \"tool_catalog\", \"plan_verify_loop\"]}",
+    "response_timing_ms": 25.2,
+    "response_timing_detail": "First word 0.01s \u00b7 completed 0.01s\n{\"fastpath\": true, \"fastpath_reason\": \"direct_reply_terminal_front\", \"first_word_s\": 0.01, \"completed_s\": 0.01, \"front_action\": \"final_basic\", \"stages_skipped\": [\"prepare_answer_route\", \"worker_stream\", \"progress_watchdog\", \"ensure_context\", \"background_verify\", \"tool_catalog\", \"plan_verify_loop\"]}",
+    "completed_ms": 34.3,
+    "runner_done_ms": 34.3
+   }
+  ],
+  "hud_turn_task_front_ok": [
+   {
+    "post_returned_ms": 12.0,
+    "acknowledgement_ms": 12.0,
+    "stage:Understanding the request_ms": 16.1,
+    "ingress_size_classified_ms": 21.1,
+    "front_response_started_ms": 29.6,
+    "front_response_completed_ms": 33.9,
+    "progress_ms": 44.8,
+    "trajectory_lessons_dropped_ms": 54.9,
+    "model_ms": 61.1,
+    "chat_tts:Speak reply_ms": 1216.6,
+    "failed_ms": 1230.5,
+    "runner_done_ms": 15011.8
+   },
+   {
+    "post_returned_ms": 22.1,
+    "acknowledgement_ms": 22.2,
+    "stage:Understanding the request_ms": 27.9,
+    "ingress_size_classified_ms": 33.1,
+    "front_response_started_ms": 39.5,
+    "front_response_completed_ms": 43.8,
+    "progress_ms": 51.0,
+    "trajectory_lessons_dropped_ms": 57.5,
+    "model_ms": 63.1,
+    "chat_tts:Speak reply_ms": 1229.0,
+    "failed_ms": 1248.7,
+    "runner_done_ms": 15014.6
+   },
+   {
+    "post_returned_ms": 15.1,
+    "acknowledgement_ms": 15.1,
+    "stage:Understanding the request_ms": 19.0,
+    "ingress_size_classified_ms": 23.9,
+    "front_response_started_ms": 30.7,
+    "front_response_completed_ms": 37.5,
+    "progress_ms": 45.4,
+    "trajectory_lessons_dropped_ms": 52.8,
+    "model_ms": 57.9,
+    "chat_tts:Speak reply_ms": 1223.0,
+    "failed_ms": 1238.9,
+    "runner_done_ms": 15011.4
+   },
+   {
+    "post_returned_ms": 15.6,
+    "acknowledgement_ms": 15.6,
+    "stage:Understanding the request_ms": 20.4,
+    "ingress_size_classified_ms": 25.3,
+    "front_response_started_ms": 34.0,
+    "front_response_completed_ms": 36.5,
+    "progress_ms": 44.3,
+    "trajectory_lessons_dropped_ms": 51.2,
+    "model_ms": 57.2,
+    "chat_tts:Speak reply_ms": 1221.7,
+    "failed_ms": 1235.7,
+    "runner_done_ms": 15012.1
+   }
+  ],
+  "hud_turn_task_front_http500": [
+   {
+    "post_returned_ms": 19.6,
+    "acknowledgement_ms": 19.6,
+    "stage:Understanding the request_ms": 26.2,
+    "ingress_size_classified_ms": 34.2,
+    "front_response_started_ms": 42.6,
+    "front_response_completed_ms": 46.0,
+    "progress_ms": 56.0,
+    "trajectory_lessons_dropped_ms": 66.0,
+    "model_ms": 73.4,
+    "chat_tts:Speak reply_ms": 1224.8,
+    "failed_ms": 1238.5,
+    "runner_done_ms": 15011.0
+   },
+   {
+    "post_returned_ms": 15.3,
+    "acknowledgement_ms": 15.3,
+    "stage:Understanding the request_ms": 20.0,
+    "ingress_size_classified_ms": 24.9,
+    "front_response_started_ms": 32.2,
+    "front_response_completed_ms": 36.0,
+    "progress_ms": 44.5,
+    "trajectory_lessons_dropped_ms": 52.3,
+    "model_ms": 57.6,
+    "chat_tts:Speak reply_ms": 1221.1,
+    "failed_ms": 1233.6,
+    "runner_done_ms": 15011.3
+   }
+  ],
+  "loadavg_end": [
+   "3.62",
+   "5.97",
+   "11.85"
+  ]
+ },
+ "kokoro_cpu_and_faster_whisper_base_runs": [
+  {
+   "import_s": 3.915,
+   "model_plus_pipeline_load_s": 1.658,
+   "first_call_right_away_s": 0.46,
+   "right_away": {
+    "median_s": 0.853,
+    "min_s": 0.527,
+    "audio_s": 1.55
+   },
+   "sentence_57c": {
+    "median_s": 1.098,
+    "min_s": 0.52,
+    "audio_s": 3.83
+   },
+   "whisper_base_load_per_call_s": {
+    "median": 0.305,
+    "max": 0.355
+   },
+   "whisper_base_transcribe_3p8s_audio_s": {
+    "median": 1.009,
+    "min": 0.958
+   }
+  },
+  {
+   "import_s": 4.025,
+   "model_plus_pipeline_load_s": 1.692,
+   "first_call_right_away_s": 0.509,
+   "right_away": {
+    "median_s": 0.386,
+    "min_s": 0.283,
+    "audio_s": 1.55
+   },
+   "sentence_57c": {
+    "median_s": 2.971,
+    "min_s": 0.636,
+    "audio_s": 3.83
+   },
+   "whisper_base_load_per_call_s": {
+    "median": 0.29,
+    "max": 0.331
+   },
+   "whisper_base_transcribe_3p8s_audio_s": {
+    "median": 1.005,
+    "min": 0.95
+   }
+  }
+ ],
+ "kokoro_first_run_note": "An earlier single run recorded kokoro_first_synth_short 415 s at loadavg ~37; not reproduced (0.46-0.51 s in the two runs above). Treated as box contention and excluded from the RFC table.",
+ "backend_startup": {
+  "import_app_main_s": [
+   3.714,
+   1.896,
+   1.846,
+   1.901,
+   1.827,
+   1.823
+  ],
+  "spawn_to_health_ok_s": [
+   2.426,
+   2.406,
+   2.416
+  ],
+  "health_get_ms_best3": [
+   2.3,
+   2.4,
+   2.5
+  ],
+  "env": "JARVIS_SKIP_MODEL=1, no GGUF/Kokoro assets in the temp root"
+ }
+}

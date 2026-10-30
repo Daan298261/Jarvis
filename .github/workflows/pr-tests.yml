@@ -127,6 +127,9 @@ jobs:
       - name: HexStrike granted-only autostart tests
         run: npm run test:hexstrike-autostart
 
+      - name: Node model dropdown identity tests (RFC-0244)
+        run: node --experimental-strip-types --test node-model-options.test.mjs
+
       - name: Persona morph hook tests (RFC-0218 S5)
         run: npm run test:persona-morph-hook
 

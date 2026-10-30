@@ -32,6 +32,12 @@ from ..persona.owner_chat import rebind_owner_conversations_after_hotswap
 router = APIRouter(prefix="/api/model", tags=["model"])
 
 
+@router.get("/node-inventory")
+async def node_ai_inventory(refresh: bool = False):
+    from ..inference.node_inventory import NODE_INVENTORY
+    return await NODE_INVENTORY.scan(force=refresh)
+
+
 class LoadBody(BaseModel):
     profile: str | None = None
 
@@ -242,11 +248,24 @@ async def run_model_harness():
 @router.post("/load")
 async def load_model(body: LoadBody | None = None):
     settings = load_settings()
+    from ..engine_mode import model_enabled
+    if not model_enabled(settings):
+        raise HTTPException(status_code=409, detail="JEV/Laya only is active. Enable a model mode before loading.")
     profile = (body.profile if body else None) or settings.inference.profile
     previous_context = int(MANAGER.state.context_size or settings.inference.context_size or 0)
     target = resolve_profile(profile)
     target_context = int(target.context_size or settings.inference.context_size or 0)
     try:
+        if settings.inference.backend == "ollama":
+            from ..inference.ollama_runtime import ensure_local_ollama, is_loopback_host
+
+            if is_loopback_host(settings.inference.host):
+                boot = await ensure_local_ollama(
+                    host=settings.inference.host, port=settings.inference.port,
+                    model=settings.inference.remote_model, pull_if_missing=False,
+                )
+                if not boot.get("ok"):
+                    raise RuntimeError(boot.get("detail") or "The selected Ollama model did not load")
         await MANAGER.load(settings, profile)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)[:500])

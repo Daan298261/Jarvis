@@ -4,8 +4,8 @@
 #define MyAppName "ANZU"
 ; AppVersion is the semver customers see (pre-release tags allowed).
 ; Windows VERSIONINFO is numeric only, so VersionInfoVersion uses the core
-; before the first '-' (1.5.3-beta -> 1.5.3.0).
-#define MyAppVersion "1.5.3-beta"
+; before the first '-' (1.6.0-beta -> 1.6.0.0).
+#define MyAppVersion "1.6.0-beta"
 #define MyAppVersionCore Copy(MyAppVersion, 1, Pos("-", MyAppVersion + "-") - 1)
 #define MyAppPublisher "ANZU"
 #define MyAppURL "https://github.com/Daan298261/Jarvis"
@@ -88,7 +88,7 @@ Name: "dl_expert27b"; Description: "Qwen3.5-27B Expert weights (high VRAM/RAM re
 ; Exclude heavy or machine-local dirs — bootstrap recreates them on first run.
 ; Product allowlist. Untracked scratch folders (names starting with _) and
 ; nested copies are not shipped. Heavy dirs stay in Excludes.
-Source: "..\..\android\*"; DestDir: "{app}\android"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*,.git\**,.venv\*,.venv\**,.vendor\*,.vendor\**,.pytest_cache\*,.pytest_cache\**,tests\*,tests\**,__pycache__\*,__pycache__\**,*\__pycache__\*,*\__pycache__\**,node_modules\*,node_modules\**,frontend\node_modules\*,frontend\node_modules\**,frontend\dist\*,frontend\dist\**,mcp\node_modules\*,mcp\node_modules\**,models\*,models\**,runtime\*,runtime\**,data\*,data\**,logs\*,logs\**,release\*,release\**,Releases\*,Releases\**,_release_upload\*,_release_upload\**,installer-build*.log,stage-desktop*.log,build-*.log,android\app\.cxx\*,android\app\.cxx\**,android\build\*,android\build\**,frontend\src-tauri\target\*,frontend\src-tauri\target\**,frontend\src-tauri\gen\*,frontend\src-tauri\sidecars\*,frontend\src-tauri\sidecars\**,frontend\src-tauri\gen\**,android\.gradle\*,android\.gradle\**,android\app\build\*,android\app\build\**,.codex-remote-attachments\*,.codex-remote-attachments\**,installer\windows\payload\*,installer\windows\payload\**,installer\windows\dist\*,installer\windows\dist\**,tools\license_manager\*,tools\license_manager\**,backend\app\licensing\manager_app.py,JarvisLicenseManager.exe,*.jarvis-license,issuer.key,issuer.pub,issuer.sqlite,Logo_black.png,Logo_white.png,Jarvis\*,Jarvis\**,*\Jarvis\*,*\Jarvis\**,_*\*,_*\**"
+Source: "..\..\android\*"; DestDir: "{app}\android"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".cxx\*,.cxx\**,app\.cxx\*,app\.cxx\**,app\build\*,app\build\**,build\*,build\**,.gradle\*,.gradle\**,.git\*,.git\**,.venv\*,.venv\**,.vendor\*,.vendor\**,.pytest_cache\*,.pytest_cache\**,tests\*,tests\**,__pycache__\*,__pycache__\**,*\__pycache__\*,*\__pycache__\**,node_modules\*,node_modules\**,frontend\node_modules\*,frontend\node_modules\**,frontend\dist\*,frontend\dist\**,mcp\node_modules\*,mcp\node_modules\**,models\*,models\**,runtime\*,runtime\**,data\*,data\**,logs\*,logs\**,release\*,release\**,Releases\*,Releases\**,_release_upload\*,_release_upload\**,installer-build*.log,stage-desktop*.log,build-*.log,android\app\.cxx\*,android\app\.cxx\**,android\build\*,android\build\**,frontend\src-tauri\target\*,frontend\src-tauri\target\**,frontend\src-tauri\gen\*,frontend\src-tauri\sidecars\*,frontend\src-tauri\sidecars\**,frontend\src-tauri\gen\**,android\.gradle\*,android\.gradle\**,android\app\build\*,android\app\build\**,.codex-remote-attachments\*,.codex-remote-attachments\**,installer\windows\payload\*,installer\windows\payload\**,installer\windows\dist\*,installer\windows\dist\**,tools\license_manager\*,tools\license_manager\**,backend\app\licensing\manager_app.py,JarvisLicenseManager.exe,*.jarvis-license,issuer.key,issuer.pub,issuer.sqlite,Logo_black.png,Logo_white.png,Jarvis\*,Jarvis\**,*\Jarvis\*,*\Jarvis\**,_*\*,_*\**"
 Source: "..\..\backend\*"; DestDir: "{app}\backend"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*,.git\**,.venv\*,.venv\**,.vendor\*,.vendor\**,.pytest_cache\*,.pytest_cache\**,tests\*,tests\**,__pycache__\*,__pycache__\**,*\__pycache__\*,*\__pycache__\**,node_modules\*,node_modules\**,frontend\node_modules\*,frontend\node_modules\**,frontend\dist\*,frontend\dist\**,mcp\node_modules\*,mcp\node_modules\**,models\*,models\**,runtime\*,runtime\**,data\*,data\**,logs\*,logs\**,release\*,release\**,Releases\*,Releases\**,_release_upload\*,_release_upload\**,installer-build*.log,stage-desktop*.log,build-*.log,android\app\.cxx\*,android\app\.cxx\**,android\build\*,android\build\**,frontend\src-tauri\target\*,frontend\src-tauri\target\**,frontend\src-tauri\gen\*,frontend\src-tauri\sidecars\*,frontend\src-tauri\sidecars\**,frontend\src-tauri\gen\**,android\.gradle\*,android\.gradle\**,android\app\build\*,android\app\build\**,.codex-remote-attachments\*,.codex-remote-attachments\**,installer\windows\payload\*,installer\windows\payload\**,installer\windows\dist\*,installer\windows\dist\**,tools\license_manager\*,tools\license_manager\**,backend\app\licensing\manager_app.py,JarvisLicenseManager.exe,*.jarvis-license,issuer.key,issuer.pub,issuer.sqlite,Logo_black.png,Logo_white.png,Jarvis\*,Jarvis\**,*\Jarvis\*,*\Jarvis\**,_*\*,_*\**,app\licensing\manager_app.py"
 Source: "..\..\config\*"; DestDir: "{app}\config"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*,.git\**,.venv\*,.venv\**,.vendor\*,.vendor\**,.pytest_cache\*,.pytest_cache\**,tests\*,tests\**,__pycache__\*,__pycache__\**,*\__pycache__\*,*\__pycache__\**,node_modules\*,node_modules\**,frontend\node_modules\*,frontend\node_modules\**,frontend\dist\*,frontend\dist\**,mcp\node_modules\*,mcp\node_modules\**,models\*,models\**,runtime\*,runtime\**,data\*,data\**,logs\*,logs\**,release\*,release\**,Releases\*,Releases\**,_release_upload\*,_release_upload\**,installer-build*.log,stage-desktop*.log,build-*.log,android\app\.cxx\*,android\app\.cxx\**,android\build\*,android\build\**,frontend\src-tauri\target\*,frontend\src-tauri\target\**,frontend\src-tauri\gen\*,frontend\src-tauri\sidecars\*,frontend\src-tauri\sidecars\**,frontend\src-tauri\gen\**,android\.gradle\*,android\.gradle\**,android\app\build\*,android\app\build\**,.codex-remote-attachments\*,.codex-remote-attachments\**,installer\windows\payload\*,installer\windows\payload\**,installer\windows\dist\*,installer\windows\dist\**,tools\license_manager\*,tools\license_manager\**,backend\app\licensing\manager_app.py,JarvisLicenseManager.exe,*.jarvis-license,issuer.key,issuer.pub,issuer.sqlite,Logo_black.png,Logo_white.png,Jarvis\*,Jarvis\**,*\Jarvis\*,*\Jarvis\**,_*\*,_*\**"
 Source: "..\..\docs\*"; DestDir: "{app}\docs"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*,.git\**,.venv\*,.venv\**,.vendor\*,.vendor\**,.pytest_cache\*,.pytest_cache\**,tests\*,tests\**,__pycache__\*,__pycache__\**,*\__pycache__\*,*\__pycache__\**,node_modules\*,node_modules\**,frontend\node_modules\*,frontend\node_modules\**,frontend\dist\*,frontend\dist\**,mcp\node_modules\*,mcp\node_modules\**,models\*,models\**,runtime\*,runtime\**,data\*,data\**,logs\*,logs\**,release\*,release\**,Releases\*,Releases\**,_release_upload\*,_release_upload\**,installer-build*.log,stage-desktop*.log,build-*.log,android\app\.cxx\*,android\app\.cxx\**,android\build\*,android\build\**,frontend\src-tauri\target\*,frontend\src-tauri\target\**,frontend\src-tauri\gen\*,frontend\src-tauri\sidecars\*,frontend\src-tauri\sidecars\**,frontend\src-tauri\gen\**,android\.gradle\*,android\.gradle\**,android\app\build\*,android\app\build\**,.codex-remote-attachments\*,.codex-remote-attachments\**,installer\windows\payload\*,installer\windows\payload\**,installer\windows\dist\*,installer\windows\dist\**,tools\license_manager\*,tools\license_manager\**,backend\app\licensing\manager_app.py,JarvisLicenseManager.exe,*.jarvis-license,issuer.key,issuer.pub,issuer.sqlite,Logo_black.png,Logo_white.png,Jarvis\*,Jarvis\**,*\Jarvis\*,*\Jarvis\**,_*\*,_*\**"
@@ -144,13 +144,15 @@ Source: "assets\sponsor\bgp-logo-150.png"; DestDir: "{tmp}"; Flags: dontcopy
 #ifndef SkipBootstrapModel
 ; Release distributions carry a local bootstrap brain. The multi-GB file is staged
 ; by build-installer.ps1 and is not committed to the repository.
-Source: "payload\models\bootstrap\Ornith-1.5-9B-Q4_K_M.gguf"; DestDir: "{app}\models\bootstrap"; Flags: ignoreversion
+#define BootstrapModelSHA256 GetSHA256OfFile(SourcePath + "payload\models\bootstrap\Ornith-1.5-9B-Q4_K_M.gguf")
+Source: "payload\models\bootstrap\Ornith-1.5-9B-Q4_K_M.gguf"; DestDir: "{app}\models\bootstrap"; Flags: ignoreversion; Check: ShouldCopyModel('models\bootstrap\Ornith-1.5-9B-Q4_K_M.gguf', '{#BootstrapModelSHA256}')
 #endif
 #ifndef SkipFrontModel
 ; Always-warm front lane. Staged by stage-front-model.ps1 and not committed.
 ; Upgrade, repair, and semi-clean keep it the same way as the Ornith bootstrap
-; GGUF: it lives under models\ and is recopied from this payload.
-Source: "payload\models\Qwen3.5-2B-GGUF\Qwen3.5-2B-Q4_K_M.gguf"; DestDir: "{app}\models\Qwen3.5-2B-GGUF"; Flags: ignoreversion
+; GGUF: verified matching weights are reused; changed or damaged weights are restored.
+#define FrontModelSHA256 GetSHA256OfFile(SourcePath + "payload\models\Qwen3.5-2B-GGUF\Qwen3.5-2B-Q4_K_M.gguf")
+Source: "payload\models\Qwen3.5-2B-GGUF\Qwen3.5-2B-Q4_K_M.gguf"; DestDir: "{app}\models\Qwen3.5-2B-GGUF"; Flags: ignoreversion; Check: ShouldCopyModel('models\Qwen3.5-2B-GGUF\Qwen3.5-2B-Q4_K_M.gguf', '{#FrontModelSHA256}')
 #endif
 #ifndef SkipVoicePack
 ; Default household butler Kokoro-82M weights (RFC-0070). Staged by stage-voice-default.ps1.
@@ -824,7 +826,7 @@ begin
   Result := ComparePackedVersion(InstallerPacked, InstalledPacked);
   if Result <> 0 then
     Exit;
-  { Same numeric core: a pre-release (1.5.3-beta) is older than the final (1.5.3). }
+  { Same numeric core: a pre-release (1.6.0-beta) is older than the final (1.6.0). }
   InstallerPre := Pos('-', InstallerVersion) > 0;
   InstalledPre := Pos('-', InstalledVersion) > 0;
   if InstallerPre and (not InstalledPre) then
@@ -1351,6 +1353,37 @@ begin
     Delete(Result, Length(Result), 1);
 end;
 
+function ShouldCopyModel(RelativePath, ExpectedSHA256: String): Boolean;
+var
+  Target: String;
+begin
+  Target := AddBackslash(ExpandConstant('{app}')) + RelativePath;
+  Result := True;
+  if FileExists(Target) then
+  begin
+    try
+      Result := CompareText(GetSHA256OfFile(Target), ExpectedSHA256) <> 0;
+    except
+      Log('Could not validate existing model; restoring bundled copy: ' + Target);
+    end;
+  end;
+end;
+
+function IsPreservingUpgrade: Boolean;
+begin
+  Result := ExistingInstallDetected;
+  if ExistingInstallPage <> nil then
+    Result := Result and (ExistingInstallPage.SelectedValueIndex = 0);
+  { Explicit task choices on the command line remain authoritative. }
+  Result := Result and (ExpandConstant('{param:TASKS|}') = '') and
+    (ExpandConstant('{param:MERGETASKS|}') = '');
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := IsPreservingUpgrade and ((PageID = wpSelectTasks) or (PageID = wpSelectComponents));
+end;
+
 function GetBootstrapRunParameters(Param: String): String;
 var
   Wrapper: String;
@@ -1361,6 +1394,12 @@ begin
   if not FileExists(Wrapper) then
     Wrapper := ExpandConstant('{tmp}\run-installer-bootstrap.ps1');
   Params := '-NoProfile -ExecutionPolicy Bypass -File "' + Wrapper + '" -MaxMinutes 180';
+  if IsPreservingUpgrade then
+  begin
+    Result := Params + ' -SkipHeavyPrepare -SkipModelDownload -SkipKokoro -SkipPersonaVoices' +
+      ' -InstallerDir "' + ExpandConstant('{src}') + '" -AppRoot "' + ExpandConstant('{app}') + '"';
+    Exit;
+  end;
   if BootstrapSkipHeavy then
     Params := Params + ' -SkipHeavyPrepare';
   if BootstrapSkipModelDownload then
