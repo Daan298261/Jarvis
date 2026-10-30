@@ -599,6 +599,8 @@ def _build_graded_profile(
         "vram_state": vram_state_for_weight(weight_gb),
         "matched": discovered_match is not None,
     }
+    if merged.get("huggingface"):
+        result["huggingface"] = dict(merged["huggingface"])
     source_notes = merged.get("source_notes")
     if source_notes:
         result["source_notes"] = str(source_notes)

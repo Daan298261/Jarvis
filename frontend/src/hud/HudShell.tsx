@@ -21,7 +21,8 @@ import { HudOverlayProvider, useHudOverlay } from "./hudOverlayContext"
 import { useHexStrikeSuiteActive } from "./hexstrikeSuite"
 import type { HealthIssue } from "./systemHealth"
 import { isGalaxyPresenceEffective } from "../presence/galaxyPresence"
-import { usePresentationSettings } from "../presence/presentationSettings"
+import { updatePresentation, usePresentationSettings } from "../presence/presentationSettings"
+import { DAYBREAK_AVATAR_ID, usesDaybreakAppearance } from "../presence/appearanceModes"
 import { supportsHumanoidRuntime } from "../presence/renderers/humanoidRuntime"
 import { HudStarfield } from "./HudStarfield"
 import "./hud.css"
@@ -296,7 +297,7 @@ function HudShellInner({
   projectsPanel,
 }: HudShellProps) {
   const { active: hexStrikeActive } = useHexStrikeSuiteActive()
-  const { hexSuiteExpanded, toggleHexSuite, dismissHexSuiteForOverlay } = useHudOverlay()
+  const { hexSuiteExpanded, toggleHexSuite, focusHexSuite, dismissHexSuiteForOverlay } = useHudOverlay()
   const location = useLocation()
   const [adminOpen, setAdminOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
@@ -380,7 +381,10 @@ function HudShellInner({
 
   function onDaybreakToggle() {
     closePanels()
-    toggleHexSuite()
+    if (!usesDaybreakAppearance(presentation, hexStrikeActive)) {
+      void updatePresentation({ shell: "hud", requestedPresence: "humanoid", avatarId: DAYBREAK_AVATAR_ID })
+      focusHexSuite()
+    } else toggleHexSuite()
   }
 
   const skyOpen = !isChat || adminOpen || helpOpen || panel !== null || modelMenuOpen
@@ -388,7 +392,7 @@ function HudShellInner({
   const presentation = usePresentationSettings()
   const galaxyEffective = isGalaxyPresenceEffective({
     requestedPresence: presentation.requestedPresence,
-    suiteOverride: hexStrikeActive,
+    suiteOverride: usesDaybreakAppearance(presentation, hexStrikeActive),
     webglAvailable: supportsHumanoidRuntime(),
   })
 

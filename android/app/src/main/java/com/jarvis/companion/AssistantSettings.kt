@@ -13,10 +13,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun AssistantSettings(model: CompanionModel) {
     val context = LocalContext.current
+    val wakeSettings = remember { WakeSettings(context) }
+    val scope = rememberCoroutineScope()
+    var wakePhrases by remember { mutableStateOf(wakeSettings.phrases) }
+    var wakeThreshold by remember { mutableFloatStateOf(wakeSettings.threshold) }
+    var screenContext by remember { mutableStateOf(wakeSettings.screenContext) }
+    var wakeNotice by remember { mutableStateOf("") }
+    var savingWake by remember { mutableStateOf(false) }
     val permissions = remember { PhoneToolPermissions(context) }
     var enabled by remember { mutableStateOf(permissions.enabled()) }
     val local by model.preferPhoneLocal.collectAsStateWithLifecycle()
@@ -29,8 +39,11 @@ fun AssistantSettings(model: CompanionModel) {
         assistantHeld = role.isRoleHeld(RoleManager.ROLE_ASSISTANT)
     }
     val microphone = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) runCatching { context.startForegroundService(Intent(context, AnzuWakeService::class.java).setAction("enable")) }
-            .onFailure { WakeAudioState.status.value = "Could not start wake listening: ${it.message}" }
+        if (granted && role.isRoleHeld(RoleManager.ROLE_ASSISTANT)) {
+            wakeSettings.enabled = true
+            runCatching { context.startForegroundService(Intent(context, AnzuWakeService::class.java).setAction("enable")) }
+                .onFailure { wakeSettings.enabled = false; WakeAudioState.status.value = "Could not start wake listening: ${it.message}" }
+        } else wakeNotice = if (!granted) "Microphone permission is required." else "Make ANZU your default assistant before enabling wake listening."
     }
     var packageName by remember { mutableStateOf("") }
     var categories by remember { mutableStateOf(emptySet<String>()) }
@@ -52,15 +65,36 @@ fun AssistantSettings(model: CompanionModel) {
             else assistant.launch(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS))
         }) { Text("Make ANZU the default assistant") }
         Text(if (assistantHeld) "ANZU is your default digital assistant" else "ANZU is not your default digital assistant")
-        OutlinedButton(onClick = { assistant.launch(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) }) { Text("Digital assistant options") }
+        OutlinedButton(onClick = { assistant.launch(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) }) { Text("Android digital assistant settings") }
         OutlinedButton(onClick = { context.startActivity(Intent(ANZU_VOICE_ASSIST_ACTION).setPackage(context.packageName)) }) { Text("Test assistant button") }
-        Text("On Samsung, choose ANZU in Digital assistant app, then select Digital assistant for the side button in Advanced features → Side button.")
+        Text("Galaxy S23: Settings → Apps → Choose default apps → Digital assistant app → ANZU. On current One UI, set Advanced features → Side button → Long press → Digital assistant, then hold the Side button. Older One UI may offer a swipe inward from a bottom corner in Display → Navigation bar → Assistant app. Holding Side + Volume down opens the power menu.")
+        Text("Choosing a default assistant does not enable wake listening. Enable it below; the notification confirms when the microphone is listening.")
+        OutlinedTextField(value = wakePhrases, onValueChange = { wakePhrases = it.take(500) }, label = { Text("Wake phrases, separated by commas") }, modifier = Modifier.fillMaxWidth())
+        Text("Includes ANZU, Anoe, Enzo, Anzoo, Aanzo and Jarvis. You can also use English dictionary words. Short names may trigger more often; use 'hey' for fewer accidental activations.")
+        Text("Detection threshold: ${"%.2f".format(wakeThreshold)}. Lower makes activation easier; higher reduces accidental triggers.")
+        Slider(value = wakeThreshold, onValueChange = { wakeThreshold = it }, valueRange = 0.05f..0.6f)
+        OutlinedButton(enabled = !savingWake, onClick = {
+            savingWake = true
+            scope.launch {
+                val result = withContext(Dispatchers.IO) { runCatching { wakeSettings.keywords(context, wakePhrases) } }
+                result.onSuccess {
+                    wakeSettings.phrases = wakePhrases
+                    wakeSettings.threshold = wakeThreshold
+                    wakeSettings.enabled = false
+                    context.stopService(Intent(context, AnzuWakeService::class.java))
+                    wakeNotice = "Wake settings saved. Enable listening to use them."
+                }.onFailure { wakeNotice = it.message ?: "Could not validate wake phrases." }
+                savingWake = false
+            }
+        }) { Text("Save wake settings") }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { microphone.launch(Manifest.permission.RECORD_AUDIO) }) { Text("Enable Hey ANZU / Hey Anu") }
-            OutlinedButton(onClick = { context.stopService(Intent(context, AnzuWakeService::class.java)) }) { Text("Stop listening") }
+            OutlinedButton(onClick = { microphone.launch(Manifest.permission.RECORD_AUDIO) }) { Text("Enable wake listening") }
+            OutlinedButton(onClick = { wakeSettings.enabled = false; context.stopService(Intent(context, AnzuWakeService::class.java)) }) { Text("Stop listening") }
         }
         Text(wake)
-        Text("Wake audio stays local. Enable while ANZU is open. If Samsung suspends it, review Settings → Battery → Background usage limits. No boot microphone restart.")
+        Text(wakeNotice)
+        Text("Wake audio stays local. Listening pauses while locked, during calls, music or ANZU speech. Saved opt-in resumes when you reopen ANZU. If Samsung suspends it, review Settings → Battery → Background usage limits. No boot microphone restart.")
+        Row { Text("Include visible screen text when assistant is invoked", Modifier.weight(1f)); Switch(screenContext, { screenContext = it; wakeSettings.screenContext = it }) }
         Row { Text("Allow requested app control", Modifier.weight(1f)); Switch(enabled, { enabled = it; permissions.enable(it) }) }
         Text("ANZU can read your screen and act in selected apps. Screen content is untrusted. Android permission/security screens and password fields stay manual.")
         OutlinedButton(onClick = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }) { Text("Enable ANZU in Accessibility") }

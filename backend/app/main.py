@@ -336,7 +336,8 @@ async def startup() -> None:
         asyncio.create_task(_auto_start_blackgrid())
     except Exception:
         logging.debug("Supermemory auto-start scheduling skipped", exc_info=True)
-    if current.inference.auto_load and not os.environ.get("JARVIS_SKIP_MODEL"):
+    from .engine_mode import model_enabled
+    if model_enabled(current) and current.inference.auto_load and not os.environ.get("JARVIS_SKIP_MODEL"):
         asyncio.create_task(_autoload_model(current))
 
     launch_prompt = os.environ.get("JARVIS_LAUNCH_PROMPT")
@@ -373,7 +374,7 @@ async def startup() -> None:
         schedule_tts_warm_start()
     except Exception:
         logging.debug("TTS warm-start scheduling skipped", exc_info=True)
-    if not os.environ.get("PYTEST_CURRENT_TEST"):
+    if model_enabled(current) and not os.environ.get("PYTEST_CURRENT_TEST"):
         try:
             from .inference.front_runtime import FRONT_RUNTIME
 
@@ -517,6 +518,9 @@ async def shutdown() -> None:
 
 
 async def _autoload_model(current) -> None:
+    from .engine_mode import model_enabled
+    if not model_enabled(current):
+        return
     # Discovery offers are independent of the saved boot choice. New servers
     # must neither take it over nor leave autoload waiting for a modal choice.
     try:
@@ -531,8 +535,19 @@ async def _autoload_model(current) -> None:
                 )
                 if not boot.get("ok"):
                     raise RuntimeError(boot.get("detail") or "The selected LM Studio model did not load")
+        if current.inference.backend == "ollama":
+            from .inference.ollama_runtime import ensure_local_ollama, is_loopback_host
+
+            if is_loopback_host(current.inference.host):
+                boot = await ensure_local_ollama(
+                    host=current.inference.host, port=current.inference.port,
+                    model=current.inference.remote_model, pull_if_missing=False,
+                )
+                if not boot.get("ok"):
+                    raise RuntimeError(boot.get("detail") or "The selected Ollama model did not load")
         await MANAGER.load(current, context_size=current.inference.context_size)
-    except Exception:
+    except Exception as exc:
+        MANAGER.state.last_error = str(exc)[:500]
         fallback = local_lmstudio_fallback_settings(current)
         if fallback is None:
             logging.exception("Model auto-load failed; it can be loaded from the Model page")

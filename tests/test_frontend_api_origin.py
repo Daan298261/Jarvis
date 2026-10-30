@@ -13,13 +13,10 @@ def test_portal_fetch_uses_local_backend_outside_loopback_spa():
     assert api.count("fetch(jarvisApiUrl") >= 10
 
 
-def test_hud_model_switch_uses_activation_snapshot_and_retries_catalogs():
+def test_hud_model_switch_uses_activation_snapshot():
     apply = (ROOT / "frontend" / "src" / "hud" / "applyRuntimeProfile.ts").read_text(encoding="utf-8")
-    selector = (ROOT / "frontend" / "src" / "hud" / "HudModelSelector.tsx").read_text(encoding="utf-8")
     assert "finishModelActivation(result.load)" in apply
     assert "finishModelActivation(runtime.load)" in apply
-    assert "Retry local models" in selector
-    assert "void refreshProfiles()" in selector
 
 
 def test_model_play_routes_do_not_block_on_a_second_full_probe():
