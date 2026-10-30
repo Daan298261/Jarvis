@@ -154,7 +154,7 @@ class NodeInventory:
                     "models": result["models"], "status": "Loaded inventory verified" if verified else "Advertised models; loading unverified"})
                 for name in result["models"]:
                     metadata = (result.get("metadata") or {}).get(name, {})
-                    selected_names = {MANAGER.state.remote_model, getattr(MANAGER.provider, "model", "")}
+                    selected_names = {getattr(MANAGER.provider, "model", "") or MANAGER.state.remote_model}
                     model_key = metadata.get("model_key")
                     unique_key = bool(model_key and sum(1 for value in (result.get("metadata") or {}).values() if value.get("model_key") == model_key) == 1)
                     exact_selected = any(item in selected_names for item in result["models"])

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { modelName, nodeModelOptions, selectedModelOption } from "./src/hud/nodeModelOptions.ts"
+import { modelName, nodeModelOptions, selectedModelOption, servingModel } from "./src/hud/nodeModelOptions.ts"
+
+test("serving identity takes precedence over a saved remote selection", () => {
+  assert.equal(servingModel({ loaded: true, active_model: "actual-27B", remote_model: "selected-9B" }), "actual-27B")
+  assert.equal(servingModel({ loaded: false, remote_model: "selected-9B" }), "No model serving")
+})
 
 test("model identities retain dotted names and quantization", () => {
   assert.equal(modelName("C:\\models\\Qwen3.8-9B.Q8_0.gguf"), "Qwen3.8-9B.Q8_0")

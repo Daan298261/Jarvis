@@ -98,6 +98,14 @@ async def test_ambiguous_model_key_does_not_mark_two_instances_active(inventory,
     assert not any(row["active"] for row in result["models"])
 
 
+async def test_saved_selection_does_not_override_provider_actually_in_use(inventory, monkeypatch):
+    service, _, manager = inventory
+    manager.state.remote_model = "saved-9B"
+    monkeypatch.setattr(ni, "probe", AsyncMock(return_value={"models": ["worker", "saved-9B"], "backend": "lmstudio", "verified_loaded": True}))
+    rows = (await service.scan())["models"]
+    assert [row["model"] for row in rows if row["active"]] == ["worker"]
+
+
 async def test_scan_caches_force_refresh_and_keeps_probe_setup_off_portal_loop(inventory, monkeypatch):
     service, settings, _ = inventory
     main_thread = threading.get_ident()

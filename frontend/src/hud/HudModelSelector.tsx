@@ -6,11 +6,10 @@ import { applyRuntimeProfile, playDiscoveredGguf, playLmStudioCatalogProfile } f
 import { hexStrikeSelectMessage } from "./hexstrikeAutostart"
 import { isHexStrikeSuiteProfile } from "./hexstrikeSuite"
 import { NodeAiInventory } from "./NodeAiInventory"
-import { modelName, nodeModelOptions, selectedModelOption, type NodeAiInventory as Inventory } from "./nodeModelOptions"
+import { modelName, nodeModelOptions, selectedModelOption, servingModel, type NodeModelState as ModelState, type NodeAiInventory as Inventory } from "./nodeModelOptions"
 import "./hexstrike.css"
 import "./nodeModels.css"
 
-type ModelState = { loaded?: boolean; loading?: boolean; active_model?: string; remote_model?: string; last_error?: string }
 export type HudModelSelectorProps = { model: ModelState | null; onOpenChange?: (open: boolean) => void }
 
 export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps) {
@@ -28,7 +27,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
   const options = useMemo(() => nodeModelOptions(profiles.filter((p) => !isHexStrikeSuiteProfile(p)), catalog), [profiles, catalog])
   const suite = profiles.find(isHexStrikeSuiteProfile)
   const state = open ? snapshot || model : model || snapshot
-  const serving = state?.loaded ? state.remote_model || state.active_model || "Identity unavailable" : "No model serving"
+  const serving = servingModel(state)
   const value = options.some((option) => option.key === draft) ? draft : selectedModelOption(options, selectedId)
   const choice = options.find((option) => option.key === value)
 
@@ -74,7 +73,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
       const live = await api<ModelState>("/api/model")
       setSnapshot(live)
       setMessage(suiteOnly ? hexStrikeSelectMessage("hexStrikeAutoStarted" in applied && !!applied.hexStrikeAutoStarted)
-        : live.loaded ? `Serving: ${live.remote_model || live.active_model || "identity unavailable"}` : "Selection saved; no model is serving yet.")
+        : live.loaded ? `Serving: ${servingModel(live)}` : "Selection saved; no model is serving yet.")
     } catch (err) { setError(err instanceof Error ? err.message : "Could not load model") }
     finally { working.current = false; setBusy(false); void refresh() }
   }

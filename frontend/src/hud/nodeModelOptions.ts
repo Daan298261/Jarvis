@@ -4,6 +4,10 @@ export type NodeModelOption = { key: string; kind: "runtime" | "catalog" | "file
 export function modelName(value: string): string {
   return (value || "").split(/[\\/]/).pop()?.replace(/\.gguf$/i, "") || value
 }
+export type NodeModelState = { loaded?: boolean; loading?: boolean; active_model?: string; remote_model?: string; last_error?: string }
+export function servingModel(state: NodeModelState | null | undefined): string {
+  return state?.loaded ? state.active_model || state.remote_model || "Identity unavailable" : "No model serving"
+}
 export function nodeModelOptions(profiles: RuntimeProfile[], catalog: LmStudioCatalogResponse | null): NodeModelOption[] {
   const options: NodeModelOption[] = [], paths = new Set<string>(), catalogIds = new Set<string>()
   for (const profile of catalog?.profiles || []) {
