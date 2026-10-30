@@ -381,7 +381,7 @@ On a conflict, merge `development` into the slice branch (merge commit). No reba
 | `test_on_disk_dump_routes_after_probe[ffs-tar]`, `[ffs-zip]` (`p1_ffs.tar` / `p1_ffs.zip` archives) | weak (component) → probe `ext:` | S2 |
 | `test_ffs_path_plus_question_calls_ingest_without_overflow` | weak → probe `dump` → dispatch | S3 (+ S4 caps) |
 
-That is 21 xfail cases.
+Every row above is a strict-xfail case; the table is the count, so no number is repeated in this RFC.
 
 **Live tests (not xfail; they pass on `development` today, and every slice must keep them green, S2 most of all because it adds the detector):**
 
@@ -396,11 +396,11 @@ That is 21 xfail cases.
 | `test_outside_path_with_markers_is_never_probed`: a fake dump outside the allowed folder; spies on `os.stat` / `Path.exists` record **no** call under that path, and the route is not RE | allow-list first (`store.admit_allowed_target`, #661 landed); no existence oracle |
 | `test_empty_allow_list_refuses_outside_target_without_stat`: settings `allowed_directories == []`, the same fake dump outside → refused (not RE), and the spies record no call under that path | D1 via CoS: the helper reads the settings list, never passes `None`; an empty list admits nothing |
 
-That is 18 live tests.
+Every row above is a live test; the table is the count, so no number is repeated in this RFC.
 
 **CI step:** existing `.github/workflows/pr-tests.yml:94–95` → "Run full backend suite" (`python -m pytest -q -rs`), which collects `tests/test_rfc0232_ffs_path_routing.py`. No workflow edit in S1. Architect owns `pr-tests.yml`.
 
-**Acceptance:** all 21 xfail cases above xfail strictly on `development`; the 18 live tests pass; CI green.
+**Acceptance:** every row of the S1 xfail table above xfails strictly on `development`; every row of the S1 live-test table passes; CI green.
 
 **README row:** #652 (RFC-0225; final head in this PR's body) rewrites the last README paragraph and appends the 2026-10-17 batch paragraph with "Next free after **0229** is **0230**". So that a later merge resolves without a conflict, S1 leaves that paragraph untouched and adds one separate paragraph before the "Memory recall follow-up" paragraph (so an unchanged paragraph sits between the two hunks; `git merge-tree` against #652's head is clean) in #652's batch format (bold date label, linked number, status, PR number), which says 0230/0231 are parallel and 0233 is reserved. Once #652 lands, the Architect merges `development` into this branch (merge commit) or, if this PR landed first, makes a docs commit that moves that sentence into #652's single next-free line ("Next free after **0233** is **0234**" once 0230/0231/0233 exist) and drops the separate paragraph, so the README keeps one next-free line.
 
@@ -439,9 +439,9 @@ That is 18 live tests.
 - `test_roots_empty_reaches_task_stream` — call `rea_investigate` with empty roots under a live task → one task event whose detail contains `Settings → Integrations → Reverse Engineering` **and** one `chat_tts` event; **zero** calls to `publish_owner_text`.
 - `test_roots_empty_without_task_uses_engine_owner_line` — monkeypatch `engine_coexistence.owner_line`; assert it is called once with `level="error"` and `title="Reverse engineering"` (RFC-0225, #652 (RFC-0225; final head in this PR's body)). Lands once RFC-0225 S3 adds `owner_line` (see §Owner-visible channel, Dependency).
 
-**CI step:** `.github/workflows/pr-tests.yml:94–95` "Run full backend suite" collects `tests/test_rfc0232_ffs_path_routing.py` (including the 18 live tests), `tests/test_rfc0232_intent_and_alias.py`, `tests/test_rfc0230_reflex_budget.py` and `tests/test_decision_persona_intent.py`. `tests/test_rfc0230_reflex_budget.py` also runs in RFC-0230's "RFC-0230 latency contract tests" step (#666); the slice is green only when every named test above passes there.
+**CI step:** `.github/workflows/pr-tests.yml:94–95` "Run full backend suite" collects `tests/test_rfc0232_ffs_path_routing.py` (including every row of the S1 live-test table), `tests/test_rfc0232_intent_and_alias.py`, `tests/test_rfc0230_reflex_budget.py` and `tests/test_decision_persona_intent.py`. `tests/test_rfc0230_reflex_budget.py` also runs in RFC-0230's "RFC-0230 latency contract tests" step (#666); the slice is green only when every named test above passes there.
 
-**Acceptance:** the 20 S1 routing xfails (path forms, dump wordings, explicit wording, on-disk dumps) are gone and pass; the 18 live tests and `test_one_decide_per_turn_carries_persona_question` stay green; every probe is allow-list first, stat-only, ≤ 24 stats and ≤ 10 ms; no soft-fail on empty roots.
+**Acceptance:** every row of the S1 xfail table whose "Marker removed by" column names S2 (path forms, dump wordings, explicit wording, on-disk dumps) is gone and passes; every row of the S1 live-test table and `test_one_decide_per_turn_carries_persona_question` stay green; every probe is allow-list first, stat-only, ≤ 24 stats and ≤ 10 ms; no soft-fail on empty roots.
 
 ---
 
