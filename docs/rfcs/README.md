@@ -55,7 +55,7 @@ PC first-response latency (P0): [0230](0230-pc-first-response-latency.md) — me
 
 Interesting integrations **in** 1.4: [0107](0107-obsidian-linked-memory-brain.md)–[0110](0110-chatgpt-style-approval-popup.md). Bulk catalog **0095–0104** stays later ([`INTEGRATION_SPECS.md`](../../INTEGRATION_SPECS.md)). Post-1.4 optional accelerators: [0116](0116-typesafe-jev-optional-decision-tier.md) TypeSafe Jev decision tier (**implemented**: Settings + `has_feature` Plus + real probe; Jev is publicly usable per RFC-0171 but still requires opt-in + probe; live TypeSafe account is desktop sign-off), [0117](0117-tiny-front-chat-responder.md) tiny front-chat responder for first visible/audible replies.
 
-Large-prompt pipeline (reflex detect → gated large-model preload via RFC-0225/0228, spoken ack, split + bounded completeness, durable sequential part tasks with mandatory deeper + quantitative sub-tasks): [0231](0231-large-prompt-pipeline.md) (**accepted**; Taco ask B 2026-10-20).
+Large-prompt pipeline (reflex detect → gated large-model preload via RFC-0225/0228, spoken ack, split + bounded completeness, durable sequential part tasks with mandatory deeper + quantitative sub-tasks): [0245](0245-large-prompt-pipeline.md) (**accepted**; Taco ask B 2026-10-20).
 
 **Numbering:** two files share **0117** — [tiny front-chat responder](0117-tiny-front-chat-responder.md) (**implemented**) and [durable-state journal](0117-durable-state-journal-rollback.md) (**implemented**, #380). Do not reuse 0117. **0119 is reserved** for a parallel license-package entitlements RFC — do not take it from this pack.
 
