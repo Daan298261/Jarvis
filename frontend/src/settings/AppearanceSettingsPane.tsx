@@ -1,7 +1,8 @@
 import { useState } from "react"
 import { CollapsibleSection } from "../components/CollapsibleSection"
 import { applyRuntimeProfile } from "../hud/applyRuntimeProfile"
-import { useHexStrikeSuiteActive } from "../hud/hexstrikeSuite"
+import { isHexStrikeSuiteProfile, useHexStrikeSuiteActive } from "../hud/hexstrikeSuite"
+import { DAYBREAK_AVATAR_ID, usesDaybreakAppearance } from "../presence/appearanceModes"
 import { useHudOverlayOptional } from "../hud/hudOverlayContext"
 import { NamedPersonaControls } from "../persona/NamedPersonaControls"
 import { PersonaVisualSliders } from "../persona/PersonaVisualSliders"
@@ -14,7 +15,6 @@ import { MUSCULAR_HUMANOID_AVATAR_ID } from "../presence/renderers/humanoidRunti
 import {
   MYTHIC_LIVING_AVATAR_ID,
   MYTHIC_AVATAR_CHOICES,
-  LEGACY_HUMANOID_AVATAR_ID,
   MYTHIC_LIVE_B_AVATAR_ID,
 } from "../presence/mythicPersonaVariant"
 import { PullLampThemeToggle } from "../vendor/shipnotes/PullLampThemeToggle"
@@ -31,13 +31,16 @@ const APEX_ASSISTIVE =
 export function AppearanceSettingsPane({ settings, showPersona = true }: AppearanceSettingsPaneProps) {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState("")
-  const { active: hexStrikeActive, profile: hexstrikeProfile } = useHexStrikeSuiteActive()
+  const { active: suiteActive, profiles } = useHexStrikeSuiteActive()
+  const hexStrikeActive = usesDaybreakAppearance(settings, suiteActive)
+  const hexstrikeProfile = profiles.find(isHexStrikeSuiteProfile)
   const overlay = useHudOverlayOptional()
 
   async function apply(patch: Partial<PresentationSettings>, note = "") {
     setBusy(true)
     setMessage("")
     try {
+      overlay?.dismissHexSuiteForOverlay()
       await updatePresentation(patch)
       setMessage(note)
     } catch (error) {
@@ -53,7 +56,7 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
     setMessage("")
     try {
       await applyRuntimeProfile(hexstrikeProfile.id || hexstrikeProfile.name)
-      await updatePresentation({ shell: "hud", requestedPresence: "humanoid" })
+      await updatePresentation({ shell: "hud", requestedPresence: "humanoid", avatarId: DAYBREAK_AVATAR_ID })
       overlay?.focusHexSuite()
       setMessage("HexStrike · Daybreak suite active.")
     } catch (error) {
@@ -111,7 +114,7 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
         <button
           type="button"
           disabled={busy}
-          className={selected === "humanoid" && settings.avatarId !== LEGACY_HUMANOID_AVATAR_ID ? "active" : ""}
+          className={selected === "humanoid" ? "active" : ""}
           onClick={() =>
             apply(
               { shell: "hud", requestedPresence: "humanoid", avatarId: "jarvis_base" },
@@ -135,13 +138,6 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
         >
           <PresenceModePreview mode="muscular_humanoid" />
           Muscular humanoid · showcase
-        </button>
-        <button type="button" disabled={busy}
-          className={settings.requestedPresence === "humanoid" && settings.avatarId === LEGACY_HUMANOID_AVATAR_ID ? "active" : ""}
-          onClick={() => apply({ shell: "hud", requestedPresence: "humanoid", avatarId: LEGACY_HUMANOID_AVATAR_ID })}
-        >
-          <PresenceModePreview mode="humanoid" />
-          Humanoid · original particle sculpture
         </button>
         {MYTHIC_AVATAR_CHOICES.map(choice => (
           <button key={choice.id} type="button" disabled={busy}

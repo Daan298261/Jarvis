@@ -1,3 +1,30 @@
 fn main() {
-    tauri_build::build()
+    tauri_build::try_build(
+        tauri_build::Attributes::new().app_manifest(
+            tauri_build::AppManifest::new().commands(&[
+                "app_version",
+                "backend_status",
+                "minimize_window",
+                "show_window",
+                "hide_window",
+                "start_backend",
+                "stop_backend",
+                "restart_backend",
+                "open_logs",
+                "set_autostart",
+                "get_autostart",
+                "set_close_to_tray",
+                "quit_jarvis",
+                "quit_manager",
+                "data_paths",
+                "obsidian_probe",
+                "obsidian_bound_vault_path",
+                "obsidian_embed_start",
+                "obsidian_embed_resize",
+                "obsidian_embed_stop",
+                "obsidian_focus_note",
+                "obsidian_open_install",
+            ]),
+        ),
+    ).expect("failed to build desktop command permissions");
 }

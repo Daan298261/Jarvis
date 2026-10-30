@@ -198,6 +198,11 @@
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 148px), 1fr));
 }
 
+.hud-render-modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.hud-render-modes button { padding: 10px 8px; border-radius: 8px; border: 1px solid rgba(103,220,255,.25); background: #091722; color: #cbe9f4; cursor: pointer; }
+.hud-render-modes button.active { color: #fff; border-color: #67dcff; background: #15394a; }
+.hud-render-modes button:disabled { opacity: .45; cursor: default; }
+
 .jarvis-presence-mode-row button,
 .jarvis-presence-controls select,
 .jarvis-presence-controls-table select {

@@ -720,6 +720,9 @@ def small_context_envelope(
 
 def front_provider(settings: AppSettings | None = None):
     app = settings or load_settings()
+    from ..engine_mode import model_enabled
+    if not model_enabled(app):
+        return None
     from ..inference.front_runtime import FRONT_RUNTIME
 
     dedicated = FRONT_RUNTIME.provider(app)
@@ -760,6 +763,9 @@ async def generate_front_reply(
     on_delta: Callable[[str], Awaitable[None] | None] | None = None,
 ) -> FrontReply:
     app = settings or load_settings()
+    from ..engine_mode import model_enabled
+    if not model_enabled(app):
+        return FrontReply(action="silent_skip", text="", model="", skipped=True)
     cfg = front_lane_config(app)
     started = turn_started if turn_started is not None else time.perf_counter()
     decision = turn_decision
