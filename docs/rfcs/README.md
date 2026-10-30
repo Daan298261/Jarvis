@@ -52,6 +52,7 @@ PC first-response latency (P0): [0230](0230-pc-first-response-latency.md) — me
 | [0113](0113-admin-settings-submenu-1-4.md) | Admin > Settings 1.4 IA deltas (C); RFC-0094 already implemented |
 | [0114](0114-context-overflow-preflight-recovery.md) | Context overflow preflight + recovery (D) |
 | [0115](0115-ornith-orchestrator-router-complexity.md) | Ornith orchestrator-router + complexity tiers + visible handoff (E+F) (**implemented**, #377) |
+| [0242](0242-model-identity-and-menu-clarity.md) | Model identity, honest node-dropdown rows, verified Unload and Load, rescoped onto the RFC-0244 dropdown (**accepted**, rescoped 2026-10-30; slot, Pin and bind-endpoint parts superseded by [0244](0244-three-engine-modes.md); code rework in #682) |
 
 Interesting integrations **in** 1.4: [0107](0107-obsidian-linked-memory-brain.md)–[0110](0110-chatgpt-style-approval-popup.md). Bulk catalog **0095–0104** stays later ([`INTEGRATION_SPECS.md`](../../INTEGRATION_SPECS.md)). Post-1.4 optional accelerators: [0116](0116-typesafe-jev-optional-decision-tier.md) TypeSafe Jev decision tier (**implemented**: Settings + `has_feature` Plus + real probe; Jev is publicly usable per RFC-0171 but still requires opt-in + probe; live TypeSafe account is desktop sign-off), [0117](0117-tiny-front-chat-responder.md) tiny front-chat responder for first visible/audible replies.
 
