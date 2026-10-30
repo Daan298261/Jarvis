@@ -260,8 +260,8 @@ def decide(
 
     from ..engine_mode import engine_mode
     mode = engine_mode()
-    typed_enabled = mode != "model_only"
-    generation_enabled = mode != "reflex_only"
+    typed_enabled = mode not in {"model_only", "_rules_only"}
+    generation_enabled = mode not in {"reflex_only", "_rules_only"}
     laya_ready = typed_enabled and laya_runtime.is_ready()
     # Jev is only a candidate here. Check its entitlement/key/WAN gate when
     # actually trying it, after a warm Laya result has had the first chance.

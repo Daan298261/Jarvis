@@ -14,6 +14,8 @@ Add a persisted engine mode with a three-position radio control in the model men
 
 ## Acceptance criteria
 
+Owner-turn decisions use the caller's settings snapshot inside the 50 ms window, without reloading configuration. Legacy settings-less decisions retain deterministic rules only because no engine selection can be established; typed-provider fixtures must supply their enabled settings snapshot.
+
 - [ ] Three clearly named positions persist through settings reload and show save errors.
 - [ ] Model only cannot call JEV/Laya; hybrid keeps current routing and provider availability checks.
 - [ ] Reflex only cannot start/call front or worker generation, including startup and fallback paths.
@@ -23,4 +25,4 @@ Add a persisted engine mode with a three-position radio control in the model men
 
 ## Scope
 
-Engine-mode configuration/helper and settings API, Reflex provider selection/cache, Laya configuration, model/front runtime entrypoints, owner chat/agent ingress, startup warming, shared UI control, classic settings, focused tests. No architect-owned specifications, installer changes, model downloads or release promotion.
+Engine-mode configuration/helper and settings API, Reflex provider selection/cache and owner-turn settings snapshot, Laya configuration, model/front runtime entrypoints, owner chat/agent ingress, startup warming, shared UI control, classic settings, focused tests. No architect-owned specifications, installer changes, model downloads or release promotion.

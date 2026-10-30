@@ -1,19 +1,40 @@
 """Owner-selected generation and structured-decision lanes (RFC-0244)."""
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+
 from .config import AppSettings
+
+_REQUEST_MODE: ContextVar[str | None] = ContextVar("engine_mode", default=None)
+
+
+@contextmanager
+def engine_mode_scope(settings: AppSettings | None):
+    """Carry the caller's snapshot through the bounded decision without disk I/O."""
+    # Without a settings snapshot, only deterministic rules are safe to enable.
+    token = _REQUEST_MODE.set(getattr(settings, "engine_mode", "_rules_only") if settings is not None else "_rules_only")
+    try:
+        yield
+    finally:
+        _REQUEST_MODE.reset(token)
 
 
 def engine_mode(settings: AppSettings | None = None) -> str:
+    if settings is not None:
+        return getattr(settings, "engine_mode", "hybrid")
+    scoped = _REQUEST_MODE.get()
+    if scoped is not None:
+        return scoped
     from .config import load_settings
     return getattr(settings or load_settings(), "engine_mode", "hybrid")
 
 
 def model_enabled(settings: AppSettings | None = None) -> bool:
-    return engine_mode(settings) != "reflex_only"
+    return engine_mode(settings) not in {"reflex_only", "_rules_only"}
 
 
 def decision_engines_enabled(settings: AppSettings | None = None) -> bool:
-    return engine_mode(settings) != "model_only"
+    return engine_mode(settings) not in {"model_only", "_rules_only"}
 
 
 class ModelDisabledError(RuntimeError):
