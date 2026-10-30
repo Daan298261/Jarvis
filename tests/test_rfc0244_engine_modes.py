@@ -123,15 +123,24 @@ def test_hard_approval_requirement_survives_every_mode(engines, mode):
 @pytest.mark.asyncio
 async def test_reflex_only_chat_does_not_delegate_or_run_model(engines, monkeypatch):
     from app.persona.owner_chat import stream_owner_chat, reset_owner_conversations
+    from app.providers.base import ChatMessage
     engines.engine_mode = "reflex_only"
     delegate = AsyncMock(side_effect=AssertionError("No hidden model task"))
     monkeypatch.setattr("app.agent.loop.AGENT.create_task", delegate)
     monkeypatch.setattr("app.persona.owner_chat.generate_front_reply", AsyncMock(side_effect=AssertionError("No front generation")))
+    monkeypatch.setattr("app.persona.owner_chat.hydrate_conversation", AsyncMock(return_value=[ChatMessage(role="user", content="Earlier question")]))
+    save = AsyncMock()
+    deliver = AsyncMock(return_value={"tts_id": "bounded-reply"})
+    monkeypatch.setattr("app.projects.portal_store.save_owner_conversation", save)
+    monkeypatch.setattr("app.persona.owner_chat.publish_owner_text", deliver)
     reset_owner_conversations()
     events = [event async for event in stream_owner_chat("Write a detailed report and save it to disk")]
     done = next(event for event in events if event["type"] == "done")
     assert done["engine_mode"] == "reflex_only"
     assert "no requested work was run" in done["reply"]
+    assert done["tts_id"] == "bounded-reply"
+    assert save.await_args.args[1][0].content == "Earlier question"
+    deliver.assert_awaited_once()
     delegate.assert_not_awaited()
     reset_owner_conversations()
 
@@ -143,6 +152,8 @@ async def test_reflex_only_task_finishes_with_bounded_reply_without_model(engine
     from app.db.session import SessionLocal
     engines.engine_mode = "reflex_only"
     monkeypatch.setattr(jarvis_env["manager"], "load", AsyncMock(side_effect=AssertionError("No model load")))
+    delivery = AsyncMock(return_value={})
+    monkeypatch.setattr("app.agent.loop.publish_owner_text", delivery)
     runtime = AgentRuntime()
     task = await runtime.create_task("Write a detailed report and save it to disk")
     await runtime._tasks[task.id]
@@ -150,6 +161,7 @@ async def test_reflex_only_task_finishes_with_bounded_reply_without_model(engine
         row = await session.get(Task, task.id)
         assert row.status == "completed"
         assert "no requested work was run" in row.result
+    delivery.assert_awaited_once()
 
 
 @pytest.mark.asyncio

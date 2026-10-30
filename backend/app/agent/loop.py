@@ -2276,6 +2276,7 @@ class AgentRuntime:
             if not history or history[-1].role != "user" or history[-1].content != active_prompt:
                 history.append(ChatMessage(role="user", content=active_prompt))
             history.append(ChatMessage(role="assistant", content=reply))
+            await publish_owner_text(reply, source="task_chat", user_prompt=active_prompt, lane="front")
             await self._update(task_id, status="completed", stage="completed", result=reply, error="",
                                finished_at=utcnow(), current_action="JEV/Laya decision",
                                conversation_json=serialize_messages(history))

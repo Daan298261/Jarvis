@@ -353,12 +353,15 @@ async def stream_owner_chat(
     engine_settings = load_settings()
     if not model_enabled(engine_settings):
         reply, source = await reflex_only_reply(cleaned, engine_settings)
-        _conversations.setdefault(cid, []).extend([
+        _conversations[cid] = list(await hydrate_conversation(cid)) + [
             ChatMessage(role="user", content=cleaned), ChatMessage(role="assistant", content=reply),
-        ])
+        ]
+        from ..projects.portal_store import save_owner_conversation
+        await save_owner_conversation(cid, _conversations[cid], title=cleaned[:120])
+        delivery = await publish_owner_text(reply, source="owner_chat", user_prompt=cleaned, lane="front")
         yield {"type": "delta", "text": reply}
         yield {"type": "done", "conversation_id": cid, "text": reply, "reply": reply,
-               "engine_mode": "reflex_only", "decision_source": source}
+               "engine_mode": "reflex_only", "decision_source": source, "tts_id": delivery.get("tts_id")}
         return
 
     from ..agent.planning import simple_app_control, simple_file_control
