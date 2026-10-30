@@ -165,6 +165,26 @@ async def test_reflex_only_task_finishes_with_bounded_reply_without_model(engine
 
 
 @pytest.mark.asyncio
+async def test_reflex_only_continue_does_not_repeat_the_original_user_message(engines, monkeypatch):
+    from app.agent.compaction import deserialize_messages
+    from app.agent.loop import AgentRuntime
+    from app.db.models import Task
+    from app.db.session import SessionLocal
+    engines.engine_mode = "reflex_only"
+    monkeypatch.setattr("app.agent.loop.publish_owner_text", AsyncMock(return_value={}))
+    runtime = AgentRuntime()
+    prompt = "Write a report about this project"
+    task = await runtime.create_task(prompt)
+    await runtime._tasks[task.id]
+    await runtime.continue_task(task.id)
+    await runtime._tasks[task.id]
+    async with SessionLocal() as session:
+        row = await session.get(Task, task.id)
+        users = [message.content for message in deserialize_messages(row.conversation_json) if message.role == "user"]
+    assert users == [prompt]
+
+
+@pytest.mark.asyncio
 async def test_reflex_only_startup_skips_model_load(engines, monkeypatch):
     from app.main import _autoload_model
     engines.engine_mode = "reflex_only"

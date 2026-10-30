@@ -2271,12 +2271,15 @@ class AgentRuntime:
         active_prompt = gate_text or prompt
         from ..engine_mode import model_enabled, reflex_only_reply
         if not model_enabled(settings):
-            reply, source = await reflex_only_reply(active_prompt, settings)
             history = list(existing)
-            if not history or history[-1].role != "user" or history[-1].content != active_prompt:
-                history.append(ChatMessage(role="user", content=active_prompt))
+            engine_prompt = extra_prompt or next((message.content for message in reversed(history) if message.role == "user"), active_prompt)
+            reply, source = await reflex_only_reply(engine_prompt, settings)
+            if not any(message.role == "user" for message in history) or (
+                extra_prompt and (history[-1].role != "user" or history[-1].content != extra_prompt)
+            ):
+                history.append(ChatMessage(role="user", content=engine_prompt))
             history.append(ChatMessage(role="assistant", content=reply))
-            await publish_owner_text(reply, source="task_chat", user_prompt=active_prompt, lane="front")
+            await publish_owner_text(reply, source="task_chat", user_prompt=engine_prompt, lane="front")
             await self._update(task_id, status="completed", stage="completed", result=reply, error="",
                                finished_at=utcnow(), current_action="JEV/Laya decision",
                                conversation_json=serialize_messages(history))

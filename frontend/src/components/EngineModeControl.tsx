@@ -24,7 +24,12 @@ export function EngineModeControl() {
       void api<{ engine_mode?: EngineMode; decision?: { laya_enabled?: boolean; tier?: string } }>("/api/settings")
       .then((settings) => {
         if (!active || revision !== requestRevision.current) return
-        setMode(settings.engine_mode || "hybrid")
+        if (!choices.some((choice) => choice.value === settings.engine_mode)) {
+          setMode(null)
+          setError("Engine modes need the updated backend.")
+          return
+        }
+        setMode(settings.engine_mode as EngineMode)
         setError("")
         setUnconfigured(!settings.decision?.laya_enabled && (!settings.decision?.tier || settings.decision.tier === "local"))
       }).catch(() => { if (active && revision === requestRevision.current) setError("Could not read engine mode.") })
@@ -40,6 +45,7 @@ export function EngineModeControl() {
     setError("")
     try {
       const saved = await api<{ engine_mode: EngineMode }>("/api/settings", { method: "PUT", body: JSON.stringify({ engine_mode: next }) })
+      if (saved.engine_mode !== next) throw new Error("Engine mode was not confirmed")
       setMode(saved.engine_mode)
       window.dispatchEvent(new Event("anzu-engine-mode"))
     } catch {
