@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
-import { api, getLmStudioCatalog, getSelectedRuntimeProfileId, listRuntimeProfiles, type LmStudioCatalogResponse, type RuntimeProfile } from "../api"
+import { api, getLmStudioCatalog, getSelectedRuntimeProfileId, listRuntimeProfiles, sortLmStudioProfiles, type LmStudioCatalogResponse, type RuntimeProfile } from "../api"
 import { EngineModeControl } from "../components/EngineModeControl"
 import { applyRuntimeProfile, playDiscoveredGguf, playLmStudioCatalogProfile } from "./applyRuntimeProfile"
 import { hexStrikeSelectMessage } from "./hexstrikeAutostart"
@@ -26,7 +26,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
   const [busy, setBusy] = useState(false), [refreshing, setRefreshing] = useState(false)
   const [runtimesFailed, setRuntimesFailed] = useState(false), [catalogFailed, setCatalogFailed] = useState(false), [elapsed, setElapsed] = useState(0)
   const [message, setMessage] = useState(""), [error, setError] = useState(""), [refreshError, setRefreshError] = useState("")
-  const options = useMemo(() => nodeModelOptions(profiles.filter((p) => !isHexStrikeSuiteProfile(p)), catalog), [profiles, catalog])
+  const options = useMemo(() => nodeModelOptions(profiles.filter((p) => !isHexStrikeSuiteProfile(p)), catalog && { ...catalog, profiles: sortLmStudioProfiles(catalog.profiles) }), [profiles, catalog])
   const suite = profiles.find(isHexStrikeSuiteProfile)
   const state = open ? snapshot || model : model || snapshot
   const serving = servingModel(state)
@@ -61,6 +61,13 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
   }, [])
   useEffect(() => { onOpenChange?.(open) }, [open, onOpenChange])
   useEffect(() => {
+    // The trigger shows suite/offline status before the menu is ever opened, so read the runtimes once on mount.
+    const started = revision.current
+    void listRuntimeProfiles().then(
+      (runtime) => { if (revision.current === started) { setProfiles(runtime.profiles); setRuntimesFailed(false) } },
+      () => { if (revision.current === started) setRuntimesFailed(true) })
+  }, [])
+  useEffect(() => {
     if (!open) return
     void refresh()
     const outside = (event: MouseEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false) }
@@ -86,6 +93,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
       setSelectedId(applied.id); setDraft("")
       const live = await api<ModelState>("/api/model")
       setSnapshot(live)
+      if (suiteOnly) setOpen(false)
       setMessage(suiteOnly ? hexStrikeSelectMessage("hexStrikeAutoStarted" in applied && !!applied.hexStrikeAutoStarted)
         : live.loaded ? `Serving: ${servingModel(live)}` : "Selection saved; no model is serving yet.")
     } catch (err) { setError(err instanceof Error ? err.message : "Could not load model") }
@@ -108,7 +116,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
   }
 
   return <div className="hud-model-selector" ref={root}>
-    <button type="button" className={`hud-model-trigger${open ? " open" : ""}${transferring ? " transferring" : ""}`} aria-expanded={open} aria-controls={menuId} aria-busy={transferring} title="Model for current node" onClick={() => setOpen(!open)}>
+    <button type="button" className={`hud-model-trigger${open ? " open" : ""}${transferring ? " transferring" : ""}`} aria-expanded={open} aria-haspopup="true" aria-controls={menuId} aria-busy={transferring} title="Model for current node" onClick={() => setOpen(!open)}>
       <span className="hud-model-trigger-label">{transferring ? "Switching model…" : modelName(serving)}</span>
       <span className="hud-model-trigger-meta">{triggerMeta({ transferring, suiteActive, runtimesFailed })}</span>
     </button>
