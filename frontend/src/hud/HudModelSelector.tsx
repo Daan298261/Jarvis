@@ -5,6 +5,7 @@ import { EngineModeControl } from "../components/EngineModeControl"
 import { applyRuntimeProfile, playDiscoveredGguf, playLmStudioCatalogProfile } from "./applyRuntimeProfile"
 import { hexStrikeSelectMessage } from "./hexstrikeAutostart"
 import { isHexStrikeSuiteProfile } from "./hexstrikeSuite"
+import { backendModelError, loadStatusLine, localCatalogHint, triggerMeta, vramHint } from "./modelMenuStatus"
 import { NodeAiInventory } from "./NodeAiInventory"
 import { modelName, nodeModelOptions, selectedModelOption, servingModel, type NodeModelState as ModelState, type NodeAiInventory as Inventory } from "./nodeModelOptions"
 import "./hexstrike.css"
@@ -23,6 +24,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
   const [snapshot, setSnapshot] = useState<ModelState | null>(null)
   const [engineMode, setEngineMode] = useState("hybrid")
   const [busy, setBusy] = useState(false), [refreshing, setRefreshing] = useState(false)
+  const [runtimesFailed, setRuntimesFailed] = useState(false), [catalogFailed, setCatalogFailed] = useState(false), [elapsed, setElapsed] = useState(0)
   const [message, setMessage] = useState(""), [error, setError] = useState(""), [refreshError, setRefreshError] = useState("")
   const options = useMemo(() => nodeModelOptions(profiles.filter((p) => !isHexStrikeSuiteProfile(p)), catalog), [profiles, catalog])
   const suite = profiles.find(isHexStrikeSuiteProfile)
@@ -30,6 +32,17 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
   const serving = servingModel(state)
   const value = options.some((option) => option.key === draft) ? draft : selectedModelOption(options, selectedId)
   const choice = options.find((option) => option.key === value)
+  const transferring = busy || !!state?.loading
+  const suiteActive = !!suite && (suite.id === selectedId || suite.name === selectedId)
+  const catalogHint = localCatalogHint(catalog, catalogFailed), vram = vramHint(catalog)
+  const backendError = backendModelError(state?.last_error, [error, refreshError], transferring)
+
+  useEffect(() => {
+    if (!transferring) { setElapsed(0); return }
+    const started = Date.now()
+    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000)
+    return () => window.clearInterval(timer)
+  }, [transferring])
 
   const refresh = useCallback(async () => {
     if (working.current) return
@@ -40,6 +53,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
     const [runtime, files, live, settings] = results
     if (runtime.status === "fulfilled") setProfiles(runtime.value.profiles)
     if (files.status === "fulfilled") setCatalog(files.value)
+    setRuntimesFailed(runtime.status === "rejected"); setCatalogFailed(files.status === "rejected")
     if (live.status === "fulfilled") setSnapshot(live.value)
     if (settings.status === "fulfilled") setEngineMode(settings.value.engine_mode || "hybrid")
     setRefreshError(live.status === "rejected" ? "Serving status could not refresh." : runtime.status === "rejected" || files.status === "rejected" ? "Some model choices could not refresh." : "")
@@ -94,12 +108,13 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
   }
 
   return <div className="hud-model-selector" ref={root}>
-    <button type="button" className={`hud-model-trigger${open ? " open" : ""}${busy || state?.loading ? " transferring" : ""}`} aria-expanded={open} aria-controls={menuId} title="Model for current node" onClick={() => setOpen(!open)}>
-      <span className="hud-model-trigger-label">{busy || state?.loading ? "Switching model…" : modelName(serving)}</span>
-      <span className="hud-model-trigger-meta">Current node · Models ▾</span>
+    <button type="button" className={`hud-model-trigger${open ? " open" : ""}${transferring ? " transferring" : ""}`} aria-expanded={open} aria-controls={menuId} aria-busy={transferring} title="Model for current node" onClick={() => setOpen(!open)}>
+      <span className="hud-model-trigger-label">{transferring ? "Switching model…" : modelName(serving)}</span>
+      <span className="hud-model-trigger-meta">{triggerMeta({ transferring, suiteActive, runtimesFailed })}</span>
     </button>
     {open && <div id={menuId} className="hud-model-menu node-model-menu" role="dialog" aria-label="Model for current node">
       <div className="hud-model-menu-head"><span>Model for this node</span><button type="button" onClick={() => setOpen(false)}>Close</button></div>
+      {transferring && <p className="hud-model-transferring" role="status">{loadStatusLine(elapsed)}</p>}
       <div className="node-model-serving" role="status"><strong>Serving now</strong><span>{serving}</span></div>
       <label htmlFor={`${menuId}-choice`} className="node-model-label">Choose a model</label>
       <select id={`${menuId}-choice`} className="node-model-select" value={value} disabled={busy} onChange={(event) => { setDraft(event.target.value); setMessage("") }}>
@@ -108,6 +123,7 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
         <optgroup label="Configured runtimes">{options.filter((option) => option.kind === "runtime").map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}</optgroup>
       </select>
       <p className="node-model-detail">{choice?.detail || "Select a model, then press Load."}</p>
+      {(catalogHint || vram) && <p className="node-model-detail hud-model-local-hint">{[catalogHint, vram].filter(Boolean).join(" · ")}</p>}
       <div className="node-model-actions">
         <button type="button" disabled={busy || state?.loading || !choice || engineMode === "reflex_only"} onClick={() => void activate()}>Load</button>
         <button type="button" disabled={busy || state?.loading || !state?.loaded} onClick={() => void unload()}>Unload</button>
@@ -116,8 +132,10 @@ export function HudModelSelector({ model, onOpenChange }: HudModelSelectorProps)
       </div>
       {message && <p role="status" className="node-model-detail">{message}</p>}
       {(error || refreshError) && <p role="alert" className="node-model-error">{error || refreshError}</p>}
+      {backendError && <p role="alert" className="node-model-error hud-model-error">{backendError}</p>}
       <EngineModeControl />
-      {suite && <button type="button" className="hexstrike-model-entry" disabled={busy} onClick={() => void activate(true)}>HexStrike AI · Cyber suite</button>}
+      {suite && <button type="button" className={`hud-model-suite-row${suiteActive ? " active" : ""}`} disabled={transferring} onClick={() => void activate(true)}>
+        <span className="mark" aria-hidden>⬡</span><span>{suite.label || "HexStrike AI"}</span><span className="meta">Cyber suite</span></button>}
       {more && <NodeAiInventory />}
       <div className="hud-model-menu-foot"><Link to="/model" onClick={() => setOpen(false)}>All model settings →</Link></div>
     </div>}

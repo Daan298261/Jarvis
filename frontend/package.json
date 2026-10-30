@@ -20,7 +20,8 @@
     "test:companion-remote-access": "node --experimental-strip-types --test companion-remote-access.test.mjs",
     "test:hexstrike-autostart": "node --experimental-strip-types --import ./apply-runtime-profile-test-register.mjs --test apply-runtime-profile.test.mjs",
     "test:persona-morph-hook": "node --experimental-strip-types --test persona-morph-hook.test.mjs",
-    "test:manager-controls": "node --test manager-controls.test.mjs"
+    "test:manager-controls": "node --test manager-controls.test.mjs",
+    "test:hud-model-menu": "node --experimental-strip-types --test hud-model-menu-status.test.mjs"
   },
   "dependencies": {
     "qrcode.react": "4.2.0",

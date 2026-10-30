@@ -19,3 +19,7 @@
 .node-ai-inventory li { display: flex; flex-direction: column; gap: 4px; padding: 9px 0; border-bottom: 1px solid #438da033; font-size: 12px; overflow-wrap: anywhere; }
 .node-ai-inventory li span, .node-ai-inventory small, .node-ai-meta { font-size: 11px; color: #b5cbd5; line-height: 1.45; overflow-wrap: anywhere; }
 .node-ai-inventory p { font-size: 12px; line-height: 1.5; }
+.node-model-menu .hud-model-suite-row { display: flex; align-items: center; gap: 10px; width: 100%; margin: 0 0 8px; padding: 8px 10px; border-color: #f0c36b59; background: #f0c36b14; color: #fff4d6; text-align: left; }
+.node-model-menu .hud-model-suite-row.active { box-shadow: 0 0 0 1px #f0c36b; }
+.node-model-menu .hud-model-suite-row .meta { margin-left: auto; }
+.node-model-menu .hud-model-error { margin: 0 0 8px; }
