@@ -61,7 +61,7 @@ Taco goals memo (decision, not an implement ticket): [0118](0118-taco-goals-high
 
 **Jarvis 1.4.1 priority bugfix (specs first; do not block RFC-0108):** [0122](0122-ingress-size-gate-spill-and-trajectory-cap.md) ingress size-gate, DB spill (optional Obsidian mirror), trajectory quality cap. RFC-0114 recovery stays; this fixes **what enters** the budget.
 
-**2026-10-20 ANZU P0 bug (Taco; spec 2026-10-20):** [0232](0232-ffs-path-routes-to-re-tool.md) FFS / APK path + question routes to the RE tool, no context overflow (P0; root cause D1 + D2; **accepted**, this PR #664). **Numbering:** **0230** and **0231** are parallel in-flight RFCs and **0233** is reserved — do not take them. This row folds into the single next-free line after #652 lands.
+**2026-10-20 ANZU P0 bug (Taco; spec 2026-10-20):** [0232](0232-ffs-path-routes-to-re-tool.md) FFS / APK path + question routes to the RE tool, no context overflow (P0; root cause D1 + D2; **accepted**, this PR #664). **Numbering:** **0230** and **0245** are parallel in-flight RFCs and **0233** is reserved — do not take them. This row folds into the single next-free line after #652 lands.
 
 Memory recall follow-up: [0132](0132-supermemory-semantic-recall-sidecar.md) adds an optional self-hosted Supermemory semantic sidecar while keeping ContextRepo authoritative, native fallback mandatory, and Obsidian as the owner-editable linked vault.
 
