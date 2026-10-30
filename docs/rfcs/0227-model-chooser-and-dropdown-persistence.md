@@ -98,7 +98,7 @@ PG ruling via CoS (2026-10-20): no gate. Pieces this RFC needs are ported (cited
 | #649 `api/model.py::model_status` → `MODEL_DETAILS.read()` and `inference/model_details_cache.py` | Ported in RFC-0225 S1; S1 adds its routes to the same file after it (sequential), no conflict with `model_status` | 0225-S1 → S1 |
 | #648 (= #649) `frontend/src/hud/RunningModels.tsx` — `AbortController`, `working` / `revision` refs, `setTimeout` chain, `<details>` + `<summary>Available local models (n)</summary>` | Ported | S2 |
 | #648 (= #649) `api/runtime_profiles.py` — `list_runtime_profiles` via `asyncio.to_thread` in the list route | Ported | S3 |
-| #648 `config.py` merge-safe settings save, `manager.py` `_same_endpoint` / cancelled-load cleanup, `hotswap.py` persist-after-success, `api/model.py::load_model` `gguf_path` reset | Ported in RFC-0228 S2 (backend saved selection); not needed by this RFC's HUD persistence | — |
+| #648 `config.py` merge-safe settings save, `manager.py` `_same_endpoint` / cancelled-load cleanup, `hotswap.py` persist-after-success, `api/model.py::load_model` `gguf_path` reset | Landed with #648 (`d214b6d`; erratum: earlier text said "ported in RFC-0228 S2", which no longer ports anything); not needed by this RFC's HUD persistence | — |
 | #649 `frontend/src/api.ts` (`prompt_steps` task types) | Not needed; S3's `api.ts` hunk is limited to the runtime-profile helpers and does not touch task types | — |
 
 **Reconciliation rule:** if a draft lands first, the slice reuses the draft's code for the ported piece (no second polling loop, no second `<details>`, no duplicate `to_thread`) and adds only what this RFC specifies beyond it. If a slice lands first, the draft rebases onto it and drops its identical hunk.
@@ -118,7 +118,7 @@ Assign order: **S1 → S2; S3 independent.**
 | `backend/app/inference/running_models.py` | Stable offer key; persisted `notified_at` + `snoozed_until`; cooldown; exclusion via RFC-0225 classification; aggregated notice; `decide()` → background job; `snooze(keys)` |
 | `backend/app/api/model.py` | Choice returns `{job_id}`; `GET /api/model/running/jobs/{job_id}`; `POST /api/model/running/snooze`; snapshot includes `offer_key`, `cooldown_until`, `snoozed_until`, `job` |
 | `tests/fixtures/rfc0227_taco/` (new) | Fixtures above |
-| `tests/test_rfc0227_offer_frequency.py` (new) | Below. **`tests/test_rfc0210_running_models.py` is not edited by this RFC** (UX #6): its only changes in the batch are RFC-0225 S3's three listed #648 fixture changes, plus (erratum 2026-10-20) RFC-0225 S3's rename (#652 @ 9216a95) of `test_new_offer_is_announced_once_on_front_voice_lane` to `test_new_offer_is_announced_once_on_owner_channel`, because the old test asserted the dead `publish_owner_text` channel; every other RFC-0210 assertion stays as is |
+| `tests/test_rfc0227_offer_frequency.py` (new) | Below. **`tests/test_rfc0210_running_models.py` is not edited by this RFC** (UX #6): its only changes in the batch are RFC-0225 S3's three listed #648 fixture changes, plus (erratum 2026-10-20) RFC-0225 S3's rename (#652, RFC-0225; final head in this PR's body) of `test_new_offer_is_announced_once_on_front_voice_lane` to `test_new_offer_is_announced_once_on_owner_channel`, because the old test asserted the dead `publish_owner_text` channel; every other RFC-0210 assertion stays as is |
 
 - [ ] **Taco:** `lmstudio_1234_selected.json` → the 9B row is `selected` with choice `"use"`; it is never an offer and never in any stop list.
 - [ ] **Taco:** `lmstudio_instance_churn.json` (`…:2` instance, port change) → no new offer, no new spoken line.
@@ -186,7 +186,7 @@ Assign order: **S1 → S2; S3 independent.**
 
 ## Likely files
 
-See ownership tables. Sequential chains: `running_models.py` 0225-S3 → 0227-S1; `api/model.py` 0225-S1 → 0225-S3 → 0227-S1 → 0228-S2. `RunningModels.tsx`, `runtime_profiles.py` (API), `modelSlots.ts`, `HudModelSelector.tsx`, `api.ts` are owned only here in the batch.
+See ownership tables. Sequential chains: `running_models.py` 0225-S3 → 0227-S1; `api/model.py` 0225-S3 → 0227-S1 (erratum: 0225-S1 and 0228-S2 no longer edit it). `RunningModels.tsx`, `runtime_profiles.py` (API), `modelSlots.ts`, `HudModelSelector.tsx`, `api.ts` are owned only here in the batch.
 
 `frontend/package.json` and `.github/workflows/pr-tests.yml` are shared by every frontend ticket in the 2026-10-17 batch: each ticket adds exactly one `test:*` script line and one `frontend-build` step (append-only hunks, trivial rebase) and touches nothing else in those files.
 
@@ -200,3 +200,12 @@ See ownership tables. Sequential chains: `running_models.py` 0225-S3 → 0227-S1
 
 - **Stable key merges two genuinely different deployments of the same model id** — acceptable; the Model page still lists every row.
 - **Server persistence vs multiple portal windows** — last write wins with `updated_at`; windows refresh on the change event.
+
+## Errata
+
+- **2026-10-20, #652 (RFC-0225), follow-on to the L121 erratum added by #663.** L121 says the batch's changes to `tests/test_rfc0210_running_models.py` are "RFC-0225 S3's three listed #648 fixture changes" plus the rename. Correct reading: #648 has **landed** (`d214b6d`) and made its three fixture changes itself, and they are on `development` now:
+  1. `test_valid_server_uses_metadata_only` is parametrized over ports 1235 and 11434 (`:27`);
+  2. `test_background_reconnect_requires_existing_owner_choice` sets `settings.inference.auto_load = True` (`:271`);
+  3. `test_startup_waits_for_owner_choice_before_loading_worker` is renamed `test_startup_loads_saved_model_without_waiting_for_discovery`, with `load.assert_awaited_once_with(...)` (`:308`).
+
+  **RFC-0225 S3 makes only the fourth change:** `test_new_offer_is_announced_once_on_front_voice_lane` (`:288`) is renamed `test_new_offer_is_announced_once_on_owner_channel` and asserts `owner_line` instead of the dead `publish_owner_text` channel (the change #663's erratum names). This RFC still does not edit that file, and every other RFC-0210 assertion stays as is.
