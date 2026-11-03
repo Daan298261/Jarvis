@@ -325,9 +325,6 @@ class CompanionPackManager(
         errorRef.set("")
     }
 
-    suspend fun downloadSelected(onProgress: (Int) -> Unit = {}) =
-        downloadPack(selectedPack() ?: error("No pack selected"), onProgress)
-
     /**
      * Downloads [pack] into a `.partial` and only replaces the installed file after the pinned SHA-256
      * verifies, so a failed update never removes the last good copy. Status reflects the selected pack
@@ -554,6 +551,7 @@ class CompanionPackManager(
             statusRef.set(CompanionPackStatus.RUNNING)
             val nCtx = DeviceInferenceGuard.contextTokens(app, pack)
             val parentJob = coroutineContext[Job]!!
+            val turn = TurnGuard(stallDeadlines, pack.id)
             // Started UNDISPATCHED on Unconfined: the watcher is already suspended in
             // awaitCancellation() before the engine runs, and cancel() resumes it inline on the
             // cancelling thread. A Default-dispatched watcher could be cancelled before it ever ran
@@ -566,10 +564,14 @@ class CompanionPackManager(
                     if (parentJob.isCancelled) engine.requestCancel()
                 }
             }
+            // Bounds the load phase (180 s) and the whole call (300 s, sectioned prompts included).
+            val turnWatch = launch(Dispatchers.Default) { turn.watch(engine) }
             try {
                 val started = android.os.SystemClock.elapsedRealtime()
                 onProgress("Loading model on this phone")
                 val loadError = engine.load(path.absolutePath, nCtx)
+                turn.loaded()
+                turn.throwIfExpired()
                 if (loadError != null) {
                     statusRef.set(CompanionPackStatus.ERROR)
                     errorRef.set(loadError)
@@ -600,6 +602,7 @@ class CompanionPackManager(
                         sections = plan.sections,
                         maxTokens = maxTokens.coerceAtMost(plan.summaryMaxTokens),
                         model = pack.id,
+                        turn = turn,
                     )
                     var finalPrompt = OfflinePromptPlanner.finalPromptFromSummaries(
                         plan.history,
@@ -615,7 +618,7 @@ class CompanionPackManager(
                             plan.skeletonTokens,
                             merged.size,
                         )
-                        summaries = summarizeSections(merged, maxTokens.coerceAtMost(cap), pack.id)
+                        summaries = summarizeSections(merged, maxTokens.coerceAtMost(cap), pack.id, turn)
                         finalPrompt = OfflinePromptPlanner.finalPromptFromSummaries(
                             plan.history,
                             latestText,
@@ -627,12 +630,13 @@ class CompanionPackManager(
                 } else {
                     plan.prompt
                 }
+                turn.throwIfExpired()
                 if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
                 var produced = false
                 var firstTokenMs: Long? = null
                 onProgress("Reading context")
                 engine.beginPass()
-                val outcome = watchedGenerate(toRun, maxTokens, pack.id) { chunk ->
+                val outcome = watchedGenerate(toRun, maxTokens, pack.id, turn) { chunk ->
                     if (!produced) {
                         firstTokenMs = android.os.SystemClock.elapsedRealtime() - started
                         onProgress("Writing reply")
@@ -650,14 +654,16 @@ class CompanionPackManager(
                 }
                 GenerateResult(truncated = outcome.truncated, sectioned = sectioned, clipped = plan.clipped)
             } finally {
+                turnWatch.cancel()
                 cancelWatch.cancel()
             }
         }
     }
 
-    private suspend fun summarizeSections(sections: List<String>, maxTokens: Int, model: String): ArrayList<String> {
+    private suspend fun summarizeSections(sections: List<String>, maxTokens: Int, model: String, turn: TurnGuard): ArrayList<String> {
         val summaries = ArrayList<String>()
         for (section in sections) {
+            turn.throwIfExpired()
             if (!coroutineContext.isActive) throw CancellationException("generate cancelled")
             engine.beginPass()
             val piece = StringBuilder()
@@ -665,6 +671,7 @@ class CompanionPackManager(
                 OfflinePromptPlanner.summarizeSectionPrompt(section),
                 maxTokens,
                 model,
+                turn,
             ) { piece.append(it) }
             if (outcome.cancelled) throw CancellationException("generate cancelled")
             outcome.error?.let { failGenerate(it) }
@@ -678,7 +685,7 @@ class CompanionPackManager(
      * thread (which is blocked in native decode); on a stall it asks the engine to stop and the pass
      * ends with [LocalStreamStallError] instead of a cancellation, so the turn fails visibly.
      */
-    private suspend fun watchedGenerate(prompt: String, maxTokens: Int, model: String, onToken: (String) -> Unit): GenerateOutcome =
+    private suspend fun watchedGenerate(prompt: String, maxTokens: Int, model: String, turn: TurnGuard, onToken: (String) -> Unit): GenerateOutcome =
         kotlinx.coroutines.coroutineScope {
             val clock = stallDeadlines.clockMs
             val passStart = clock()
@@ -710,12 +717,56 @@ class CompanionPackManager(
                     lastToken.set(clock())
                     onToken(chunk)
                 }
+                turn.throwIfExpired()
                 stall.get()?.let { throw it }
                 outcome
             } finally {
                 watchdog.cancel()
             }
         }
+
+    /**
+     * The load-phase (180 s) and whole-call (300 s) bounds of one [generate] call. [watch] runs off the
+     * llama thread: when a bound passes it records a typed [LocalStreamStallError] and asks the engine to
+     * stop (native decode honours that; a native model load cannot be interrupted, so a load past its
+     * budget fails the turn as soon as it returns). Each pass then rethrows the error, which is a normal
+     * failure: same cleanup and send-lock release as a stall, never a cancellation.
+     */
+    private class TurnGuard(private val deadlines: LocalStallDeadlines, private val model: String) {
+        private val clock = deadlines.clockMs
+        private val start = clock()
+        @Volatile private var loadedAt = Long.MIN_VALUE
+        private val expired = AtomicReference<LocalStreamStallError?>(null)
+
+        fun loaded() { loadedAt = clock() }
+
+        private fun check(now: Long): LocalStreamStallError? {
+            val loading = loadedAt == Long.MIN_VALUE
+            val loadElapsed = (if (loading) now else loadedAt) - start
+            return when {
+                loadElapsed > deadlines.loadMs -> LocalStreamStallError(LocalStreamStallError.LOAD, loadElapsed, deadlines.loadMs, model)
+                now - start > deadlines.turnMs -> LocalStreamStallError(LocalStreamStallError.TURN, now - start, deadlines.turnMs, model)
+                else -> null
+            }
+        }
+
+        suspend fun watch(engine: LocalInferenceEngine) {
+            while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                kotlinx.coroutines.delay(deadlines.checkEveryMs)
+                val hit = check(clock()) ?: continue
+                if (expired.compareAndSet(null, hit)) {
+                    Log.w(TAG, "local_reply_stall model=$model deadline=${hit.deadline} elapsed_ms=${hit.elapsedMs} budget_ms=${hit.budgetMs}")
+                    engine.requestCancel()
+                }
+                return
+            }
+        }
+
+        fun throwIfExpired() {
+            expired.get()?.let { throw it }
+            check(clock())?.let { if (expired.compareAndSet(null, it)) throw it else throw expired.get()!! }
+        }
+    }
 
     private fun failGenerate(message: String): Nothing {
         statusRef.set(CompanionPackStatus.ERROR)
