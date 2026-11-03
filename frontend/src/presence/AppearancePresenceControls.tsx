@@ -7,6 +7,8 @@ import { NamedPersonaControls } from "../persona/NamedPersonaControls"
 import { CollapsibleSection } from "../components/CollapsibleSection"
 import { appearanceSettingsPath, voiceSettingsPath } from "../settings/settingsSubmenus"
 import type { PresentationSettings } from "./presenceTypes"
+import { RenderModeButtons } from "./RenderModeButtons"
+import { PersonaVisualSliders } from "../persona/PersonaVisualSliders"
 
 type AppearancePresenceControlsProps = {
   settings: PresentationSettings
@@ -43,6 +45,8 @@ function panelForMenu(id: PresenceMenu, settings: PresentationSettings): ReactNo
   if (id === "appearance") {
     return (
       <div className="jarvis-presence-controls-body">
+        <RenderModeButtons settings={settings} />
+        <PersonaVisualSliders />
         <CollapsibleSection title="Appearance options" storageKey="hud-appearance-options"><AppearanceSettingsPane settings={settings} showPersona={false} /></CollapsibleSection>
         <p className="lede" style={{ margin: "8px 0 0", fontSize: 13 }}>
           <Link to={appearanceSettingsPath()}>Open full Appearance settings</Link>

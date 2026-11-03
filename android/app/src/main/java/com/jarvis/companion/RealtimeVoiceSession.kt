@@ -148,13 +148,16 @@ class RealtimeVoiceSession(
     }
 
     private suspend fun awaitType(type: String): JSONObject {
+        val deferred = ArrayDeque<JSONObject>()
+        try {
         while (true) {
-            val event = if (pending.isNotEmpty()) pending.removeFirst() else events.receive()
+            val event = events.receive()
             when (event.optString("type")) {
                 "error" -> throw IllegalStateException(event.optString("detail", "Realtime voice error"))
                 type -> return event
-                else -> pending.addLast(event)
+                else -> deferred.addLast(event)
             }
         }
+        } finally { pending.addAll(deferred) }
     }
 }

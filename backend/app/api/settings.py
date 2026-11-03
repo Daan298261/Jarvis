@@ -55,6 +55,7 @@ def _schedule_front_reconfigure() -> None:
 
 
 class SettingsUpdate(BaseModel):
+    engine_mode: Literal["hybrid", "model_only", "reflex_only"] | None = None
     autonomy: str | None = None
     allowed_directories: list[str] | None = None
     default_timeout_seconds: int | None = None
@@ -200,6 +201,8 @@ async def update_settings(body: SettingsUpdate):
                           "remote_base_url", "remote_api_key", "prompt_cache")
     settings = load_settings()
     previous_front = tuple(getattr(settings.front_responder, k) for k in front_runtime_keys)
+    if body.engine_mode is not None:
+        settings.engine_mode = body.engine_mode
     if body.autonomy is not None:
         settings.autonomy = body.autonomy
     if body.allowed_directories is not None:
@@ -423,6 +426,9 @@ async def update_settings(body: SettingsUpdate):
 
     save_settings(settings)
     REGISTRY.apply_settings(settings)
+    if body.engine_mode is not None:
+        from ..decision.cache import clear
+        clear()
     if previous_front != tuple(getattr(settings.front_responder, k) for k in front_runtime_keys):
         _schedule_front_reconfigure()
     return settings.model_dump()

@@ -29,6 +29,84 @@ import java.util.Locale
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class PlatformSttTest {
+    @Test
+    fun exhaustedSamsungProvidersOfferNativeOrDesktopFallbackOnce() {
+        shadowOf(app).grantPermissions(Manifest.permission.RECORD_AUDIO)
+        ShadowSpeechRecognizer.setIsOnDeviceRecognitionAvailable(true)
+        installDefaultRecognizer()
+        val voice = PlatformVoice(app)
+        val unavailable = mutableListOf<String>()
+        voice.startListening({}, { throw AssertionError(it) }, { throw AssertionError(it) }, onUnavailable = { unavailable += it })
+        idle()
+        shadowOf(ShadowSpeechRecognizer.getLatestSpeechRecognizer()).triggerOnError(SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE)
+        idle()
+        val last = shadowOf(ShadowSpeechRecognizer.getLatestSpeechRecognizer())
+        last.triggerOnError(SpeechRecognizer.ERROR_SERVER_DISCONNECTED)
+        idle()
+        last.triggerOnError(SpeechRecognizer.ERROR_SERVER_DISCONNECTED)
+        idle()
+        assertFalse(voice.listening)
+        assertEquals(1, unavailable.size)
+        voice.shutdown()
+    }
+
+    @Test
+    fun normalNoMatchDoesNotRestartCaptureThroughFallback() {
+        shadowOf(app).grantPermissions(Manifest.permission.RECORD_AUDIO)
+        ShadowSpeechRecognizer.setIsOnDeviceRecognitionAvailable(true)
+        val voice = PlatformVoice(app)
+        val errors = mutableListOf<String>()
+        voice.startListening({}, {}, { errors += it }, onUnavailable = { throw AssertionError(it) })
+        idle()
+        shadowOf(ShadowSpeechRecognizer.getLatestSpeechRecognizer()).triggerOnError(SpeechRecognizer.ERROR_NO_MATCH)
+        idle()
+        assertFalse(voice.listening)
+        assertEquals(1, errors.size)
+        voice.shutdown()
+    }
+
+    @Test
+    fun silenceStopsAt250MsAndMissingFinalCommitsPartialOnce() {
+        shadowOf(app).grantPermissions(Manifest.permission.RECORD_AUDIO)
+        ShadowSpeechRecognizer.setIsOnDeviceRecognitionAvailable(true)
+        val voice = PlatformVoice(app)
+        val spoken = mutableListOf<String>()
+        var ended = 0
+        voice.startListening({}, { spoken += it }, { throw AssertionError(it) }, { ended++ })
+        idle()
+        val recognizer = shadowOf(ShadowSpeechRecognizer.getLatestSpeechRecognizer())
+        recognizer.triggerOnPartialResults(results("Open my project"))
+        idle()
+        recognizer.triggerOnRmsChanged(0f)
+        idle()
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(249))
+        assertTrue(voice.listening)
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(1))
+        assertFalse(voice.listening)
+        assertEquals(1, ended)
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(VoiceEndpoint.FINAL_RESULT_MS))
+        assertEquals(listOf("Open my project"), spoken)
+        recognizer.triggerOnResults(results("Late duplicate"))
+        idle()
+        assertEquals(1, spoken.size)
+        voice.shutdown()
+    }
+
+    @Test
+    fun noSpeechDeadlineReleasesRecognizerAndReportsError() {
+        shadowOf(app).grantPermissions(Manifest.permission.RECORD_AUDIO)
+        ShadowSpeechRecognizer.setIsOnDeviceRecognitionAvailable(true)
+        val voice = PlatformVoice(app)
+        val errors = mutableListOf<String>()
+        voice.startListening({}, { throw AssertionError("Unexpected result") }, { errors += it })
+        idle()
+        val recognizer = shadowOf(ShadowSpeechRecognizer.getLatestSpeechRecognizer())
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(VoiceEndpoint.NO_SPEECH_MS))
+        assertFalse(voice.listening)
+        assertTrue(recognizer.isDestroyed)
+        assertEquals(1, errors.size)
+        voice.shutdown()
+    }
     private val app: Application = ApplicationProvider.getApplicationContext()
 
     @After

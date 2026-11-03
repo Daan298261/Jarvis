@@ -26,7 +26,8 @@ function safeAvatarId(value: unknown): string {
   if (typeof value !== "string") return DEFAULT_PRESENTATION_SETTINGS.avatarId
   const trimmed = value.trim()
   if (!trimmed || trimmed.length > 80) return DEFAULT_PRESENTATION_SETTINGS.avatarId
-  return trimmed
+  if (trimmed === "humanoid_legacy") return "jarvis_base"
+  return trimmed === "mythic_legacy_c" || trimmed === "mythic_legacy_d" ? "mythic_living_b" : trimmed
 }
 
 export function normalizePresentation(value: unknown): PresentationSettings {

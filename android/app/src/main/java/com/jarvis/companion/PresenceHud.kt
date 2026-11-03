@@ -48,6 +48,14 @@ fun PresenceHud(
     phase: PresencePhase,
     audioLevel: Float = 0f,
 ) {
+    val reduced = Settings.Global.getFloat(LocalContext.current.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+    if (PresenceVisual.normalizePresenceMode(mode) == "humanoid") {
+        ShowcasePresence(phase, audioLevel, reduced) { NativePresenceHud(mode, phase, audioLevel) }
+    } else NativePresenceHud(mode, phase, audioLevel)
+}
+
+@Composable
+private fun NativePresenceHud(mode: String, phase: PresencePhase, audioLevel: Float) {
     val humanoid = PresenceVisual.normalizePresenceMode(mode) == "humanoid"
     val particles = remember(humanoid) {
         if (humanoid) PresenceParticles.humanoid() else PresenceParticles.orb()

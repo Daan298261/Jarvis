@@ -9,7 +9,7 @@
     "rea-agents": "3.2.1"
   },
   "overrides": {
-    "nodemailer": "10.0.1",
+    "nodemailer": "10.0.9",
     "puppeteer": "25.10.0"
   }
 }

@@ -20,6 +20,7 @@ from ..db.models import Task
 from ..db.session import SessionLocal
 from ..mobile import companion_offline, companion_voice_packs, identity, realtime_voice, scheduler, service
 from ..mobile.store import database, get, put, root, rows
+from ..projects import portal_store
 
 router = APIRouter(prefix="/api/companion", tags=["companion"])
 owner_router = APIRouter(prefix="/api/mobile/manage", tags=["mobile management"])
@@ -265,6 +266,51 @@ async def sync_offline_turns(body: OfflineTurnSync, device=Device):
 @router.get("/conversations")
 async def conversations(device=Device):
     return await service.conversations()
+
+
+class CompanionProjectName(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+    @field_validator("name")
+    @classmethod
+    def nonempty_name(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Enter a project name")
+        return value.strip()
+
+
+@router.get("/projects")
+async def companion_projects(device=Device):
+    return {"projects": await portal_store.list_projects()}
+
+
+@router.post("/projects")
+async def companion_create_project(body: CompanionProjectName, device=Device):
+    return await portal_store.create_project(body.name)
+
+
+@router.patch("/projects/{project_id}")
+async def companion_rename_project(project_id: str, body: CompanionProjectName, device=Device):
+    try:
+        await portal_store.rename_project(str(project_id), body.name)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"ok": True}
+
+
+@router.put("/projects/{project_id}/conversations/{conversation_id}")
+async def companion_move_conversation(project_id: str, conversation_id: uuid.UUID, device=Device):
+    await service.conversation_detail(str(conversation_id))
+    try:
+        await portal_store.link_member(str(project_id), "owner_chat", str(conversation_id))
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"ok": True}
+
+
+@router.get("/projects/{project_id}/conversations")
+async def companion_project_conversations(project_id: str, device=Device):
+    return await service.conversations(project_id)
 
 
 @router.get("/conversations/{conversation_id}")
