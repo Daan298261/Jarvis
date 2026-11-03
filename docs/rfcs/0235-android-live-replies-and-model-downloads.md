@@ -4,7 +4,7 @@
 
 **Author:** Codex, requested by Daan (original #650 text). Split out of #650 by the Jarvis PR fixer.
 
-**Date:** 2026-10-17 (split 2026-10-20); amended 2026-11-03 by the Jarvis Architect (UX's #671 review item 6 and CoS's ruling on item 1; traced on #671 @ `8b30a715`)
+**Date:** 2026-10-17 (split 2026-10-20); amended 2026-11-03 by the Jarvis Architect (UX's #671 review item 6 and CoS's ruling on item 1; traced on #671 @ `8b30a715`; load and turn-cap deadlines added the same day on CoS's pin of item 6)
 
 **Amended 2026-11-03 (Architect):** the spec now describes everything #671 ships: the stall deadlines and typed error, the turn lifecycle (stage ticker with the memory-pressure warning, cleanup, cancel and failure), the Home status lines, side-effect-free pack selection and the download entry points. Each has acceptance criteria and names the tests #671 already has at their real paths; tests the spec needs and #671 lacks are listed in *Tests the spec needs that #671 does not have yet* (they are named, not written, and nothing here claims they pass). **CoS ruling on UX item 1:** a failed turn keeps its error bubble in Chat (add-only); only the partial reply and the Home preview are cleared. *Where the code at `8b30a715` does not yet meet this text* is listed in its own section. Citations are by file and symbol, never by line.
 
@@ -26,10 +26,12 @@ Local Qwen replies on the phone look stalled, because generated tokens are buffe
 
 ### Stall deadlines and the typed error (`LocalStreamStall.kt`, `CompanionPackManager.watchedGenerate`)
 
-- Every native generation pass runs under two deadlines: **120 s to the first token** (`LocalStallDeadlines.firstTokenMs`, measured from the start of the pass, prefill included) and **30 s idle** (`idleMs`, the longest gap between two tokens). Both are positive (`init` rejects anything else) and injectable, with an injectable clock for tests.
-- A watchdog (`watchedGenerate`) runs on `Dispatchers.Default`, off the llama thread, which is blocked in native decode. It polls every `checkEveryMs` (a quarter of the shorter deadline, clamped to 10 ms to 1 s). On a stall it logs `local_reply_stall` (model, deadline, elapsed, budget; no prompt text), calls `engine.requestCancel()` and the pass ends with a **typed error**, `LocalStreamStallError(deadline, elapsedMs, budgetMs, model)`, where `deadline` is `first_token` or `idle`. The text names the deadline, the elapsed and limit seconds and the model, says the model was stopped, and suggests trying again or choosing a smaller model.
-- The deadlines cover the reply pass **and every section-summary pass** of a sectioned prompt (`summarizeSections` also goes through `watchedGenerate`). Each pass has its own deadlines. Model loading is not covered (see *Where the code does not yet meet this text*).
-- The stall is **not a cancellation**: it is an ordinary failure of the turn. The turn therefore fails visibly (see the failed-turn ruling), runs cleanup (`unload()` resets a `RUNNING` pack to `READY`) and **releases the send lock** (`CompanionModel.sendLock`), so the next message can be sent. A cancellation by the owner is still a cancellation and rethrows.
+- A local turn runs under four deadlines (CoS pinned UX item 6 on 2026-11-03): **180 s load phase** and **300 s overall turn cap** (below), and, for every native generation pass, **120 s to the first token** (`LocalStallDeadlines.firstTokenMs`, measured from the start of the pass, prefill included) and **30 s idle** (`idleMs`, the longest gap between two tokens). The four budgets are `LocalStallDeadlines.firstTokenMs`, `idleMs`, **`loadMs` (default 180 000)** and **`turnMs` (default 300 000)**; `init` rejects non-positive values, and all four are injectable together with the clock for tests.
+- **Load phase, 180 s.** Measured from the start of the model load until the engine is ready to generate (model loaded, context created, ready for the first `generate`). If it is not ready by then the load is stopped (`engine.requestCancel()` plus unload) and the turn ends with the typed error with `deadline = load`. A load that never returns control to the watchdog is the native-side gap already disclosed in the PR; the deadline still fails the turn as soon as control returns.
+- **Overall turn cap, 300 s.** Measured from the start of the turn (the moment `LocalReplyTurn` opens) and covering **every pass of the turn**: the load, each section-summary pass and the reply pass. No pass may run past the cap: each pass's watchdog also enforces the time left on the turn, so the first of first-token, idle, load and turn limits to expire ends the turn. When the cap ends it, the typed error carries `deadline = turn`, and `elapsedMs` and `budgetMs` are the turn's elapsed time and 300 000.
+- A watchdog (`watchedGenerate`) runs on `Dispatchers.Default`, off the llama thread, which is blocked in native decode. It polls every `checkEveryMs` (a quarter of the shorter deadline, clamped to 10 ms to 1 s). On a stall it logs `local_reply_stall` (model, deadline, elapsed, budget; no prompt text), calls `engine.requestCancel()` and the pass ends with a **typed error**, `LocalStreamStallError(deadline, elapsedMs, budgetMs, model)`, where `deadline` is `first_token`, `idle`, **`load`** or **`turn`** (a fourth and a fifth constant beside `FIRST_TOKEN` and `IDLE`; the code's existing `deadline` string is extended, so there is no new class). The text names the deadline, the elapsed and limit seconds and the model, says the model was stopped, and suggests trying again or choosing a smaller model; for `load` it says the model did not finish loading, and for `turn` that the whole reply took too long.
+- The deadlines cover the reply pass **and every section-summary pass** of a sectioned prompt (`summarizeSections` also goes through `watchedGenerate`). The first-token and idle budgets are per pass; the turn cap spans all passes, so a sectioned prompt cannot run longer than 300 s however many passes it has.
+- **All four deadlines take the same failure path.** The stall is **not a cancellation**: it is an ordinary failure of the turn. The turn therefore fails visibly (see the failed-turn ruling), runs cleanup (`unload()` resets a `RUNNING` pack to `READY`) and **releases the send lock** (`CompanionModel.sendLock`), so the next message can be sent. A cancellation by the owner is still a cancellation and rethrows.
 - A stall never sets `localPackError` and never marks the pack `ERROR`: the model is fine, the pass was stopped.
 
 ### Turn lifecycle: ticker, cleanup, cancel and failure (`LocalReplyTurn.kt`, `GenerateOutcome.kt::withOfflineAnswerCleanup`)
@@ -67,7 +69,10 @@ Local Qwen replies on the phone look stalled, because generated tokens are buffe
 ### Acceptance criteria per feature (tests are named in the next section)
 
 **A. Stall deadlines.**
-- [ ] The default deadlines are 120 s to the first token and 30 s idle, and non-positive values are rejected.
+- [ ] The default deadlines are 120 s to the first token, 30 s idle, 180 s load phase and 300 s overall turn cap, and non-positive values are rejected.
+- [ ] A model load that is not ready to generate 180 s after it started ends the turn with `LocalStreamStallError(load)`, the load is stopped, and the pack is unloaded.
+- [ ] A turn still running 300 s after it started ends with `LocalStreamStallError(turn)`, including when no single pass is stalled: for a sectioned prompt the cap is shared by all summary passes and the reply pass.
+- [ ] Load and turn-cap stalls take the same failure path as first-token and idle stalls: the error bubble per the ruling, the real `sendLock` released, the same cleanup.
 - [ ] A pass that streams a partial and then goes quiet ends with `LocalStreamStallError(idle)` after the idle budget, native decode is asked to stop, and the turn returns a failure (not a cancellation).
 - [ ] A pass that never produces a token ends with `LocalStreamStallError(first_token)` after its budget.
 - [ ] A steady stream under both deadlines is never a stall.
@@ -111,7 +116,7 @@ Local Qwen replies on the phone look stalled, because generated tokens are buffe
 | F (live UI kept) | `modelsScreenKeepsStatusDropdownAndRedownloadWithProgressOnTop`, `setupCardKeepsDownloadButtonWhileShowingTransferFeedback`, `legacyProgressStaysVisibleDuringATrackedDownload`, `modelsCardKeepsLegacyPercentDuringATrackedDownload` (`ModelScreensLiveUiTest.kt`; the last one asserts two bars today, see criterion F) |
 | F (files off main) | `snapshotReadsPackFilesOnTheFileDispatcherNotTheMainThread`, `chromeStateTakesFileFactsFromTheSnapshotWithoutTouchingDisk` (`PackFileSnapshotTest.kt`) |
 
-### Tests the spec needs that #671 does not have yet (named here, not written; no pass is claimed)
+### Tests the spec needs that #671 does not have yet: 24 tests in 20 rows (named here, not written; no pass is claimed)
 
 | # | Test (proposed file) | Proves |
 | --- | --- | --- |
@@ -119,7 +124,7 @@ Local Qwen replies on the phone look stalled, because generated tokens are buffe
 | 2 | `failedTurnErrorBubbleIsNeverSavedOrQueued` (new `CompanionModelOffgridTurnTest.kt`, fake engine and pack manager, through `sendOffgrid`) | D: bubble absent from the local store and the offline queue |
 | 3 | `stallThroughSendOffgridReleasesTheRealSendLock` (same file) | A: `CompanionModel.sendLock`, not a test-local mutex |
 | 4 | `sendOffgridLandsTheReplyAndClearsTheHomePreview` (same file) | D: the `sendOffline` wiring of `answer`, `landed`, `onFinally` |
-| 5 | `defaultStallDeadlinesAre120sAndThirtySeconds` and `nonPositiveStallDeadlineIsRejected` (`LocalReplyTurnTest.kt`) | A: the defaults |
+| 5 | `defaultStallDeadlinesAre120s30s180sAnd300s` (the default-values test, now covering all four) and `nonPositiveStallDeadlineIsRejected` (`LocalReplyTurnTest.kt`) | A: the defaults |
 | 6 | `sectionSummaryPassStallRaisesTypedError` (`LocalReplyTurnTest.kt`) | A: summary passes are watched |
 | 7 | `stalledTurnUnloadsTheEngineAndLeavesPackReadyWithNoPackError` (`LocalReplyTurnTest.kt`) | A, C |
 | 8 | `cancelledTurnUnloadsTheEngineAndClearsPicked` and `keepWarmKeepsTheModelOnlyAfterASuccessfulTurn` (`LocalReplyTurnTest.kt`) | C |
@@ -132,6 +137,9 @@ Local Qwen replies on the phone look stalled, because generated tokens are buffe
 | 15 | `selectCompanionPackLeavesErrorAndBusyUntouched` (`CompanionModelDownloadTest.kt`) | F |
 | 16 | `libraryCardShowsNoSecondBarForTheSelectedPackWhileTheLegacyBarIsVisible` (`ModelScreensLiveUiTest.kt`; replaces the two-bar assertion of `modelsCardKeepsLegacyPercentDuringATrackedDownload`) | F |
 | 17 | `downloadedContentShowsModelTransferRows` (new `DownloadedContentUiTest.kt`) | F |
+| 18 | `loadPhaseDeadlineIs180sAndRaisesTypedError` (`LocalReplyTurnTest.kt`, fake engine whose load never becomes ready, injected clock) | A: load phase, `deadline = load` |
+| 19 | `overallTurnCapIs300sAcrossSummaryPasses` (`LocalReplyTurnTest.kt`, several summary passes each under their own first-token and idle budgets whose sum passes 300 s) | A: turn cap, `deadline = turn` |
+| 20 | `loadAndTurnCapStallsFailTheTurnLikeAnyOtherStall` (`LocalReplyTurnTest.kt`: error bubble, lock, cleanup; the real `sendLock` is covered by row 3 once it also drives a load stall) | A, D: one failure path (added by the Architect to cover the same-path criterion) |
 
 ### Live-UI add-alongside reasoning
 
@@ -148,15 +156,14 @@ Local Qwen replies on the phone look stalled, because generated tokens are buffe
 
 **Astra boundary:** persona, WebGL, presence, solar, orb and HUD components are not touched, and no context-usage plumbing is added (that stays in RFC-0234, #650).
 
-### Where the code at `8b30a715` does not yet meet this text (the spec is right, #671's code follows)
+### Where the code at `8b30a715` does not yet meet this text (the spec is right, #671's code follows). *Pinned by CoS, 2026-11-03:* the 180 s load deadline and the 300 s overall turn cap (formerly item 6 of this list: no deadline on model load and no overall limit) are no longer a disclosed gap but a requirement that applies to #671 itself; criteria A and rows 18 to 20 above cover them, and `LocalStallDeadlines`, `watchedGenerate` and the load path must gain them
 
 1. `LocalReplyTurn.failed` and `discard` set `messages = prior`, removing the failed-turn error bubble (ruling above); two tests assert that.
 2. Home renders both `liveLocalReply` and the existing last-assistant line, so the streamed text shows twice (criterion E).
 3. `downloadModelPack` only logs a failure: it neither sets `error = null` on start nor `error` on failure, and the two download entry points no longer count as `busy` (criterion F).
 4. The Models screen shows two determinate bars for one download: the legacy status-card bar and the "All models" card (`ModelLibraryCards` calls `ModelTransferFeedback` with the default `showBar`); `modelsCardKeepsLegacyPercentDuringATrackedDownload` asserts two.
 5. The memory-pressure reason is read once, at the start of the chat branch only (`turn.pressure(...)` is not called in `phoneLocalAnswer`), and `LocalReplyTurn.pressure` writes `activity` even after the turn is closed. The spec requires the warning in both paths and no write after the turn ends.
-6. The stall deadlines start at the generation pass: a hung model load has no stall protection, and a sectioned prompt has no overall limit (each pass has its own). Disclosed in the PR; not a spec change.
-7. `CompanionPackManager.downloadSelected()` is no longer called from `src/main` (only tests); it should be removed or used.
+6. `CompanionPackManager.downloadSelected()` is no longer called from `src/main` (only tests); it should be removed or used.
 
 ## Files
 
