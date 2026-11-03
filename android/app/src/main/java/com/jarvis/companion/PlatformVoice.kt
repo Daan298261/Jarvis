@@ -6,6 +6,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -44,6 +46,9 @@ class PlatformVoice(
     @Volatile private var stopRequested: Boolean = false
     /** Bumped on every startListening/cancel so a previous session's late callbacks are ignored. */
     private var session: Int = 0
+    private val handler = Handler(Looper.getMainLooper())
+    private val timers = mutableListOf<Runnable>()
+    private var requestStop: (() -> Unit)? = null
 
     init {
         tts = TextToSpeech(context.applicationContext) { status ->
@@ -70,7 +75,7 @@ class PlatformVoice(
         defaultAvailable = externalRecognizer() != null,
     )
 
-    fun startListening(onPartial: (String) -> Unit, onResult: (String) -> Unit, onError: (String) -> Unit) {
+    fun startListening(onPartial: (String) -> Unit, onResult: (String) -> Unit, onError: (String) -> Unit, onCaptureEnd: () -> Unit = {}, onUnavailable: ((String) -> Unit)? = null) {
         // Cancel + destroy any previous recognizer first: its late onResults/onError must not reach this session.
         cancelListening()
         stopRequested = false
@@ -82,11 +87,11 @@ class PlatformVoice(
         }
         val candidates = recognizerCandidates()
         if (candidates.isEmpty()) {
-            onError(PlatformSttPlan.NO_RECOGNIZER_COPY)
+            (onUnavailable ?: onError)(PlatformSttPlan.NO_RECOGNIZER_COPY)
             return
         }
         listening = true
-        attempt(current, languageTag, candidates, 0, onPartial, onResult, onError)
+        attempt(current, languageTag, candidates, 0, onPartial, onResult, onError, onCaptureEnd, onUnavailable)
     }
 
     private fun attempt(
@@ -97,6 +102,8 @@ class PlatformVoice(
         onPartial: (String) -> Unit,
         onResult: (String) -> Unit,
         onError: (String) -> Unit,
+        onCaptureEnd: () -> Unit,
+        onUnavailable: ((String) -> Unit)?,
     ) {
         val kind = candidates[index]
         val next = when (kind) {
@@ -106,48 +113,84 @@ class PlatformVoice(
             PlatformRecognizerKind.DEFAULT -> SpeechRecognizer.createSpeechRecognizer(context, externalRecognizer())
         }
         var heardSpeech = false
+        var partial = ""
+        var quietSince = 0L
         fun stale() = current != session || recognizer !== next
+        fun later(ms: Long, block: () -> Unit) {
+            val task = Runnable { if (!stale()) block() }
+            timers += task
+            handler.postDelayed(task, ms)
+        }
+        fun finish(text: String?) {
+            if (stale()) return
+            listening = false
+            release()
+            if (text.isNullOrBlank()) onError(errorCopy(SpeechRecognizer.ERROR_NO_MATCH, languageTag)) else onResult(text)
+        }
+        fun endpoint() {
+            if (stale() || stopRequested) return
+            stopRequested = true
+            listening = false
+            onCaptureEnd()
+            next.stopListening()
+            later(VoiceEndpoint.FINAL_RESULT_MS) { finish(partial) }
+        }
+        requestStop = ::endpoint
         next.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {}
-            override fun onBeginningOfSpeech() { if (!stale()) heardSpeech = true }
-            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBeginningOfSpeech() { if (!stale()) { heardSpeech = true; quietSince = 0L } }
+            override fun onRmsChanged(rmsdB: Float) {
+                if (stale() || !heardSpeech || stopRequested) return
+                if (rmsdB > 1.5f) quietSince = 0L
+                else if (quietSince == 0L) {
+                    quietSince = android.os.SystemClock.elapsedRealtime()
+                    val started = quietSince
+                    later(VoiceEndpoint.SILENCE_MS) { if (quietSince == started) endpoint() }
+                }
+            }
             override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {}
+            override fun onEndOfSpeech() { endpoint() }
             override fun onEvent(eventType: Int, params: Bundle?) {}
             override fun onPartialResults(partialResults: Bundle?) {
                 if (stale()) return
-                bestResult(partialResults)?.let(onPartial)
+                bestResult(partialResults)?.let { partial = it; heardSpeech = true; onPartial(it) }
             }
             override fun onResults(results: Bundle?) {
                 if (stale()) return
-                listening = false
-                release()
-                val text = bestResult(results)
-                if (text.isNullOrBlank()) onError(errorCopy(SpeechRecognizer.ERROR_NO_MATCH, languageTag)) else onResult(text)
+                finish(bestResult(results) ?: partial)
             }
             override fun onError(error: Int) {
                 if (stale()) {
                     Log.w(TAG, "Ignoring late speech recognition error $error from a previous session")
                     return
                 }
+                if (partial.isNotBlank()) { finish(partial); return }
                 release()
                 Log.w(TAG, "Built-in speech recognition error $error from $kind recognizer")
                 if (listening && !stopRequested && PlatformSttPlan.shouldFallBack(error, heardSpeech, hasNext = index + 1 < candidates.size)) {
-                    attempt(current, languageTag, candidates, index + 1, onPartial, onResult, onError)
+                    attempt(current, languageTag, candidates, index + 1, onPartial, onResult, onError, onCaptureEnd, onUnavailable)
                     return
                 }
                 listening = false
-                onError(errorCopy(error, languageTag))
+                val unavailable = !stopRequested && PlatformSttPlan.shouldFallBack(error, heardSpeech, hasNext = true)
+                (if (unavailable) onUnavailable ?: onError else onError)(errorCopy(error, languageTag))
             }
         })
         recognizer = next
-        next.startListening(recognizerIntent(languageTag))
+        try {
+            next.startListening(recognizerIntent(languageTag))
+            later(VoiceEndpoint.NO_SPEECH_MS) { if (!heardSpeech) finish(null) }
+            later(VoiceEndpoint.MAX_CAPTURE_MS) { endpoint() }
+        } catch (exc: Exception) {
+            listening = false
+            release()
+            onError(exc.message ?: "Speech recognition could not start")
+        }
     }
 
     /** Ends capture; the recognizer then delivers its final result through the listener. */
     fun stopListening() {
-        stopRequested = true
-        recognizer?.stopListening()
+        requestStop?.invoke()
     }
 
     fun cancelListening() {
@@ -234,6 +277,9 @@ class PlatformVoice(
     }
 
     private fun release() {
+        timers.forEach(handler::removeCallbacks)
+        timers.clear()
+        requestStop = null
         recognizer?.destroy()
         recognizer = null
     }
@@ -246,6 +292,8 @@ class PlatformVoice(
         .putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag)
         .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+        .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, VoiceEndpoint.SILENCE_MS)
+        .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, VoiceEndpoint.SILENCE_MS)
 
     companion object {
         fun languageDisplayName(languageTag: String): String =

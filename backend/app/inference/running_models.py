@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import time
+from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Literal
 
@@ -20,6 +21,10 @@ Action = Literal["use", "leave", "stop", "replace"]
 KNOWN_PORTS = {1234, 1235, 8088, 11434, 8000, 30000}
 LLAMA_NAMES = {"llama-server", "llama-server.exe"}
 SERVER_NAMES = LLAMA_NAMES | {"ollama", "ollama.exe", "lms", "lms.exe"}
+
+
+def _mapping(value) -> dict:
+    return value if isinstance(value, dict) else {}
 
 
 def listener_inventory() -> dict[int, dict]:
@@ -60,18 +65,29 @@ async def optional_metadata(client: httpx.AsyncClient, url: str):
         return None
 
 
-async def probe(port: int, *, api_key: str = "") -> dict | None:
+async def probe(port: int, *, api_key: str = "", host: str = "127.0.0.1", include_embeddings: bool = False,
+                client: httpx.AsyncClient | None = None) -> dict | None:
     """Require actual model metadata, never a successful unrelated health page."""
-    base = f"http://127.0.0.1:{port}"
+    if host not in {"127.0.0.1", "::1"}:
+        raise ValueError("Discovery probes are loopback only")
+    base = f"http://{'[::1]' if host == '::1' else host}:{port}"
     try:
         async with asyncio.timeout(2.5):
-            async with httpx.AsyncClient(timeout=1.0, trust_env=False, follow_redirects=False,
-                                         headers=inference_headers(api_key)) as client:
+            async with AsyncExitStack() as stack:
+                client = client or await stack.enter_async_context(httpx.AsyncClient(
+                    timeout=1.0, trust_env=False, follow_redirects=False, headers=inference_headers(api_key)))
                 # Ollama's /v1/models includes unloaded downloads. /api/ps is authoritative.
                 body = await optional_metadata(client, base + "/api/ps")
                 if isinstance(body, dict) and isinstance(body.get("models"), list):
                     names = parse_models_payload("/api/ps", body)
-                    return {"port": port, "backend": "ollama", "models": names, "busy": None} if names else None
+                    metadata = {str(item.get("name") or item.get("model")): {
+                        "display_name": str(item.get("name") or item.get("model")),
+                        "size_bytes": item.get("size"), "context_size": item.get("context_length"),
+                        "parameters": _mapping(item.get("details")).get("parameter_size"),
+                        "quantization": _mapping(item.get("details")).get("quantization_level"),
+                    } for item in body["models"] if isinstance(item, dict)}
+                    return {"port": port, "backend": "ollama", "models": names, "busy": None,
+                            "verified_loaded": True, "source": "ollama_ps", "metadata": metadata} if names else None
                 response = await client.get(base + "/v1/models")
                 if not response.is_success:
                     return None
@@ -80,17 +96,31 @@ async def probe(port: int, *, api_key: str = "") -> dict | None:
                     return None
                 names = parse_models_payload("/v1/models", body)
                 backend = "remote"
+                verified_loaded = False
+                source = "openai_advertised"
+                metadata = {}
                 instances: list[str] = []
                 inventory_v1 = await optional_metadata(client, base + "/api/v1/models")
                 if isinstance(inventory_v1, dict) and isinstance(inventory_v1.get("models"), list):
                     entries_v1 = inventory_v1["models"]
                     if any(isinstance(item, dict) and "loaded_instances" in item for item in entries_v1):
                         instances = [str(instance["id"]) for item in entries_v1
-                                     if isinstance(item, dict) and item.get("type") == "llm"
-                                     for instance in item.get("loaded_instances", [])
+                                     if isinstance(item, dict) and item.get("type") in ({"llm", "embedding"} if include_embeddings else {"llm"})
+                                     for instance in (item.get("loaded_instances") or [])
                                      if isinstance(instance, dict) and instance.get("id")]
                         names = instances
                         backend = "lmstudio"
+                        verified_loaded = True
+                        source = "lmstudio_loaded_instances"
+                        metadata = {str(instance["id"]): {
+                            "display_name": str(item.get("display_name") or item.get("key") or instance["id"]),
+                            "model_key": item.get("key"), "parameters": item.get("params_string"),
+                            "quantization": _mapping(item.get("quantization")).get("name") or (item.get("quantization") if isinstance(item.get("quantization"), str) else None),
+                            "size_bytes": item.get("size_bytes"),
+                            "context_size": _mapping(instance.get("config")).get("context_length"),
+                        } for item in entries_v1 if isinstance(item, dict) and item.get("type") in ({"llm", "embedding"} if include_embeddings else {"llm"})
+                            for instance in (item.get("loaded_instances") or [])
+                            if isinstance(instance, dict) and instance.get("id")}
                 # LM Studio can advertise downloaded models through /v1/models.
                 # Its native inventory distinguishes the actually loaded instances.
                 if backend != "lmstudio":
@@ -100,12 +130,26 @@ async def probe(port: int, *, api_key: str = "") -> dict | None:
                         if any(isinstance(item, dict) and "state" in item for item in entries):
                             names = [str(item["id"]) for item in entries if isinstance(item, dict)
                                      and item.get("state") == "loaded" and item.get("id")]
+                            verified_loaded = True
+                            source = "lmstudio_v0_loaded"
+                if include_embeddings and not verified_loaded:
+                    props = await optional_metadata(client, base + "/props")
+                    if isinstance(props, dict) and props.get("model_path") and props.get("total_slots"):
+                        health = await optional_metadata(client, base + "/health")
+                        if isinstance(health, dict) and health.get("status") == "ok":
+                            name = str(props.get("model_alias") or props["model_path"])
+                            names = [name]
+                            backend, source, verified_loaded = "llama.cpp", "llama_props_ready", True
+                            metadata = {name: {"display_name": str(props["model_path"]).replace("\\", "/").split("/")[-1],
+                                "model_key": props["model_path"],
+                                "context_size": _mapping(props.get("default_generation_settings")).get("n_ctx")}}
                 busy = None
                 entries = await optional_metadata(client, base + "/slots")
                 if isinstance(entries, list) and entries:
                     busy = any(isinstance(item, dict) and item.get("is_processing") for item in entries)
                 return {"port": port, "backend": backend, "models": names, "busy": busy,
-                        "instance_ids": instances} if names else None
+                        "instance_ids": instances, "verified_loaded": verified_loaded,
+                        "source": source, "metadata": metadata} if names else None
     except (TimeoutError, httpx.HTTPError, ValueError, TypeError):
         return None
 
@@ -223,6 +267,9 @@ class RunningModels:
 
     async def decide(self, identifier: str, action: Action) -> dict:
         from .manager import MANAGER
+        from ..engine_mode import require_model, model_enabled
+        if action in {"use", "replace"}:
+            require_model(load_settings())
         from ..persona.owner_chat import rebind_owner_conversations_after_hotswap
 
         async with self._choice_lock:
@@ -242,7 +289,7 @@ class RunningModels:
                 await asyncio.to_thread(self._save, choices)
                 row["choice"] = "leave"
                 # Startup waits for this owner choice instead of competing for VRAM.
-                if not MANAGER.state.loaded and not MANAGER.state.loading and settings.inference.auto_load:
+                if model_enabled(settings) and not MANAGER.state.loaded and not MANAGER.state.loading and settings.inference.auto_load:
                     await MANAGER.load(settings)
                 return self.snapshot()
             async with MANAGER._request_lease.exclusive() as acquired:
@@ -328,6 +375,10 @@ class RunningModels:
                 from .manager import MANAGER
 
                 settings = load_settings()
+                from ..engine_mode import model_enabled
+                if not model_enabled(settings):
+                    await asyncio.sleep(10)
+                    continue
                 selected = next((r for r in self.rows if r["choice"] == "use"
                                  and r["port"] == settings.inference.port
                                  and r["model"] == settings.inference.remote_model

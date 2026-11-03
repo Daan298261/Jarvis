@@ -67,7 +67,7 @@ def test_canvas_is_unmasked_and_clear_alpha_stays_zero():
 
 
 def _chrome() -> str | None:
-    return shutil.which("google-chrome") or shutil.which("chromium") or shutil.which("chromium-browser")
+    return os.environ.get("JARVIS_TEST_CHROME") or shutil.which("google-chrome") or shutil.which("chromium") or shutil.which("chromium-browser")
 
 
 def _capture(html: Path, png: Path) -> None:
@@ -75,42 +75,71 @@ def _capture(html: Path, png: Path) -> None:
     if chrome is None:
         pytest.skip("headless chrome is not installed")
     png.parent.mkdir(parents=True, exist_ok=True)
-    profile = png.parent / "profile"
-    if profile.exists():
-        shutil.rmtree(profile)
-    cmd = [
-        chrome,
-        "--headless=new",
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--hide-scrollbars",
-        f"--user-data-dir={profile}",
-        "--window-size=1400,900",
-        f"--screenshot={png}",
-        "--virtual-time-budget=2000",
-        html.as_uri(),
-    ]
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    deadline = time.time() + 15
-    try:
-        while time.time() < deadline:
-            if png.exists() and png.stat().st_size > 1000:
-                break
-            if proc.poll() is not None:
-                break
-            time.sleep(0.2)
-    finally:
-        if proc.poll() is None:
-            os.killpg(proc.pid, signal.SIGKILL)
-            proc.wait(timeout=5)
-    if not png.exists() or png.stat().st_size < 1000:
-        raise AssertionError(f"headless chrome did not write {png}")
+    errors = []
+    for attempt in range(2):
+        profile = png.parent / f"profile-{attempt}"
+        if profile.exists():
+            shutil.rmtree(profile)
+        png.unlink(missing_ok=True)
+        cmd = [
+            chrome,
+            "--headless=new",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--hide-scrollbars",
+            f"--user-data-dir={profile}",
+            "--window-size=1400,900",
+            f"--screenshot={png}",
+            "--virtual-time-budget=2000",
+            html.as_uri(),
+        ]
+        stderr = png.with_suffix(f".attempt-{attempt}.log")
+        with stderr.open("w", encoding="utf-8") as diagnostics:
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=diagnostics, start_new_session=True)
+            deadline = time.monotonic() + 30
+            try:
+                while time.monotonic() < deadline:
+                    if png.exists() and png.stat().st_size > 1000:
+                        break
+                    # A successful launcher may return before its browser child writes the PNG.
+                    if proc.poll() not in (None, 0):
+                        break
+                    time.sleep(0.2)
+            finally:
+                if proc.poll() is None:
+                    if os.name == "nt":
+                        proc.kill()
+                    else:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    proc.wait(timeout=5)
+        if png.exists() and png.stat().st_size > 1000:
+            return
+        errors.append(f"attempt {attempt + 1}, exit {proc.returncode}: {stderr.read_text(errors='replace')[-2000:]}")
+    raise AssertionError(f"headless chrome did not write {png}\n" + "\n".join(errors))
+
+
+def test_capture_waits_for_successful_launcher_child(monkeypatch, tmp_path):
+    """A launcher exit is not proof that its browser finished writing the image."""
+    png = tmp_path / "child.png"
+    html = tmp_path / "child.html"
+    html.write_text("<html></html>")
+    monkeypatch.setattr(__import__(__name__, fromlist=["_chrome"]), "_chrome", lambda: "test-chrome")
+
+    class Launcher:
+        returncode = 0
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: Launcher())
+    sleeps = []
+    def child_progress(_):
+        sleeps.append(True)
+        if len(sleeps) == 2:
+            png.write_bytes(b"screenshot-payload" * 100)
+    monkeypatch.setattr(time, "sleep", child_progress)
+    _capture(html, png)
+    assert len(sleeps) == 2
 
 
 def _assert_no_mid_bands(png: Path) -> None:

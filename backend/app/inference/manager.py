@@ -12,6 +12,7 @@ import psutil
 from openai import APIStatusError
 
 from ..config import AppSettings, load_settings, logs_dir
+from ..engine_mode import require_model
 from ..persona.pack import compact_identity_instructions, inject_compact_identity_messages, persona_instructions
 from ..providers.base import ChatMessage
 from ..providers.openai_compat import OpenAICompatProvider
@@ -408,6 +409,7 @@ class InferenceManager:
         settings: AppSettings | None = None,
         working_state_block: str | None = None,
     ):
+        require_model(settings)
         if not self.provider:
             raise RuntimeError("Inference model is not loaded")
         async with self._request_lease.shared():
@@ -598,6 +600,7 @@ class InferenceManager:
         settings: AppSettings | None = None,
         working_state_block: str | None = None,
     ) -> AsyncIterator[str]:
+        require_model(settings)
         if not self.provider:
             raise RuntimeError("Inference model is not loaded")
         async with self._request_lease.shared():
@@ -711,6 +714,7 @@ class InferenceManager:
         vision: bool | None = None,
         gguf_path: str | None = None,
     ) -> InferenceState:
+        require_model(settings)
         if profile_name is None:
             profile_name = settings.inference.profile
             if gguf_path is None:
@@ -764,6 +768,7 @@ class InferenceManager:
         vision: bool = False,
     ) -> InferenceState:
         """Reload only when context must grow or vision must be attached."""
+        require_model(settings)
         async with self._lock:
             if not self.state.loaded or not self.provider:
                 return await self._load_locked(
@@ -870,6 +875,7 @@ class InferenceManager:
         force: bool = False,
         gguf_path: str | None = None,
     ) -> InferenceState:
+        require_model(settings)
         profile = await asyncio.to_thread(self._active_profile,
             settings,
             profile_name,

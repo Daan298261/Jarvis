@@ -9,12 +9,12 @@ import secrets
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, or_
 
 from ..agent.loop import AGENT
 from ..api.tasks import _task_dict
 from ..config import load_settings
-from ..db.models import Conversation, Task, TaskEvent
+from ..db.models import Conversation, Task, TaskEvent, PortalProjectLink
 from ..db.session import SessionLocal
 from ..inference.manager import MANAGER
 from ..inference.profiles import PROFILES, profile_as_dict, profile_gguf
@@ -102,10 +102,14 @@ async def approve(task_id: str, token: str, approved: bool):
     return await task_snapshot(task_id)
 
 
-async def conversations():
+async def conversations(project_id: str | None = None):
     async with SessionLocal() as db:
-        items = (await db.execute(select(Conversation).order_by(Conversation.updated_at.desc()).limit(100))).scalars().all()
-    return [{"id": c.id, "title": c.title, "task_id": c.task_id, "updated_at": iso(c.updated_at)} for c in items]
+        query = select(Conversation)
+        if project_id:
+            linked = select(PortalProjectLink.link_id).where(PortalProjectLink.project_id == project_id, PortalProjectLink.link_type == "owner_chat")
+            query = query.where(or_(Conversation.project_id == project_id, Conversation.id.in_(linked)))
+        items = (await db.execute(query.order_by(Conversation.updated_at.desc()).limit(500))).scalars().all()
+    return [{"id": c.id, "title": c.title, "task_id": c.task_id, "project_id": c.project_id, "updated_at": iso(c.updated_at)} for c in items]
 
 
 async def conversation_detail(conversation_id: str):
@@ -116,12 +120,14 @@ async def conversation_detail(conversation_id: str):
         messages = json.loads(conversation.messages_json)
         output = []
         for message in messages:
+            # Owner chats persist `content`; phone/task chats persist `text`.
+            message = {**message, "text": message.get("text", message.get("content", ""))}
             output.append(message)
             if message.get("task_id"):
                 task = await db.get(Task, message["task_id"])
                 if task and task.result:
                     output.append({"id": task.id + ":assistant", "role": "assistant", "text": task.result, "task_id": task.id, "status": task.status})
-    return {"id": conversation.id, "title": conversation.title, "messages": output, "task_id": conversation.task_id}
+    return {"id": conversation.id, "title": conversation.title, "messages": output, "task_id": conversation.task_id, "project_id": conversation.project_id}
 
 
 async def submit(device_id: str, request_id: str, prompt: str, profile: str | None = None,

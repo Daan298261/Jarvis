@@ -16,6 +16,7 @@ import {
 import type { PersonaCloudVisual, PresencePhase, PresenceSnapshot, PresentationSettings } from "../presenceTypes"
 import { readVoiceMeter } from "../../tts/voiceAnalyser"
 import { avatarMotionProfile, sampleAvatarMotion } from "../avatarMotion"
+import { isPersonaPortraitShape, personaSafeViewport } from "../appearanceModes"
 import {
   AutoPresenceQuality,
   motifSafeAccentHex,
@@ -157,6 +158,7 @@ export function MorphablePresenceStage({
       uPointerStrength: { value: 0 },
       uGesture: { value: 0 },
       uLivingRig: { value: new THREE.Vector4(0, 0, 0, 0) },
+      uHeadPivot: { value: new THREE.Vector3() },
       uAvatarDeform: { value: new THREE.Vector2(0, 0) },
       uColor: { value: new THREE.Color(PHASE_COLOR.idle) },
       uGold: { value: new THREE.Color(0xff941f) },
@@ -219,6 +221,8 @@ export function MorphablePresenceStage({
     let framingCenterX = 0
     let framingCenterY = 0
     let framingCenterZ = 0
+    let framingShiftX = 0
+    let framingShiftY = 0
     let previousPhase: PresencePhase = snapshot.phase
     let alertAge = 4
     const autoQuality = new AutoPresenceQuality()
@@ -244,11 +248,21 @@ export function MorphablePresenceStage({
         positions = new Float32Array(framed)
       }
       const fitYaw = profile.framing?.yaw ?? PRESENCE_DEFAULT_FRAMING_YAW
+      const bounds = stage.getBoundingClientRect()
+      const home = stage.closest(".hud-home")
+      const persona = isPersonaPortraitShape(system.currentShapeId) && Boolean(home)
+      const safe = persona ? personaSafeViewport(bounds,
+        home?.querySelector(".hud-chat")?.getBoundingClientRect(),
+        home?.querySelector(".jarvis-presence-controls-table.open")?.getBoundingClientRect()) : null
       const fit = normalizedPresenceFitScale(
-        positions, aspect, camera.fov, camera.position.z,
+        positions, safe ? safe.width / safe.height : aspect, camera.fov, camera.position.z,
         fitYaw, profile.framing?.fitMargin ?? 0.88, profile.framing?.landmarks,
       )
-      framingScale = fit.scale
+      const viewHeight = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.position.z
+      framingScale = fit.scale * (safe ? safe.height / Math.max(1, bounds.height) : 1)
+      framingShiftX = safe ? (safe.centerX / Math.max(1, bounds.width) - 0.5) * viewHeight * aspect : 0
+      framingShiftY = safe ? (0.5 - safe.centerY / Math.max(1, bounds.height)) * viewHeight : 0
+      stage.dataset.presenceSafeViewport = safe ? `${safe.width.toFixed(0)}/${safe.height.toFixed(0)}` : "full"
       framingCenterX = fit.centerX
       framingCenterY = fit.centerY
       framingCenterZ = fit.centerZ
@@ -278,6 +292,11 @@ export function MorphablePresenceStage({
     }
     const observer = new ResizeObserver(resize)
     observer.observe(stage)
+    const home = stage.closest(".hud-home")
+    const composerElement = home?.querySelector(".hud-chat")
+    const menus = home?.querySelector(".jarvis-presence-controls-table")
+    if (composerElement) observer.observe(composerElement)
+    if (menus) observer.observe(menus)
     resize()
 
     const onContextLost = (event: Event) => {
@@ -369,7 +388,8 @@ export function MorphablePresenceStage({
       uniforms.uGlow.value = appearance.glow
       uniforms.uPortraitExposure.value = shapeDef.appearance?.portraitExposure ?? 1
       stage.dataset.presenceExposure = uniforms.uPortraitExposure.value.toFixed(3)
-      const personaScale = visual?.scale && visual.scale > 0 ? visual.scale : 1
+      const requestedScale = visual?.scale && visual.scale > 0 ? visual.scale : 1
+      const personaScale = shapeDef.rig ? Math.min(1.12, requestedScale) : requestedScale
       bust.scale.setScalar(framingScale * personaScale)
       uniforms.uActivity.value += (activity - uniforms.uActivity.value)
         * (reduced ? 1 : Math.min(1, delta * 3))
@@ -441,15 +461,16 @@ export function MorphablePresenceStage({
         { centerX: framingCenterX, centerY: framingCenterY, centerZ: framingCenterZ },
         fitScale,
       )
-      const framedX = basePos[0] + yawOffset.x
-      const framedY = basePos[1] + yawOffset.y
+      const framedX = basePos[0] + yawOffset.x + framingShiftX
+      const framedY = basePos[1] + yawOffset.y + framingShiftY
       const framedZ = basePos[2] + yawOffset.z
       const mode = current.settings.attentionMode
       const follow = !reduced && mode !== "off"
       const att = attentionRef.current
       const morphNow = system.morphValue()
       const volumetricPersona = system.currentShapeId.startsWith("portrait_") && system.currentShapeId.endsWith("_b")
-      const livingBody = system.currentShapeId.endsWith("_living_b")
+      const fullBody = Boolean(shapeDef.rig)
+      const livingBody = fullBody || system.currentShapeId.endsWith("_living_b")
       const yawGain = THREE.MathUtils.degToRad(volumetricPersona ? 18 : 3.2)
       const pitchGain = THREE.MathUtils.degToRad(volumetricPersona ? 9 : 1.35)
       const idleMotion = reduced ? 0 : Math.max(0, animation)
@@ -492,9 +513,11 @@ export function MorphablePresenceStage({
       const headPitch = livingBody
         ? uniforms.uLivingRig.value.z + ((motion.pitch - (follow ? att.y * pitchGain * morphNow : 0)) - uniforms.uLivingRig.value.z) * (reduced ? 1 : rotationLerp)
         : bust.rotation.x
-      uniforms.uLivingRig.value.set(livingBody ? 1 : 0, headYaw, headPitch, reduced ? 0 : Math.sqrt(Math.max(0, animation)))
+      uniforms.uLivingRig.value.set(fullBody ? 2 : livingBody ? 1 : 0, headYaw, headPitch, reduced ? 0 : Math.sqrt(Math.max(0, animation)))
+      if (shapeDef.rig) uniforms.uHeadPivot.value.fromArray(shapeDef.rig.headPivot)
       if (livingBody) bust.rotation.set(motion.pitch * 0.25, baseYaw + motion.yaw * 0.25, motion.roll * 0.35)
-      stage.dataset.presenceBody = livingBody ? "articulated" : "head"
+      stage.dataset.presenceBody = fullBody ? "full" : livingBody ? "articulated" : "head"
+      stage.dataset.presenceAnatomy = shapeDef.rig?.anatomy || ""
       stage.dataset.presenceHeadYaw = headYaw.toFixed(3)
       stage.dataset.presenceYaw = bust.rotation.y.toFixed(3)
       stage.dataset.presencePitch = bust.rotation.x.toFixed(3)

@@ -61,6 +61,7 @@ export const particleVertexShader = `
   uniform float uGesture;
   uniform vec2 uAvatarDeform;
   uniform vec4 uLivingRig;
+  uniform vec3 uHeadPivot;
   varying float vGold;
   varying float vLight;
   varying float vFlow;
@@ -93,7 +94,24 @@ export const particleVertexShader = `
     p.z += cos(aSeed * 23.0 + m * 3.0) * flight * 0.3 * uMotion;
     p.y += restPulse * 0.018 * smoothstep(-1.0, 0.15, p.y);
     float flow = mix(aFlow, bFlow, m);
-    if (uLivingRig.x > 0.5 && vPortraitColor.a > 0.5) {
+    if (uLivingRig.x > 1.5 && vPortraitColor.a > 0.5) {
+      if (flow > -0.5 && flow < 0.2) {
+        vec3 q = p - uHeadPivot;
+        float yaw = uLivingRig.y;
+        float pitch = uLivingRig.z;
+        q.xz = mat2(cos(yaw), -sin(yaw), sin(yaw), cos(yaw)) * q.xz;
+        q.yz = mat2(cos(pitch), sin(pitch), -sin(pitch), cos(pitch)) * q.yz;
+        p = q + uHeadPivot;
+      } else if (flow < -9.5) {
+        // Coherent surface currents, like the surrounding waves; never dissolve the anatomy.
+        float current = sin(p.y * 8.0 + p.x * 3.2 - uTime * 1.3);
+        float breath = sin(uTime * 1.35) * 0.012;
+        p.z += (current * 0.012 + breath) * uLivingRig.w;
+        p.x += sin(p.y * 5.0 - uTime * 0.8) * 0.009 * uLivingRig.w;
+        if (flow < -12.5) p.z += sin(uTime * 0.65 + p.y * 2.0) * 0.026 * uLivingRig.w;
+        if (flow < -10.5 && flow > -12.5) p.y += sin(uTime * 0.9 + p.x * 1.5) * 0.012 * uLivingRig.w;
+      }
+    } else if (uLivingRig.x > 0.5 && vPortraitColor.a > 0.5) {
       if (flow > -0.5 && flow < 0.2) {
         // Head turns around the neck, independently of the rooted breast.
         float neckWeight = smoothstep(-1.25, -0.5, p.y);
@@ -177,7 +195,7 @@ export const particleVertexShader = `
       float listeningWave = sin(t * 2.2 - p.y * 5.0 + aSeed * 5.0);
       p.z += listeningWave * 0.012 * uListen * uMotion;
     }
-    if (uGalaxy > 0.5) {
+    if (uGalaxy > 0.5 && vPortraitColor.a < 0.5) {
       float crown = smoothstep(1.05, 1.75, p.y);
       float side = smoothstep(0.7, 1.45, abs(p.x));
       float edge = max(crown, side);
