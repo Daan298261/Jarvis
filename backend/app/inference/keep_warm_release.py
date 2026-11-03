@@ -339,7 +339,7 @@ async def _release_workers(selection: _Selection) -> tuple[list[dict[str, Any]],
 
 
 def _refusal(reason: str, **extra: Any) -> dict[str, Any]:
-    return {"ok": False, "refused": True, "reason": reason, "results": [], "released": 0, "failed": 0, "skipped": [],
+    return {"ok": False, "refused": True, "reason": reason, "results": [], "released": 0, "failed": 0, "skipped": [], "cancelled_tasks": [],
             "keep_warm": keep_warm_enabled(), **extra}
 
 
@@ -377,15 +377,21 @@ async def release_models(
             return _refusal("A model is still loading; try again when it has finished loading.")
         if FRONT_RUNTIME.starting:
             return _refusal("The front responder is starting; try again in a moment.")
-        if source == "manual" and IDLE_UNLOAD.is_busy():
-            return _refusal("ANZU is working on a task; try Unload when it finishes.")
         chosen = [e for e in LOADED.entries() if targets is None or e.key in set(targets)]
         selection = _Selection(chosen)
         if source == "manual" and not chosen:
             return _refusal(_nothing_reason(app), nothing_to_unload=True)
+        cancelled: list[str] = []
+        if source == "manual" and IDLE_UNLOAD.is_busy():
+            # RFC-0242 "Unload while a pipeline holds an engine lease": not refused. The running task(s) are
+            # cancelled visibly (task status + event), which ends their requests and frees the lease; a model
+            # request that is not part of a task still returns 409 below.
+            cancelled = await IDLE_UNLOAD.cancel_running("Cancelled: the owner pressed Unload model.")
         async with MANAGER._request_lease.exclusive() as acquired:
             if not acquired:
-                return _refusal("ANZU is answering a request; try again when it finishes.")
+                return _refusal("ANZU is answering a request; try again when it finishes."
+                                + (f" {len(cancelled)} running task(s) were cancelled." if cancelled else ""),
+                                cancelled_tasks=cancelled)
             results: list[dict[str, Any]] = []
             for host, port, key in _endpoints(app, OLLAMA_ALIASES, OLLAMA_DEFAULT_PORT):
                 if any(e.backend == OLLAMA for e in chosen):
@@ -424,6 +430,7 @@ async def release_models(
     # any model failed; ``backends`` keeps the per-endpoint detail.
     payload = {"ok": not failed, "refused": False, "reason": reason, "source": source, "results": per_model,
                "released": released, "released_count": released, "failed": sum(1 for m in per_model if not m["verified"]),
-               "skipped": skipped, "backends": results, "keep_warm": keep_warm_enabled(app)}
+               "skipped": skipped, "backends": results, "keep_warm": keep_warm_enabled(app),
+               "cancelled_tasks": cancelled}
     log.info("Model release (%s): ok=%s released=%d %s", source, payload["ok"], released, reason)
     return payload

@@ -2,14 +2,16 @@ export type ReleaseModelResult = { model: string; backend: string; via: string; 
 export type ReleaseSkipped = { model: string; reason: string }
 export type ReleaseResult = {
   ok: boolean; refused?: boolean; reason?: string; released?: number; released_count?: number; failed?: number
-  results: ReleaseModelResult[]; skipped?: ReleaseSkipped[]; keep_warm?: boolean
+  results: ReleaseModelResult[]; skipped?: ReleaseSkipped[]; keep_warm?: boolean; cancelled_tasks?: string[]
 }
 export type ReleaseNote = { tone: "ok" | "error"; text: string; lines?: string[] }
 
 /** One line per model: what was released and verified, or why it was not. */
 export function releaseLines(result: ReleaseResult): string[] {
-  return (result.results ?? []).map((row) =>
-    row.verified ? `Unloaded and verified: ${row.model}` : `Could not unload ${row.model}: ${row.error || "it is still loaded."}`)
+  const cancelled = result.cancelled_tasks ?? []
+  const head = cancelled.length ? [`Cancelled ${cancelled.length} running task${cancelled.length === 1 ? "" : "s"} (shown as cancelled in the task list).`] : []
+  return head.concat((result.results ?? []).map((row) =>
+    row.verified ? `Unloaded and verified: ${row.model}` : `Could not unload ${row.model}: ${row.error || "it is still loaded."}`))
 }
 
 /**

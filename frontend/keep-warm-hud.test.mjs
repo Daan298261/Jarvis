@@ -115,6 +115,17 @@ test("a partial unload (207) is never shown as success: one line per model and t
   })
 })
 
+test("a cancelled pipeline is shown in the HUD (the unload is not refused for a running task)", async () => {
+  backend({ unload: async () => ({ ok: true, refused: false, reason: "", released: 1, failed: 0, skipped: [], cancelled_tasks: ["t1", "t2"],
+    results: [{ model: "a", backend: "ollama", via: "ollama_keep_alive_0", verified: true, error: null }] }) })
+  await withView(async (view) => {
+    await click(view.unloadButton())
+    await flush()
+    assert.deepEqual([...view.note().querySelectorAll("li")].map((li) => li.textContent),
+      ["Cancelled 2 running tasks (shown as cancelled in the task list).", "Unloaded and verified: a"])
+  })
+})
+
 test("a full unload (200) lists every model as verified", async () => {
   backend({ unload: async () => ({ ok: true, refused: false, reason: "", released: 2, failed: 0, skipped: [], results: [
     { model: "a", backend: "ollama", via: "ollama_keep_alive_0", verified: true, error: null },

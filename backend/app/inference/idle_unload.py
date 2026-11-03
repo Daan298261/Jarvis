@@ -31,12 +31,16 @@ class IdleUnload:
         settings: Callable[[], AppSettings] = load_settings,
         release: Release | None = None,
         busy: Callable[[], bool] | None = None,
+        leased: Callable[[], bool] | None = None,
+        cancel_tasks: Callable[[str], Awaitable[list[str]]] | None = None,
     ) -> None:
         self.registry = registry
         self.poll_seconds = poll_seconds
         self._settings = settings
         self._release = release
         self._busy = busy
+        self._leased = leased
+        self._cancel_tasks = cancel_tasks
         self.held = False            # something was released and no turn has happened since
         self.front_released = False  # the front responder was stopped by a release
         self.last_result: dict[str, Any] | None = None
@@ -106,6 +110,22 @@ class IdleUnload:
 
         return any(not task.done() for task in AGENT._tasks.values())
 
+    async def cancel_running(self, reason: str) -> list[str]:
+        """Owner Unload: cancel running tasks visibly (never a silent refusal); returns the task ids."""
+        if self._cancel_tasks is not None:
+            return await self._cancel_tasks(reason)
+        from ..agent.loop import AGENT
+
+        return await AGENT.cancel_running_for_owner_unload(reason)
+
+    def engine_leased(self) -> bool:
+        """A model request, stream or reload holds the engine lease right now."""
+        if self._leased is not None:
+            return self._leased()
+        from .manager import MANAGER
+
+        return MANAGER._request_lease.in_flight
+
     async def tick(self) -> dict[str, Any]:
         """One timer check. Returns what it did so tests and logs can see why."""
         settings = self._settings()
@@ -117,6 +137,8 @@ class IdleUnload:
             return {"action": "skipped", "reason": "active"}
         if self.is_busy():
             return {"action": "skipped", "reason": "task_running"}
+        if self.engine_leased():  # a request, stream or reload holds the engine lease: the model is in use
+            return {"action": "skipped", "reason": "engine_leased"}
         release = self._release
         if release is None:
             from .keep_warm_release import release_models

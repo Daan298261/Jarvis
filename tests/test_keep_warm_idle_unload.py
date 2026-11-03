@@ -598,14 +598,10 @@ async def test_unload_all_refusals_are_409_with_a_visible_reason_and_touch_nothi
         MANAGER.state.loading = True
         loading = await client.post("/api/model/unload-all")
         MANAGER.state.loading = False
-        monkeypatch.setattr(IDLE_UNLOAD, "_busy", lambda: True)
-        running_task = await client.post("/api/model/unload-all")
-        monkeypatch.setattr(IDLE_UNLOAD, "_busy", lambda: False)
         LOADED.clear()
         nothing = await client.post("/api/model/unload-all")
     assert busy.status_code == 409 and "answering a request" in busy.json()["detail"]
     assert loading.status_code == 409 and "still loading" in loading.json()["detail"]
-    assert running_task.status_code == 409 and "working on a task" in running_task.json()["detail"]
     assert nothing.status_code == 409 and nothing.json()["detail"].startswith("Nothing to unload")
     assert servers.ollama == ["qwen3:8b"] and servers.mutating() == []
     assert MANAGER.state.manually_unloaded is False and IDLE_UNLOAD.held is False
