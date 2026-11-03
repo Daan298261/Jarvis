@@ -8,6 +8,12 @@ export type NodeModelState = { loaded?: boolean; loading?: boolean; active_model
 export function servingModel(state: NodeModelState | null | undefined): string {
   return state?.loaded ? state.active_model || state.remote_model || "Identity unavailable" : "No model serving"
 }
+/** "Overall 7.5 · " prefix for a graded model's detail line, or "" when it has no score. */
+export function overallScore(overall: number | undefined): string {
+  return typeof overall === "number" && Number.isFinite(overall) ? `Overall ${overall.toFixed(1)} · ` : ""
+}
+
+/** Graded models keep the order the caller gives them (pinned/favorite first, then Overall); files and runtimes follow alphabetically. */
 export function nodeModelOptions(profiles: RuntimeProfile[], catalog: LmStudioCatalogResponse | null): NodeModelOption[] {
   const options: NodeModelOption[] = [], paths = new Set<string>(), catalogIds = new Set<string>()
   for (const profile of catalog?.profiles || []) {
@@ -15,8 +21,8 @@ export function nodeModelOptions(profiles: RuntimeProfile[], catalog: LmStudioCa
     paths.add(profile.path.toLowerCase())
     if (profile.runtime_profile_id) catalogIds.add(profile.runtime_profile_id)
     options.push({ key: `catalog:${profile.id}`, kind: "catalog", id: profile.id,
-      label: `${modelName(profile.path)} · ${profile.weight_gb.toFixed(1)} GB`,
-      detail: `${profile.weight_gb.toFixed(1)} GB weights · ${profile.quantization} · ${profile.strength || "Local GGUF"}`,
+      label: `${profile.pinned ? "★ " : ""}${modelName(profile.path)} · ${profile.weight_gb.toFixed(1)} GB`,
+      detail: `${overallScore(profile.overall)}${profile.weight_gb.toFixed(1)} GB weights · ${profile.quantization} · ${profile.strength || "Local GGUF"}`,
       runtimeId: profile.runtime_profile_id || undefined })
   }
   for (const item of catalog?.ungraded || []) {
@@ -32,7 +38,9 @@ export function nodeModelOptions(profiles: RuntimeProfile[], catalog: LmStudioCa
       label: `${modelName(profile.model || profile.label || profile.name)} · ${profile.provider}`,
       detail: `${profile.label || profile.name} · ${profile.quantization || "Quantization unspecified"} · configured runtime${profile.is_local ? "" : " · remote"}` })
   }
-  return options.sort((a, b) => a.label.localeCompare(b.label))
+  const graded = options.filter((option) => option.kind === "catalog")
+  const others = options.filter((option) => option.kind !== "catalog").sort((a, b) => a.label.localeCompare(b.label))
+  return [...graded, ...others]
 }
 export function selectedModelOption(options: NodeModelOption[], selectedId: string): string {
   return options.find((option) => option.runtimeId === selectedId)?.key || ""
