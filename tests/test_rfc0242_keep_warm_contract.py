@@ -398,3 +398,125 @@ async def test_keep_warm_on_repins_lmstudio_instances_without_ttl(monkeypatch, t
     async with MANAGER._request_lease.shared():
         rows = await lmstudio_context.repin_local_instances(settings, lease=MANAGER._request_lease)
     assert rows and rows[0]["verified"] is False and [c for c in commands if c[1] in {"unload", "load"}] == []
+
+
+# --- D1 review: owner approvals, entry-point scan, persona bind -------------------------------------------------
+
+async def test_owner_approval_after_unload_respawns_the_model(monkeypatch):
+    """Approving a parked task after Unload is an owner act: the hold is lifted before the runner loads."""
+    from types import SimpleNamespace
+
+    from app.api import tasks as tasks_api
+
+    seen: list[bool] = []
+
+    async def confirm_task(self, task_id, approved, **kwargs):
+        seen.append(MANAGER.state.manually_unloaded)  # what _run -> _guard_background_load would see
+        return SimpleNamespace(id=task_id)
+
+    monkeypatch.setattr(type(AGENT), "confirm_task", confirm_task)
+    monkeypatch.setattr(tasks_api, "_task_dict", lambda task: {"id": task.id})
+    for body in (tasks_api.ContinueBody(approve=True), tasks_api.ContinueBody(grant_mode="allow_once"),
+                 tasks_api.ContinueBody(approve=False)):
+        MANAGER.state.manually_unloaded = True
+        await tasks_api.continue_task("parked-1", body)
+    assert seen == [False, False, False]
+
+
+async def test_a_real_parked_task_resumes_after_unload_only_through_an_owner_approval(monkeypatch, tmp_path):
+    """End to end through AGENT.confirm_task: _run reaches the guard and the owner route is what clears it."""
+    from app.api import tasks as tasks_api
+    from app.db import session as session_mod
+    from app.db.models import Task
+
+    await session_mod.configure_database(path=tmp_path / "jarvis.db")
+    await session_mod.init_db()
+    async with session_mod.SessionLocal() as session:
+        session.add(Task(id="parked-2", title="t", prompt="p", status="running", stage="waiting",
+                         waiting_for_confirmation=True, confirmation_payload="{}"))
+        await session.commit()
+    guard: list[bool] = []
+
+    async def run(task_id, **kwargs):
+        guard.append(MANAGER.state.manually_unloaded)
+
+    monkeypatch.setattr(AGENT, "_run", run)
+    MANAGER.state.manually_unloaded = True
+    try:
+        await tasks_api.continue_task("parked-2", tasks_api.ContinueBody(approve=True))
+    except Exception:
+        pass  # the response shape is not under test; the runner ordering is
+    await asyncio.gather(*[t for t in AGENT._tasks.values()], return_exceptions=True)
+    AGENT._tasks.pop("parked-2", None)
+    assert guard == [False]
+
+
+def test_static_scan_every_owner_task_entry_point_touches_before_it_reaches_the_agent():
+    """Every AGENT.create_task / continue_task / confirm_task caller either lifts the Unload hold first (an owner
+    act) or is on the explicit allowlist (background starters, automatic timeouts, guest approvals)."""
+    import ast
+
+    from tests.test_keep_warm_idle_unload import BACKEND_APP, _outermost_functions, _python_files
+
+    background = {  # (file, function): why it must NOT lift manually_unloaded
+        ("agent/acp_adapter.py", None): "ACP client, not the owner's HUD",
+        ("agent/intake.py", None): "intake chain",
+        ("agent/queue_watcher.py", None): "queue_watcher background task",
+        ("inference/live_agent_suite.py", None): "benchmark harness",
+        ("api/guest_portals.py", None): "a guest's approval is not the owner's",
+        ("api/reversibility.py", "pending_timeout"): "an automatic timeout is not an owner act",
+    }
+    methods = {"create_task", "continue_task", "confirm_task"}
+    lifts = {"touch", "explicit_load"}
+    owners: list[str] = []
+    offenders: list[str] = []
+    for name, text in _python_files():
+        if name == "agent/loop.py":
+            continue  # the AgentRuntime itself
+        for fn in _outermost_functions(ast.parse(text)):
+            agent_calls = [c.lineno for c in ast.walk(fn) if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
+                           and c.func.attr in methods and isinstance(c.func.value, ast.Name) and c.func.value.id == "AGENT"]
+            if not agent_calls:
+                continue
+            if (name, None) in background or (name, fn.name) in background:
+                continue
+            first_lift = min([c.lineno for c in ast.walk(fn) if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
+                              and c.func.attr in lifts and isinstance(c.func.value, ast.Name)
+                              and c.func.value.id == "IDLE_UNLOAD"] or [10**9])
+            owners.append(f"{name}:{fn.name}")
+            if first_lift > min(agent_calls):
+                offenders.append(f"{name}:{fn.name}")
+    assert offenders == []
+    # The scan sees the owner routes it is meant to police (a rename of AGENT would otherwise empty it).
+    for expected in ("api/tasks.py:continue_task", "api/tasks.py:create_task", "api/voice.py:voice_command",
+                     "api/voice.py:voice_listen", "api/workflows.py", "mobile/service.py:submit", "mobile/service.py:approve",
+                     "api/reversibility.py:pending_decide", "persona/owner_chat.py"):
+        assert any(owner.startswith(expected) for owner in owners), expected
+
+
+async def test_persona_bind_after_unload_lifts_the_hold_before_the_prepare_step(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.api import named_personas
+
+    await_order: list[tuple[str, bool]] = []
+    profile = SimpleNamespace(enabled=True, provider="ollama", endpoint="http://127.0.0.1:11434", model="persona-brain:8b")
+    monkeypatch.setattr(named_personas, "resolve_persona_id", lambda raw, required=True: "veles")
+    monkeypatch.setattr(named_personas, "brain_runtime_name_for_persona", lambda pid: "rt")
+    monkeypatch.setattr(named_personas, "get_runtime_profile", lambda name: profile)
+    monkeypatch.setattr(named_personas, "reflex_verify_brain_runtime", lambda **kw: True)
+
+    async def prepare(**kwargs):
+        await_order.append(("prepare", warm_blocked()))
+        return {"ok": True}
+
+    async def activate(profile, force=False):
+        await_order.append(("activate", warm_blocked()))
+
+    monkeypatch.setattr(named_personas, "ensure_local_ollama", prepare)
+    monkeypatch.setattr(named_personas, "activate_runtime_profile", activate)
+    MANAGER.state.manually_unloaded = True
+    IDLE_UNLOAD.held = True
+    await named_personas._maybe_activate_persona_brain("veles")
+    assert await_order == [("prepare", False), ("activate", False)]  # not blocked at prepare: the bind goes through
+    assert MANAGER.state.manually_unloaded is False

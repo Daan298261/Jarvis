@@ -321,6 +321,7 @@ async def continue_task(task_id: str, body: ContinueBody | None = None):
                 approved = True
             else:
                 approved = bool(body.approve)
+            IDLE_UNLOAD.touch()  # an owner approval is an owner turn: lifts the Unload hold before the runner loads
             task = await AGENT.confirm_task(
                 task_id,
                 approved,

@@ -95,6 +95,7 @@ async def approve(task_id: str, token: str, approved: bool):
         if not task or hashlib.sha256((task.confirmation_payload or "").encode()).hexdigest() != approval["payload_hash"]:
             raise HTTPException(409, "The pending action has changed")
         try:
+            IDLE_UNLOAD.touch()  # an owner approval is an owner turn: lifts the Unload hold before the runner loads
             await AGENT.confirm_task(task_id, approved, expected_payload=task.confirmation_payload or "")
         except ValueError as exc:
             raise HTTPException(409, str(exc))
