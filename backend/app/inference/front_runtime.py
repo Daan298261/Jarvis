@@ -215,6 +215,19 @@ class FrontRuntime:
     def decision(self) -> FrontDecision:
         return self._decision
 
+    @property
+    def running(self) -> bool:
+        """True while ANZU owns a local front llama-server process."""
+        return self._backend is not None
+
+    @property
+    def pid(self) -> int | None:
+        return self._backend.pid if self._backend is not None else None
+
+    @property
+    def starting(self) -> bool:
+        return self._lock.locked()
+
     def status(self) -> dict[str, Any]:
         return self._decision.as_dict()
 
@@ -481,6 +494,11 @@ class FrontRuntime:
         from ..engine_mode import model_enabled
         if not model_enabled(app):
             return FrontDecision(reason="reflex_only")
+        from .idle_unload import IDLE_UNLOAD
+
+        if IDLE_UNLOAD.background_blocked():
+            # Released by Unload model / idle unload: only a turn or an explicit Load restarts it.
+            return FrontDecision(reason="released_until_next_turn")
         async with self._lock:
             remote_ok = None
             remote_error = ""
@@ -578,6 +596,9 @@ class FrontRuntime:
             return decision
         self._backend = backend
         self._attach_provider(settings, decision)
+        from .loaded_models import FRONT, LLAMA_SERVER, LOADED
+
+        LOADED.record(LLAMA_SERVER, FRONT, primary=True)
         try:
             await self._warmup(decision)
         except Exception:
@@ -592,8 +613,10 @@ class FrontRuntime:
         return decision
 
     async def _warmup(self, decision: FrontDecision) -> None:
+        from .idle_unload import warm_blocked
+
         provider = self._provider
-        if provider is None or not hasattr(provider, "chat_stream"):
+        if provider is None or not hasattr(provider, "chat_stream") or warm_blocked():
             return
         from ..agent.front_responder import small_context_envelope
         # Warm the actual stable front prefix, not an unrelated one-word prompt.

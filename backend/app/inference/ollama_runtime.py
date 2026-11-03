@@ -15,6 +15,9 @@ from typing import Any
 
 from .backends import probe_remote_server
 from .gpu_prefer import ensure_ollama_gpu
+from .idle_unload import UNLOADED_DETAIL, warm_blocked
+from .keep_alive import ollama_request
+from .loaded_models import LOADED, OLLAMA
 from ..persona.persona_brain import UMI_OLLAMA_MODEL
 
 _log = logging.getLogger(__name__)
@@ -155,17 +158,17 @@ async def ensure_local_ollama(
         }
 
     warm: dict[str, Any] = {"ok": True, "method": "ready"}
+    if resolved and warm_blocked():
+        return {"ok": False, "method": "unloaded", "detail": UNLOADED_DETAIL, "models": advertised[:12]}
     if resolved:
         warm = await ensure_ollama_gpu(host=host, port=port, model=resolved, timeout=120.0)
         if warm.get("method") == "skipped":
-            address = f"[{host}]" if ":" in host else host
             try:
                 async with httpx.AsyncClient(timeout=120.0, trust_env=False) as client:
-                    response = await client.post(
-                        f"http://{address}:{int(port)}/api/generate",
-                        json={"model": resolved, "prompt": "", "stream": False, "keep_alive": "24h"},
-                    )
+                    response = await ollama_request(client, host, port, "/api/generate", resolved,
+                                                    {"prompt": "", "stream": False})
                     response.raise_for_status()
+                LOADED.record(OLLAMA, resolved)
                 warm = {"ok": True, "detail": "Model loaded"}
             except Exception as exc:
                 warm = {"ok": False, "detail": str(exc)[:240]}

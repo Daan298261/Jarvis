@@ -78,7 +78,9 @@ def schedule_orchestrator_restore(settings: AppSettings | None = None) -> None:
 
     async def _run() -> None:
         await asyncio.sleep(orchestrator_idle_seconds(app))
-        if not MANAGER.state.loaded:
+        from .idle_unload import warm_blocked
+
+        if not MANAGER.state.loaded or warm_blocked():
             return
         current = (MANAGER.state.profile or "").strip().lower()
         if is_orchestrator_profile(current):

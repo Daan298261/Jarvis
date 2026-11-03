@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from ..inference.idle_unload import IDLE_UNLOAD
 from ..agent.loop import AGENT
 from ..agent.workflows import (
     GUIDE_SECTIONS,
@@ -65,6 +66,7 @@ async def run_workflow(body: WorkflowRun):
     values = merge_parameter_values(workflow, body.parameters)
     prompt = compose_prompt(workflow, values)
     mode = body.execution_mode or workflow.execution_mode or "balanced"
+    IDLE_UNLOAD.touch()  # an owner-started task is a real owner turn: lifts the hold before it loads
     task = await AGENT.create_task(prompt, body.autonomy, body.profile, mode)
     return {"task": _task_dict(task), "prompt": prompt, "workflow_id": workflow.id}
 

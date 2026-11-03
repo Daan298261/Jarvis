@@ -52,6 +52,8 @@ def arguments(provider, messages, temperature, top_p, top_k, max_tokens, extra):
     options = dict(extra or {})
     options.pop("chat_template_kwargs", None)
     options.pop("reasoning_budget", None)
+    for key, value in provider._runtime_extras().items():
+        options.setdefault(key, value)
     if top_k is not None:
         options["top_k"] = top_k
     result = dict(model=provider.model, prompt=prompt(messages),

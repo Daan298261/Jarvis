@@ -10,6 +10,7 @@ from typing import Any, AsyncIterator, Literal, TypedDict
 import time
 
 from ..config import load_settings
+from ..inference.idle_unload import IDLE_UNLOAD
 from ..inference.manager import MANAGER
 from ..inference.profiles import resolve_profile
 from ..providers.base import ChatMessage
@@ -345,6 +346,7 @@ async def stream_owner_chat(
     if not cleaned:
         yield {"type": "error", "detail": "Message is empty"}
         return
+    IDLE_UNLOAD.touch()  # a user turn: resets idle clocks and lifts Unload's hold before any load
 
     cid = _ensure_conversation(conversation_id)
     yield {"type": "start", "conversation_id": cid}

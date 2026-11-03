@@ -191,6 +191,12 @@ class ModelProvider:
             max_retries=0 if self.local_inference else 2,
         )
 
+    def _runtime_extras(self) -> dict[str, Any]:
+        """Keep-alive policy fields for an ANZU-loaded Ollama / LM Studio model (else empty)."""
+        from ..inference.keep_alive import request_extras
+
+        return request_extras(self.base_url, self.model)
+
     async def health(self) -> bool:
         root = self.base_url[:-3] if self.base_url.endswith("/v1") else self.base_url
         from ..policy.network_http import require_http_url_allowed
@@ -228,6 +234,8 @@ class ModelProvider:
         prompt_token_estimate: int | None = None,
     ) -> ChatResult:
         extra_body: dict[str, Any] = dict(extra or {})
+        for key, value in self._runtime_extras().items():
+            extra_body.setdefault(key, value)
         extra_body.setdefault("chat_template_kwargs", {})
         if thinking is not None:
             extra_body["chat_template_kwargs"]["enable_thinking"] = bool(thinking)
@@ -387,6 +395,8 @@ class ModelProvider:
         prompt_token_estimate: int | None = None,
     ) -> AsyncIterator[str]:
         extra_body: dict[str, Any] = dict(extra or {})
+        for key, value in self._runtime_extras().items():
+            extra_body.setdefault(key, value)
         extra_body.setdefault("chat_template_kwargs", {})
         if thinking is not None:
             extra_body["chat_template_kwargs"]["enable_thinking"] = bool(thinking)

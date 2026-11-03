@@ -15,6 +15,8 @@ import psutil
 
 from ..config import data_dir, load_settings, save_settings
 from .backends import inference_headers, parse_models_payload
+from .idle_unload import IDLE_UNLOAD
+from .keep_alive import is_denied, ollama_request
 
 log = logging.getLogger(__name__)
 Action = Literal["use", "leave", "stop", "replace"]
@@ -289,7 +291,8 @@ class RunningModels:
                 await asyncio.to_thread(self._save, choices)
                 row["choice"] = "leave"
                 # Startup waits for this owner choice instead of competing for VRAM.
-                if model_enabled(settings) and not MANAGER.state.loaded and not MANAGER.state.loading and settings.inference.auto_load:
+                if (model_enabled(settings) and not MANAGER.state.loaded and not MANAGER.state.loading
+                        and settings.inference.auto_load and not IDLE_UNLOAD.background_blocked()):
                     await MANAGER.load(settings)
                 return self.snapshot()
             async with MANAGER._request_lease.exclusive() as acquired:
@@ -297,15 +300,19 @@ class RunningModels:
                     raise ValueError("ANZU is answering a request; try again when it finishes")
                 before = MANAGER.live_context_size()
                 if action in {"stop", "replace"}:
+                    if is_denied(row["model"]) or (row["backend"] not in {"ollama", "lmstudio"} and any(
+                            is_denied(other["model"]) for other in self.rows if other["port"] == row["port"])):
+                        raise ValueError("ANZU never stops this model")
                     if not row["can_stop"]:
                         raise ValueError("This server does not expose a safe stop operation")
                     native_unload = row["backend"] in {"ollama", "lmstudio"}
                     if native_unload:
                         key = settings.inference.api_key if settings.inference.port == row["port"] and settings.inference.host in {"localhost", "127.0.0.1"} else ""
                         async with httpx.AsyncClient(timeout=10, trust_env=False, headers=inference_headers(key)) as client:
-                            path = "/api/generate" if row["backend"] == "ollama" else "/api/v1/models/unload"
-                            payload = {"model": row["model"], "keep_alive": 0} if row["backend"] == "ollama" else {"instance_id": row["model"]}
-                            response = await client.post(f'http://127.0.0.1:{row["port"]}{path}', json=payload)
+                            if row["backend"] == "ollama":
+                                response = await ollama_request(client, "127.0.0.1", row["port"], "/api/generate", row["model"], release=True)
+                            else:
+                                response = await client.post(f'http://127.0.0.1:{row["port"]}/api/v1/models/unload', json={"instance_id": row["model"]})
                             response.raise_for_status()
                             await verify_unloaded(client, row)
                     else:
@@ -325,6 +332,7 @@ class RunningModels:
                             choices[other["id"]] = "leave"
                     await asyncio.to_thread(self._save, choices)
                 if action in {"use", "replace"}:
+                    IDLE_UNLOAD.explicit_load()  # the owner chose this model: an explicit Load
                     updated = settings.model_copy(deep=True)
                     if action == "use":
                         updated.inference.backend = row["backend"]
@@ -383,7 +391,8 @@ class RunningModels:
                                  and r["port"] == settings.inference.port
                                  and r["model"] == settings.inference.remote_model
                                  and settings.inference.host in {"127.0.0.1", "localhost"}), None)
-                if settings.inference.auto_load and selected and not selected.get("busy") and not MANAGER.state.loaded and not MANAGER.state.loading:
+                if (settings.inference.auto_load and selected and not selected.get("busy") and not MANAGER.state.loaded
+                        and not MANAGER.state.loading and not IDLE_UNLOAD.background_blocked()):
                     async with MANAGER._request_lease.exclusive() as acquired:
                         if acquired:
                             await MANAGER.load(settings)

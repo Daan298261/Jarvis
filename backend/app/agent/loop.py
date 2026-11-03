@@ -26,6 +26,7 @@ from ..db.models import Checkpoint, Task, ToolCallRecord, utcnow
 from ..db.session import SessionLocal
 from ..events import BUS
 from ..inference.backends import is_inference_template_error
+from ..inference.idle_unload import IDLE_UNLOAD
 from ..inference.manager import MANAGER
 from ..inference.tool_capability import probe_tool_capability
 from ..inference.profiles import ModelProfile, resolve_profile
@@ -729,6 +730,30 @@ class AgentRuntime:
             await session.commit()
         self._start_runner(task_id, self._run(task_id, continue_existing=True, pending_tool=payload))
         return task
+
+    async def cancel_running_for_owner_unload(self, reason: str, *, wait_seconds: float = 10.0) -> list[str]:
+        """Owner pressed Unload model: cancel every running task visibly, then wait for its runner to end.
+
+        Each task is marked ``cancelled`` (the task list and its event stream show ``reason``), so the
+        pipeline ends in front of the owner and its engine lease is released before the models are.
+        """
+        running = {task_id: runner for task_id, runner in self._tasks.items() if not runner.done()}
+        for task_id in running:
+            self.cancel(task_id)
+            async with SessionLocal() as session:
+                task = await session.get(Task, task_id)
+                if task is not None and task.status not in _TERMINAL_TASK_STATUSES:
+                    task.status = "cancelled"
+                    task.stage = "cancelled"
+                    task.waiting_for_confirmation = False
+                    await session.commit()
+            try:
+                await BUS.publish(task_id, "cancelled", reason)
+            except Exception:  # the task is already marked cancelled; a missed event never blocks the unload
+                log.warning("Could not publish the unload cancellation for %s", task_id, exc_info=True)
+        if running:
+            await asyncio.wait(list(running.values()), timeout=wait_seconds)
+        return list(running)
 
     def cancel(self, task_id: str) -> None:
         self._cancel.add(task_id)
