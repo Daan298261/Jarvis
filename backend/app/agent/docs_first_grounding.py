@@ -214,6 +214,73 @@ def _score_document(path: Path, text: str, terms: list[str]) -> int:
     return score
 
 
+# Spec-vs-help ranking (trigger: RFC-0228 / #655). RFC specs under docs/rfcs/
+# repeat product words such as "install" and "runtime" hundreds of times, so a
+# raw term count lets a single long spec outrank the user-facing help page for
+# a plain how-to question. RFCs stay indexed: for ordinary questions their body
+# counts saturate and their score is down-weighted, so user-facing docs win;
+# when the user explicitly asks about specs or an RFC they get full weight plus
+# a boost, and a named RFC number ranks that RFC first.
+RFC_DOC_PARTS = ("docs", "rfcs")
+RFC_BODY_TERM_CAP = 12
+RFC_HELP_QUERY_WEIGHT = 0.5
+RFC_SPEC_QUERY_BONUS = 100
+RFC_NAMED_NUMBER_BONUS = 400
+
+_SPEC_INTENT_PATTERNS = (
+    re.compile(r"\brfcs?\b", re.I),
+    re.compile(r"\brfc[-_ ]?\d{1,4}\b", re.I),
+    re.compile(r"\bspec(?:s|ification|ifications)?\b", re.I),
+    re.compile(r"\bproposals?\b", re.I),
+    re.compile(r"\bdesign docs?\b", re.I),
+)
+_RFC_NUMBER_PATTERN = re.compile(r"\brfc[-_ ]?0*(\d{1,4})\b", re.I)
+_RFC_FILE_NUMBER_PATTERN = re.compile(r"^(\d{1,4})-")
+
+
+def query_targets_specs(query: str) -> bool:
+    """True when the user explicitly asks about specs, RFCs or proposals."""
+    text = query or ""
+    return any(pattern.search(text) for pattern in _SPEC_INTENT_PATTERNS)
+
+
+def requested_rfc_numbers(query: str) -> set[int]:
+    return {int(match) for match in _RFC_NUMBER_PATTERN.findall(query or "")}
+
+
+def is_rfc_spec(path: Path) -> bool:
+    """A file inside a ``docs/rfcs`` directory is an RFC spec, not user help."""
+    parts = tuple(part.lower() for part in path.parts[:-1])
+    width = len(RFC_DOC_PARTS)
+    return any(parts[idx : idx + width] == RFC_DOC_PARTS for idx in range(len(parts) - width + 1))
+
+
+def _rfc_file_number(path: Path) -> int | None:
+    match = _RFC_FILE_NUMBER_PATTERN.match(path.name)
+    return int(match.group(1)) if match else None
+
+
+def _score_rfc_document(path: Path, text: str, terms: list[str], query: str) -> int:
+    """Score an RFC spec by the query's intent: spec questions vs. help questions."""
+    if query_targets_specs(query):
+        score = _score_document(path, text, terms) + RFC_SPEC_QUERY_BONUS
+        number = _rfc_file_number(path)
+        if number is not None and number in requested_rfc_numbers(query):
+            score += RFC_NAMED_NUMBER_BONUS
+        return score
+    lowered = text.lower()
+    body = sum(min(lowered.count(term), RFC_BODY_TERM_CAP) for term in terms)
+    heading = "\n".join(text.splitlines()[:3])
+    bonus = sum(60 for term in terms if term in path.name.lower()) + _score_text(heading, terms) * 12
+    return int((body + bonus) * RFC_HELP_QUERY_WEIGHT)
+
+
+def _rank_score(path: Path, text: str, terms: list[str], query: str) -> int:
+    if is_rfc_spec(path):
+        return _score_rfc_document(path, text, terms, query)
+    return _score_document(path, text, terms)
+
+
 def _extract_snippet(text: str, terms: list[str], max_chars: int = MAX_SNIPPET_CHARS) -> str:
     if not text:
         return ""
@@ -326,11 +393,14 @@ def search_internal_references(query: str, *, max_results: int = 5) -> list[Grou
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        score = _score_document(path, text, terms) if terms else 1
+        score = _rank_score(path, text, terms, query) if terms else 1
         if terms and score <= 0:
             continue
         ranked.append((score, path, text))
-    ranked.sort(key=lambda item: (-item[0], str(item[1])))
+    # On equal scores, help questions prefer user-facing docs and spec
+    # questions prefer the RFCs.
+    spec_query = query_targets_specs(query)
+    ranked.sort(key=lambda item: (-item[0], is_rfc_spec(item[1]) != spec_query, str(item[1])))
     snippets: list[GroundingSnippet] = []
     total = 0
     for idx, (_score, path, text) in enumerate(ranked[:max_results], start=1):
@@ -390,8 +460,11 @@ __all__ = [
     "is_system_about",
     "load_budget",
     "maybe_docs_first",
+    "is_rfc_spec",
     "missing_pack_files",
+    "query_targets_specs",
     "reference_pack_root",
+    "requested_rfc_numbers",
     "reset_budget_for_tests",
     "save_budget",
     "search_internal_references",
