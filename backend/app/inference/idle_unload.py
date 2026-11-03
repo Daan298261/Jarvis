@@ -18,6 +18,7 @@ from .loaded_models import LOADED, LoadedModels
 
 log = logging.getLogger(__name__)
 POLL_SECONDS = 15.0
+EXPLICIT_LOAD_WINDOW_SECONDS = 120.0
 
 Release = Callable[[str, list[tuple[str, str]] | None], Awaitable[dict[str, Any]]]
 
@@ -41,6 +42,7 @@ class IdleUnload:
         self._busy = busy
         self._leased = leased
         self._cancel_tasks = cancel_tasks
+        self._explicit_at: float | None = None
         self.held = False            # something was released and no turn has happened since
         self.front_released = False  # the front responder was stopped by a release
         self.last_result: dict[str, Any] | None = None
@@ -50,28 +52,66 @@ class IdleUnload:
 
     # -- activity -----------------------------------------------------------------
     def touch(self) -> None:
-        """A user turn starts. Like an explicit Load it clears ``manually_unloaded`` *before*
-        the turn calls load / ensure_runtime / ensure_vision, so those calls are allowed for
-        the turn while every background caller is still refused."""
+        """A turn starts: it lifts the release hold *before* the turn calls load / ensure_runtime / ensure_vision.
+
+        Idle clocks are per model and reset where a model is actually used (``InferenceManager._mark_used``
+        for the worker or attached model, the front-reply entry for the front responder), never for every
+        model at once. ``manually_unloaded`` is cleared only by a real owner turn (a model enabled for
+        generation) or an explicit Load (``explicit_load``); see ``_lift_unload_flag``.
+        """
         from .manager import MANAGER
 
-        MANAGER.state.manually_unloaded = False
-        self.registry.touch_primary()
+        self._lift_unload_flag(MANAGER)
         self.held = False
         if self.front_released:
             self.front_released = False
             self._schedule_front_restart()
 
+    def _lift_unload_flag(self, manager) -> None:
+        """Fail closed: a reflex-only turn loads nothing, so it cannot lift ``manually_unloaded``."""
+        from ..engine_mode import model_enabled
+
+        if not manager.state.manually_unloaded:
+            return
+        try:
+            enabled = model_enabled(self._settings())
+        except Exception:
+            enabled = False  # unknown means closed
+        if enabled:
+            manager.state.manually_unloaded = False
+
     def explicit_load(self) -> None:
-        """An owner Load (HUD, dropdown, runtime activation) lifts the same hold a turn does."""
-        self.touch()
+        """An owner Load (HUD, dropdown, runtime activation) lifts the hold in every engine mode."""
+        from .manager import MANAGER
 
-    def used(self) -> None:
-        """A model was just used (end of a turn). Resets idle clocks without lifting any hold."""
-        self.registry.touch_primary()
+        MANAGER.state.manually_unloaded = False
+        self.held = False
+        self._explicit_at = self.registry._clock()
+        if self.front_released:
+            self.front_released = False
+            self._schedule_front_restart()
 
-    def note_released(self, *, front: bool) -> None:
-        self.held = True
+    def consume_explicit_load(self) -> bool:
+        """True once after an explicit Load (for two minutes): the attach that follows is the owner's own Load."""
+        at, self._explicit_at = self._explicit_at, None
+        return at is not None and self.registry._clock() - at <= EXPLICIT_LOAD_WINDOW_SECONDS
+
+    def clear_hold(self) -> None:
+        """Drop the release hold (``held``) without touching ``manually_unloaded``.
+
+        A hold set by a release that was not an owner Unload (a studio hold, an idle release) must not leave
+        ``warm_blocked()`` stuck for the respawn that follows; only an owner turn or an explicit Load clears
+        ``manually_unloaded``.
+        """
+        self.held = False
+
+    def note_released(self, *, front: bool, owner: bool = True) -> None:
+        """Record a release. Only an owner Unload holds background starters off; any other release
+        (idle policy, a studio hold) leaves nothing stuck behind (``clear_hold``)."""
+        if owner:
+            self.held = True
+        else:
+            self.clear_hold()
         self.front_released = self.front_released or front
 
     @staticmethod
@@ -97,6 +137,7 @@ class IdleUnload:
 
             try:
                 await FRONT_RUNTIME.ensure_started(self._settings())
+                self.clear_hold()  # the respawn happened: a non-owner release never leaves the hold stuck
             except Exception:
                 log.exception("Front responder respawn failed")
 

@@ -420,7 +420,7 @@ async def release_models(
     if source == "manual" and not failed and not released:
         return _refusal(_nothing_reason(app), nothing_to_unload=True, results=[], backends=results)
     if released:
-        IDLE_UNLOAD.note_released(front=front_stopped)
+        IDLE_UNLOAD.note_released(front=front_stopped, owner=source == "manual")
         from .status_monitor import STATUS_MONITOR
 
         STATUS_MONITOR.invalidate()

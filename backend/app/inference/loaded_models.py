@@ -66,12 +66,6 @@ class LoadedModels:
         if entry is not None:
             entry.last_use = self._clock()
 
-    def touch_primary(self) -> None:
-        now = self._clock()
-        for entry in self._entries.values():
-            if entry.primary:
-                entry.last_use = now
-
     def defer(self, entry: Entry) -> None:
         """A release failed: the next attempt waits a full idle window."""
         entry.last_use = self._clock()

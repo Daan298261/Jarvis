@@ -7,6 +7,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
+from ..inference.idle_unload import IDLE_UNLOAD
 from ..agent.loop import AGENT
 from ..config import load_settings
 from ..persona.quiet import should_speak_chat_reply
@@ -75,6 +76,7 @@ async def voice_command(body: VoiceIn):
     text = (body.text or "").strip()
     if not text:
         raise HTTPException(400, "text is required")
+    IDLE_UNLOAD.touch()  # an owner-started task is a real owner turn: lifts the hold before it loads
     task = await AGENT.create_task(text, body.autonomy)
     return {"task_id": task.id, "status": task.status, "transcript": text}
 
@@ -94,6 +96,7 @@ async def voice_listen(audio: UploadFile = File(...), autonomy: str | None = For
         return await _stt_error_response(
             VoiceSTTError(str(exc), code="stt_failed", install_hint=status.get("install_hint") or "")
         )
+    IDLE_UNLOAD.touch()  # an owner-started task is a real owner turn: lifts the hold before it loads
     task = await AGENT.create_task(transcript, autonomy)
     return {
         "task_id": task.id,

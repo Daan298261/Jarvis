@@ -31,7 +31,7 @@ from .context_window import (
     n_keep_overflow_message,
     parse_n_keep_overflow,
 )
-from .loaded_models import LLAMA_SERVER, LOADED, WORKER
+from .loaded_models import LLAMA_SERVER, LMSTUDIO, LOADED, OLLAMA, WORKER
 from .inference_prompt import sanitize_messages_for_inference
 from .profiles import (
     PROFILES,
@@ -107,6 +107,12 @@ class InferenceState:
     gguf_path: str = ""
     # Set by the HUD Unload model button; only a user turn or an explicit Load lifts it.
     manually_unloaded: bool = False
+
+
+def IDLE_UNLOAD_explicit_pending() -> bool:
+    from .idle_unload import IDLE_UNLOAD
+
+    return IDLE_UNLOAD.consume_explicit_load()
 
 
 class ModelManuallyUnloaded(RuntimeError):
@@ -423,7 +429,7 @@ class InferenceManager:
         if not self.provider:
             raise RuntimeError("Inference model is not loaded")
         async with self._request_lease.shared():
-            self._register_loaded()  # this model was just used
+            self._mark_used()  # this model was just used: reset ITS idle clock only
             try:
                 return await self._chat_holding_lease(
                     messages,
@@ -438,7 +444,7 @@ class InferenceManager:
                     working_state_block=working_state_block,
                 )
             finally:
-                self._register_loaded()
+                self._mark_used()
                 await self._keep_alive_touch()
 
     async def _chat_holding_lease(
@@ -619,7 +625,7 @@ class InferenceManager:
         if not self.provider:
             raise RuntimeError("Inference model is not loaded")
         async with self._request_lease.shared():
-            self._register_loaded()  # this model was just used
+            self._mark_used()  # this model was just used: reset ITS idle clock only
             try:
                 async for delta in self._chat_stream_holding_lease(
                     messages,
@@ -634,7 +640,7 @@ class InferenceManager:
                 ):
                     yield delta
             finally:
-                self._register_loaded()
+                self._mark_used()
                 await self._keep_alive_touch()
 
     async def _chat_stream_holding_lease(
@@ -790,17 +796,31 @@ class InferenceManager:
         await touch_ollama_if_resident(str(getattr(provider, "base_url", "")), str(getattr(provider, "model", "")),
                                        str(getattr(provider, "api_key", "") or ""))
 
-    def _register_loaded(self) -> None:
-        """Record the model ANZU itself loaded or attached to, and that it was just used."""
-        from .loaded_models import LMSTUDIO, OLLAMA
-
+    def _mark_used(self) -> None:
+        """A turn used this model: reset *its* idle clock. Never records a model (no ledger entry is created here)."""
         if self.state.manages_process:
             if self.state.loaded:
-                LOADED.record(LLAMA_SERVER, WORKER, primary=True)
+                LOADED.touch(LLAMA_SERVER, WORKER)
         elif self.state.backend in {OLLAMA, LMSTUDIO} and self.state.loaded:
             model = self.state.remote_model or str(getattr(self.provider, "model", "") or "")
             if model:
-                LOADED.record(self.state.backend, model, primary=True)
+                LOADED.touch(self.state.backend, model)
+
+    def _register_loaded(self, *, attach: bool = False) -> None:
+        """Record a model ANZU started.
+
+        A managed llama-server worker is always ANZU's own start. An Ollama / LM Studio model the owner
+        started and ANZU merely attached to is **not** ANZU-loaded (RFC-0225 / RFC-0228 managed-mode rule):
+        it is recorded only when ``attach`` says an explicit owner Load asked for it (its own warm / load
+        request records it as well), never from a chat, a poll or a background attach.
+        """
+        if self.state.manages_process:
+            if self.state.loaded:
+                LOADED.record(LLAMA_SERVER, WORKER)
+        elif attach and self.state.backend in {OLLAMA, LMSTUDIO} and self.state.loaded:
+            model = self.state.remote_model or str(getattr(self.provider, "model", "") or "")
+            if model:
+                LOADED.record(self.state.backend, model)
 
     def _same_endpoint(self, settings: AppSettings) -> bool:
         return bool(
@@ -1044,7 +1064,7 @@ class InferenceManager:
         self.state.loading = False
         self.state.load_time_seconds = round(time.time() - started, 2)
         self.provider = self._make_provider(settings, advertised)
-        self._register_loaded()
+        self._register_loaded(attach=IDLE_UNLOAD_explicit_pending())
         await self.refresh_resources()
         self._invalidate_status_cache()
         return self.state

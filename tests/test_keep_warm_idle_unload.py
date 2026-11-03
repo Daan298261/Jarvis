@@ -240,18 +240,24 @@ async def test_idle_unload_fires_only_after_300_idle_seconds():
     assert calls == [("idle", [(OLLAMA, "qwen3:8b")])]
 
 
-async def test_every_turn_resets_the_idle_timer():
+async def test_using_a_model_resets_its_own_idle_timer():
     timer, clock, calls, _ = make_timer()
     clock.now += 290
-    timer.touch()  # a turn starts
-    clock.now += 290
-    assert (await timer.tick())["action"] == "skipped"
-    timer.used()  # a turn ends
+    timer.registry.touch(OLLAMA, "qwen3:8b")  # the turn used this model
     clock.now += 299
     assert (await timer.tick())["action"] == "skipped"
     clock.now += 1
     assert (await timer.tick())["action"] == "released"
     assert len(calls) == 1
+
+
+async def test_a_turn_entry_alone_resets_no_idle_clock():
+    """RFC-0242 row 7: the entry hook lifts holds; clocks reset where a model is actually used."""
+    timer, clock, calls, _ = make_timer()
+    clock.now += 290
+    timer.touch()
+    clock.now += 11
+    assert (await timer.tick())["action"] == "released"
 
 
 async def test_agent_tasks_front_replies_and_owner_chat_all_touch_the_timer(monkeypatch):
@@ -260,7 +266,6 @@ async def test_agent_tasks_front_replies_and_owner_chat_all_touch_the_timer(monk
 
     touches: list[str] = []
     monkeypatch.setattr(IDLE_UNLOAD, "touch", lambda: touches.append("touch"))
-    monkeypatch.setattr(IDLE_UNLOAD, "used", lambda: touches.append("used"))
 
     async def turn():
         return None
@@ -268,7 +273,17 @@ async def test_agent_tasks_front_replies_and_owner_chat_all_touch_the_timer(monk
     runner = loop.AGENT._start_runner("keep-warm-wiring", turn())
     await runner
     loop.AGENT._tasks.pop("keep-warm-wiring", None)
-    assert touches == ["touch", "used"]  # start of the turn, then end of the turn
+    assert touches == []  # a task runner is not an owner turn: queue_watcher / intake tasks never lift a hold
+
+    from app.api import tasks as tasks_api
+
+    async def fake_create_task(*args, **kwargs):
+        raise RuntimeError("stop after the task entry")
+
+    monkeypatch.setattr(tasks_api.AGENT, "create_task", fake_create_task)
+    with pytest.raises(Exception):
+        await tasks_api.create_task(tasks_api.TaskCreate(prompt="hello"))
+    assert touches == ["touch"]  # the owner's task API is an owner turn
 
     touches.clear()
 
@@ -479,7 +494,7 @@ async def test_an_explicit_load_registers_the_model_so_the_idle_timer_unloads_it
     monkeypatch.setattr(LOADED, "_clock", clock)
     MANAGER.state.backend, MANAGER.state.loaded, MANAGER.state.remote_model = OLLAMA, True, "chosen:7b"
     MANAGER.provider = type("P", (), {"model": "chosen:7b"})()
-    MANAGER._register_loaded()  # what an explicit Load / dropdown choice does on success
+    MANAGER._register_loaded(attach=True)  # what an explicit Load / dropdown choice does on success
     assert LOADED.match(OLLAMA, ["chosen:7b"]) is not None and LOADED.match(OLLAMA, [FOREIGN]) is None
     timer = IdleUnload(registry=LOADED, settings=lambda: settings_with(False), busy=lambda: False)
     clock.now += 301
@@ -735,6 +750,7 @@ async def test_a_turn_after_unload_all_clears_the_flag_before_ensure_and_respawn
     async def turn():
         await MANAGER.ensure_runtime(settings)  # ... the turn is not: the flag was cleared at its entry point
 
+    IDLE_UNLOAD.touch()  # the owner's entry point (owner_chat / task API)
     await loop.AGENT._start_runner("keep-warm-turn", turn())
     loop.AGENT._tasks.pop("keep-warm-turn", None)
     assert loads == [False] and MANAGER.state.manually_unloaded is False and MANAGER.state.loaded is True
