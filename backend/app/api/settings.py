@@ -445,4 +445,11 @@ async def update_settings(body: SettingsUpdate):
 
         _IDLE_TICKS.add(task := asyncio.create_task(IDLE_UNLOAD.tick(), name="anzu-idle-unload-now"))
         task.add_done_callback(_IDLE_TICKS.discard)
+    if settings.inference.keep_warm and not previous_policy[0]:
+        # Keep warm switched ON: models ANZU loaded under the 300 s policy are re-pinned now (Ollama -1, LM Studio
+        # reload without TTL), not at their next request.
+        from ..inference.keep_warm_release import repin_loaded_models
+
+        _IDLE_TICKS.add(task := asyncio.create_task(repin_loaded_models(settings), name="anzu-keep-warm-repin"))
+        task.add_done_callback(_IDLE_TICKS.discard)
     return settings.model_dump()

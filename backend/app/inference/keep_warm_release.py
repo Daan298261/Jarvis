@@ -434,3 +434,53 @@ async def release_models(
                "cancelled_tasks": cancelled}
     log.info("Model release (%s): ok=%s released=%d %s", source, payload["ok"], released, reason)
     return payload
+
+
+async def repin_loaded_models(
+    settings: AppSettings | None = None,
+    *,
+    client_factory: ClientFactory | None = None,
+) -> dict[str, Any]:
+    """Keep warm turned ON: re-pin every ANZU-loaded model that is resident (RFC-0242 row 6).
+
+    Ollama gets a prompt-less native request carrying the pinned keep_alive (``ollama_request``, so the
+    helper picks the value) for each ANZU-loaded model ``/api/ps`` lists; nothing is loaded by it. LM Studio
+    cannot change a TTL in place, so each ANZU-loaded instance is unloaded (verified) and reloaded without
+    ``--ttl`` (``lmstudio_context.repin_local_instances``). Models ANZU did not load and denied names are
+    never touched, and nothing is re-pinned after an owner Unload.
+    """
+    from .idle_unload import warm_blocked
+    from .lmstudio_context import repin_local_instances
+    from .manager import MANAGER
+
+    app = settings or current_settings()
+    if not keep_warm_enabled(app):
+        return {"action": "skipped", "reason": "keep_warm_off", "results": []}
+    if warm_blocked():
+        return {"action": "skipped", "reason": "unloaded", "results": []}
+    factory = client_factory or _client
+    results: list[dict[str, Any]] = []
+    mine = [e for e in LOADED.entries() if e.backend == OLLAMA and not is_denied(e.model)]
+    if mine:
+        for host, port, key in _endpoints(app, OLLAMA_ALIASES, OLLAMA_DEFAULT_PORT):
+            try:
+                async with factory(key) as client:
+                    response = await client.get(f"http://{host}:{port}/api/ps")
+                    response.raise_for_status()
+                    resident = parse_models_payload("/api/ps", response.json())
+                    for name in resident:
+                        entry = LOADED.match(OLLAMA, [name])
+                        if entry is None or is_denied(name):
+                            continue
+                        try:
+                            pinned = await ollama_request(client, host, port, "/api/generate", name,
+                                                          {"prompt": "", "stream": False}, settings=app)
+                            pinned.raise_for_status()
+                            results.append(_model(OLLAMA, name, "ollama_keep_alive_-1"))
+                        except httpx.HTTPError as exc:
+                            results.append(_model(OLLAMA, name, "ollama_keep_alive_-1", error=str(exc)[:240]))
+            except (httpx.HTTPError, ValueError) as exc:
+                log.debug("Keep warm re-pin skipped Ollama %s:%s: %s", host, port, exc)
+    if any(e.backend == LMSTUDIO for e in LOADED.entries()):
+        results.extend(await repin_local_instances(app, lease=MANAGER._request_lease))
+    return {"action": "repinned", "reason": "", "results": results}

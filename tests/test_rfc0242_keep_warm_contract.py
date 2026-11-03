@@ -323,3 +323,78 @@ async def test_name_guard_is_a_second_layer_even_when_the_ledger_lists_bgm_inges
 
     settings = settings_with(False, backend="lmstudio", host="127.0.0.1", port=1234)
     assert await grow_local_instance(settings, 32768, FOREIGN) is None
+
+
+# --- row 6: Keep warm ON re-pins ---------------------------------------------------------------------------------
+
+async def test_toggle_on_repins_every_loaded_anzu_model_with_minus_one(monkeypatch, tmp_path):
+    from app.api import settings as settings_api
+    from tests.test_keep_warm_idle_unload import write_settings
+
+    servers = FakeServers(ollama=[ANZU_OLLAMA, "owner-started:7b", FOREIGN]).install(monkeypatch)
+    write_settings(tmp_path, keep_warm=False)
+    LOADED.record(OLLAMA, ANZU_OLLAMA)
+    LOADED.record(OLLAMA, FOREIGN)  # even a buggy ledger entry cannot unlock the studio model
+    await settings_api.update_settings(settings_api.SettingsUpdate(inference_keep_warm=True))
+    await asyncio.gather(*settings_api._IDLE_TICKS)
+    posts = [body for _p, method, path, body in servers.requests if method == "POST"]
+    assert posts == [{"model": ANZU_OLLAMA, "prompt": "", "stream": False, "keep_alive": "-1"}]
+    # Turning it OFF never re-pins; an owner Unload blocks it; the toggle with no change does nothing.
+    servers.requests.clear()
+    await settings_api.update_settings(settings_api.SettingsUpdate(inference_keep_warm=True))
+    await asyncio.gather(*settings_api._IDLE_TICKS)
+    assert [r for r in servers.requests if r[1] == "POST"] == []
+    MANAGER.state.manually_unloaded = True
+    result = await keep_warm_release.repin_loaded_models()
+    assert result["action"] == "skipped" and [r for r in servers.requests if r[1] == "POST"] == []
+
+
+async def test_keep_warm_on_repins_lmstudio_instances_without_ttl(monkeypatch, tmp_path):
+    import json
+    import subprocess
+
+    from app.inference import lmstudio_context
+    from tests.test_keep_warm_idle_unload import write_settings
+
+    write_settings(tmp_path, keep_warm=True)
+    instances = {
+        "qwen-a": {"identifier": "qwen-a", "modelKey": "qwen-a", "status": "idle", "queued": 0, "contextLength": 16384,
+                   "maxContextLength": 32768, "ttlMs": 300000},
+        "owner-lm": {"identifier": "owner-lm", "modelKey": "owner-lm", "status": "idle", "queued": 0,
+                     "contextLength": 8192, "maxContextLength": 8192, "ttlMs": 3600000},
+        FOREIGN: {"identifier": FOREIGN, "modelKey": FOREIGN, "status": "idle", "queued": 0, "contextLength": 8192,
+                  "maxContextLength": 8192, "ttlMs": 300000},
+    }
+    commands: list[list[str]] = []
+
+    def run(argv, **kwargs):
+        args = [str(a) for a in argv]
+        commands.append(args)
+        if args[1:3] == ["ps", "--json"]:
+            return subprocess.CompletedProcess(argv, 0, json.dumps(list(instances.values())), "")
+        if args[1] == "unload":
+            instances.pop(args[2])
+        if args[1] == "load":
+            instances[args[2]] = {**{"identifier": args[2], "modelKey": args[2], "status": "idle", "queued": 0,
+                                     "contextLength": int(args[args.index("--context-length") + 1]),
+                                     "maxContextLength": 32768}, "ttlMs": None if "--ttl" not in args else 1}
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(lmstudio_context.subprocess, "run", run)
+    monkeypatch.setattr(lmstudio_context.shutil, "which", lambda name: "/bin/lms")
+    LOADED.record(LMSTUDIO, "qwen-a")
+    LOADED.record(LMSTUDIO, FOREIGN)
+    settings = settings_with(True, backend="lmstudio", host="127.0.0.1", port=1234)
+    rows = await lmstudio_context.repin_local_instances(settings, lease=MANAGER._request_lease)
+    assert [(r["model"], r["verified"]) for r in rows] == [("qwen-a", True)]
+    mutating = [c[1:] for c in commands if c[1] in {"unload", "load"}]
+    assert mutating[0] == ["unload", "qwen-a"]
+    assert mutating[1][:3] == ["load", "qwen-a", "--identifier"] and "--ttl" not in mutating[1]
+    assert all("owner-lm" not in c and FOREIGN not in c for c in mutating)  # not ANZU-loaded / denied: untouched
+    assert instances["qwen-a"]["ttlMs"] is None and instances["owner-lm"]["ttlMs"] == 3600000
+    # An engine lease held by a running request defers the reload (the TTL stays until it finishes).
+    instances["qwen-a"]["ttlMs"] = 300000
+    commands.clear()
+    async with MANAGER._request_lease.shared():
+        rows = await lmstudio_context.repin_local_instances(settings, lease=MANAGER._request_lease)
+    assert rows and rows[0]["verified"] is False and [c for c in commands if c[1] in {"unload", "load"}] == []
