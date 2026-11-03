@@ -23,7 +23,7 @@ import psutil
 from ..config import AppSettings
 from .backends import LMSTUDIO_ALIASES, OLLAMA_ALIASES, inference_headers, parse_models_payload
 from .idle_unload import IDLE_UNLOAD
-from .keep_alive import current_settings, idle_unload_seconds, keep_warm_enabled
+from .keep_alive import current_settings, idle_unload_seconds, is_denied, keep_warm_enabled, ollama_request
 from .loaded_models import FRONT, LLAMA_SERVER, LMSTUDIO, LOADED, OLLAMA, WORKER, Entry, canonical
 
 log = logging.getLogger(__name__)
@@ -60,7 +60,33 @@ def _endpoints(settings: AppSettings, aliases: set[str], default_port: int) -> l
 
 
 def _row(backend: str, endpoint: str) -> dict[str, Any]:
-    return {"backend": backend, "endpoint": endpoint, "running": True, "released": [], "left_alone": [], "ok": True, "detail": ""}
+    return {"backend": backend, "endpoint": endpoint, "running": True, "released": [], "left_alone": [], "ok": True,
+            "detail": "", "models": [], "skipped": []}
+
+
+def _model(backend: str, model: str, via: str, *, error: str | None = None) -> dict[str, Any]:
+    """One per-model result; ``verified`` is settled only after the post-unload inventory check."""
+    return {"model": model, "backend": backend, "via": via, "verified": False if error else None, "error": error}
+
+
+def _left_alone(row: dict[str, Any], name: str) -> None:
+    row["left_alone"].append(name)  # not loaded by ANZU (or a denied model): never touched
+    row["skipped"].append({"model": name, "reason": "protected: ANZU never touches this model" if is_denied(name)
+                           else "not loaded by ANZU"})
+
+
+def _settle(row: dict[str, Any], still: list[str], error: str | None = None) -> None:
+    """Mark each released model verified, or unverified with the reason (inventory still lists it)."""
+    wanted = {canonical(name) for name in still}
+    for item in row["models"]:
+        if item["error"]:
+            continue
+        if error:
+            item.update(verified=False, error=error)
+        elif canonical(item["model"]) in wanted:
+            item.update(verified=False, error="still loaded after unload")
+        else:
+            item["verified"] = True
 
 
 def _not_running(row: dict[str, Any], selection: _Selection, backend: str) -> dict[str, Any]:
@@ -92,6 +118,8 @@ class _Selection:
         self.failed: set[tuple[str, str]] = set()
 
     def pick(self, backend: str, ids: list[str]) -> Entry | None:
+        if any(is_denied(i) for i in ids if i):
+            return None  # a denied model is foreign even if a ledger entry names it
         wanted = {canonical(i) for i in ids if i}
         return next((e for e in self.entries.values() if e.backend == backend and e.ids() & wanted), None)
 
@@ -126,22 +154,26 @@ async def _release_ollama(host: str, port: int, key: str, factory: ClientFactory
         for name in names:
             entry = selection.pick(OLLAMA, [name])
             if entry is None:
-                row["left_alone"].append(name)  # not loaded by ANZU: never touched
+                _left_alone(row, name)
                 continue
             try:
-                response = await client.post(base + "/api/generate", json={"model": name, "keep_alive": 0})
+                response = await ollama_request(client, host, port, "/api/generate", name, release=True)
                 response.raise_for_status()
                 row["released"].append(name)
+                row["models"].append(_model(OLLAMA, name, "ollama_keep_alive_0"))
                 entries[name] = entry
             except httpx.HTTPError as exc:
                 failures.append(f"{name}: {exc}")
+                row["models"].append(_model(OLLAMA, name, "ollama_keep_alive_0", error=str(exc)[:240]))
                 selection.failed.add(entry.key)
         try:
             still = await _verified(loaded, row["released"])
         except (httpx.HTTPError, ValueError) as exc:
             row.update(ok=False, detail=f"could not verify /api/ps after unload: {exc}"[:240])
+            _settle(row, [], error=row["detail"])
             selection.failed.update(e.key for e in entries.values())
             return row
+    _settle(row, still)
     for name, entry in entries.items():
         if name in still:
             selection.failed.add(entry.key)
@@ -200,7 +232,7 @@ async def _release_lmstudio(host: str, port: int, key: str, factory: ClientFacto
         for model_key, instance in pairs:
             entry = selection.pick(LMSTUDIO, [instance, model_key])
             if entry is None:
-                row["left_alone"].append(instance)  # not loaded by ANZU: never touched
+                _left_alone(row, instance)
                 continue
             try:
                 if use_native:
@@ -216,16 +248,21 @@ async def _release_lmstudio(host: str, port: int, key: str, factory: ClientFacto
                     if completed.returncode != 0:
                         raise RuntimeError((completed.stderr or completed.stdout or "lms unload failed").strip())
                 row["released"].append(instance)
+                row["models"].append(_model(LMSTUDIO, instance, "lmstudio_instance" if use_native else "lmstudio_cli"))
                 entries[instance] = entry
             except (httpx.HTTPError, RuntimeError) as exc:
                 failures.append(f"{instance}: {exc}")
+                row["models"].append(_model(LMSTUDIO, instance, "lmstudio_instance" if use_native else "lmstudio_cli",
+                                            error=str(exc)[:240]))
                 selection.failed.add(entry.key)
         try:
             still = await _verified(read_loaded, row["released"])
         except (httpx.HTTPError, ValueError) as exc:
             row.update(ok=False, detail=f"could not verify the unload: {exc}"[:240])
+            _settle(row, [], error=row["detail"])
             selection.failed.update(e.key for e in entries.values())
             return row
+    _settle(row, still)
     for instance, entry in entries.items():
         if instance in still:
             selection.failed.add(entry.key)
@@ -266,6 +303,8 @@ async def _release_workers(selection: _Selection) -> tuple[list[dict[str, Any]],
             row.update(ok=False, detail="the worker still reports a loaded model")
         elif pid is not None and await asyncio.to_thread(_alive, pid):
             row.update(ok=False, detail=f"llama-server pid {pid} is still running")
+        row["models"].append({**_model(LLAMA_SERVER, row["released"][0], "managed_process"),
+                              "verified": row["ok"], "error": None if row["ok"] else row["detail"]})
         if row["ok"]:
             selection.done[worker.key] = worker
         else:
@@ -287,6 +326,8 @@ async def _release_workers(selection: _Selection) -> tuple[list[dict[str, Any]],
             row.update(ok=False, detail="the front responder is still running")
         elif pid is not None and await asyncio.to_thread(_alive, pid):
             row.update(ok=False, detail=f"front llama-server pid {pid} is still running")
+        row["models"].append({**_model(LLAMA_SERVER, row["released"][0], "managed_process"),
+                              "verified": row["ok"], "error": None if row["ok"] else row["detail"]})
         if row["ok"]:
             selection.done[front.key] = front
         else:
@@ -298,7 +339,8 @@ async def _release_workers(selection: _Selection) -> tuple[list[dict[str, Any]],
 
 
 def _refusal(reason: str, **extra: Any) -> dict[str, Any]:
-    return {"ok": False, "refused": True, "reason": reason, "results": [], "keep_warm": keep_warm_enabled(), **extra}
+    return {"ok": False, "refused": True, "reason": reason, "results": [], "released": 0, "failed": 0, "skipped": [],
+            "keep_warm": keep_warm_enabled(), **extra}
 
 
 def _nothing_reason(settings: AppSettings) -> str:
@@ -361,10 +403,16 @@ async def release_models(
         if key in selection.entries:
             LOADED.defer(selection.entries[key])
     failed = [r for r in results if not r["ok"]]
-    released = sum(len(r["released"]) for r in results)
+    per_model = [m for r in results for m in r["models"]]
+    for r in failed:  # a backend that failed before naming a model (unreadable inventory) is still a failure line
+        if not any(m["verified"] is False for m in r["models"]):
+            per_model.append({"model": f'{r["backend"]} {r["endpoint"]}', "backend": r["backend"], "via": "inventory",
+                              "verified": False, "error": r["detail"] or "release could not be verified"})
+    released = sum(1 for m in per_model if m["verified"])
+    skipped = [item for r in results for item in r["skipped"]]
     reason = "; ".join(f'{r["backend"]} {r["endpoint"]}: {r["detail"]}' for r in failed)
     if source == "manual" and not failed and not released:
-        return _refusal(_nothing_reason(app), nothing_to_unload=True, results=results)
+        return _refusal(_nothing_reason(app), nothing_to_unload=True, results=[], backends=results)
     if released:
         IDLE_UNLOAD.note_released(front=front_stopped)
         from .status_monitor import STATUS_MONITOR
@@ -372,7 +420,10 @@ async def release_models(
         STATUS_MONITOR.invalidate()
     if source == "manual" and not failed:
         MANAGER.state.manually_unloaded = True  # stays unloaded until a user turn or an explicit Load
-    payload = {"ok": not failed, "refused": False, "reason": reason, "source": source,
-               "released_count": released, "results": results, "keep_warm": keep_warm_enabled(app)}
+    # Contract (RFC-0242 "Unload-all"): ``results`` is one entry per model; ``ok`` is False (HTTP 207) whenever
+    # any model failed; ``backends`` keeps the per-endpoint detail.
+    payload = {"ok": not failed, "refused": False, "reason": reason, "source": source, "results": per_model,
+               "released": released, "released_count": released, "failed": sum(1 for m in per_model if not m["verified"]),
+               "skipped": skipped, "backends": results, "keep_warm": keep_warm_enabled(app)}
     log.info("Model release (%s): ok=%s released=%d %s", source, payload["ok"], released, reason)
     return payload

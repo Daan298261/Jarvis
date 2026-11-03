@@ -96,6 +96,38 @@ test("a refused unload shows the reason in the HUD and the button comes back (ne
   })
 })
 
+test("a partial unload (207) is never shown as success: one line per model and the reason", async () => {
+  backend({ unload: async () => ({
+    ok: false, refused: false, reason: "ollama 127.0.0.1:11434: stuck:1b: still loaded after unload", released: 1, failed: 1, skipped: [],
+    results: [
+      { model: "qwen-a", backend: "lmstudio", via: "lmstudio_instance", verified: true, error: null },
+      { model: "stuck:1b", backend: "ollama", via: "ollama_keep_alive_0", verified: false, error: "still loaded after unload" },
+    ] }) })
+  await withView(async (view) => {
+    await click(view.unloadButton())
+    await flush()
+    assert.ok(view.note().classList.contains("error"))
+    assert.match(view.note().textContent, /^Unload incomplete: 1 of 2 models released\. ollama 127\.0\.0\.1:11434/)
+    const lines = [...view.note().querySelectorAll("li")].map((li) => li.textContent)
+    assert.deepEqual(lines, ["Unloaded and verified: qwen-a", "Could not unload stuck:1b: still loaded after unload"])
+    assert.doesNotMatch(view.note().textContent, /They load again/)
+    assert.equal(view.unloadButton().disabled, false)
+  })
+})
+
+test("a full unload (200) lists every model as verified", async () => {
+  backend({ unload: async () => ({ ok: true, refused: false, reason: "", released: 2, failed: 0, skipped: [], results: [
+    { model: "a", backend: "ollama", via: "ollama_keep_alive_0", verified: true, error: null },
+    { model: "b", backend: "lmstudio", via: "lmstudio_instance", verified: true, error: null }] }) })
+  await withView(async (view) => {
+    await click(view.unloadButton())
+    await flush()
+    assert.ok(!view.note().classList.contains("error"))
+    assert.match(view.note().textContent, /^Unloaded 2 models\./)
+    assert.deepEqual([...view.note().querySelectorAll("li")].map((li) => li.textContent), ["Unloaded and verified: a", "Unloaded and verified: b"])
+  })
+})
+
 test("a backend that fails to release (502) reports its own reason instead of a success", async () => {
   backend({ unload: async () => { throw new ApiError(502, "ollama 127.0.0.1:11434: still loaded after unload: stuck:1b") } })
   await withView(async (view) => {

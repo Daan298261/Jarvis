@@ -436,6 +436,8 @@ async def test_release_unloads_every_anzu_loaded_model_and_verifies(monkeypatch)
     assert servers.ollama == [] and servers.lmstudio == []
     assert [r[2] for r in servers.requests].count("/api/ps") >= 2  # re-read after the unload: verified
     assert {row["backend"] for row in result["results"]} == {"ollama", "lmstudio"}
+    assert all(row["verified"] is True and row["error"] is None for row in result["results"])
+    assert result["released"] == 4 and result["failed"] == 0 and result["skipped"] == []
     assert LOADED.entries() == [] and MANAGER.state.manually_unloaded is True
 
 
@@ -452,7 +454,8 @@ async def test_a_foreign_model_is_never_unloaded_by_the_button_or_the_idle_timer
     assert result["ok"] is True and result["released_count"] == 2
     assert servers.ollama == [FOREIGN] and servers.lmstudio == [FOREIGN]
     assert all(FOREIGN not in json.dumps(body) for body in servers.unload_requests())
-    assert {tuple(row["left_alone"]) for row in result["results"]} == {(FOREIGN,)}
+    assert {tuple(row["left_alone"]) for row in result["backends"]} == {(FOREIGN,)}
+    assert {item["model"] for item in result["skipped"]} == {FOREIGN} and all("protected" in item["reason"] for item in result["skipped"])
     # The idle path (targets = idle ANZU entries) leaves it alone too.
     LOADED.record(OLLAMA, ANZU_OLLAMA)
     servers.ollama.append(ANZU_OLLAMA)
@@ -491,7 +494,7 @@ async def test_release_reports_a_backend_that_is_not_running_without_failing(mon
     result = await keep_warm_release.release_models("manual")
     # Nothing was actually resident: reported as "Nothing to unload" (409), not as a failure (502).
     assert result["refused"] is True and result["nothing_to_unload"] is True
-    assert all(row["running"] is False for row in result["results"])
+    assert all(row["running"] is False for row in result["backends"])
     assert LOADED.entries() == [] and MANAGER.state.manually_unloaded is False
 
 
@@ -544,7 +547,8 @@ async def test_release_stops_the_llama_server_workers_and_proves_the_process_is_
     assert MANAGER.state.loaded is False and MANAGER.provider is None and not FRONT_RUNTIME.running
     assert not any(psutil.pid_exists(pid) and psutil.Process(pid).status() != psutil.STATUS_ZOMBIE for pid in pids)
     assert IDLE_UNLOAD.front_released is True
-    assert {row["backend"] for row in result["results"]} >= {"llama-server", "front responder"}
+    assert {row["backend"] for row in result["backends"]} >= {"llama-server", "front responder"}
+    assert {row["via"] for row in result["results"]} == {"managed_process"} and all(row["verified"] for row in result["results"])
 
 
 # --- POST /api/model/unload-all (separate from /api/model/unload) --------------------------------------------
@@ -581,7 +585,8 @@ async def test_unload_all_returns_the_verified_per_backend_result(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True and body["released_count"] == 2 and body["keep_warm"] is False
-    assert [row["released"] for row in body["results"] if row["released"]] == [["qwen3:8b"], ["qwen-a"]]
+    assert [(row["model"], row["backend"], row["verified"]) for row in body["results"]] == [("qwen3:8b", "ollama", True), ("qwen-a", "lmstudio", True)]
+    assert body["released"] == 2 and body["failed"] == 0 and body["skipped"] == [] and "snapshot" in body
 
 
 async def test_unload_all_refusals_are_409_with_a_visible_reason_and_touch_nothing(monkeypatch):
@@ -615,12 +620,22 @@ async def test_unload_all_after_an_idle_unload_says_so(monkeypatch):
     assert "was unloaded after 5 minutes idle" in response.json()["detail"]
 
 
-async def test_unload_all_failure_is_502_with_the_backend_reason(monkeypatch):
-    FakeServers(ollama=["stuck:1b"], ollama_ignores_unload=True).install(monkeypatch)
+async def test_unload_all_partial_failure_returns_207_with_per_model_results(monkeypatch):
+    """One release fails (Ollama keeps it resident): that model is verified:false with its error, the
+    others are released, and the status is 207, never 200."""
+    FakeServers(ollama=["stuck:1b"], ollama_ignores_unload=True, lmstudio=["qwen-a"]).install(monkeypatch)
     LOADED.record(OLLAMA, "stuck:1b")
+    LOADED.record(LMSTUDIO, "qwen-a")
     async with api_client() as client:
         response = await client.post("/api/model/unload-all")
-    assert response.status_code == 502 and "stuck:1b" in response.json()["detail"]
+    assert response.status_code == 207
+    body = response.json()
+    by_model = {row["model"]: row for row in body["results"]}
+    assert body["ok"] is False and body["released"] == 1 and body["failed"] == 1
+    assert by_model["stuck:1b"]["verified"] is False and "still loaded" in by_model["stuck:1b"]["error"]
+    assert by_model["qwen-a"]["verified"] is True and by_model["qwen-a"]["error"] is None
+    assert "stuck:1b" in body["reason"] and "snapshot" in body
+    assert MANAGER.state.manually_unloaded is False  # a failed unload is not "stays unloaded"
 
 
 # --- manually_unloaded: no background load or warm until a user turn / explicit Load -----------------------------
@@ -771,15 +786,45 @@ async def test_idle_unload_holds_background_starters_but_a_turn_lifts_it():
 
 async def test_ownership_comes_from_the_ledger_not_from_a_model_name(monkeypatch):
     """The same name is exempt when someone else loaded it and released when ANZU loaded it."""
-    servers = FakeServers(ollama=[FOREIGN]).install(monkeypatch)
-    assert (await keep_warm_release.release_models("manual"))["refused"] is True
-    assert servers.ollama == [FOREIGN]
-    LOADED.record(OLLAMA, FOREIGN)  # ANZU loaded a model that happens to carry that name
-    assert request_extras("http://127.0.0.1:11434/v1", FOREIGN) == {"keep_alive": "300s"}
+    shared = "owner-shared-model:7b"
+    servers = FakeServers(ollama=[shared]).install(monkeypatch)
+    assert (await keep_warm_release.release_models("manual"))["refused"] is True  # unknown origin = foreign
+    assert servers.ollama == [shared]
+    assert request_extras("http://127.0.0.1:11434/v1", shared) == {}
+    LOADED.record(OLLAMA, shared)  # ANZU loaded a model that happens to carry that name
+    assert request_extras("http://127.0.0.1:11434/v1", shared) == {"keep_alive": "300s"}
     assert (await keep_warm_release.release_models("manual"))["ok"] is True
     assert servers.ollama == []
-    source = "\n".join(path.read_text(encoding="utf-8") for path in BACKEND_APP.rglob("*.py"))
-    assert not re.search(r"""["']bgm[-_]""", source)  # no model-name literal anywhere in backend code
+    # The deny constant lives in the one helper module and nowhere else.
+    holders = [name for name, text in _python_files() if re.search(r"""["']bgm[-_]""", text)]
+    assert holders == ["inference/keep_alive.py"]
+
+
+async def test_denied_model_is_never_addressed_even_if_the_ledger_lists_it(monkeypatch):
+    """bgm-ingest-9b: no keep_alive, no TTL, no unload, no warm and no touch, whatever the ledger or toggle says."""
+    servers = FakeServers(ollama=[FOREIGN, ANZU_OLLAMA], lmstudio=[FOREIGN]).install(monkeypatch)
+    LOADED.record(OLLAMA, FOREIGN)  # even a (buggy) ledger entry cannot unlock it
+    LOADED.record(LMSTUDIO, FOREIGN)
+    for keep_warm in (False, True):
+        write_settings(Path(load_settings.__globals__["settings_path"]().parent), keep_warm=keep_warm)
+        assert request_extras("http://127.0.0.1:11434/v1", FOREIGN) == {}
+        assert request_extras("http://127.0.0.1:1234/v1", FOREIGN) == {}
+    assert keep_alive.is_denied(FOREIGN) and keep_alive.is_denied(FOREIGN + ":latest") and not keep_alive.is_denied(ANZU_OLLAMA)
+    with pytest.raises(keep_alive.DeniedModelError):
+        keep_alive.ollama_body(FOREIGN)
+    with pytest.raises(keep_alive.DeniedModelError):
+        keep_alive.ollama_body(FOREIGN, release=True)
+    monkeypatch.setattr(gpu_prefer, "nvidia_gpu_present", lambda: True)
+    warmed = await gpu_prefer.ensure_ollama_gpu(host="127.0.0.1", port=11434, model=FOREIGN)
+    assert warmed["ok"] is False and warmed["method"] == "denied"
+    assert servers.requests == [], "a denied model gets zero requests of any kind"
+    assert await keep_alive.touch_ollama_if_resident("http://127.0.0.1:11434/v1", FOREIGN) is False
+    LOADED.record(OLLAMA, ANZU_OLLAMA)
+    result = await keep_warm_release.release_models("manual")
+    assert FOREIGN in servers.ollama and FOREIGN in servers.lmstudio
+    assert all(FOREIGN not in json.dumps(body) for body in servers.unload_requests())
+    assert {item["model"] for item in result["skipped"]} >= {FOREIGN}
+    assert all(row["model"] != FOREIGN for row in result["results"])
 
 
 # --- static scan: every keep_alive literal and every load / warm site is routed through helper + guard ----------
@@ -900,7 +945,7 @@ def test_static_scan_every_keep_alive_ttl_consumer_reads_the_helper():
     for name in ("inference/gpu_prefer.py", "inference/ollama_runtime.py", "inference/lmstudio_server.py",
                  "inference/lmstudio_context.py", "providers/base.py"):
         text = (BACKEND_APP / name).read_text(encoding="utf-8")
-        assert re.search(r"ollama_keep_alive|lmstudio_ttl_seconds|request_extras", text), name
+        assert re.search(r"ollama_keep_alive|ollama_request|lmstudio_ttl_seconds|request_extras", text), name
 
 
 def test_a_rebuilt_lm_studio_instance_follows_the_policy_only_when_anzu_loaded_it():
@@ -910,3 +955,198 @@ def test_a_rebuilt_lm_studio_instance_follows_the_policy_only_when_anzu_loaded_i
     assert instance_load_args(row, key="k", identifier="owner", context_length=4096)[-2:] == ["--ttl", 60]  # foreign: as-is
     LOADED.record(LMSTUDIO, "owner")
     assert instance_load_args(row, key="k", identifier="owner", context_length=4096)[-2:] == ["--ttl", 300]
+
+
+# --- CoS guard coverage: every remaining background path, and the owner respawn --------------------------------
+
+async def test_grow_local_instance_runs_no_lms_command_after_unload_and_proceeds_after_an_owner_act(monkeypatch):
+    from app.inference import lmstudio_context
+
+    await unloaded_after_unload_all(monkeypatch)
+    commands: list[list[str]] = []
+
+    def run(argv, **kwargs):
+        commands.append([str(a) for a in argv])
+        return subprocess.CompletedProcess(argv, 0, "[]", "")
+
+    monkeypatch.setattr(lmstudio_context.subprocess, "run", run)
+    monkeypatch.setattr(lmstudio_context.shutil, "which", lambda name: "/bin/lms")
+    settings = settings_with(False, backend="lmstudio", host="127.0.0.1", port=1234)
+    assert await lmstudio_context.grow_local_instance(settings, 65536, "qwen-a") is None
+    assert commands == [], "no `lms ps` / `lms load` while the Unload hold is up"
+    IDLE_UNLOAD.explicit_load()  # an explicit Load (or an owner turn) lifts the hold
+    await lmstudio_context.grow_local_instance(settings, 65536, "qwen-a")
+    assert commands and commands[0][:2] == ["/bin/lms", "ps"]
+
+
+async def test_startup_autoload_after_unload_all_issues_no_lms_load_and_no_ollama_warm(monkeypatch):
+    """main._autoload_model reaches ensure_local_lmstudio / ensure_local_ollama; both stay silent after Unload."""
+    from app import main
+
+    await unloaded_after_unload_all(monkeypatch)
+    trip = Tripwire().install(monkeypatch)
+    started: list[str] = []
+
+    async def probe(*args, **kwargs):
+        return {"ok": True, "models": []}
+
+    async def cli(*args, **kwargs):
+        started.append("lms")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(lmstudio_server, "probe_remote_server", probe)
+    monkeypatch.setattr(ollama_runtime, "probe_remote_server", probe)
+    monkeypatch.setattr(lmstudio_server, "lmstudio_cli", lambda: "/bin/lms")
+    monkeypatch.setattr(lmstudio_server, "_run_cli", lambda *a, **k: started.append("lms") or subprocess.CompletedProcess(a, 0, "", ""))
+    monkeypatch.setattr(gpu_prefer, "_run_cli", cli)
+    monkeypatch.setattr(main, "model_enabled", lambda s: True, raising=False)
+    for backend, model in (("lmstudio", "qwen-a"), ("ollama", "qwen3:8b")):
+        await main._autoload_model(settings_with(False, backend=backend, host="127.0.0.1", remote_model=model,
+                                                 port=1234 if backend == "lmstudio" else 11434))
+    assert started == [] and [r for r in trip.requests if not r.startswith("GET ")] == []
+    assert MANAGER.state.loaded is False and MANAGER.state.manually_unloaded is True
+
+
+async def test_hotswap_activation_is_an_explicit_load_and_the_lm_studio_ollama_ensure_paths_respawn(monkeypatch, tmp_path):
+    """hotswap reaches ensure_local_* only through activate_runtime_profile (which lifts the hold first); once an
+    owner act lifted it, ensure_local_lmstudio loads with --ttl 300 and ensure_local_ollama warms with 300s."""
+    tree = ast.parse((BACKEND_APP / "inference" / "hotswap.py").read_text(encoding="utf-8-sig"))
+    fns = {fn.name: fn for fn in _outermost_functions(tree)}
+    activate_calls = [c.func.attr if isinstance(c.func, ast.Attribute) else c.func.id
+                      for c in ast.walk(fns["activate_runtime_profile"]) if isinstance(c, ast.Call)
+                      and isinstance(c.func, (ast.Attribute, ast.Name))]
+    assert activate_calls.index("explicit_load") < activate_calls.index("apply_runtime_profile_to_settings")
+    callers = [name for name, text in _python_files() if re.search(r"(?<!def )apply_runtime_profile_to_settings\(", text)]
+    assert callers == ["inference/hotswap.py"]  # no other module reaches the hotswap ensure_local_* calls
+
+    await unloaded_after_unload_all(monkeypatch)
+    loads: list[list[str]] = []
+
+    async def probe(*args, **kwargs):
+        return {"ok": True, "models": ["qwen-a"]}
+
+    monkeypatch.setattr(lmstudio_server, "probe_remote_server", probe)
+    monkeypatch.setattr(lmstudio_server, "lmstudio_cli", lambda: "/bin/lms")
+    monkeypatch.setattr(lmstudio_server, "_run_cli", lambda argv, timeout: loads.append(list(argv)) or subprocess.CompletedProcess(argv, 0, "", ""))
+
+    async def loaded_ids(host, port):
+        return set()
+
+    monkeypatch.setattr(lmstudio_server, "_loaded_model_ids", loaded_ids)
+    blocked = await lmstudio_server.ensure_local_lmstudio(host="127.0.0.1", port=1234, model="qwen-a")
+    assert blocked["method"] == "unloaded" and loads == []
+    IDLE_UNLOAD.explicit_load()
+    await lmstudio_server.ensure_local_lmstudio(host="127.0.0.1", port=1234, model="qwen-a")
+    assert loads and loads[0][1:3] == ["load", "qwen-a"] and loads[0][-2:] == ["--ttl", "300"]
+
+
+async def test_an_owner_turn_respawns_the_front_responder_warm_up_and_the_front_warm_runs(monkeypatch):
+    await unloaded_after_unload_all(monkeypatch)
+    IDLE_UNLOAD.note_released(front=True)
+    warmed: list[bool] = []
+
+    class Provider:
+        async def chat_stream(self, *args, **kwargs):
+            warmed.append(True)
+            yield "ok"
+
+    FRONT_RUNTIME._provider = Provider()
+    await FRONT_RUNTIME._warmup(FrontDecision(reason="ok"))
+    assert warmed == []  # background warm-up refused while unloaded
+    IDLE_UNLOAD.touch()  # an owner turn lifts the hold
+    assert warm_blocked() is False
+
+
+def test_no_front_keep_warm_loop_or_watchdog_restart_exists_in_this_tree_yet():
+    """RFC-0230-S2's front keep-warm and watchdog restart are not in the tree. When one lands it must call
+    warm_blocked()/background_blocked() first; this test then fails until it is added to the guard scan."""
+    pattern = re.compile(r"def \w*(front\w*(watchdog|keep_?warm|rewarm)|(watchdog|keep_?warm|rewarm)\w*front)", re.I)
+    assert [name for name, text in _python_files() if pattern.search(text)] == []
+
+
+async def test_every_ollama_generate_and_chat_call_goes_through_the_one_helper():
+    """No /api/generate or /api/chat request in backend/app is built outside ollama_request()."""
+    offenders: list[str] = []
+    for name, text in _python_files():
+        if name == "inference/keep_alive.py":
+            continue
+        for fn in _outermost_functions(ast.parse(text)):
+            literals = [c.value for c in ast.walk(fn) if isinstance(c, ast.Constant) and isinstance(c.value, str)
+                        and c.value in {"/api/generate", "/api/chat"}]
+            if literals and "ollama_request" not in _calls(fn):
+                offenders.append(f"{name}:{fn.name}")
+    assert offenders == []
+
+
+async def test_ollama_v1_turn_is_followed_by_a_keep_alive_touch_only_if_resident(monkeypatch, tmp_path):
+    servers = FakeServers(ollama=[ANZU_OLLAMA]).install(monkeypatch)
+    real = httpx.AsyncClient
+    monkeypatch.setattr(keep_alive.httpx, "AsyncClient",
+                        lambda **kw: real(transport=httpx.MockTransport(servers.handler), **kw))
+    base = "http://127.0.0.1:11434/v1"
+    assert await keep_alive.touch_ollama_if_resident(base, ANZU_OLLAMA) is False  # not ANZU-loaded: never touched
+    assert servers.requests == []
+    LOADED.record(OLLAMA, ANZU_OLLAMA)
+    for keep_warm, expected in ((False, "300s"), (True, "-1")):
+        servers.requests.clear()
+        write_settings(tmp_path, keep_warm=keep_warm)
+        assert await keep_alive.touch_ollama_if_resident(base, ANZU_OLLAMA) is True
+        posts = [body for _p, method, path, body in servers.requests if method == "POST"]
+        assert posts == [{"model": ANZU_OLLAMA, "prompt": "", "stream": False, "keep_alive": expected}]
+    servers.ollama.clear()  # no longer resident (its own expiry unloaded it): a touch must never load it
+    servers.requests.clear()
+    assert await keep_alive.touch_ollama_if_resident(base, ANZU_OLLAMA) is False
+    assert [r for r in servers.requests if r[1] == "POST"] == []
+    servers.ollama.append(ANZU_OLLAMA)
+    MANAGER.state.manually_unloaded = True  # after Unload nothing is touched
+    servers.requests.clear()
+    assert await keep_alive.touch_ollama_if_resident(base, ANZU_OLLAMA) is False and servers.requests == []
+
+
+async def test_the_manager_touches_ollama_after_every_turn(monkeypatch):
+    from types import SimpleNamespace
+
+    touched: list[tuple[str, str]] = []
+
+    async def touch(base_url, model, api_key=""):
+        touched.append((base_url, model))
+        return True
+
+    async def reply(*args, **kwargs):
+        return "reply"
+
+    monkeypatch.setattr(keep_alive, "touch_ollama_if_resident", touch)
+    monkeypatch.setattr(MANAGER, "_chat_holding_lease", reply)
+    MANAGER.provider = SimpleNamespace(base_url="http://127.0.0.1:11434/v1", model=ANZU_OLLAMA, api_key="local")
+    MANAGER.state.backend, MANAGER.state.loaded = "ollama", True
+    assert await MANAGER.chat([]) == "reply"
+    assert touched == [("http://127.0.0.1:11434/v1", ANZU_OLLAMA)]
+    MANAGER.state.backend = "llama.cpp"
+    await MANAGER.chat([])
+    assert len(touched) == 1  # only Ollama turns need the touch
+
+
+async def test_lm_studio_rest_load_retries_without_ttl_when_a_build_rejects_the_key(monkeypatch):
+    """The documented /api/v1/models/load body has no `ttl`; a build that rejects it still loads (ANZU's timer enforces)."""
+    bodies: list[dict] = []
+    real = httpx.AsyncClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        bodies.append(body)
+        return httpx.Response(400 if "ttl" in body else 200, json={"error": "Unrecognized key(s) in object: 'ttl'"})
+
+    monkeypatch.setattr(gpu_prefer.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    assert (await gpu_prefer._lmstudio_rest_load("127.0.0.1", 1234, "m", timeout=5))["ok"] is True
+    assert ["ttl" in body for body in bodies] == [True, False]
+
+
+def test_manually_unloaded_is_exposed_in_the_model_snapshot_and_the_status_monitor_live_keys():
+    from app.inference.status_monitor import _LIVE_STATE_KEYS
+
+    assert "manually_unloaded" in _LIVE_STATE_KEYS
+    MANAGER.state.manually_unloaded = True
+    assert MANAGER.live_state_overlay()["manually_unloaded"] is True
+    assert MANAGER._assemble_snapshot(load_settings(), healthy=False)["manually_unloaded"] is True
+    MANAGER.state.manually_unloaded = False
+    assert MANAGER.live_state_overlay()["manually_unloaded"] is False

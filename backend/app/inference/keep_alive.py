@@ -7,14 +7,23 @@ Only models ANZU itself loaded (``LoadedModels``) ever receive these values.
 """
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 from urllib.parse import urlparse
 
+import httpx
+
 from .. import config as _config
 from ..config import AppSettings
-from .backends import LMSTUDIO_ALIASES, OLLAMA_ALIASES
-from .loaded_models import LMSTUDIO, LOADED, OLLAMA
+from .backends import LMSTUDIO_ALIASES, OLLAMA_ALIASES, inference_headers
+from .loaded_models import LMSTUDIO, LOADED, OLLAMA, canonical
+
+log = logging.getLogger(__name__)
+# Models ANZU never sends a request, an unload or a keep_alive to, whatever else is true
+# (CoS/PG ruling: Black Grid's ingest model shares the owner's Ollama). A backstop in front of
+# the ``LoadedModels`` ledger, which already fails closed for any model ANZU did not load.
+DENIED_MODELS = frozenset({"bgm-ingest-9b"})
 
 DEFAULT_IDLE_UNLOAD_SECONDS = 300
 # Always-warm (Keep warm ON): Ollama pins the model instead of relying on an expiry.
@@ -86,9 +95,71 @@ def request_extras(base_url: str, model: str, settings: AppSettings | None = Non
     warm is off.
     """
     family = backend_family(base_url, settings)
-    if family is None or LOADED.match(family, [model]) is None:
+    if family is None or is_denied(model) or LOADED.match(family, [model]) is None:
         return {}
     if family == OLLAMA:
         return {"keep_alive": ollama_keep_alive(settings)}
     ttl = lmstudio_ttl_seconds(settings)
     return {} if ttl is None else {"ttl": ttl}
+
+
+def is_denied(model: str) -> bool:
+    """True for a model ANZU must never address (any tag of a denied name)."""
+    return canonical(model).split(":", 1)[0] in DENIED_MODELS
+
+
+class DeniedModelError(ValueError):
+    """An Ollama request named a model ANZU may never address."""
+
+
+def ollama_body(model: str, body: dict[str, Any] | None = None, *, release: bool = False,
+                settings: AppSettings | None = None) -> dict[str, Any]:
+    """The one place an Ollama request body gets its ``keep_alive``.
+
+    ``"300s"`` (idle window) with Keep warm off, ``"-1"`` with it on, ``0`` for an explicit
+    unload (``release=True``). Ollama applies its own 5 minute default to a request that omits
+    the field, so every native request ANZU sends goes through here. Raises for a denied model.
+    """
+    if is_denied(model):
+        raise DeniedModelError(f"{model} is not an ANZU model; ANZU never sends it a request.")
+    return {**(body or {}), "model": model, "keep_alive": 0 if release else ollama_keep_alive(settings)}
+
+
+async def ollama_request(client: httpx.AsyncClient, host: str, port: int, path: str, model: str,
+                         body: dict[str, Any] | None = None, *, release: bool = False,
+                         settings: AppSettings | None = None) -> httpx.Response:
+    """POST a native Ollama generate or chat request with the policy keep_alive (the only sender)."""
+    address = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    return await client.post(f"http://{address}:{int(port)}{path}", json=ollama_body(model, body, release=release, settings=settings))
+
+
+async def touch_ollama_if_resident(base_url: str, model: str, api_key: str = "",
+                                   settings: AppSettings | None = None) -> bool:
+    """Keep-alive touch after a turn served through Ollama's OpenAI-compatible ``/v1``.
+
+    ``/v1`` honours a ``keep_alive`` field only on Ollama >= 0.35 and silently ignores it on
+    older builds, so the policy must not depend on it: a prompt-less native ``/api/generate``
+    carrying the policy value follows the turn, but only when ``/api/ps`` lists the model (a
+    touch never loads anything). Only a model ANZU loaded is touched; errors never reach the turn.
+    """
+    from .idle_unload import warm_blocked
+
+    if warm_blocked():  # after Unload / idle unload nothing is touched or reloaded until an owner turn or Load
+        return False
+    if backend_family(base_url, settings) != OLLAMA or is_denied(model) or LOADED.match(OLLAMA, [model]) is None:
+        return False
+    parsed = urlparse(base_url)
+    host, port = parsed.hostname or "127.0.0.1", int(parsed.port or 11434)
+    try:
+        async with httpx.AsyncClient(timeout=5.0, trust_env=False, headers=inference_headers(api_key)) as client:
+            ps = await client.get(f"http://{host}:{port}/api/ps")
+            ps.raise_for_status()
+            resident = {canonical(str(m.get("name") or m.get("model") or "")) for m in (ps.json().get("models") or []) if isinstance(m, dict)}
+            if canonical(model) not in resident:
+                return False
+            response = await ollama_request(client, host, port, "/api/generate", model, {"prompt": "", "stream": False}, settings=settings)
+            response.raise_for_status()
+        return True
+    except Exception as exc:  # a touch is best effort; the idle timer and verified unload remain the enforcers
+        log.debug("Ollama keep-alive touch skipped: %s", exc)
+        return False

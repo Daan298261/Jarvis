@@ -11,7 +11,7 @@ from urllib.parse import quote
 import httpx
 
 from .idle_unload import UNLOADED_DETAIL, warm_blocked
-from .keep_alive import lmstudio_ttl_seconds, ollama_keep_alive
+from .keep_alive import DeniedModelError, lmstudio_ttl_seconds, ollama_request
 from .loaded_models import LMSTUDIO, LOADED, OLLAMA
 
 _log = logging.getLogger(__name__)
@@ -123,10 +123,13 @@ async def _lmstudio_rest_load(host: str, port: int, model: str, timeout: float) 
     async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
         for path in paths:
             for body in payloads:
-                if ttl is not None:
-                    body = {**body, "ttl": ttl}
                 try:
-                    response = await client.post(root + path, json=body)
+                    response = await client.post(root + path, json={**body, "ttl": ttl} if ttl is not None else body)
+                    if ttl is not None and response.status_code in {400, 422}:
+                        # LM Studio's documented /api/v1/models/load body has no ``ttl`` (docs: lmstudio.ai/docs/
+                        # developer/rest/load); a build that rejects the key gets the load without it. ANZU's own
+                        # idle timer and verified unload still enforce the window; ``lms load --ttl`` is the primary.
+                        response = await client.post(root + path, json=body)
                 except Exception as exc:
                     return {"ok": False, "method": "rest", "detail": str(exc)[:240]}
                 if response.status_code < 400:
@@ -143,20 +146,15 @@ async def ensure_ollama_gpu(*, host: str, port: int, model: str, timeout: float 
         return {"ok": False, "method": "skipped", "detail": "no model or no NVIDIA GPU"}
     if warm_blocked():
         return {"ok": False, "method": "unloaded", "detail": UNLOADED_DETAIL}
-    url = f"http://{host}:{int(port)}/api/generate"
-    body = {
-        "model": hint,
-        "prompt": "",
-        "stream": False,
-        "keep_alive": ollama_keep_alive(),
-        "options": ollama_gpu_options(),
-    }
+    body = {"prompt": "", "stream": False, "options": ollama_gpu_options()}
     try:
         async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-            response = await client.post(url, json=body)
+            response = await ollama_request(client, host, port, "/api/generate", hint, body)
         if response.status_code < 400:
             LOADED.record(OLLAMA, hint)
             return {"ok": True, "method": "ollama-generate", "detail": hint}
         return {"ok": False, "method": "ollama-generate", "detail": f"HTTP {response.status_code}"}
+    except DeniedModelError as exc:
+        return {"ok": False, "method": "denied", "detail": str(exc)}
     except Exception as exc:
         return {"ok": False, "method": "ollama-generate", "detail": str(exc)[:240]}

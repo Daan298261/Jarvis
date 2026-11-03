@@ -59,7 +59,12 @@ export function HudModelRelease() {
         title={keepWarm ? "Models stay loaded" : "Models unload after 5 minutes without a turn"}>
         Keep warm: {keepWarm === null ? "…" : keepWarm ? "On" : "Off"}
       </button>
-      {note && <p id={noteId} role="status" className={`hud-model-release-note ${note.tone}`}>{note.text}</p>}
+      {note && (
+        <div id={noteId} role="status" className={`hud-model-release-note ${note.tone}`}>
+          <p>{note.text}</p>
+          {note.lines && note.lines.length > 0 && <ul>{note.lines.map((line) => <li key={line}>{line}</li>)}</ul>}
+        </div>
+      )}
     </div>
   )
 }

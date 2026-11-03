@@ -439,6 +439,7 @@ class InferenceManager:
                 )
             finally:
                 self._register_loaded()
+                await self._keep_alive_touch()
 
     async def _chat_holding_lease(
         self,
@@ -634,6 +635,7 @@ class InferenceManager:
                     yield delta
             finally:
                 self._register_loaded()
+                await self._keep_alive_touch()
 
     async def _chat_stream_holding_lease(
         self,
@@ -777,6 +779,16 @@ class InferenceManager:
         """
         if self.state.manually_unloaded:
             raise ModelManuallyUnloaded()
+
+    async def _keep_alive_touch(self) -> None:
+        """After a turn: an Ollama model served over ``/v1`` gets a native keep-alive touch (never loads)."""
+        provider = self.provider
+        if provider is None or self.state.backend != "ollama":
+            return
+        from .keep_alive import touch_ollama_if_resident
+
+        await touch_ollama_if_resident(str(getattr(provider, "base_url", "")), str(getattr(provider, "model", "")),
+                                       str(getattr(provider, "api_key", "") or ""))
 
     def _register_loaded(self) -> None:
         """Record the model ANZU itself loaded or attached to, and that it was just used."""
@@ -1229,6 +1241,7 @@ class InferenceManager:
         return {
             "loaded": self.state.loaded,
             "loading": self.state.loading,
+            "manually_unloaded": self.state.manually_unloaded,
             "last_error": self.state.last_error,
             "profile": self.state.profile or profile.name,
             "pid": self.state.pid,
@@ -1274,6 +1287,7 @@ class InferenceManager:
         return {
             "loaded": self.state.loaded,
             "loading": self.state.loading,
+            "manually_unloaded": self.state.manually_unloaded,
             "healthy": bool(healthy),
             "active_model": (
                 (self.provider.model if self.provider else self.provider_model(settings, self.state.advertised_models))

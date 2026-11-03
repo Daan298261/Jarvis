@@ -16,6 +16,7 @@ import psutil
 from ..config import data_dir, load_settings, save_settings
 from .backends import inference_headers, parse_models_payload
 from .idle_unload import IDLE_UNLOAD
+from .keep_alive import ollama_request
 
 log = logging.getLogger(__name__)
 Action = Literal["use", "leave", "stop", "replace"]
@@ -305,9 +306,10 @@ class RunningModels:
                     if native_unload:
                         key = settings.inference.api_key if settings.inference.port == row["port"] and settings.inference.host in {"localhost", "127.0.0.1"} else ""
                         async with httpx.AsyncClient(timeout=10, trust_env=False, headers=inference_headers(key)) as client:
-                            path = "/api/generate" if row["backend"] == "ollama" else "/api/v1/models/unload"
-                            payload = {"model": row["model"], "keep_alive": 0} if row["backend"] == "ollama" else {"instance_id": row["model"]}
-                            response = await client.post(f'http://127.0.0.1:{row["port"]}{path}', json=payload)
+                            if row["backend"] == "ollama":
+                                response = await ollama_request(client, "127.0.0.1", row["port"], "/api/generate", row["model"], release=True)
+                            else:
+                                response = await client.post(f'http://127.0.0.1:{row["port"]}/api/v1/models/unload', json={"instance_id": row["model"]})
                             response.raise_for_status()
                             await verify_unloaded(client, row)
                     else:
