@@ -12,6 +12,7 @@ import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -142,8 +143,44 @@ class ModelScreensLiveUiTest {
             } }
         }
         compose.onNodeWithText("42%").assertExists()
-        // One bar in the status card (development's) and one on that model's library card; the
-        // status card's transfer view adds no second bar.
-        assertEquals(2, compose.onAllNodes(determinateBar).fetchSemanticsNodes().size)
+        // Development's percent text and bar stay; the transfer view adds no second bar.
+        compose.onAllNodesWithText("Downloading · 42%").assertCountEquals(2) // status card and the library card
+    }
+
+    /** RFC-0235 criterion F: one determinate bar per download on the Models screen, not one per surface. */
+    @Test fun libraryCardShowsNoSecondBarForTheSelectedPackWhileTheLegacyBarIsVisible() {
+        val chrome = CompanionDeviceModelChrome()
+        val transfer = ModelDownloadState(otherId, packs[1].label, ModelDownloadStage.DOWNLOADING,
+            receivedBytes = 166_616_056, totalBytes = 396_704_896)
+        val devicePack = DevicePackChromeState(status = DevicePackStatus.DOWNLOADING, selectedPackId = otherId,
+            selectedPackLabel = packs[1].label, availablePacks = packs, downloadProgress = 0.42f,
+            nativeRuntimeBundled = true, downloads = mapOf(otherId to transfer))
+        compose.setContent {
+            MaterialTheme(colorScheme = darkColorScheme()) { Surface {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    CompanionModelsSection(chrome, devicePack, CompanionState(), pickModelFile = {})
+                }
+            } }
+        }
+        // Only the status card's legacy bar for the selected pack; its library card draws no bar.
+        assertEquals(1, compose.onAllNodes(determinateBar).fetchSemanticsNodes().size)
+    }
+
+    @Test fun anotherPacksLibraryCardKeepsItsOwnBar() {
+        val chrome = CompanionDeviceModelChrome()
+        val transfer = ModelDownloadState(otherId, packs[1].label, ModelDownloadStage.DOWNLOADING,
+            receivedBytes = 166_616_056, totalBytes = 396_704_896)
+        // The installed 1.7B pack is selected and READY; the 0.6B pack downloads in the background.
+        val devicePack = DevicePackChromeState(status = DevicePackStatus.READY, selectedPackId = installedId,
+            selectedPackLabel = packs[0].label, bytesOnDisk = 1_107_409_024, availablePacks = packs,
+            nativeRuntimeBundled = true, downloads = mapOf(otherId to transfer))
+        compose.setContent {
+            MaterialTheme(colorScheme = darkColorScheme()) { Surface {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    CompanionModelsSection(chrome, devicePack, CompanionState(), pickModelFile = {})
+                }
+            } }
+        }
+        assertEquals("the downloading pack's card shows its one bar", 1, compose.onAllNodes(determinateBar).fetchSemanticsNodes().size)
     }
 }
