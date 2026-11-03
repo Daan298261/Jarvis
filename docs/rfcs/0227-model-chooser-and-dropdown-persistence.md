@@ -203,9 +203,9 @@ See ownership tables. Sequential chains: `running_models.py` 0225-S3 → 0227-S1
 
 ## Errata
 
-- **2026-10-20, #652 (RFC-0225), follow-on to the L121 erratum added by #663.** L121 says the batch's changes to `tests/test_rfc0210_running_models.py` are "RFC-0225 S3's three listed #648 fixture changes" plus the rename. Correct reading: #648 has **landed** (`d214b6d`) and made its three fixture changes itself, and they are on `development` now:
-  1. `test_valid_server_uses_metadata_only` is parametrized over ports 1235 and 11434 (`:27`);
-  2. `test_background_reconnect_requires_existing_owner_choice` sets `settings.inference.auto_load = True` (`:271`);
-  3. `test_startup_waits_for_owner_choice_before_loading_worker` is renamed `test_startup_loads_saved_model_without_waiting_for_discovery`, with `load.assert_awaited_once_with(...)` (`:308`).
+- **2026-10-20, #652 (RFC-0225), follow-on to the erratum added by #663 in the `tests/test_rfc0227_offer_frequency.py` row of the file table.** That row says the batch's changes to `tests/test_rfc0210_running_models.py` are "RFC-0225 S3's three listed #648 fixture changes" plus the rename. Correct reading: #648 has **landed** (`d214b6d`) and made its three fixture changes itself, and they are on `development` now:
+  1. `tests/test_rfc0210_running_models.py::test_valid_server_uses_metadata_only` is parametrized over ports 1235 and 11434;
+  2. `tests/test_rfc0210_running_models.py::test_background_reconnect_requires_existing_owner_choice` sets `settings.inference.auto_load = True`;
+  3. `tests/test_rfc0210_running_models.py::test_startup_waits_for_owner_choice_before_loading_worker` is renamed `test_startup_loads_saved_model_without_waiting_for_discovery`, with `load.assert_awaited_once_with(...)`.
 
-  **RFC-0225 S3 makes only the fourth change:** `test_new_offer_is_announced_once_on_front_voice_lane` (`:288`) is renamed `test_new_offer_is_announced_once_on_owner_channel` and asserts `owner_line` instead of the dead `publish_owner_text` channel (the change #663's erratum names). This RFC still does not edit that file, and every other RFC-0210 assertion stays as is.
+  **RFC-0225 S3 makes only the fourth change:** `tests/test_rfc0210_running_models.py::test_new_offer_is_announced_once_on_front_voice_lane` is renamed `test_new_offer_is_announced_once_on_owner_channel` and asserts `owner_line` instead of the dead `publish_owner_text` channel (the change #663's erratum names). This RFC still does not edit that file, and every other RFC-0210 assertion stays as is.
