@@ -366,7 +366,7 @@ Ticket order: **S1 → S2, S3, S5 (parallel after S1; S5 also needs BGM-P2's fir
 
 | File | Chain (batch and 0242 as their specs read today, then 0246) | Notes |
 | --- | --- | --- |
-| `backend/app/inference/manager.py` | 0225-S3 → keep-warm ticket (D2) → 0242-T3 → 0242-T6 → 0246-S3 (0228-S2 also edits this file, between keep-warm and T3, per #655 and #686; this RFC does not reorder it. #670 also edits it and merges `development` in when picked up.) | S3 adds only the studio-busy check, in `_load_impl`, right after #686's checks. |
+| `backend/app/inference/manager.py` | 0225-S3 → keep-warm ticket (D2) → 0228-S2 → 0242-T3 → 0242-T6 → 0246-S3 (#670 also edits it and merges `development` in when picked up) | S3 adds only the studio-busy check, in `_load_impl`, right after #686's checks. |
 | `backend/app/inference/status_monitor.py` | 0230 (read-only) → 0242-T3 (the keep-warm ticket first if it edits it) → 0246-S3 | One additive live key. |
 | `backend/app/inference/front_runtime.py` | #648/#649 (landed) → 0230-S2 → 0246-S3 (#670 also edits it and merges `development` in) | Guard only. No 0225, 0228 or 0242 ticket edits it. |
 | `backend/app/inference/engine_requests.py`, `load_origin.py`, `model_release.py` (new) | 0242-T3 creates them → 0246-S3 (guard in `engine_requests.py` only) | S3 edits no other of the three. |
