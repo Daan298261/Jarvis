@@ -17,7 +17,8 @@ import java.util.concurrent.atomic.AtomicReference
  * - The stage ticker never hides a memory-pressure warning: once [pressure] is set, every tick
  *   starts with that warning.
  * - A turn that does not land a saved reply (cancelled, failed or stalled) leaves no partial
- *   assistant bubble in Chat and no preview on Home; a failure is shown only through `error`.
+ *   assistant bubble in Chat and no preview on Home. A failure is shown through `error` and, as it
+ *   always was, keeps its unsaved error bubble in Chat (live UI is add-only); a cancel leaves neither.
  * - A landed reply lives in `messages`; the streamed Home preview is cleared.
  */
 internal class LocalReplyTurn(
@@ -41,9 +42,10 @@ internal class LocalReplyTurn(
 
     val progress: (String) -> Unit = { stage.set(it) }
 
+    /** Remembers the warning for every later tick; writes it now only while the turn is open. */
     fun pressure(reason: String) {
         pressure.set(reason)
-        state.update { it.copy(activity = reason) }
+        if (open) state.update { it.copy(activity = reason) }
     }
 
     fun activityLine(): String =
@@ -63,7 +65,7 @@ internal class LocalReplyTurn(
     /**
      * Runs the turn's [block] under [withOfflineAnswerCleanup] with the stage ticker in [scope].
      * A cancelled turn rethrows after dropping its partial reply; a failed or stalled turn returns
-     * the failure after showing it as an error.
+     * the failure after showing it as an error (and its error bubble).
      */
     suspend fun <T> answer(
         scope: CoroutineScope,
@@ -96,10 +98,20 @@ internal class LocalReplyTurn(
         state.update { it.copy(liveLocalReply = "", messages = prior) }
     }
 
-    /** The turn failed: the message is an error, never a reply. */
+    /**
+     * The turn failed: only the partial reply and the Home preview are dropped. The error stays
+     * visible as `error` and keeps its unsaved error bubble in Chat, exactly as before this change;
+     * it is never persisted or queued as a reply.
+     */
     fun failed(message: String) {
-        discard()
-        state.update { it.copy(error = message) }
+        open = false
+        state.update {
+            it.copy(
+                liveLocalReply = "",
+                messages = prior + StandaloneActions.chatMessage(assistantId, "assistant", message, StandaloneActions.ORIGIN_ASSISTANT),
+                error = message,
+            )
+        }
     }
 
     /** The reply is saved and shown in Chat; Home's streamed preview is no longer needed. */

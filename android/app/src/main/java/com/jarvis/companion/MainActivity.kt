@@ -405,14 +405,7 @@ class MainActivity : FragmentActivity() {
                                     fontWeight = FontWeight.Light,
                                 )
                                 if (state.liveTranscript.isNotEmpty()) Text(state.liveTranscript, fontSize = 14.sp, color = Gold, modifier = Modifier.padding(top = 8.dp))
-                                if (state.liveLocalReply.isNotBlank()) Text(state.liveLocalReply, fontSize = 14.sp, color = Gold,
-                                    maxLines = 4, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(top = 8.dp))
-                                Text(state.activity, fontSize = 12.sp, color = Muted, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
-                                if (state.handoffText.isNotBlank()) Text(state.handoffText, color = Color(0xFF3AD4FF), modifier = Modifier.padding(8.dp))
-                                state.messages.lastOrNull { it.optString("role") == "assistant" }?.let { reply ->
-                                    Text(reply.optString("text"), maxLines = 5, modifier = Modifier.padding(8.dp))
-                                }
+                                HomeReplyLines(state)
                                 if (state.lanLabel.isNotEmpty()) Text(state.lanLabel, fontSize = 13.sp, color = Gold, modifier = Modifier.padding(bottom = 8.dp))
                                 if (CompanionMode.needsPhoneSetup(state.connected, state.localModelReady)) {
                                     PhoneSetupCard(state, devicePack, deviceChrome, pickModelFile)
@@ -615,6 +608,23 @@ private fun phoneModelStatus(state: CompanionState, devicePack: DevicePackChrome
     }
 }
 
+/**
+ * Home's reply lines. While an on-device reply streams, [CompanionState.liveLocalReply] is the one
+ * visible copy: the last assistant message is that same partial text (or the previous turn's reply),
+ * so it is hidden until the stream ends.
+ */
+@Composable
+internal fun HomeReplyLines(state: CompanionState) {
+    if (state.liveLocalReply.isNotBlank()) Text(state.liveLocalReply, fontSize = 14.sp, color = Gold,
+        maxLines = 4, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        modifier = Modifier.padding(top = 8.dp))
+    Text(state.activity, fontSize = 12.sp, color = Muted, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
+    if (state.handoffText.isNotBlank()) Text(state.handoffText, color = Color(0xFF3AD4FF), modifier = Modifier.padding(8.dp))
+    if (state.liveLocalReply.isBlank()) state.messages.lastOrNull { it.optString("role") == "assistant" }?.let { reply ->
+        Text(reply.optString("text"), maxLines = 5, modifier = Modifier.padding(8.dp))
+    }
+}
+
 private fun inferenceStatus(state: CompanionState): String {
     val name = state.inferenceFamily.ifBlank { state.inferenceProfile }.ifBlank { "conversation model" }
     return when {
@@ -758,7 +768,7 @@ private fun inferenceStatus(state: CompanionState): String {
     if (devicePack.availablePacks.isNotEmpty()) {
         Text("All models", fontSize = 16.sp, modifier = Modifier.padding(top = 14.dp, bottom = 6.dp))
         ModelLibraryCards(devicePack.availablePacks, devicePack.selectedPackId, devicePack.downloads, busy,
-            chrome::selectPack, chrome::downloadPack, chrome::cancelDownload)
+            chrome::selectPack, chrome::downloadPack, chrome::cancelDownload, showBar = { it.id != devicePack.selectedPackId })
     }
 }
 
