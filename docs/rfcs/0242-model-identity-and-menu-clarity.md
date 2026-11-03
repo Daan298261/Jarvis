@@ -1,13 +1,13 @@
 # RFC-0242: Accurate model identity, honest node-dropdown rows, verified Unload and verified Load (rescoped onto the RFC-0244 dropdown)
 
-**Status:** accepted (original text by Codex, #682); **rescoped 2026-10-30** by Jarvis Architect on CoS assignment. This file is the authoritative RFC-0242 on `development`. Where it differs from the text in #682 (RFC-0242; final head in this PR's body), this file wins.
+**Status:** accepted (original text by Codex, #682); **rescoped 2026-10-30** by Jarvis Architect on CoS assignment; **amended 2026-11-03** with the Keep warm toggle and 5-minute idle unload contract (section "Amendment: Keep warm toggle and 5-minute idle unload"). This file is the authoritative RFC-0242 on `development`. Where it differs from the text in #682 (RFC-0242; final head in this PR's body), this file wins.
 **Author:** Codex, requested by Daan (original, 2026-10-28); Jarvis Architect (rescope, 2026-10-30)
-**Date:** 2026-10-28; amended 2026-10-30
+**Date:** 2026-10-28; amended 2026-10-30 and 2026-11-03
 **Aligns with:** [`ANZU_PRODUCT_NORTH_STAR.md`](../../ANZU_PRODUCT_NORTH_STAR.md) §8 (ANZU must verify its own work; "confidence should come from evidence rather than cheerful completion messages"), §9 (local-first, owner-controlled infrastructure), §19 ("Do expose state when the user needs confidence in what ANZU is doing"; "Do not mark something finished merely because its backend exists"), §20.
 **Traced on:** `development` @ `a62bd454` (#685 landed on top of RFC-0244, #684). Every citation below is by file and symbol or by section name; no line numbers.
 **Builds on:** [RFC-0244](0244-three-engine-modes.md) sections "Decision" (including its owner follow-up) and "Acceptance criteria". Not affected: [RFC-0241](0241-model-startup-upgrade-reuse-catalog.md) (startup upgrade and catalog reuse).
 **Open batch PRs reconciled (final heads in this PR's body):** #652 (RFC-0225; final head in this PR's body), #655 (RFC-0228; final head in this PR's body), #664 (RFC-0232; final head in this PR's body), #665 (RFC-0245; final head in this PR's body), #668 (RFC-0233; final head in this PR's body). #682 (RFC-0242; final head in this PR's body) is the code PR this rescope reworks, and it stays the single code PR (reworked by D2, one commit per ticket).
-**Ordering (CoS, 2026-10-30):** RFC-0242's tickets go **last** on every file they share with the batch, after each file's existing chain. The tickets assume the batch (#652, #655, #664, #665, #668 and #670) has landed; D2 merges `development` into #682 once it has. The batch specs need no edit for this RFC.
+**Ordering (CoS, 2026-10-30):** RFC-0242's tickets go **last** on every file they share with the batch, after each file's existing chain. The tickets assume the batch (#652, #655, #664, #665, #668 and #670) has landed; D2 merges `development` into #682 once it has. The batch specs need no edit for this RFC's tickets. (The separate 2026-11-03 keep-warm order also reconciles #655 (RFC-0228; final head in this PR's body), see *Amendment: Keep warm toggle and 5-minute idle unload*.)
 **Astra boundary:** personas, WebGL and presence are not touched. The model dropdown is shared HUD chrome, not an Astra system; it is changed add-alongside only (see *Live-UI add-alongside reasoning pass*).
 
 ## Supersession notice (read first)
@@ -175,6 +175,70 @@ The model dropdown is live UI on `development` (RFC-0244, #685). Nothing below r
 
 No `[hidden]`, `display: none` or removal of an RFC-0244 element is introduced. New CSS is limited to additive rules in `frontend/src/hud/nodeModels.css` (the existing dropdown stylesheet) for the mismatch line; `hud-v2.css` is not edited. Live audit (S-level, recorded in the T2/T4/T6 PRs, numbers not invented in advance): on Taco's PC at 390 px and 1366 px, open the menu with a long file name and the mismatch line visible and confirm the menu does not overflow and `Escape` still closes it.
 
+## Amendment: Keep warm toggle and 5-minute idle unload
+
+**Owner order (Taco, via CoS, 2026-11-03).** Two new top-right HUD controls: an **Unload model** button and a **Keep warm** toggle that defaults to **off**. D2 is already building them as a Taco-owned ticket (the *keep-warm ticket* below). This amendment records the contract and how it composes with R1-R7 and T3-T6. It does not block the keep-warm ticket, and T1-T6 are unchanged.
+
+**Source of truth for names.** When this amendment was written, no PR for the keep-warm ticket existed on `Daan298261/Jarvis` (all states searched for keep warm, idle unload and `keep_alive`; only #655 (RFC-0228; final head in this PR's body) mentions an idle policy). The names below are therefore proposals: `keep_warm` (bool, default `false`) and `idle_unload_seconds` (default `300`), both on `InferenceSettings`; `idle_unload_seconds` is the key RFC-0228 section "Idle unload + reload (normative)" already uses. **D2's PR sets the final names, files and test paths.** When it opens, its number goes into this PR's body and any difference is a one-line edit here, not a blocker.
+
+**Contract (normative; each line has a named test below):**
+
+- **Keep warm OFF (default).** Every model ANZU loaded unloads after `idle_unload_seconds` (300 s) with no request lease, stream, tool loop or task stage, and respawns on demand on the next request that needs it. That covers the front responder, the 9B worker, the 27B coder and any LM Studio, Ollama or llama-server model ANZU loaded. A model an owner loaded and ANZU did not load stays under the existing RFC-0225 and RFC-0228 managed-mode rule (never unloaded unless managed mode is on); this toggle does not widen consent.
+- **Keep warm ON.** Today's always-warm behaviour applies: no idle timer for any model. ANZU-originated Ollama warms are pinned (`keep_alive: "-1"`), so "always warm" no longer depends on a 24 h expiry.
+- **No 24 h keep-alive survives.** Jarvis set `keep_alive: "24h"` in `gpu_prefer.ensure_ollama_gpu` and `ollama_runtime.ensure_local_ollama` earlier today, and the keep-warm ticket removes it. The idle policy replaces it: OFF sends `f"{idle_unload_seconds}s"`, ON sends `"-1"`. RFC-0228 section "Idle unload + reload (normative)" carries the same rule for its 9B timer and has no separate 9B timeout.
+- **The setting persists** across restart through the merge-safe `save_settings`; a settings file without the key means OFF.
+
+**How it composes with this RFC:**
+
+| Case | Behaviour | Why |
+| --- | --- | --- |
+| HUD **Unload model** button | An explicit owner Unload: it calls the same `POST /api/model/unload` and `unloadCurrentModel()` as the dropdown's Unload (T3, T4), with T3's verified native release (R5). It sets `manually_unloaded`. | One code path; no second unload implementation. |
+| Idle unload | **Not** a manual unload: `manually_unloaded` stays false. It is recorded as RFC-0228's `engine_coexistence.idle_unloaded()` ("unloaded (idle) for N min"). It reports "unloaded" only after the runtime's own post-unload evidence (R5); a failed release is shown once, the state is not reported unloaded, and the next attempt waits a full window. | Idle unload is policy, not an owner decision. |
+| Next request after an idle unload | Respawns on demand through RFC-0225 `prepare_engine_for` with the existing "Loading model…" state. The `RUNNING_MODELS` autoload branches (see the T3 table) skip an idle-unloaded model, so a poll never undoes an idle unload. | The owner asked for on-demand respawn, not for a poll-driven reload. |
+| Next request after an explicit Unload | **No** respawn: `ModelManuallyUnloaded` and its "Use Load" text stand until the owner's explicit Load clears the flag (T3). | An owner decision beats the idle policy. |
+| Unload pressed when nothing is loaded (for example after an idle unload) | 409 with a visible reason on the pressed control ("Nothing to unload: <model> was unloaded after 5 minutes idle and loads again on your next request"). `manually_unloaded` is **not** set. | R7: no dead button; no flag for a no-op. |
+| Unload or toggle refused (lease held, runtime error, settings write failed) | 409 or 502 with the runtime's text on the control; the toggle shows its previous state and the error, never an optimistic state. | R7. |
+| `reflex_only` (RFC-0244) | Idle unload still runs for ANZU-loaded models (releasing VRAM needs no model lane; see "Unload works in every mode" in *Reconciling Unload with RFC-0244*). **Nothing respawns on demand**: a request gets RFC-0244's bounded reflex answer and only an explicit owner Load (R2, T6) brings a model back. Keep warm ON changes nothing here. | Generation lanes stay governed by RFC-0244. |
+| `model_only` and `hybrid` | Respawn on demand as above (`model_only` still excludes JEV and Laya). | RFC-0244 routing is unchanged. |
+| Mode switch | Never unloads and never claims release (R4); an idle unload is caused by idleness only. | R4 unchanged. |
+| Toggle ON → OFF | Idle is measured from each model's last use, not from the toggle, so a model already idle for 300 s or more unloads at the next idle check. | One clock, no surprise window. |
+| Startup restore (`_autoload_model`) | Unchanged; the idle clock starts when a model finishes loading. | Not part of this order. |
+
+**Latency note.** RFC-0230 (landed, #666, `94a62fa0`) budgets first-word latency against a warm front lane. With Keep warm OFF the first request after an idle unload pays a reload, with the loading state visible. Keep warm ON restores the warm budget. This is the owner's order; the RFC records the cost.
+
+**Live-UI add-alongside reasoning pass (2026-10-14 standing order) for the two controls.** `HudShell.tsx` renders `.hud-top-right` with `HelpTrigger`, the Admin button (with its setup dot), the Classic toggle and `HudModelSelector`.
+
+| Existing element | What the keep-warm ticket does | Reasoning |
+| --- | --- | --- |
+| `HelpTrigger`, Admin button and setup dot, Classic toggle, `HudModelSelector` | unchanged, same order, same handlers | Nothing live is removed or re-parented. |
+| `.hud-top-right` reflow rules when the model menu is open (`.hud-model-trigger.open`) | unchanged; the new controls carry the existing `hud-icon-btn` class, so the existing reflow rule orders them with the other buttons | No existing CSS rule is edited; new rules are additive and live in a new stylesheet or `nodeModels.css`, never `hud-v2.css`. |
+| Dropdown Unload (T4) and `EngineModeControl` | unchanged | The HUD button reuses T4's call; it adds a second entry point only. |
+| Persona, WebGL, presence | untouched | Astra's. |
+
+New controls are two additive children of `.hud-top-right`, rendered by one new component mounted by one added line in `HudShell.tsx`. No `[hidden]`, `display: none` or removal is introduced. Live audit (recorded in the keep-warm PR, numbers not invented in advance): at 390 px and 1366 px the row does not overflow its `max-width` and both controls are reachable with the menu open and closed.
+
+**Conformance tests (named here; D2's PR sets the final paths).** Backend, `tests/test_keep_warm_idle_unload.py`:
+
+- `test_keep_warm_defaults_off_and_idle_window_is_300`
+- `test_idle_unload_after_300s_for_every_anzu_loaded_model` (parametrised: front responder, managed llama-server 9B, Ollama 27B coder, ANZU-loaded LM Studio instance)
+- `test_idle_unload_leaves_models_anzu_did_not_load`
+- `test_idle_unload_waits_for_lease_stream_and_task`
+- `test_respawn_on_demand_after_idle_unload_in_hybrid_and_model_only`
+- `test_reflex_only_idle_unload_runs_but_never_respawns_on_demand`
+- `test_idle_unload_does_not_set_manually_unloaded`
+- `test_poll_autoload_does_not_undo_idle_unload`
+- `test_keep_warm_on_never_idle_unloads_and_cancels_timers`
+- `test_keep_warm_off_resumes_idle_clock_from_last_use`
+- `test_explicit_unload_is_not_auto_respawned_until_owner_load`
+- `test_unload_with_nothing_loaded_returns_409_reason_and_sets_no_flag`
+- `test_idle_unload_failure_is_surfaced_not_reported_unloaded`
+- `test_no_ollama_24h_keep_alive_remains` (static scan of `backend/app` plus the payloads of `ensure_ollama_gpu` and `ensure_local_ollama`: `"300s"` when OFF, `"-1"` when ON)
+- `test_keep_warm_setting_persists_across_restart`
+
+Frontend, `frontend/keep-warm-hud.test.mjs` (`npm run test:keep-warm-hud`): the toggle renders OFF by default; the Unload model button calls the T4 unload path and shows a 409 reason on its own line; a refused toggle write reverts and shows the error; every existing `.hud-top-right` child is still present, in order. **CI:** backend step **"Run model and security regression tests"** (append `tests/test_keep_warm_idle_unload.py`) and **"Run full backend suite"**; frontend, one new append-only `frontend-build` step **"Keep warm HUD tests (keep-warm ticket)"**.
+
+**Ticket card (Taco-owned, already in flight).** *KW:* lane D2; model Grok 4.6 · fast mode off (recorded for the card; D2 is already building it and the model is not a gate); depends none. Files: `backend/app/config.py` (`keep_warm`, `idle_unload_seconds`), the idle-timer owner chosen by D2's PR, `backend/app/inference/gpu_prefer.py` and `backend/app/inference/ollama_runtime.py` (the `keep_alive` values above), `frontend/src/hud/HudShell.tsx` (one mount line), the new HUD component, its stylesheet and the two test files. **Ordering:** KW lands before T3, T4 and T6 on every file they share (it is in flight, and "0242 tickets go last" already covers it). After it lands, T3 re-points the idle-unload release call at `model_release.py` if KW used an earlier helper, and the T3 autoload skip guard also skips an idle-unloaded model (`test_poll_autoload_does_not_undo_idle_unload`).
+
 ## Slices (one ticket each, one developer each, fast off)
 
 Lane for every ticket: **D2** (the #682 code rework is a development merge into `cursor/model-menu-clarity-99ea`, no rebase; see *Rework of #682*). Tickets can use #682's code as the starting point but must drop every item in the supersession table.
@@ -206,6 +270,7 @@ Lane for every ticket: **D2** (the #682 code rework is a development merge into 
 | `backend/app/inference/status_monitor.py`, `backend/app/inference/model_release.py` (new) | 0242-T3 only | RFC-0230 lists `status_monitor.py` as read-only. |
 | `frontend/src/api.ts` | 0230-S0 → 0218-S3 → 0227 → 0245-S6 → 0233-S6 → 0242-T2 | T2 adds type fields only. |
 | `frontend/src/hud/HudModelSelector.tsx` | 0227-S3 → 0242-T2 → 0242-T4 → 0242-T6 | 0227-S3's row there is a slot-restore edit that RFC-0244 made obsolete; D2 works on whatever `development` holds after the batch, and does not re-add slots. |
+| `frontend/src/hud/HudShell.tsx` | keep-warm ticket only | One added mount line in `.hud-top-right`; no 0242 ticket edits it. |
 | `frontend/src/hud/nodeModelOptions.ts`, `frontend/src/hud/nodeModels.css`, `frontend/src/hud/applyRuntimeProfile.ts`, `frontend/apply-runtime-profile-api-stub.mjs` | 0242 only (T2, T2, T4, T4) | No batch spec edits them. |
 | `frontend/src/hud/modelMenuStatus.ts` | 0242-T4 → 0242-T6 | |
 | `frontend/src/App.tsx` | 0225-S5 → 0225-S3 → #670 (RFC-0211; final head in this PR's body) → 0242-T4 | T4's generation guard goes into the `/api/model` poll effect on top of 0225-S5's state-machine edit. |
@@ -430,6 +495,7 @@ Every ticket starts only after the batch chain for each of its files has landed 
 - [ ] Switching to a downloaded LM Studio model verifies its loaded instance before reporting success (T5).
 - [ ] An explicit owner Load works in every engine mode, and no generation lane starts under `reflex_only` (T6).
 - [ ] Choosing a dropdown row never activates a model; the inventory stays read-only (R1, R3).
+- [ ] Keep warm defaults off; with it off every ANZU-loaded model (front responder included) unloads after 5 minutes idle and respawns on demand, and an explicit Unload is never auto-respawned; with it on nothing idle-unloads; no 24 h Ollama keep-alive remains (section "Amendment: Keep warm toggle and 5-minute idle unload", `tests/test_keep_warm_idle_unload.py`).
 - [ ] No slot, Pin, bind endpoint or `modelSlots.ts` exists after the rework.
 - [ ] Backend regressions, full pytest, frontend build and lint, and the frontend test steps above pass; installed-app status is reported separately.
 
@@ -443,4 +509,6 @@ Security-gate changes, automatic model downloads or promotion, installer replace
 - **`reflex_only` explicit Load changes two RFC-0244 tests** (named in T6). CoS ruling; if it is withdrawn, T6 is dropped (including the offer-card change) and nothing else depends on it.
 - **LM Studio inventory shape.** `loaded_instances` is read from the native API; a runtime version without it makes Unload and Load fail closed with a message (never a false success).
 - **Ordering with the batch.** RFC-0242 goes last on every shared file, so D2 cannot start a ticket until its files' batch chains have landed; that is the cost of leaving #652 and #655 untouched. If a batch PR slips, only the tickets on its files wait.
+- **Cold first word after an idle unload.** With Keep warm OFF the first request after 5 idle minutes reloads the model, including the front responder, so RFC-0230's first-word budget applies to a warm lane only. The loading state is visible and Keep warm ON restores the warm path (owner order).
+- **Keep-warm ticket and T3 overlap on `manager.py`, `running_models.py` and `api/model.py`.** The keep-warm ticket lands first and 0242 stays last on shared files; if D2's PR names a setting, file or test differently, this section is edited to match, and D2's PR is the source of truth.
 - **`replace` stops another application's server.** It is an explicit owner click behind the card's existing confirm dialog, and it now also works under `reflex_only` (CoS ruling). Its stop path is unchanged and is verified by the existing unload-verification code (`verify_unloaded`).
