@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from ..config import AppSettings, FrontResponderSettings, load_settings
+from ..inference.idle_unload import IDLE_UNLOAD
 from ..inference.manager import MANAGER
 from ..providers.base import ChatMessage, ChatResult
 from .planning import RequestRoute
@@ -766,6 +767,7 @@ async def generate_front_reply(
     from ..engine_mode import model_enabled
     if not model_enabled(app):
         return FrontReply(action="silent_skip", text="", model="", skipped=True)
+    IDLE_UNLOAD.touch()  # a front-lane turn resets the idle-unload timer
     cfg = front_lane_config(app)
     started = turn_started if turn_started is not None else time.perf_counter()
     decision = turn_decision

@@ -13,6 +13,7 @@ from typing import Any
 import psutil
 
 from ..observability.rolling_log import record_event
+from .keep_alive import lmstudio_ttl_seconds
 from .request_lease import RequestLease
 
 _log = logging.getLogger(__name__)
@@ -84,7 +85,14 @@ def instance_load_args(row: dict[str, Any], *, key: str, identifier: str, contex
     if parallel is not None:
         args.extend(["--parallel", parallel])
     args.extend(["--context-length", context_length, "--yes"])
-    ttl = row.get("ttl", config.get("ttl"))
+    # An instance ANZU loaded follows the idle policy (300 s TTL, none while Keep warm is on); an
+    # instance ANZU did not load is rebuilt exactly as it was, its own TTL included.
+    from .loaded_models import LMSTUDIO, LOADED
+
+    if LOADED.match(LMSTUDIO, [identifier, key]) is not None:
+        ttl = lmstudio_ttl_seconds()
+    else:
+        ttl = row.get("ttl", config.get("ttl"))
     if isinstance(ttl, (int, float)) and not isinstance(ttl, bool) and ttl > 0:
         args.extend(["--ttl", int(ttl)])
     flash = row.get("flashAttention", config.get("flashAttention", config.get("flash_attn")))
@@ -107,6 +115,10 @@ async def grow_local_instance(
     lease: RequestLease | None = None,
     on_unloaded: Any | None = None,
 ) -> int | None:
+    from .idle_unload import warm_blocked
+
+    if warm_blocked():  # after Unload / idle unload nothing reloads until a turn or an explicit Load
+        return None
     # CLI talks to the local daemon. Never use it for another computer/port.
     if settings.inference.host not in {"localhost", "127.0.0.1", "::1"} or settings.inference.port != 1234:
         return None

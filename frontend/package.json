@@ -21,7 +21,8 @@
     "test:hexstrike-autostart": "node --experimental-strip-types --import ./apply-runtime-profile-test-register.mjs --test apply-runtime-profile.test.mjs",
     "test:persona-morph-hook": "node --experimental-strip-types --test persona-morph-hook.test.mjs",
     "test:manager-controls": "node --test manager-controls.test.mjs",
-    "test:hud-model-menu": "node --experimental-strip-types --test hud-model-menu-status.test.mjs && node --experimental-strip-types --import ./hud-model-selector-render-test-register.mjs --test hud-model-selector-render.test.mjs"
+    "test:hud-model-menu": "node --experimental-strip-types --test hud-model-menu-status.test.mjs && node --experimental-strip-types --import ./hud-model-selector-render-test-register.mjs --test hud-model-selector-render.test.mjs",
+    "test:keep-warm-hud": "node --experimental-strip-types --import ./hud-model-selector-render-test-register.mjs --test keep-warm-hud.test.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.32",

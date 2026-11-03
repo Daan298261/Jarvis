@@ -18,6 +18,7 @@ from .api import investigations
 
 from .agent.queue_watcher import QUEUE_WATCHER, enqueue_prompt_file
 from .api import advisor, agent_policy, agent_portability, agent_rooms, amazon_ads, approvals, auth, automation_breaker, autonomy, blackgrid, capability_lab, coding, companion, computer_use, context_repo, custom_presence, cyber_ato, decision, delegation, diagnostics, guest_portals, help as help_api, hexstrike, ingest, installer, integrations, license, lmstudio, lta, mcp, media, memory, mobile, model, modules, named_personas, owner_chat, packs, perception, perception_commentary, perception_identity, permissions, projects, queue, recovery, reversibility, runtime_profiles, security_agents, self_dev, session_personality, settings, setup, skill_forge, supermemory, swarm, system, tasks, tools, trajectories, vault, voice, voice_profiles, worker_environments, workflows, rea
+from .api import model_unload_all
 from .auth import authenticate_request, authenticate_websocket
 from .guests.service import authenticate_guest_request, extract_guest_token_from_request
 from . import startup_health
@@ -72,6 +73,7 @@ app.include_router(advisor.router)
 app.include_router(queue.router)
 app.include_router(system.router)
 app.include_router(model.router)
+app.include_router(model_unload_all.router)
 app.include_router(tools.router)
 app.include_router(settings.router)
 app.include_router(mcp.router)
@@ -364,6 +366,10 @@ async def startup() -> None:
         STATUS_MONITOR.start()
     except Exception:
         logging.debug("Model status monitor start skipped", exc_info=True)
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        from .inference.idle_unload import IDLE_UNLOAD
+
+        IDLE_UNLOAD.start()
     # Never await queue ingest on the startup path — create_task / routing can
     # stall (model/network) and leave Uvicorn stuck at "Waiting for application
     # startup" with nothing listening on :4780.
@@ -468,6 +474,9 @@ async def shutdown() -> None:
     from .inference.running_models import RUNNING_MODELS
 
     RUNNING_MODELS.stop()
+    from .inference.idle_unload import IDLE_UNLOAD
+
+    IDLE_UNLOAD.stop()
     try:
         from .inference.status_monitor import STATUS_MONITOR
 

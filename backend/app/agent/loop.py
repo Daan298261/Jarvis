@@ -26,6 +26,7 @@ from ..db.models import Checkpoint, Task, ToolCallRecord, utcnow
 from ..db.session import SessionLocal
 from ..events import BUS
 from ..inference.backends import is_inference_template_error
+from ..inference.idle_unload import IDLE_UNLOAD
 from ..inference.manager import MANAGER
 from ..inference.tool_capability import probe_tool_capability
 from ..inference.profiles import ModelProfile, resolve_profile
@@ -455,8 +456,10 @@ class AgentRuntime:
         heartbeat = asyncio.create_task(self._heartbeat_loop(task_id))
         self._tasks[task_id] = runner
         self._heartbeat_tasks[task_id] = heartbeat
+        IDLE_UNLOAD.touch()  # a turn resets the idle-unload timer and lifts a release hold
 
         def finish(_finished: asyncio.Task) -> None:
+            IDLE_UNLOAD.used()
             current = self._heartbeat_tasks.pop(task_id, None)
             if current:
                 current.cancel()

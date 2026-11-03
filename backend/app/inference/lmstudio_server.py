@@ -15,6 +15,9 @@ from typing import Any
 import httpx
 
 from .backends import probe_remote_server
+from .idle_unload import UNLOADED_DETAIL, warm_blocked
+from .keep_alive import lmstudio_ttl_seconds
+from .loaded_models import LMSTUDIO, LOADED
 
 _log = logging.getLogger(__name__)
 
@@ -145,12 +148,18 @@ async def ensure_local_lmstudio(
         }
 
     hint = (model or "").strip()
+    if hint and cli and warm_blocked():
+        return {"ok": False, "method": "unloaded", "detail": UNLOADED_DETAIL, "models": list(ready.get("models") or [])}
     if hint and cli:
         try:
             requested_context = max(4096, min(65536, int(context_size or 16384)))
+            load_args = [cli, "load", hint, "-c", str(requested_context), "-y"]
+            ttl = lmstudio_ttl_seconds()
+            if ttl is not None:
+                load_args.extend(["--ttl", str(ttl)])
             loaded = await asyncio.to_thread(
                 _run_cli,
-                [cli, "load", hint, "-c", str(requested_context), "-y"],
+                load_args,
                 min(timeout, 90.0),
             )
             if loaded.returncode != 0:
@@ -161,6 +170,8 @@ async def ensure_local_lmstudio(
 
     loaded = await _loaded_model_ids(host, port) if model else None
     model_ready = not model or (model in loaded if loaded is not None else model in (ready.get("models") or []))
+    if model and model_ready:
+        LOADED.record(LMSTUDIO, model)
     return {
         "ok": bool(ready.get("ok") and model_ready),
         "method": "auto-start",

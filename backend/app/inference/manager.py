@@ -31,6 +31,7 @@ from .context_window import (
     n_keep_overflow_message,
     parse_n_keep_overflow,
 )
+from .loaded_models import LLAMA_SERVER, LOADED, WORKER
 from .inference_prompt import sanitize_messages_for_inference
 from .profiles import (
     PROFILES,
@@ -104,6 +105,15 @@ class InferenceState:
     health_path: str = ""
     remote_model: str = ""
     gguf_path: str = ""
+    # Set by the HUD Unload model button; only a user turn or an explicit Load lifts it.
+    manually_unloaded: bool = False
+
+
+class ModelManuallyUnloaded(RuntimeError):
+    """A background path tried to load a model after the owner pressed Unload model."""
+
+    def __init__(self) -> None:
+        super().__init__("Model was manually unloaded. Use Load to start a model again.")
 
 
 def _with_context(profile: ModelProfile, context_size: int) -> ModelProfile:
@@ -413,18 +423,22 @@ class InferenceManager:
         if not self.provider:
             raise RuntimeError("Inference model is not loaded")
         async with self._request_lease.shared():
-            return await self._chat_holding_lease(
-                messages,
-                tools=tools,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                max_tokens=max_tokens,
-                thinking=thinking,
-                extra=extra,
-                settings=settings,
-                working_state_block=working_state_block,
-            )
+            self._register_loaded()  # this model was just used
+            try:
+                return await self._chat_holding_lease(
+                    messages,
+                    tools=tools,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    max_tokens=max_tokens,
+                    thinking=thinking,
+                    extra=extra,
+                    settings=settings,
+                    working_state_block=working_state_block,
+                )
+            finally:
+                self._register_loaded()
 
     async def _chat_holding_lease(
         self,
@@ -604,18 +618,22 @@ class InferenceManager:
         if not self.provider:
             raise RuntimeError("Inference model is not loaded")
         async with self._request_lease.shared():
-            async for delta in self._chat_stream_holding_lease(
-                messages,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                max_tokens=max_tokens,
-                thinking=thinking,
-                extra=extra,
-                settings=settings,
-                working_state_block=working_state_block,
-            ):
-                yield delta
+            self._register_loaded()  # this model was just used
+            try:
+                async for delta in self._chat_stream_holding_lease(
+                    messages,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    max_tokens=max_tokens,
+                    thinking=thinking,
+                    extra=extra,
+                    settings=settings,
+                    working_state_block=working_state_block,
+                ):
+                    yield delta
+            finally:
+                self._register_loaded()
 
     async def _chat_stream_holding_lease(
         self,
@@ -715,6 +733,7 @@ class InferenceManager:
         gguf_path: str | None = None,
     ) -> InferenceState:
         require_model(settings)
+        self._guard_background_load()
         if profile_name is None:
             profile_name = settings.inference.profile
             if gguf_path is None:
@@ -750,6 +769,27 @@ class InferenceManager:
                 gguf_path=gguf_path if gguf_path is not None else (profile.absolute_path or None),
             )
 
+    def _guard_background_load(self) -> None:
+        """After the owner pressed Unload model nothing reloads in the background.
+
+        A user turn or an explicit Load lifts ``manually_unloaded`` first
+        (``IdleUnload.touch`` / ``explicit_load``), so only background callers stop here.
+        """
+        if self.state.manually_unloaded:
+            raise ModelManuallyUnloaded()
+
+    def _register_loaded(self) -> None:
+        """Record the model ANZU itself loaded or attached to, and that it was just used."""
+        from .loaded_models import LMSTUDIO, OLLAMA
+
+        if self.state.manages_process:
+            if self.state.loaded:
+                LOADED.record(LLAMA_SERVER, WORKER, primary=True)
+        elif self.state.backend in {OLLAMA, LMSTUDIO} and self.state.loaded:
+            model = self.state.remote_model or str(getattr(self.provider, "model", "") or "")
+            if model:
+                LOADED.record(self.state.backend, model, primary=True)
+
     def _same_endpoint(self, settings: AppSettings) -> bool:
         return bool(
             self.state.host == settings.inference.host
@@ -769,6 +809,7 @@ class InferenceManager:
     ) -> InferenceState:
         """Reload only when context must grow or vision must be attached."""
         require_model(settings)
+        self._guard_background_load()
         async with self._lock:
             if not self.state.loaded or not self.provider:
                 return await self._load_locked(
@@ -796,6 +837,7 @@ class InferenceManager:
         """Attach mmproj for an in-flight vision request. Does not keep it at idle."""
         if self.state.vision_loaded:
             return self.state
+        self._guard_background_load()
         manages = bool(self.backend and getattr(self.backend, "manages_process", False))
         if not manages:
             profile = self._active_profile(settings)
@@ -851,6 +893,7 @@ class InferenceManager:
         force: bool = False,
         gguf_path: str | None = None,
     ) -> InferenceState:
+        self._guard_background_load()
         try:
             return await self._load_impl(
                 settings, profile_name, context_size=context_size, vision=vision,
@@ -876,6 +919,7 @@ class InferenceManager:
         gguf_path: str | None = None,
     ) -> InferenceState:
         require_model(settings)
+        self._guard_background_load()
         profile = await asyncio.to_thread(self._active_profile,
             settings,
             profile_name,
@@ -934,6 +978,7 @@ class InferenceManager:
             self.state.loaded = True
             self.state.loading = False
             self.state.pid = backend.pid
+            self._register_loaded()
             await self.refresh_resources()
             self._invalidate_status_cache()
             return self.state
@@ -987,6 +1032,7 @@ class InferenceManager:
         self.state.loading = False
         self.state.load_time_seconds = round(time.time() - started, 2)
         self.provider = self._make_provider(settings, advertised)
+        self._register_loaded()
         await self.refresh_resources()
         self._invalidate_status_cache()
         return self.state

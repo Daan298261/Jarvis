@@ -1,0 +1,8 @@
+.hud-model-release { position: relative; display: flex; align-items: center; gap: 5px; flex: 0 0 auto; }
+.hud-model-release .hud-icon-btn:disabled { opacity: .6; cursor: progress; }
+.hud-model-release .hud-keep-warm.on { border-color: rgba(103, 220, 255, 0.55); color: #e8f4fa; }
+.hud-model-release .hud-unload-btn.busy { animation: hud-model-pulse 1.4s ease-in-out infinite; }
+.hud-model-release-note { position: absolute; top: calc(100% + 6px); right: 0; z-index: 120; width: max-content; max-width: min(340px, calc(100vw - 24px)); margin: 0; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--hud-line); background: rgba(8, 14, 20, 0.94); color: #d7edf4; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.hud-model-release-note.error { border-color: rgba(255, 189, 156, 0.6); color: #ffbd9c; }
+.hud-top-right:has(.hud-model-trigger.open) > .hud-model-release { order: 1; flex: 0 0 auto; }
+@media (max-width: 640px) { .hud-model-release .hud-keep-warm, .hud-model-release .hud-unload-btn { padding-inline: 8px; } }

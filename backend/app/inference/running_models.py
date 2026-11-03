@@ -15,6 +15,7 @@ import psutil
 
 from ..config import data_dir, load_settings, save_settings
 from .backends import inference_headers, parse_models_payload
+from .idle_unload import IDLE_UNLOAD
 
 log = logging.getLogger(__name__)
 Action = Literal["use", "leave", "stop", "replace"]
@@ -289,7 +290,8 @@ class RunningModels:
                 await asyncio.to_thread(self._save, choices)
                 row["choice"] = "leave"
                 # Startup waits for this owner choice instead of competing for VRAM.
-                if model_enabled(settings) and not MANAGER.state.loaded and not MANAGER.state.loading and settings.inference.auto_load:
+                if (model_enabled(settings) and not MANAGER.state.loaded and not MANAGER.state.loading
+                        and settings.inference.auto_load and not IDLE_UNLOAD.background_blocked()):
                     await MANAGER.load(settings)
                 return self.snapshot()
             async with MANAGER._request_lease.exclusive() as acquired:
@@ -325,6 +327,7 @@ class RunningModels:
                             choices[other["id"]] = "leave"
                     await asyncio.to_thread(self._save, choices)
                 if action in {"use", "replace"}:
+                    IDLE_UNLOAD.explicit_load()  # the owner chose this model: an explicit Load
                     updated = settings.model_copy(deep=True)
                     if action == "use":
                         updated.inference.backend = row["backend"]
@@ -383,7 +386,8 @@ class RunningModels:
                                  and r["port"] == settings.inference.port
                                  and r["model"] == settings.inference.remote_model
                                  and settings.inference.host in {"127.0.0.1", "localhost"}), None)
-                if settings.inference.auto_load and selected and not selected.get("busy") and not MANAGER.state.loaded and not MANAGER.state.loading:
+                if (settings.inference.auto_load and selected and not selected.get("busy") and not MANAGER.state.loaded
+                        and not MANAGER.state.loading and not IDLE_UNLOAD.background_blocked()):
                     async with MANAGER._request_lease.exclusive() as acquired:
                         if acquired:
                             await MANAGER.load(settings)

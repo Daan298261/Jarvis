@@ -20,6 +20,7 @@ from ..config import (
 from ..inference.backends import suggested_port
 from ..tools.registry import REGISTRY
 
+_IDLE_TICKS: set[asyncio.Task] = set()
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 _front_reconfigure_task: asyncio.Task | None = None
 _front_revision = 0
@@ -75,6 +76,8 @@ class SettingsUpdate(BaseModel):
     inference_host: str | None = None
     inference_port: int | None = None
     inference_vision: bool | None = None
+    inference_keep_warm: bool | None = None
+    inference_idle_unload_seconds: int | None = Field(default=None, ge=30, le=86400)
     inference_remote_model: str | None = None
     inference_api_key: str | None = None
     vision_mode: str | None = None
@@ -201,6 +204,7 @@ async def update_settings(body: SettingsUpdate):
                           "remote_base_url", "remote_api_key", "prompt_cache")
     settings = load_settings()
     previous_front = tuple(getattr(settings.front_responder, k) for k in front_runtime_keys)
+    previous_policy = (settings.inference.keep_warm, settings.inference.idle_unload_seconds)
     if body.engine_mode is not None:
         settings.engine_mode = body.engine_mode
     if body.autonomy is not None:
@@ -252,6 +256,10 @@ async def update_settings(body: SettingsUpdate):
         settings.inference.port = body.inference_port
     if body.inference_vision is not None:
         settings.inference.vision = body.inference_vision
+    if body.inference_keep_warm is not None:
+        settings.inference.keep_warm = body.inference_keep_warm
+    if body.inference_idle_unload_seconds is not None:
+        settings.inference.idle_unload_seconds = body.inference_idle_unload_seconds
     if body.inference_remote_model is not None:
         settings.inference.remote_model = body.inference_remote_model
     if body.inference_api_key is not None:
@@ -431,4 +439,10 @@ async def update_settings(body: SettingsUpdate):
         clear()
     if previous_front != tuple(getattr(settings.front_responder, k) for k in front_runtime_keys):
         _schedule_front_reconfigure()
+    if not settings.inference.keep_warm and previous_policy != (settings.inference.keep_warm, settings.inference.idle_unload_seconds):
+        # Keep warm switched off (or a shorter window): models already idle past it unload now.
+        from ..inference.idle_unload import IDLE_UNLOAD
+
+        _IDLE_TICKS.add(task := asyncio.create_task(IDLE_UNLOAD.tick(), name="anzu-idle-unload-now"))
+        task.add_done_callback(_IDLE_TICKS.discard)
     return settings.model_dump()
