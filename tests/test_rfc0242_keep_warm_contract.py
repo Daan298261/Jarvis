@@ -407,6 +407,9 @@ async def test_owner_approval_after_unload_respawns_the_model(monkeypatch):
     from types import SimpleNamespace
 
     from app.api import tasks as tasks_api
+    from app.inference.manager import MANAGER  # resolved at call time: other tests reload app modules
+
+    AGENT = tasks_api.AGENT
 
     seen: list[bool] = []
 
@@ -428,7 +431,9 @@ async def test_a_real_parked_task_resumes_after_unload_only_through_an_owner_app
     from app.api import tasks as tasks_api
     from app.db import session as session_mod
     from app.db.models import Task
+    from app.inference.manager import MANAGER
 
+    AGENT = tasks_api.AGENT
     await session_mod.configure_database(path=tmp_path / "jarvis.db")
     await session_mod.init_db()
     async with session_mod.SessionLocal() as session:
@@ -520,3 +525,151 @@ async def test_persona_bind_after_unload_lifts_the_hold_before_the_prepare_step(
     await named_personas._maybe_activate_persona_brain("veles")
     assert await_order == [("prepare", False), ("activate", False)]  # not blocked at prepare: the bind goes through
     assert MANAGER.state.manually_unloaded is False
+
+
+# --- D1 review: real-load wiring, worker clock, name guards -------------------------------------------------------
+
+def _reset_manager():
+    MANAGER.provider = None
+    MANAGER.backend = None
+    MANAGER.state.loaded = False
+    MANAGER.state.loading = False
+    MANAGER._attach_ok = False
+
+
+async def _real_attach(monkeypatch, backend: str, model: str, port: int):
+    """Drive the real MANAGER.load against an already running, owner-started server."""
+    from app.inference import manager as manager_mod
+
+    async def probe(*args, **kwargs):
+        return {"ok": True, "models": [model]}
+
+    async def nothing(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(manager_mod, "probe_remote_server", probe)
+    monkeypatch.setattr(MANAGER, "refresh_resources", nothing)
+    _reset_manager()
+    settings = settings_with(False, backend=backend, host="127.0.0.1", port=port, remote_model=model)
+    await MANAGER.load(settings, force=True)
+    assert MANAGER.state.loaded is True
+    return settings
+
+
+@pytest.mark.parametrize("backend,model,port", [("ollama", "owner-started:7b", 11434), ("lmstudio", "owner-lm", 1234)])
+async def test_a_real_load_attach_never_enters_the_ledger_without_an_explicit_owner_load(monkeypatch, backend, model, port):
+    """Mutant guard: _load_impl / _load_locked must not register an attach unless an explicit Load asked for it."""
+    await _real_attach(monkeypatch, backend, model, port)
+    assert LOADED.entries() == []  # attached to what the owner started: foreign, never idle-unloaded
+    # A background starter (ensure_runtime) goes through the same path and still records nothing.
+    _reset_manager()
+    await _real_attach(monkeypatch, backend, model, port)
+    assert LOADED.entries() == []
+
+
+@pytest.mark.parametrize("backend,model,port", [("ollama", "owner-started:7b", 11434), ("lmstudio", "owner-lm", 1234)])
+async def test_a_real_load_after_an_explicit_load_records_the_model(monkeypatch, backend, model, port):
+    IDLE_UNLOAD.explicit_load()  # HUD / dropdown / runtime activation
+    await _real_attach(monkeypatch, backend, model, port)
+    assert LOADED.match(backend, [model]) is not None
+    # single use: the next attach in the same context is background again and records nothing new
+    LOADED.clear()
+    await _real_attach(monkeypatch, backend, model, port)
+    assert LOADED.entries() == []
+
+
+async def test_an_explicit_load_that_never_reaches_a_load_cannot_leak_into_a_later_background_attach(monkeypatch):
+    async def owner_act_that_fails_before_loading():
+        IDLE_UNLOAD.explicit_load()  # e.g. the HUD click whose load request errors out before MANAGER.load runs
+
+    await asyncio.create_task(owner_act_that_fails_before_loading())
+    await _real_attach(monkeypatch, "ollama", "owner-started:7b", 11434)  # a later, separate background attach
+    assert LOADED.entries() == []
+    assert IDLE_UNLOAD.consume_explicit_load() is False
+    # ... and an explicit Load whose load() short-circuits (already loaded, same settings) is still consumed.
+    IDLE_UNLOAD.explicit_load()
+    settings = settings_with(False, backend="ollama", host="127.0.0.1", port=11434, remote_model="owner-started:7b")
+    await MANAGER.load(settings)  # same endpoint and profile: returns early without a new attach
+    assert IDLE_UNLOAD.consume_explicit_load() is False
+    _reset_manager()
+
+
+async def test_worker_only_turn_resets_only_the_worker_clock_for_chat_and_chat_stream(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.inference.loaded_models import FRONT, LLAMA_SERVER, WORKER
+
+    clock = FakeClock()
+    monkeypatch.setattr(LOADED, "_clock", clock)
+    LOADED.record(LLAMA_SERVER, WORKER)
+    LOADED.record(LLAMA_SERVER, FRONT)
+    LOADED.record(OLLAMA, "other:1b")
+    MANAGER.state.manages_process, MANAGER.state.loaded = True, True
+
+    async def reply(*args, **kwargs):
+        return "reply"
+
+    async def stream(*args, **kwargs):
+        yield "chunk"
+
+    MANAGER.provider = SimpleNamespace(chat=reply, chat_stream=stream, base_url="http://127.0.0.1:8088/v1", model="w")
+    monkeypatch.setattr(MANAGER, "_keep_alive_touch", lambda: reply())
+    idle = lambda: {e.key[1]: LOADED.idle_for(e) for e in LOADED.entries()}  # noqa: E731
+    clock.now += 250
+    await MANAGER.chat([])
+    assert idle() == {WORKER: 0, FRONT: 250, "other:1b": 250}
+    clock.now += 10
+    async for _chunk in MANAGER.chat_stream([]):
+        pass
+    assert idle() == {WORKER: 0, FRONT: 260, "other:1b": 260}
+
+
+async def test_lm_studio_instance_load_args_and_grow_never_carry_a_ttl_or_run_for_the_studio_model(monkeypatch, tmp_path):
+    from app.inference import lmstudio_context
+    from tests.test_keep_warm_idle_unload import write_settings
+
+    write_settings(tmp_path, keep_warm=False)
+    LOADED.record(LMSTUDIO, FOREIGN)  # even a buggy ledger entry
+    row = {"identifier": FOREIGN, "modelKey": FOREIGN, "contextLength": 8192, "ttlMs": 300000}
+    args = lmstudio_context.instance_load_args(row, key=FOREIGN, identifier=FOREIGN, context_length=8192)
+    assert "--ttl" not in args  # lmstudio_ttl_seconds(model=) refuses it
+    assert keep_alive.lmstudio_ttl_seconds(model=FOREIGN) is None
+    assert keep_alive.lmstudio_ttl_seconds(model="qwen-a") == 300  # control: the guard is by name only
+    commands: list[list[str]] = []
+
+    def run(argv, **kwargs):
+        import subprocess
+
+        commands.append([str(a) for a in argv])
+        return subprocess.CompletedProcess(argv, 0, "[]", "")
+
+    monkeypatch.setattr(lmstudio_context.subprocess, "run", run)
+    monkeypatch.setattr(lmstudio_context.shutil, "which", lambda name: "/bin/lms")
+    settings = settings_with(False, backend="lmstudio", host="127.0.0.1", port=1234)
+    assert await lmstudio_context.grow_local_instance(settings, 65536, FOREIGN) is None
+    assert commands == []  # not even `lms ps`: the name guard runs before any command
+
+
+async def test_repin_skips_the_studio_model_by_name_even_when_the_ledger_and_ps_list_it(monkeypatch, tmp_path):
+    import json
+    import subprocess
+
+    from app.inference import lmstudio_context
+    from tests.test_keep_warm_idle_unload import write_settings
+
+    write_settings(tmp_path, keep_warm=True)
+    LOADED.record(LMSTUDIO, FOREIGN)
+    commands: list[list[str]] = []
+
+    def run(argv, **kwargs):
+        args = [str(a) for a in argv]
+        commands.append(args)
+        row = {"identifier": FOREIGN, "modelKey": FOREIGN, "status": "idle", "queued": 0, "contextLength": 8192,
+               "maxContextLength": 8192, "ttlMs": 300000}
+        return subprocess.CompletedProcess(argv, 0, json.dumps([row]), "")
+
+    monkeypatch.setattr(lmstudio_context.subprocess, "run", run)
+    monkeypatch.setattr(lmstudio_context.shutil, "which", lambda name: "/bin/lms")
+    settings = settings_with(True, backend="lmstudio", host="127.0.0.1", port=1234)
+    assert await lmstudio_context.repin_local_instances(settings, lease=MANAGER._request_lease) == []
+    assert [c for c in commands if c[1] in {"unload", "load"}] == []

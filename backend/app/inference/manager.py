@@ -275,6 +275,7 @@ class InferenceManager:
         self.backend: InferenceBackend | None = None
         self._lock = asyncio.Lock()
         self._request_lease = RequestLease()
+        self._attach_ok = False  # set only inside load() for an explicit owner Load
         self.provider: OpenAICompatProvider | None = None
         self._loaded_profile: ModelProfile | None = None
 
@@ -747,35 +748,40 @@ class InferenceManager:
             if gguf_path is None:
                 gguf_path = settings.inference.gguf_path or None
         async with self._lock:
-            profile = await asyncio.to_thread(self._active_profile,
-                settings,
-                profile_name,
-                gguf_path=gguf_path,
-                context_size=context_size,
-            )
-            backend = resolve_backend(settings)
-            model = profile_gguf(profile)
-            same = (
-                not force
-                and self.backend
-                and self.state.loaded
-                and self.state.profile == profile.name
-                and self.state.model_path == (str(model) if backend.requires_local_files else "")
-                and self.backend.name == backend.name
-                and self._same_endpoint(settings)
-                and int((self.state.context_size if backend.manages_process else self.state.requested_context_size) or 0) >= int(profile.context_size or 0)
-                and (not vision or self.state.vision_loaded)
-            )
-            if same:
-                return self.state
-            return await self._load_locked(
-                settings,
-                profile.name,
-                context_size=context_size or profile.context_size,
-                vision=vision,
-                force=force,
-                gguf_path=gguf_path if gguf_path is not None else (profile.absolute_path or None),
-            )
+            # An explicit owner Load is consumed by the very next load call, whether or not it reaches the attach.
+            self._attach_ok = IDLE_UNLOAD_explicit_pending()
+            try:
+                profile = await asyncio.to_thread(self._active_profile,
+                    settings,
+                    profile_name,
+                    gguf_path=gguf_path,
+                    context_size=context_size,
+                )
+                backend = resolve_backend(settings)
+                model = profile_gguf(profile)
+                same = (
+                    not force
+                    and self.backend
+                    and self.state.loaded
+                    and self.state.profile == profile.name
+                    and self.state.model_path == (str(model) if backend.requires_local_files else "")
+                    and self.backend.name == backend.name
+                    and self._same_endpoint(settings)
+                    and int((self.state.context_size if backend.manages_process else self.state.requested_context_size) or 0) >= int(profile.context_size or 0)
+                    and (not vision or self.state.vision_loaded)
+                )
+                if same:
+                    return self.state
+                return await self._load_locked(
+                    settings,
+                    profile.name,
+                    context_size=context_size or profile.context_size,
+                    vision=vision,
+                    force=force,
+                    gguf_path=gguf_path if gguf_path is not None else (profile.absolute_path or None),
+                )
+            finally:
+                self._attach_ok = False
 
     def _guard_background_load(self) -> None:
         """After the owner pressed Unload model nothing reloads in the background.
@@ -1010,7 +1016,7 @@ class InferenceManager:
             self.state.loaded = True
             self.state.loading = False
             self.state.pid = backend.pid
-            self._register_loaded()
+            self._register_loaded(attach=self._attach_ok)
             await self.refresh_resources()
             self._invalidate_status_cache()
             return self.state
@@ -1064,7 +1070,7 @@ class InferenceManager:
         self.state.loading = False
         self.state.load_time_seconds = round(time.time() - started, 2)
         self.provider = self._make_provider(settings, advertised)
-        self._register_loaded(attach=IDLE_UNLOAD_explicit_pending())
+        self._register_loaded(attach=self._attach_ok)
         await self.refresh_resources()
         self._invalidate_status_cache()
         return self.state

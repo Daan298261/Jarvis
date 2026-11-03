@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextvars import ContextVar
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -18,7 +19,9 @@ from .loaded_models import LOADED, LoadedModels
 
 log = logging.getLogger(__name__)
 POLL_SECONDS = 15.0
-EXPLICIT_LOAD_WINDOW_SECONDS = 120.0
+# True inside the asyncio task / request that made an explicit owner Load. A context variable (not a clock
+# window) so a later background attach in another task can never inherit it.
+_EXPLICIT_LOAD: ContextVar[bool] = ContextVar("anzu_explicit_owner_load", default=False)
 
 Release = Callable[[str, list[tuple[str, str]] | None], Awaitable[dict[str, Any]]]
 
@@ -42,7 +45,6 @@ class IdleUnload:
         self._busy = busy
         self._leased = leased
         self._cancel_tasks = cancel_tasks
-        self._explicit_at: float | None = None
         self.held = False            # something was released and no turn has happened since
         self.front_released = False  # the front responder was stopped by a release
         self.last_result: dict[str, Any] | None = None
@@ -86,15 +88,17 @@ class IdleUnload:
 
         MANAGER.state.manually_unloaded = False
         self.held = False
-        self._explicit_at = self.registry._clock()
+        _EXPLICIT_LOAD.set(True)
         if self.front_released:
             self.front_released = False
             self._schedule_front_restart()
 
     def consume_explicit_load(self) -> bool:
-        """True once after an explicit Load (for two minutes): the attach that follows is the owner's own Load."""
-        at, self._explicit_at = self._explicit_at, None
-        return at is not None and self.registry._clock() - at <= EXPLICIT_LOAD_WINDOW_SECONDS
+        """True once, in the task that made an explicit Load: the attach that follows is the owner's own Load."""
+        explicit = _EXPLICIT_LOAD.get()
+        if explicit:
+            _EXPLICIT_LOAD.set(False)
+        return explicit
 
     def clear_hold(self) -> None:
         """Drop the release hold (``held``) without touching ``manually_unloaded``.
