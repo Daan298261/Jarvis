@@ -16,7 +16,7 @@ import psutil
 from ..config import data_dir, load_settings, save_settings
 from .backends import inference_headers, parse_models_payload
 from .idle_unload import IDLE_UNLOAD
-from .keep_alive import ollama_request
+from .keep_alive import is_denied, ollama_request
 
 log = logging.getLogger(__name__)
 Action = Literal["use", "leave", "stop", "replace"]
@@ -300,6 +300,9 @@ class RunningModels:
                     raise ValueError("ANZU is answering a request; try again when it finishes")
                 before = MANAGER.live_context_size()
                 if action in {"stop", "replace"}:
+                    if is_denied(row["model"]) or (row["backend"] not in {"ollama", "lmstudio"} and any(
+                            is_denied(other["model"]) for other in self.rows if other["port"] == row["port"])):
+                        raise ValueError("ANZU never stops this model")
                     if not row["can_stop"]:
                         raise ValueError("This server does not expose a safe stop operation")
                     native_unload = row["backend"] in {"ollama", "lmstudio"}

@@ -13,7 +13,7 @@ from typing import Any
 import psutil
 
 from ..observability.rolling_log import record_event
-from .keep_alive import lmstudio_ttl_seconds
+from .keep_alive import is_denied, lmstudio_ttl_seconds
 from .request_lease import RequestLease
 
 _log = logging.getLogger(__name__)
@@ -90,7 +90,7 @@ def instance_load_args(row: dict[str, Any], *, key: str, identifier: str, contex
     from .loaded_models import LMSTUDIO, LOADED
 
     if LOADED.match(LMSTUDIO, [identifier, key]) is not None:
-        ttl = lmstudio_ttl_seconds()
+        ttl = lmstudio_ttl_seconds(model=identifier)
     else:
         ttl = row.get("ttl", config.get("ttl"))
     if isinstance(ttl, (int, float)) and not isinstance(ttl, bool) and ttl > 0:
@@ -118,6 +118,8 @@ async def grow_local_instance(
     from .idle_unload import warm_blocked
 
     if warm_blocked():  # after Unload / idle unload nothing reloads until a turn or an explicit Load
+        return None
+    if is_denied(identifier):  # never closed, reloaded or re-TTL'd (name guard)
         return None
     # CLI talks to the local daemon. Never use it for another computer/port.
     if settings.inference.host not in {"localhost", "127.0.0.1", "::1"} or settings.inference.port != 1234:

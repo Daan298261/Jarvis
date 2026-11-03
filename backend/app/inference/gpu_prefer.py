@@ -66,7 +66,7 @@ def lmstudio_cli_load_args(model: str) -> list[str] | None:
     if not binary or not (model or "").strip():
         return None
     args = [binary, "load", model.strip(), "--gpu", LMS_GPU_FLAG, "-y"]
-    ttl = lmstudio_ttl_seconds()
+    ttl = lmstudio_ttl_seconds(model=model)
     if ttl is not None:
         args.extend(["--ttl", str(ttl)])
     return args
@@ -119,7 +119,7 @@ async def _lmstudio_rest_load(host: str, port: int, model: str, timeout: float) 
         {"model_key": model, "config": {"offload_ratio": 1.0}},
     )
     paths = ("/api/v0/models/load", "/api/v1/models/load", f"/api/v0/models/{quote(model, safe='')}/load")
-    ttl = lmstudio_ttl_seconds()
+    ttl = lmstudio_ttl_seconds(model=model)
     async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
         for path in paths:
             for body in payloads:

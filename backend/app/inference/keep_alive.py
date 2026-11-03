@@ -65,9 +65,11 @@ def ollama_keep_alive(settings: AppSettings | None = None) -> str:
     return OLLAMA_PINNED_KEEP_ALIVE if keep_warm_enabled(app) else f"{idle_unload_seconds(app)}s"
 
 
-def lmstudio_ttl_seconds(settings: AppSettings | None = None) -> int | None:
-    """LM Studio ``ttl`` in seconds, or ``None`` (no TTL) when Keep warm is on."""
+def lmstudio_ttl_seconds(settings: AppSettings | None = None, model: str = "") -> int | None:
+    """LM Studio ``ttl`` in seconds, or ``None`` (no TTL) when Keep warm is on or ``model`` is denied."""
     app = settings or current_settings()
+    if model and is_denied(model):
+        return None
     return None if keep_warm_enabled(app) else idle_unload_seconds(app)
 
 
@@ -88,24 +90,29 @@ def backend_family(base_url: str, settings: AppSettings | None = None) -> str | 
 
 
 def request_extras(base_url: str, model: str, settings: AppSettings | None = None) -> dict[str, Any]:
-    """Keep-alive fields for one request to ``model`` at ``base_url`` (empty for foreign models).
+    """Keep-alive fields for one request to ``model`` at ``base_url`` (empty for a denied model).
 
-    Ollama resets a model to its own default whenever a request omits ``keep_alive``, so every
-    ANZU request to an ANZU-loaded Ollama model carries it. LM Studio gets ``ttl`` while Keep
-    warm is off.
+    Ollama resets a model to its own default whenever a request omits ``keep_alive``, so *every*
+    ANZU request to a loopback Ollama model carries it, whether or not ANZU loaded it (the
+    value only restates the idle policy; ``bgm-ingest-9b`` is the one exception). Unloads, the
+    idle timer and the release path still touch only models in the ledger. LM Studio gets
+    ``ttl`` only for an instance ANZU loaded, and only while Keep warm is off.
     """
     family = backend_family(base_url, settings)
-    if family is None or is_denied(model) or LOADED.match(family, [model]) is None:
+    if family is None or is_denied(model):
         return {}
     if family == OLLAMA:
         return {"keep_alive": ollama_keep_alive(settings)}
-    ttl = lmstudio_ttl_seconds(settings)
+    if LOADED.match(family, [model]) is None:
+        return {}
+    ttl = lmstudio_ttl_seconds(settings, model)
     return {} if ttl is None else {"ttl": ttl}
 
 
 def is_denied(model: str) -> bool:
     """True for a model ANZU must never address (any tag of a denied name)."""
-    return canonical(model).split(":", 1)[0] in DENIED_MODELS
+    name = canonical(model).split(":", 1)[0].rsplit("/", 1)[-1]
+    return name in DENIED_MODELS
 
 
 class DeniedModelError(ValueError):
@@ -140,13 +147,13 @@ async def touch_ollama_if_resident(base_url: str, model: str, api_key: str = "",
     ``/v1`` honours a ``keep_alive`` field only on Ollama >= 0.35 and silently ignores it on
     older builds, so the policy must not depend on it: a prompt-less native ``/api/generate``
     carrying the policy value follows the turn, but only when ``/api/ps`` lists the model (a
-    touch never loads anything). Only a model ANZU loaded is touched; errors never reach the turn.
+    touch never loads anything). Any resident non-denied model ANZU just served is touched; errors never reach the turn.
     """
     from .idle_unload import warm_blocked
 
     if warm_blocked():  # after Unload / idle unload nothing is touched or reloaded until an owner turn or Load
         return False
-    if backend_family(base_url, settings) != OLLAMA or is_denied(model) or LOADED.match(OLLAMA, [model]) is None:
+    if backend_family(base_url, settings) != OLLAMA or is_denied(model):
         return False
     parsed = urlparse(base_url)
     host, port = parsed.hostname or "127.0.0.1", int(parsed.port or 11434)

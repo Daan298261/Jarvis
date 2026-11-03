@@ -234,3 +234,92 @@ async def test_unload_with_nothing_loaded_returns_409_reason_and_sets_no_flag(mo
     assert response.status_code == 409
     assert "Nothing to unload" in response.text
     assert MANAGER.state.manually_unloaded is False and IDLE_UNLOAD.held is False
+
+
+# --- rows 4, 5 and 9 ---------------------------------------------------------------------------------------------
+
+async def test_every_ollama_request_path_sets_keep_alive_except_the_studio_model(monkeypatch, tmp_path):
+    """On the wire: a /v1 chat for ANY Ollama model (in the ledger or not) carries keep_alive; the studio model never."""
+    from openai import AsyncOpenAI
+
+    from app.providers.base import ModelProvider
+    from tests.test_keep_warm_idle_unload import write_settings
+
+    sent: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        sent.append(_json.loads(request.content))
+        return httpx.Response(200, json={"id": "x", "object": "chat.completion", "created": 0, "model": "m",
+                                         "choices": [{"index": 0, "finish_reason": "stop",
+                                                      "message": {"role": "assistant", "content": "hi"}}],
+                                         "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}})
+
+    from app.providers.base import ChatMessage
+
+    for keep_warm, expected in ((False, "300s"), (True, "-1")):
+        write_settings(tmp_path, keep_warm=keep_warm)
+        for model in ("never-loaded-by-anzu:7b", ANZU_OLLAMA, FOREIGN):
+            provider = ModelProvider("http://127.0.0.1:11434/v1", model=model)
+            provider.client = AsyncOpenAI(base_url="http://127.0.0.1:11434/v1", api_key="x",
+                                          http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+            sent.clear()
+            await provider.chat([ChatMessage(role="user", content="hello")])
+            body = sent[-1]
+            if model == FOREIGN:
+                assert "keep_alive" not in body  # bgm-ingest-9b is the one exception
+            else:
+                assert body["keep_alive"] == expected, model
+    assert LOADED.entries() == []  # sending keep_alive recorded nothing: it restates the policy only
+
+
+async def test_ollama_v1_turn_is_followed_by_a_keep_alive_touch_only_if_resident(monkeypatch, tmp_path):
+    from tests.test_keep_warm_idle_unload import write_settings
+
+    servers = FakeServers(ollama=["owner-started:7b"]).install(monkeypatch)
+    real = httpx.AsyncClient
+    monkeypatch.setattr(keep_alive.httpx, "AsyncClient",
+                        lambda **kw: real(transport=httpx.MockTransport(servers.handler), **kw))
+    write_settings(tmp_path, keep_warm=False)
+    base = "http://127.0.0.1:11434/v1"
+    assert await keep_alive.touch_ollama_if_resident(base, "owner-started:7b") is True  # resident, not in the ledger
+    posts = [body for _p, method, path, body in servers.requests if method == "POST"]
+    assert posts == [{"model": "owner-started:7b", "prompt": "", "stream": False, "keep_alive": "300s"}]
+    servers.requests.clear()
+    assert await keep_alive.touch_ollama_if_resident(base, "not-resident:1b") is False  # never loads anything
+    assert [r for r in servers.requests if r[1] == "POST"] == []
+    assert await keep_alive.touch_ollama_if_resident("http://10.0.0.9:11434/v1", "owner-started:7b") is False
+
+
+async def test_name_guard_is_a_second_layer_even_when_the_ledger_lists_bgm_ingest_9b(monkeypatch):
+    servers = FakeServers(ollama=[FOREIGN, ANZU_OLLAMA], lmstudio=[FOREIGN]).install(monkeypatch)
+    LOADED.record(OLLAMA, FOREIGN)
+    LOADED.record(LMSTUDIO, FOREIGN)
+    LOADED.record(OLLAMA, ANZU_OLLAMA)
+    # a registry-style or path-style id does not slip through
+    for variant in (FOREIGN, FOREIGN + ":latest", "hf.co/acme/" + FOREIGN, "acme/" + FOREIGN):
+        assert keep_alive.is_denied(variant)
+        assert keep_alive.request_extras("http://127.0.0.1:11434/v1", variant) == {}
+        assert keep_alive.lmstudio_ttl_seconds(model=variant) is None
+    result = await keep_warm_release.release_models("manual")
+    assert FOREIGN in servers.ollama and FOREIGN in servers.lmstudio and result["ok"] is True
+    # the discovery stop / replace path (closing the process or unloading) refuses it as well
+    from app.inference.running_models import RUNNING_MODELS
+
+    row = {"id": "r1", "model": FOREIGN, "backend": "ollama", "port": 11434, "process": "p", "can_stop": True,
+           "busy": False, "active": False}
+    monkeypatch.setattr(RUNNING_MODELS, "rows", [row])
+
+    async def scan(force=False):
+        return RUNNING_MODELS.snapshot()
+
+    monkeypatch.setattr(RUNNING_MODELS, "scan", scan)
+    for action in ("stop", "replace"):
+        with pytest.raises(ValueError, match="never stops"):
+            await RUNNING_MODELS.decide("r1", action)
+    # growing / restoring an LM Studio instance with that identifier is refused too
+    from app.inference.lmstudio_context import grow_local_instance
+
+    settings = settings_with(False, backend="lmstudio", host="127.0.0.1", port=1234)
+    assert await grow_local_instance(settings, 32768, FOREIGN) is None

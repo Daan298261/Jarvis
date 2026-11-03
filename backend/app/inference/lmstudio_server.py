@@ -154,7 +154,7 @@ async def ensure_local_lmstudio(
         try:
             requested_context = max(4096, min(65536, int(context_size or 16384)))
             load_args = [cli, "load", hint, "-c", str(requested_context), "-y"]
-            ttl = lmstudio_ttl_seconds()
+            ttl = lmstudio_ttl_seconds(model=hint)
             if ttl is not None:
                 load_args.extend(["--ttl", str(ttl)])
             loaded = await asyncio.to_thread(

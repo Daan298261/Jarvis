@@ -195,7 +195,7 @@ async def test_every_ollama_request_anzu_sends_carries_keep_alive_for_anzu_model
     LOADED.record(OLLAMA, ANZU_OLLAMA, primary=True)
     anzu, foreign = ModelProvider(base, model=ANZU_OLLAMA), ModelProvider(base, model=FOREIGN)
     assert anzu._runtime_extras() == {"keep_alive": "300s"}
-    assert foreign._runtime_extras() == {}  # a foreign model never gets a keep_alive
+    assert foreign._runtime_extras() == {}  # the studio model never gets a keep_alive
     write_settings(tmp_path, keep_warm=True)
     assert anzu._runtime_extras() == {"keep_alive": "-1"}
     assert foreign._runtime_extras() == {}
@@ -802,9 +802,10 @@ async def test_ownership_comes_from_the_ledger_not_from_a_model_name(monkeypatch
     servers = FakeServers(ollama=[shared]).install(monkeypatch)
     assert (await keep_warm_release.release_models("manual"))["refused"] is True  # unknown origin = foreign
     assert servers.ollama == [shared]
-    assert request_extras("http://127.0.0.1:11434/v1", shared) == {}
-    LOADED.record(OLLAMA, shared)  # ANZU loaded a model that happens to carry that name
+    # keep_alive restates the idle policy on every request (RFC-0242 row 4); it never makes the model ANZU's.
     assert request_extras("http://127.0.0.1:11434/v1", shared) == {"keep_alive": "300s"}
+    assert LOADED.match(OLLAMA, [shared]) is None
+    LOADED.record(OLLAMA, shared)  # ANZU loaded a model that happens to carry that name
     assert (await keep_warm_release.release_models("manual"))["ok"] is True
     assert servers.ollama == []
     # The deny constant lives in the one helper module and nowhere else.
@@ -1096,9 +1097,7 @@ async def test_ollama_v1_turn_is_followed_by_a_keep_alive_touch_only_if_resident
     monkeypatch.setattr(keep_alive.httpx, "AsyncClient",
                         lambda **kw: real(transport=httpx.MockTransport(servers.handler), **kw))
     base = "http://127.0.0.1:11434/v1"
-    assert await keep_alive.touch_ollama_if_resident(base, ANZU_OLLAMA) is False  # not ANZU-loaded: never touched
-    assert servers.requests == []
-    LOADED.record(OLLAMA, ANZU_OLLAMA)
+    assert LOADED.match(OLLAMA, [ANZU_OLLAMA]) is None  # RFC-0242 row 5: ledger membership is not required
     for keep_warm, expected in ((False, "300s"), (True, "-1")):
         servers.requests.clear()
         write_settings(tmp_path, keep_warm=keep_warm)
