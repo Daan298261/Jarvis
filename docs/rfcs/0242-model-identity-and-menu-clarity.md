@@ -224,7 +224,7 @@ After an **explicit Unload**, no **background** path reloads anything until an e
 
 ### Reconciliation with #690 (as of `aa40d53a`; the contract above is unchanged)
 
-#690 does not yet meet these contract lines. They are **not** silently changed here; T3 (below) lands them as edits on top of #690 once it merges, and the list is reported to CoS.
+#690 does not yet meet these contract lines. They are **not** silently changed here; T3 (below) lands rows 1-8 as edits on top of #690 once it merges, #688's S3 lands rows 9 and 10, and the list is reported to CoS.
 
 | # | Contract | #690 today | T3 follow-up (test) |
 | --- | --- | --- | --- |
@@ -237,6 +237,7 @@ After an **explicit Unload**, no **background** path reloads anything until an e
 | 7 | Per-model idle clock: a front-only turn resets only the front | `IDLE_UNLOAD.touch()` calls `LOADED.touch_primary()`, which resets every `primary` entry (worker and front) at any turn | `test_front_only_turn_resets_only_the_front_clock` |
 | 8 | Owner turn respawns; a background caller never does (fail closed: an unknown caller is background) | the flag is cleared at the turn entry, including a `reflex_only` turn that loads nothing, and stays clear for any background task that runs afterwards | `test_reflex_only_turn_does_not_clear_manually_unloaded` |
 | 9 | Name guard for `bgm-ingest-9b` (CoS ruling on #688) | ledger only, by design | `test_name_guard_is_a_second_layer_even_when_the_ledger_lists_bgm_ingest_9b` (owned by #688 S3) |
+| 10 | A studio hold releases models without setting `manually_unloaded`, and the Keep-warm-ON respawn after the run is a background path (#688 §4) | `release_models` calls `IDLE_UNLOAD.note_released(...)` for every source, so `held` makes `warm_blocked()` true after any release, including a studio one, and the respawn would be refused | `test_respawn_clears_hold_but_never_manually_unloaded` (owned by #688 S3, which adds `IDLE_UNLOAD.clear_hold()`: it clears `held`, never `manually_unloaded`) |
 
 ### How it composes with this RFC
 
@@ -389,7 +390,7 @@ Tests:
 
 **Model:** Grok 4.6 · **fast mode off** · **Lane:** D2 · **Depends:** **#690** (keep-warm; final head in this PR's body: it creates `loaded_models.py`, `keep_alive.py`, `idle_unload.py`, `keep_warm_release.py`, `api/model_unload_all.py` and edits `manager.py`, `running_models.py`, `api/model.py`, `gpu_prefer.py`, `ollama_runtime.py`, `lmstudio_server.py`, `lmstudio_context.py`, `front_runtime.py`), plus 0225-S3, 0228-S2 and 0227-S1 on the shared files (batch landed).
 
-**What #690 already covers, so T3 does not rebuild it (and no #682 rework of these pieces is needed):** the `manually_unloaded` flag and `ModelManuallyUnloaded`, the guards in `load`, `ensure_runtime`, `ensure_vision`, `_load_locked`, `_load_impl`, `FrontRuntime.ensure_started` and every direct-HTTP warm, the autoload skips in `running_models.py` (`_poll`, the `leave` branch), `POST /api/model/unload-all` with verified release per backend, the ledger, the keep-alive and TTL helper, the idle timer, the HUD Unload and Keep warm controls. **What T3 still owns** (the #682 rework keeps `inference/model_release.py`, now for the dropdown only): the single-model **verified release of the selected model whoever loaded it** (#690's release acts on the ledger only), the live key, the caller-classification test, and the nine contract closers in *Reconciliation with #690*. #688's S3 targets #690's symbols, not `model_release.release_all_anzu_loaded` (which no longer exists in this plan).
+**What #690 already covers, so T3 does not rebuild it (and no #682 rework of these pieces is needed):** the `manually_unloaded` flag and `ModelManuallyUnloaded`, the guards in `load`, `ensure_runtime`, `ensure_vision`, `_load_locked`, `_load_impl`, `FrontRuntime.ensure_started` and every direct-HTTP warm, the autoload skips in `running_models.py` (`_poll`, the `leave` branch), `POST /api/model/unload-all` with verified release per backend, the ledger, the keep-alive and TTL helper, the idle timer, the HUD Unload and Keep warm controls. **What T3 still owns** (the #682 rework keeps `inference/model_release.py`, now for the dropdown only): the single-model **verified release of the selected model whoever loaded it** (#690's release acts on the ledger only), the live key, the caller-classification test, and the eight contract closers of rows 1-8 in *Reconciliation with #690* (rows 9 and 10 belong to #688's S3). #688's S3 targets #690's symbols, not `model_release.release_all_anzu_loaded` (which no longer exists in this plan).
 
 | File | Change |
 | --- | --- |
