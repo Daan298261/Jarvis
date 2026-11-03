@@ -3,7 +3,7 @@
 **Status:** accepted (specs-only; **implementation is gated**, see *Gating*)
 **Priority:** P2 (Taco's order with PG's approval, relayed by Chief of Staff 2026-11-03)
 **Author:** Jarvis Architect
-**Date:** 2026-11-03
+**Date:** 2026-11-03 (amended 2026-11-03: #686's keep-warm amendment is now present; S3 aligned with its proposed names)
 **Traced on:** `development` @ `a62bd454` (every cited Jarvis symbol resolved there). Open PRs cited: #686 (RFC-0242; final head in this PR's body), #655 (RFC-0228; final head in this PR's body), #665 (RFC-0245; final head in this PR's body), #668 (RFC-0233; final head in this PR's body). Studio API read from Black Grid Multimedia (BGM) PRs #32, #33 and #34 (cited by endpoint path and symbol; final heads in this PR's body, as provenance only).
 
 **Aligns with:** [`ANZU_PRODUCT_NORTH_STAR.md`](../../ANZU_PRODUCT_NORTH_STAR.md):
@@ -18,8 +18,8 @@
 - [RFC-0096](0096-comfyui-sana-blackgrid-media-gen.md) / [RFC-0097](0097-opencut-openmontage-hyperframes-blackgrid-stitch.md): the BlackGrid media connector idea. The landed `blackgrid_studio` tool (ComfyUI / HR Endless sidecar) is kept unchanged and gains the studio actions defined here.
 - [RFC-0031](0031-reversibility-first-action-gates.md) and [RFC-0110](0110-chatgpt-style-approval-popup.md): the action gate, `ApprovalGrant` and the approval popup. This RFC adds no confirmation mechanism of its own.
 - [RFC-0244](0244-three-engine-modes.md): engine modes.
-- #686 (RFC-0242; final head in this PR's body): the verified native release (T3, `inference/model_release.py`) and explicit owner Load (T6), and its section "Amendment: Keep warm toggle and 5-minute idle unload".
-- D2's Taco-owned keep-warm ticket (**no PR was open on `development` when this RFC was traced**; the PR number is added to this PR's body and to *Gating* when it opens).
+- #686 (RFC-0242; final head in this PR's body): its section "Amendment: Keep warm toggle and 5-minute idle unload" (present on #686) and its T3 verified native release (`inference/model_release.py`, **not yet landed**) and T6 explicit owner Load.
+- D2's Taco-owned keep-warm ticket. The amendment proposes `keep_warm` (default `false`) and `idle_unload_seconds` (default `300`) on `InferenceSettings`, with Ollama `keep_alive` `"300s"` when off and `"-1"` when on, and says **D2's PR sets the final names, files and test paths**. No D2 PR is open yet; its number is added to this PR's body and to *Gating* when it opens, and any name difference is a one-line edit here.
 
 **Astra boundary:** persona, WebGL, presence, morph and appearance are out of scope (Astra). This RFC edits no persona or presence component. The only UI is one additive status line (S4).
 
@@ -33,7 +33,7 @@ Nothing in S1-S5 starts until **all** of these hold:
 
 1. BGM PRs #32, #33 and #34 are **merged to BGM `main`**. #33 and #34 are stacked (their bases are the previous slice's branch), so today the endpoints below exist only on those branches.
 2. The studio-side PRs **BGM-P1** (`GET /api/gpu/status`) and **BGM-P2** (`GET /api/contract`) are merged to BGM `main` (see *Studio-side changes*). The GPU gate reads BGM-P1 and nothing else.
-3. #686's amendment section "Amendment: Keep warm toggle and 5-minute idle unload" and its T3 (`inference/model_release.py`) are on `development`, and D2's keep-warm PR has landed. S3 calls their release and rewarm entry points and re-traces their names at assignment.
+3. #686's T3 (`inference/model_release.py`, not yet landed) and its section "Amendment: Keep warm toggle and 5-minute idle unload" are on `development`, and D2's keep-warm PR (which sets the final names of `keep_warm` and `idle_unload_seconds`) has landed. S3 calls T3's release and the keep-warm setting, and re-traces their final names at assignment.
 4. PG tells Chief of Staff the contract is final, and Chief of Staff assigns the tickets.
 
 At assignment each ticket's first step is the **contract re-trace**: re-read every endpoint in *Studio contract* on BGM `main`, resolve each *contract-check item* (C1-C12), and record fixtures (S1). A difference is fixed in an amendment to this RFC before code is written. The studio is PG's repo and PG owns its contract; this RFC follows it and never edits it.
@@ -62,7 +62,7 @@ owner / model turn ─► agent/tool_exposure.py (alias + retrieval, S2) ─► 
               busy ─► defer the load with a visible reason (explicit owner Load: refused, 409)
               free / studio not running ─► load as today
         run starts (seen by poll, or started through this tool) ─► verified release of ANZU-loaded models (#686 T3 path) ─► hold + visible reason
-        run ends ─► hold cleared ─► respawn on demand (Keep warm ON: one rewarm via D2's path)
+        run ends ─► hold cleared ─► respawn on demand (`keep_warm` true: one respawn of the released seats via RFC-0225 `prepare_engine_for`)
 ```
 
 **One tool path, not a parallel one.** The connector is extra actions on the existing `blackgrid_studio` tool (same registry entry, same `ToolRegistry.execute`, same gate, same exposure code). There is no new tool class, no MCP server and no second HTTP layer.
@@ -170,7 +170,7 @@ Not exposed on purpose: accepting or dismissing entity proposals (`.../entity-pr
 
 A static test classifies every `MANAGER.load(` call site (the same table and test as #686 T3 uses; S3 adds a column) so a new load path cannot appear unguarded.
 
-| Situation | Automatic load (chat turn, startup restore, `RUNNING_MODELS` autoload, keep-warm rewarm) | Explicit owner Load (#686 T6 routes) |
+| Situation | Automatic load (chat turn, startup restore, `RUNNING_MODELS` autoload, keep-warm respawn) | Explicit owner Load (#686 T6 routes) |
 | --- | --- | --- |
 | `free` or `not_running` | proceeds as today | proceeds as today |
 | `busy` | **deferred**: raises `StudioGpuBusy(RuntimeError)` with the reason text below; autoload branches that #686 already skips silently skip silently | **refused**: `POST /api/model/load` and the activate routes answer 409 with the same text; the owner can pause the run (`studio_run_control`) or wait. No silent override. |
@@ -182,17 +182,17 @@ Reason text (fixed, tested): `BlackGrid Studio is rendering (project "<title>", 
 - *Started through ANZU:* `studio_start_generation` / `studio_regenerate` / a `resume` of a `generate` run (the tool reads the run's stage at execution time; resuming an ingest run releases nothing), after the grant and **before** the `POST`, calls the verified release of #686 T3 for **every ANZU-loaded model, front seat included** (`reason="studio_run"`). If the release is not verified (T3's own 409/502 result) or ANZU is mid-answer (`MANAGER._request_lease.exclusive()` not acquired), **the studio run is not started** and the tool says why. Nothing is half-started.
 - *Started from the studio's own UI:* a watcher polls BGM-P1 every `STUDIO_WATCH_INTERVAL_S = 10` while any ANZU-loaded model is resident, backs off to `STUDIO_WATCH_BACKOFF_S = 60` while the studio is `not_running`, and polls nothing when no ANZU-loaded model is resident and no hold is active. On `free → busy` it runs the same verified release.
 
-The release uses the **verified native path** only (LM Studio `loaded_instances` check, Ollama `/api/ps` check, managed process stop; #686 T3). A studio hold **does not** set `manually_unloaded`: that flag means "stays unloaded until explicit Load", while a studio hold clears itself. Models the owner loaded in another program (Taco's default LM Studio 9B) are **not** ANZU-loaded: ANZU leaves them running, and the hold text adds `LM Studio's model "<id>" is still resident because you loaded it; unload it from the model menu to give the render the whole GPU.` using the existing explicit Unload (RFC-0244 inventory is read-only; ANZU stops no other program).
+The release uses the **verified native path** only (LM Studio `loaded_instances` check, Ollama `/api/ps` check, managed process stop; #686 T3). A studio hold **does not** set `manually_unloaded` (that flag means "stays unloaded until explicit Load" and belongs to an owner Unload, as the amendment's composition table says), and it is **not** recorded as an idle unload (`engine_coexistence.idle_unloaded()` of RFC-0228); it is its own reason, `studio_hold`, reported only after the same verified evidence (R5). A hold clears itself. When an idle unload already released the models, run start finds nothing resident, releases nothing and still holds. Models the owner loaded in another program (Taco's default LM Studio 9B) are **not** ANZU-loaded and stay under the amendment's rule (the RFC-0225 and RFC-0228 managed-mode rule; this RFC does not widen consent): ANZU leaves them running, and the hold text adds `LM Studio's model "<id>" is still resident because you loaded it; unload it from the model menu to give the render the whole GPU.` using the existing explicit Unload (RFC-0244 inventory is read-only; ANZU stops no other program).
 
-**Respawn after the run.** The watcher's next poll sees `busy=false` (or `not_running`, which includes a studio crash) and clears the hold, publishes the cleared state, and does **nothing else**. The next request loads on demand through the normal path. With **Keep warm ON** the gate calls D2's single rewarm entry point once (the one the keep-warm toggle uses at startup), never a private loader. With Keep warm OFF there is no preload.
+**Respawn after the run.** The watcher's next poll sees `busy=false` (or `not_running`, which includes a studio crash) and clears the hold, publishes the cleared state, and does **nothing else**. The next request loads on demand through the normal path. With **Keep warm ON** (`keep_warm` true in the amendment's proposed names) the gate asks for **one** respawn of exactly the seats it released, through RFC-0225 `prepare_engine_for`, the same call the amendment's on-demand respawn uses, never a private loader; ANZU-originated Ollama warms after it use the amendment's `keep_alive` rule (`"-1"` when on, `f"{idle_unload_seconds}s"` when off). With Keep warm OFF (default, `idle_unload_seconds` 300) there is no preload and the normal idle timer applies to whatever loads next. D2's PR sets the final names; S3 follows them.
 
 ### Keep warm × studio × engine mode
 
-| | Keep warm OFF (default; 5-minute idle unload) | Keep warm ON (always-warm) |
+| | Keep warm OFF (default; `keep_warm` false, `idle_unload_seconds` 300) | Keep warm ON (`keep_warm` true; no idle timer, Ollama `keep_alive` `"-1"`) |
 | --- | --- | --- |
 | Studio run active, any mode | ANZU-loaded models unloaded at run start (not at the 5-minute mark); loads deferred | **Studio run wins.** Same unload, same deferral, a visible reason. Keep warm's "stay resident" is suspended, not turned off |
-| Run ends, `hybrid` / `model_only` | hold cleared; next request respawns on demand | hold cleared; one rewarm through D2's entry point |
-| Run ends, `reflex_only` | hold cleared; nothing loads | hold cleared; **no rewarm** (no model lane is allowed to start) |
+| Run ends, `hybrid` / `model_only` | hold cleared; next request respawns on demand | hold cleared; one respawn of the released seats via `prepare_engine_for` |
+| Run ends, `reflex_only` | hold cleared; nothing loads | hold cleared; **no respawn** (no model lane is allowed to start) |
 | `reflex_only`, run active | there is no automatic load to defer. A model the owner explicitly Loaded under #686 T6 is resident-but-unused; the run-start release unloads it like any other ANZU-loaded model, and an explicit Load is refused while busy | same |
 
 The user-visible reason: `status_monitor` adds one live key `studio_hold: {"active": bool, "reason": str, "project_id": str, "run_id": int, "since": iso}` to the `/api/model` snapshot (additive; #686 T3 owns the same file earlier in the chain), the deferred chat turn shows the reason text as the answer, and the HUD shows one status line (S4). The chat turn is never silent.
@@ -255,12 +255,12 @@ Ticket order: **S1 → S2, S3 (parallel after S1) → S4 (after S3) → S5 (last
 ### S3: GPU gate, unload on run start, respawn after the run
 **Model:** Grok 4.6 (fast mode off). **Depends:** S1, gating items 2 and 3.
 **Owns:** `backend/app/studio/gpu_gate.py` (new), `backend/app/inference/manager.py` (the guard in `load` / `_load_locked` only, after #686 T3/T6 and D2's keep-warm ticket), `backend/app/inference/front_runtime.py` (the guard in `ensure_started` / `_start_local`, after every earlier chain), `backend/app/inference/status_monitor.py` (the `studio_hold` key only, after #686 T3), `backend/app/main.py` (lifespan start and stop of the watcher only), `backend/app/api/model.py` (409 mapping for `StudioGpuBusy` on the explicit Load routes only), `tests/test_rfc0246_studio_gpu_gate.py`, `.github/workflows/pr-tests.yml` (add the file to the step).
-**Tests (named):** `tests/test_rfc0246_studio_gpu_gate.py`: `test_load_deferred_while_run_active`, `test_front_runtime_start_deferred_while_run_active`, `test_unload_on_run_start_through_the_tool_before_the_post`, `test_unload_on_run_start_seen_by_the_watcher`, `test_run_not_started_when_release_is_unverified`, `test_run_not_started_while_a_request_is_in_flight`, `test_respawn_on_demand_after_run_ends`, `test_no_preload_after_run_when_keep_warm_off`, `test_keep_warm_on_studio_run_wins_and_unloads`, `test_keep_warm_on_rewarms_once_through_the_keep_warm_entry_point`, `test_reflex_only_no_automatic_load_and_no_rewarm`, `test_reflex_only_explicit_load_refused_while_busy`, `test_user_visible_reason_in_snapshot_and_in_the_deferred_turn`, `test_studio_not_running_never_blocks_a_load`, `test_unknown_status_blocks_automatic_load_but_not_explicit_load`, `test_studio_crash_clears_the_hold`, `test_owner_loaded_lm_studio_model_is_not_unloaded_and_the_notice_says_so`, `test_studio_hold_never_sets_manually_unloaded`, `test_watcher_backs_off_while_studio_not_running_and_stops_when_nothing_is_resident`, `test_gate_reads_only_gpu_status_not_run_lists`, `test_every_manager_load_site_is_classified_for_studio_hold` (static).
+**Tests (named):** `tests/test_rfc0246_studio_gpu_gate.py`: `test_load_deferred_while_run_active`, `test_front_runtime_start_deferred_while_run_active`, `test_unload_on_run_start_through_the_tool_before_the_post`, `test_unload_on_run_start_seen_by_the_watcher`, `test_run_not_started_when_release_is_unverified`, `test_run_not_started_while_a_request_is_in_flight`, `test_respawn_on_demand_after_run_ends`, `test_no_preload_after_run_when_keep_warm_off`, `test_keep_warm_on_studio_run_wins_and_unloads`, `test_keep_warm_on_respawns_released_seats_once_through_prepare_engine_for`, `test_hold_unload_is_not_recorded_as_idle_unload_or_manual_unload`, `test_run_start_with_nothing_resident_releases_nothing_and_still_holds`, `test_reflex_only_no_automatic_load_and_no_respawn`, `test_reflex_only_explicit_load_refused_while_busy`, `test_user_visible_reason_in_snapshot_and_in_the_deferred_turn`, `test_studio_not_running_never_blocks_a_load`, `test_unknown_status_blocks_automatic_load_but_not_explicit_load`, `test_studio_crash_clears_the_hold`, `test_owner_loaded_lm_studio_model_is_not_unloaded_and_the_notice_says_so`, `test_studio_hold_never_sets_manually_unloaded`, `test_watcher_backs_off_while_studio_not_running_and_stops_when_nothing_is_resident`, `test_gate_reads_only_gpu_status_not_run_lists`, `test_every_manager_load_site_is_classified_for_studio_hold` (static).
 **CI step:** `BlackGrid Studio connector tests (RFC-0246)`, `Run model and security regression tests`, `Run full backend suite`.
 **Acceptance:**
 - [ ] While BGM-P1 says busy, no ANZU model starts by any automatic path, and explicit Load answers 409 with the reason.
 - [ ] A run starting (through ANZU or the studio UI) unloads every ANZU-loaded model through the verified path, front seat included, or the ANZU-started run is refused with the cause.
-- [ ] After the run, loads resume on demand; Keep warm ON rewarms exactly once; `reflex_only` never loads.
+- [ ] After the run, loads resume on demand; Keep warm ON respawns the released seats exactly once; `reflex_only` never loads.
 - [ ] The owner sees why, in chat, the model menu and `/api/model`, and nothing says "unloaded" unless the verified release said so.
 - [ ] Studio not running, or crashed, never blocks ANZU.
 
@@ -316,7 +316,7 @@ Ticket order: **S1 → S2, S3 (parallel after S1) → S4 (after S3) → S5 (last
 - [ ] Starting a render, regenerating, stitching, ingesting, approving and deleting need a real `ApprovalGrant` bound to the exact target; reads and small edits do not (S2).
 - [ ] The connector talks to loopback only, and a non-loopback URL is rejected by settings and by the client (S1).
 - [ ] While a studio run holds the GPU, no ANZU model is loaded by any automatic path and explicit Load is refused with a reason; a run start unloads every ANZU-loaded model through the verified path or the ANZU-started run is refused; the next request respawns on demand (S3).
-- [ ] Keep warm ON loses to the studio, then rewarms once; `reflex_only` never loads or rewarms (S3).
+- [ ] Keep warm ON loses to the studio, then respawns the released seats once; `reflex_only` never loads or respawns (S3).
 - [ ] The contract is proven against recorded fixtures of merged BGM `main` and a live-loopback run that cannot skip in CI (S1, S5).
 - [ ] Real-GPU behaviour on Taco's PC is reported separately as a desktop sign-off (S5).
 
@@ -330,7 +330,7 @@ Studio code (BGM-P1/P2 are BGM-repo PRs reviewed by PG), studio auth, remote or 
 - **BGM-P1 may not land as proposed.** If PG chooses a different shape, only S3's parser and the fixture change; the rule "the gate reads one studio answer, never run lists" stays.
 - **Owner-loaded models keep VRAM.** Taco's LM Studio 9B is not ANZU-loaded, so ANZU will not unload it. The hold text says so and offers the existing explicit Unload; whether ANZU should offer to unload it automatically during runs is a decision for Taco (Q3).
 - **Studio hangs while up.** `unknown` defers automatic loads rather than risk the render; explicit owner Load is never blocked by `unknown`, so the owner always has a way out.
-- **#686 and D2 names are not final.** S3 calls "the verified release" and "the rewarm entry point" by section; it re-traces their names when the amendment and the keep-warm PR land (gating item 3).
+- **#686 and D2 names are not final.** The amendment on #686 proposes `keep_warm`, `idle_unload_seconds` and the `keep_alive` values and leaves final names to D2's PR; T3's `inference/model_release.py` has not landed. S3 uses the amendment's names by section and re-traces them when T3 and D2's PR land (gating item 3).
 - **Approval fatigue.** Approve-take is gated by design; if Taco wants "approve all ready takes" as one grant, that is an amendment with a bulk target, not a gate bypass.
 
 ## Open questions for PG (BGM API)
