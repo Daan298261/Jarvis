@@ -200,6 +200,11 @@ def test_fallback_does_not_fire_when_a_user_doc_covers_the_question(rfc_indexed)
         "what are the specs of the RTX 4090",
         "show me the specifications of my computer",
         "my graphics card spec",
+        "specs for the iPhone 16",
+        "spec sheet of my laptop",
+        "system specs of this PC",
+        "what are the specs of the new phone",
+        "what are the specs of my phone",
         "How do I install the humanoid runtime?",
         "respect my settings",
     ],
@@ -220,6 +225,19 @@ def test_hardware_and_bare_spec_words_are_not_spec_intent(query):
         "the installer proposal",
         "the design doc for engine modes",
         "show me the spec of the engine modes",
+        # Product-feature words are not hardware vetoes (D1 round 2).
+        "where is the spec for the android companion",
+        "what does the spec say about the phone companion",
+        "what does the spec say about the camera feature",
+        "what does the spec say about the display settings",
+        "what does the spec say about the device pairing",
+        "what does the spec say about the screen capture",
+        "what does the specification say about the card layout",
+        # Article is optional.
+        "technical spec for the swarm",
+        "feature spec for persona",
+        "spec for the swarm",
+        "spec for keep warm",
     ],
 )
 def test_rfc_and_spec_document_phrasing_is_spec_intent(query):
@@ -237,6 +255,22 @@ def test_hardware_spec_questions_do_not_boost_rfcs(rfc_indexed, query):
     ranked = [hit.source_path for hit in hits]
     # No RFC is boosted to the top by the word "spec".
     assert not (ranked and ranked[0].startswith("docs/rfcs/"))
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "where is the spec for the android companion",
+        "what does the spec say about the android companion",
+    ],
+)
+def test_android_companion_spec_question_surfaces_the_companion_rfcs(query):
+    hits = search_internal_references(query, max_results=8)
+    sources = [hit.source_path for hit in hits]
+
+    for number in ("0204-", "0139-", "0059-"):
+        assert any(f"docs/rfcs/{number}" in src for src in sources), (number, sources)
+    assert sources[0].startswith("docs/rfcs/"), sources
 
 
 def test_rfc_number_parsing_and_rfc_path_detection():

@@ -237,25 +237,36 @@ _STRONG_SPEC_INTENT_PATTERNS = (
     re.compile(r"\bdesign (?:docs?|documents?)\b", re.I),
     re.compile(r"\b(?:specification|spec|technical spec|feature spec) (?:docs?|documents?|files?)\b", re.I),
 )
-# "the spec for/of <feature>", "which spec covers ...", "what does the spec say".
+# "spec for/of <feature>" (article optional: "technical spec for the swarm",
+# "spec for keep warm"), "which spec covers ...", "what does the spec say".
 _SPEC_NOUN_PHRASE_PATTERNS = (
+    re.compile(r"\b(?:spec|specification)\s+(?:for|of|on|about)\b", re.I),
     re.compile(
-        r"\b(?:the|this|that|which|a)\s+(?:spec|specification)\s+(?:for|of|on|about)\b"
-        r"(?!\s+(?:my|your|our|his|her|their|its|me|you|this|that|these|those)\b)",
-        re.I,
-    ),
-    re.compile(
-        r"\b(?:the|this|that|which|a)\s+(?:spec|specs|specification)\s+"
-        r"(?:say|says|said|describe|describes|define|defines|cover|covers|specify|specifies)\b",
+        r"\b(?:spec|specs|specification)\s+(?:say|says|said|describe|describes|define|defines|"
+        r"cover|covers|specify|specifies)\b",
         re.I,
     ),
 )
-# Hardware/product-sheet context: a weak "spec" phrase here is not about an RFC.
-_HARDWARE_SPEC_CONTEXT = re.compile(
-    r"\b(?:gpu|cpu|pc|laptop|desktop|computer|phone|iphone|android|tablet|monitor|screen|display|"
-    r"graphics|card|chip|processor|motherboard|ram|ssd|hardware|device|machine|camera|car|"
-    r"rtx|gtx|radeon|nvidia|amd|intel|apple|samsung|pixel)\b",
-    re.I,
+# The hardware veto applies only to hardware-spec phrasing, never to a query that
+# merely contains a product word (phone companion, camera feature, display
+# settings, device pairing, android companion are this product's own features).
+_HARDWARE_NOUNS = (
+    r"gpu|cpu|pc|laptop|desktop|computer|notebook|tablet|monitor|processor|motherboard|ram|ssd|"
+    r"hardware|graphics card|video card|iphone|ipad|macbook|pixel|galaxy|phone|smartphone"
+)
+_HARDWARE_SPEC_PHRASING = (
+    # "specs of my <anything>": possessive hardware question.
+    re.compile(r"\bspecs?\s+(?:of|for|on)\s+(?:my|your|our|his|her|their)\b", re.I),
+    # "specs of the <hw>" where the hardware noun ends the question.
+    re.compile(
+        rf"\bspecs?\s+(?:of|for|on)\s+(?:(?:the|this|that|a|an|new)\s+)?(?:\w+\s+){{0,2}}?(?:{_HARDWARE_NOUNS})\s*[?.!,]*\s*$",
+        re.I,
+    ),
+    # "<hw> specs" / "<hw> spec sheet".
+    re.compile(rf"\b(?:{_HARDWARE_NOUNS})\s+specs?\b", re.I),
+    re.compile(r"\b(?:spec sheet|system specs?|tech specs? of)\b", re.I),
+    # A model number: "specs of the RTX 4090", "specs for the iPhone 16".
+    re.compile(r"\b(?:rtx|gtx|rx|radeon|geforce|iphone|ipad|galaxy|pixel|macbook)\s?[a-z]{0,2}\s?\d{1,4}\b", re.I),
 )
 _RFC_NUMBER_PATTERN = re.compile(r"\brfc[-_ ]?0*(\d{1,4})\b", re.I)
 _RFC_FILE_NUMBER_PATTERN = re.compile(r"^(\d{1,4})-")
@@ -270,7 +281,7 @@ def query_targets_specs(query: str) -> bool:
     text = query or ""
     if any(pattern.search(text) for pattern in _STRONG_SPEC_INTENT_PATTERNS):
         return True
-    if _HARDWARE_SPEC_CONTEXT.search(text):
+    if any(pattern.search(text) for pattern in _HARDWARE_SPEC_PHRASING):
         return False
     return any(pattern.search(text) for pattern in _SPEC_NOUN_PHRASE_PATTERNS)
 
