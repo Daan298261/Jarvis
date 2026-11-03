@@ -226,22 +226,53 @@ RFC_BODY_TERM_CAP = 12
 RFC_HELP_QUERY_WEIGHT = 0.5
 RFC_SPEC_QUERY_BONUS = 100
 RFC_NAMED_NUMBER_BONUS = 400
+RFC_ONLY_FEATURE_BONUS = 100
 
-_SPEC_INTENT_PATTERNS = (
+# Spec intent must come from RFC/spec-document phrasing, never from the bare
+# word "spec": "what are the specs of my GPU" is a hardware question.
+_STRONG_SPEC_INTENT_PATTERNS = (
     re.compile(r"\brfcs?\b", re.I),
     re.compile(r"\brfc[-_ ]?\d{1,4}\b", re.I),
-    re.compile(r"\bspec(?:s|ification|ifications)?\b", re.I),
     re.compile(r"\bproposals?\b", re.I),
-    re.compile(r"\bdesign docs?\b", re.I),
+    re.compile(r"\bdesign (?:docs?|documents?)\b", re.I),
+    re.compile(r"\b(?:specification|spec|technical spec|feature spec) (?:docs?|documents?|files?)\b", re.I),
+)
+# "the spec for/of <feature>", "which spec covers ...", "what does the spec say".
+_SPEC_NOUN_PHRASE_PATTERNS = (
+    re.compile(
+        r"\b(?:the|this|that|which|a)\s+(?:spec|specification)\s+(?:for|of|on|about)\b"
+        r"(?!\s+(?:my|your|our|his|her|their|its|me|you|this|that|these|those)\b)",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:the|this|that|which|a)\s+(?:spec|specs|specification)\s+"
+        r"(?:say|says|said|describe|describes|define|defines|cover|covers|specify|specifies)\b",
+        re.I,
+    ),
+)
+# Hardware/product-sheet context: a weak "spec" phrase here is not about an RFC.
+_HARDWARE_SPEC_CONTEXT = re.compile(
+    r"\b(?:gpu|cpu|pc|laptop|desktop|computer|phone|iphone|android|tablet|monitor|screen|display|"
+    r"graphics|card|chip|processor|motherboard|ram|ssd|hardware|device|machine|camera|car|"
+    r"rtx|gtx|radeon|nvidia|amd|intel|apple|samsung|pixel)\b",
+    re.I,
 )
 _RFC_NUMBER_PATTERN = re.compile(r"\brfc[-_ ]?0*(\d{1,4})\b", re.I)
 _RFC_FILE_NUMBER_PATTERN = re.compile(r"^(\d{1,4})-")
 
 
 def query_targets_specs(query: str) -> bool:
-    """True when the user explicitly asks about specs, RFCs or proposals."""
+    """True when the user explicitly asks about an RFC, spec document or proposal.
+
+    Requires RFC/spec-doc phrasing. The bare word "spec"/"specs" (GPU specs,
+    phone specs, "specs of my PC") never counts as spec intent.
+    """
     text = query or ""
-    return any(pattern.search(text) for pattern in _SPEC_INTENT_PATTERNS)
+    if any(pattern.search(text) for pattern in _STRONG_SPEC_INTENT_PATTERNS):
+        return True
+    if _HARDWARE_SPEC_CONTEXT.search(text):
+        return False
+    return any(pattern.search(text) for pattern in _SPEC_NOUN_PHRASE_PATTERNS)
 
 
 def requested_rfc_numbers(query: str) -> set[int]:
@@ -260,8 +291,26 @@ def _rfc_file_number(path: Path) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def _score_rfc_document(path: Path, text: str, terms: list[str], query: str) -> int:
-    """Score an RFC spec by the query's intent: spec questions vs. help questions."""
+def _term_coverage(path: Path, text: str, terms: list[str]) -> int:
+    """How many distinct query terms the document (or its file name) mentions as words."""
+    name = path.name.lower()
+    covered = 0
+    for term in terms:
+        word = re.compile(rf"\b{re.escape(term)}(?:s|es|d|ed|ing)?\b", re.I)
+        if word.search(text) or term in name:
+            covered += 1
+    return covered
+
+
+def _score_rfc_document(
+    path: Path, text: str, terms: list[str], query: str, *, rfc_only_match: bool = False
+) -> int:
+    """Score an RFC spec by the query's intent: spec questions vs. help questions.
+
+    ``rfc_only_match`` marks a help question whose best match is only in RFCs
+    (no user-facing doc covers as many query terms); the RFC then ranks at full
+    weight, like a user doc, instead of being down-weighted.
+    """
     if query_targets_specs(query):
         score = _score_document(path, text, terms) + RFC_SPEC_QUERY_BONUS
         number = _rfc_file_number(path)
@@ -272,13 +321,24 @@ def _score_rfc_document(path: Path, text: str, terms: list[str], query: str) -> 
     body = sum(min(lowered.count(term), RFC_BODY_TERM_CAP) for term in terms)
     heading = "\n".join(text.splitlines()[:3])
     bonus = sum(60 for term in terms if term in path.name.lower()) + _score_text(heading, terms) * 12
+    if rfc_only_match:
+        # Same footing as a user doc in the reference pack (+100 in _score_document).
+        return body + bonus + RFC_ONLY_FEATURE_BONUS
     return int((body + bonus) * RFC_HELP_QUERY_WEIGHT)
 
 
-def _rank_score(path: Path, text: str, terms: list[str], query: str) -> int:
+def _rank_score(path: Path, text: str, terms: list[str], query: str, *, rfc_only_match: bool = False) -> int:
     if is_rfc_spec(path):
-        return _score_rfc_document(path, text, terms, query)
+        return _score_rfc_document(path, text, terms, query, rfc_only_match=rfc_only_match)
     return _score_document(path, text, terms)
+
+
+def _best_user_doc_coverage(docs: list[tuple[Path, str]], terms: list[str]) -> int:
+    best = 0
+    for path, text in docs:
+        if not is_rfc_spec(path):
+            best = max(best, _term_coverage(path, text, terms))
+    return best
 
 
 def _extract_snippet(text: str, terms: list[str], max_chars: int = MAX_SNIPPET_CHARS) -> str:
@@ -385,7 +445,7 @@ def missing_pack_files() -> list[str]:
 def search_internal_references(query: str, *, max_results: int = 5) -> list[GroundingSnippet]:
     roots = _resolve_roots()
     terms = _tokenize(query)
-    ranked: list[tuple[int, Path, str]] = []
+    docs: list[tuple[Path, str]] = []
     for path in _iter_index_files(roots):
         if not _path_confined(path, roots):
             continue
@@ -393,7 +453,16 @@ def search_internal_references(query: str, *, max_results: int = 5) -> list[Grou
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        score = _rank_score(path, text, terms, query) if terms else 1
+        docs.append((path, text))
+    # A feature documented only in an RFC: when no user-facing doc covers as many
+    # of the question's terms as the RFC does, that RFC is ranked at full weight.
+    best_user_coverage = _best_user_doc_coverage(docs, terms) if terms else 0
+    ranked: list[tuple[int, Path, str]] = []
+    for path, text in docs:
+        rfc_only = bool(
+            terms and is_rfc_spec(path) and _term_coverage(path, text, terms) > best_user_coverage
+        )
+        score = _rank_score(path, text, terms, query, rfc_only_match=rfc_only) if terms else 1
         if terms and score <= 0:
             continue
         ranked.append((score, path, text))
