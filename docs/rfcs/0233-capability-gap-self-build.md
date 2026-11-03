@@ -1319,6 +1319,7 @@ The orders on `loop.py` and `owner_turn.py` are the CoS ruling (2026-10-20). The
 | `backend/app/decision/adapters/rules.py` | 0245-S1 → 0233-S1 (0230 and 0232 do not edit it) |
 | `backend/app/agent/request_routing.py` | 0245-S1 → 0233-S1 (pass-through only; 0230 and 0232 do not edit it) |
 | `backend/app/config.py` | #649 (landed) → 0228-S1 → keep-warm ticket (D2; adds `keep_warm` and `idle_unload_seconds`; 0228-S2 no longer edits `config.py`) → 0245-S2 → 0233-S1 (settings block and the `owner_secret` call in `load_settings`) → #670 (0230 and 0232 do not edit it) |
+| `backend/app/inference/gpu_prefer.py` | keep-warm ticket (D2; the `keep_alive` values, replacing the `"24h"`; 0228-S2 no longer edits it) → 0233-S3 (its spawn takes `env=child_env(...)`, one hunk) |
 | `backend/app/security/owner_secret.py`, `backend/app/security/child_env.py` | 0233-S1 creates the first, 0233-S3 the second; nothing else in this batch edits either |
 | `backend/app/api/settings.py` | #649 (landed) → 0245-S2 → 0233-S1 |
 | `backend/app/db/models.py` | #649 (landed) → 0245-S2 → 0233-S3 (0230 and 0232 do not edit it) |
