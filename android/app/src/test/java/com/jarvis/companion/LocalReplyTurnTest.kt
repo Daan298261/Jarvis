@@ -208,7 +208,7 @@ class LocalReplyTurnTest {
         assertEquals("boom mid-answer", state.value.error)
     }
 
-    @Test fun defaultStallDeadlinesAre120sAndThirtySeconds() {
+    @Test fun defaultStallDeadlinesAre120s30s180sAnd300s() {
         val defaults = LocalStallDeadlines()
         assertEquals(120_000, defaults.firstTokenMs)
         assertEquals(30_000, defaults.idleMs)
@@ -261,7 +261,7 @@ class LocalReplyTurnTest {
         assertTrue(engine.cancelRequests >= 1)
     }
 
-    @Test fun turnCapBoundsASectionedPromptAcrossItsPasses() = runBlocking {
+    @Test fun overallTurnCapIs300sAcrossSummaryPasses() = runBlocking {
         // Every pass streams steadily (never a first-token or idle stall) but together they pass the cap.
         val engine = SectionedEngine { _, onToken, e ->
             repeat(20) { if (!e.cancelled) { onToken("tok "); Thread.sleep(40) } }
@@ -277,7 +277,7 @@ class LocalReplyTurnTest {
         assertTrue(stall.message!!.contains("stalled (turn)"))
     }
 
-    @Test fun loadDeadlineRaisesTypedErrorAfterALoadThatRunsTooLong() = runBlocking {
+    @Test fun loadPhaseDeadlineIs180sAndRaisesTypedError() = runBlocking {
         val engine = object : ScriptedInferenceEngine("never reached") {
             override fun load(modelPath: String, contextTokens: Int): String? {
                 Thread.sleep(700) // a native load cannot be interrupted; it returns past its budget
@@ -292,22 +292,49 @@ class LocalReplyTurnTest {
         assertEquals("no tokens were generated", 0, engine.generateCalls)
     }
 
-    @Test fun loadAndTurnDeadlinesFailTheTurnLikeAStall() = runBlocking {
-        val state = state()
-        val turn = LocalReplyTurn(state, prior, "a1")
-        var picked = true
-        val engine = object : ScriptedInferenceEngine("x") {
-            override fun load(modelPath: String, contextTokens: Int): String? { Thread.sleep(600); return null }
+    @Test fun loadAndTurnCapStallsFailTheTurnLikeAnyOtherStall() = runBlocking {
+        // Load phase.
+        run {
+            val state = state()
+            val turn = LocalReplyTurn(state, prior, "a1")
+            var picked = true
+            val engine = object : ScriptedInferenceEngine("x") {
+                override fun load(modelPath: String, contextTokens: Int): String? { Thread.sleep(600); return null }
+            }
+            val manager = manager(engine, LocalStallDeadlines(loadMs = 250))
+            val result = turn.answer(scope, manager, clearPicked = { picked = false }, keepWarm = { true }, onStart = {}, onFinally = {}) {
+                manager.generate("hello", 64, onProgress = turn.progress) { turn.reply.append(it) }
+            }
+            assertEquals(LocalStreamStallError.LOAD, (result.exceptionOrNull() as LocalStreamStallError).deadline)
+            assertTrue(state.value.error!!.contains("stalled (load)"))
+            assertEquals("error bubble per the ruling", prior.size + 1, state.value.messages.size)
+            assertEquals(state.value.error, state.value.messages.last().optString("text"))
+            assertFalse("picked text is cleared", picked)
+            assertTrue("unloaded even though keep-warm was requested", engine.unloadCount >= 1)
+            assertEquals(CompanionPackStatus.READY, manager.status())
+            assertEquals("", manager.lastError())
         }
-        val manager = manager(engine, LocalStallDeadlines(loadMs = 250))
-        val result = turn.answer(scope, manager, clearPicked = { picked = false }, keepWarm = { true }, onStart = {}, onFinally = {}) {
-            manager.generate("hello", 64, onProgress = turn.progress) { turn.reply.append(it) }
+        // Overall turn cap: steady streaming that never trips first-token or idle.
+        run {
+            val state = state()
+            val turn = LocalReplyTurn(state, prior, "a1")
+            var picked = true
+            val engine = SectionedEngine { _, onToken, e ->
+                repeat(20) { if (!e.cancelled) { onToken("tok "); Thread.sleep(40) } }
+                GenerateOutcome(cancelled = e.cancelled)
+            }
+            val manager = manager(engine, LocalStallDeadlines(firstTokenMs = 2_000, idleMs = 2_000, turnMs = 700))
+            val result = turn.answer(scope, manager, clearPicked = { picked = false }, keepWarm = { true }, onStart = {}, onFinally = {}) {
+                generateSectioned(manager)
+            }
+            assertEquals(LocalStreamStallError.TURN, (result.exceptionOrNull() as LocalStreamStallError).deadline)
+            assertTrue(state.value.error!!.contains("stalled (turn)"))
+            assertEquals(prior.size + 1, state.value.messages.size)
+            assertFalse(picked)
+            assertTrue(engine.unloadCount >= 1)
+            assertEquals(CompanionPackStatus.READY, manager.status())
+            assertEquals("", manager.lastError())
         }
-        assertTrue((result.exceptionOrNull() as LocalStreamStallError).deadline == LocalStreamStallError.LOAD)
-        assertTrue(state.value.error!!.contains("stalled (load)"))
-        assertEquals(prior.size + 1, state.value.messages.size)
-        assertFalse("picked text is cleared", picked)
-        assertTrue("the engine is unloaded even though keep-warm was requested", engine.unloadCount >= 1)
     }
 
     @Test fun stalledTurnUnloadsTheEngineAndLeavesPackReadyWithNoPackError() = runBlocking {

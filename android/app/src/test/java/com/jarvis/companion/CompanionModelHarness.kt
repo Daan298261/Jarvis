@@ -48,6 +48,11 @@ abstract class CompanionModelHarness {
                     if (cancelled) return GenerateOutcome(cancelled = true)
                     onToken("Done."); return GenerateOutcome()
                 }
+                "steady" -> { // keeps streaming; never a first-token or idle stall
+                    val until = System.currentTimeMillis() + 15_000
+                    while (!cancelled && System.currentTimeMillis() < until) { onToken("tok "); Thread.sleep(40) }
+                    return GenerateOutcome(cancelled = cancelled)
+                }
                 else -> { // "hang": a partial, then silence until asked to stop
                     onToken("Half an answer")
                     val until = System.currentTimeMillis() + 15_000

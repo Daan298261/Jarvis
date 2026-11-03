@@ -143,3 +143,26 @@ class CompanionModelOffgridTurnTest : CompanionModelHarness() {
         assertEquals(idle.messages, DesktopRefreshRules.messages(idle, "another", polled))
     }
 }
+
+/** The 300 s overall turn cap (shortened here) through the real model: same failure path and lock release. */
+@RunWith(KeystoreRobolectricRunner::class)
+@Config(sdk = [34], application = JarvisApp::class, shadows = [ReplaceAtomicFileShadow::class])
+class CompanionModelTurnCapTest : CompanionModelHarness() {
+    override val deadlines = LocalStallDeadlines(firstTokenMs = 5_000, idleMs = 2_000, loadMs = 5_000, turnMs = 1_000)
+
+    @Test fun overallTurnCapThroughSendOffgridRaisesTheTypedErrorAndReleasesTheRealSendLock() {
+        engine.mode = "steady"
+        model.sendOffgrid("hello there")
+        pump { model.state.value.error != null && !model.state.value.busy && !model.state.value.offlineAnswering }
+        val error = model.state.value.error!!
+        assertTrue(error, error.contains("stalled (turn)"))
+        assertEquals(listOf("hello there", error), texts())
+        assertEquals("", model.state.value.liveLocalReply)
+        assertFalse("CompanionModel.sendLock is released", sendLock().isLocked)
+        assertEquals("", model.packManager.lastError())
+        assertTrue(engine.unloadCount >= 1)
+        engine.mode = "ok"
+        model.sendOffgrid("try again")
+        pump { assistantTexts().any { it == "Hello from this phone." } && !model.state.value.busy }
+    }
+}
