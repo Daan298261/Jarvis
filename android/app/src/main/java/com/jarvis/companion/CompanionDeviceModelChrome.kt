@@ -16,6 +16,11 @@ enum class DevicePackStatus {
 data class DevicePackOption(
     val id: String,
     val label: String,
+    val sizeBytes: Long = 0,
+    val minRamMb: Int = 0,
+    val installed: Boolean = false,
+    val canDownload: Boolean = true,
+    val resumeBytes: Long = 0,
 )
 
 data class DevicePackChromeState(
@@ -27,6 +32,7 @@ data class DevicePackChromeState(
     val error: String? = null,
     val availablePacks: List<DevicePackOption> = emptyList(),
     val nativeRuntimeBundled: Boolean = false,
+    val downloads: Map<String, ModelDownloadState> = emptyMap(),
 )
 
 /**
@@ -37,6 +43,8 @@ interface DevicePackChromeActions {
     fun downloadSelectedPack()
     fun deleteSelectedPack()
     fun selectPack(packId: String)
+    fun downloadPack(packId: String) { selectPack(packId); downloadSelectedPack() }
+    fun cancelDownload(packId: String) {}
 }
 
 class CompanionDeviceModelChrome {
@@ -61,6 +69,8 @@ class CompanionDeviceModelChrome {
     fun selectPack(packId: String) {
         actions?.selectPack(packId)
     }
+    fun downloadPack(packId: String) { actions?.downloadPack(packId) }
+    fun cancelDownload(packId: String) { actions?.cancelDownload(packId) }
 }
 
 fun offlineChatBanner(

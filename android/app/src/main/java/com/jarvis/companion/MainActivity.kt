@@ -405,11 +405,7 @@ class MainActivity : FragmentActivity() {
                                     fontWeight = FontWeight.Light,
                                 )
                                 if (state.liveTranscript.isNotEmpty()) Text(state.liveTranscript, fontSize = 14.sp, color = Gold, modifier = Modifier.padding(top = 8.dp))
-                                Text(state.activity, fontSize = 12.sp, color = Muted, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
-                                if (state.handoffText.isNotBlank()) Text(state.handoffText, color = Color(0xFF3AD4FF), modifier = Modifier.padding(8.dp))
-                                state.messages.lastOrNull { it.optString("role") == "assistant" }?.let { reply ->
-                                    Text(reply.optString("text"), maxLines = 5, modifier = Modifier.padding(8.dp))
-                                }
+                                HomeReplyLines(state)
                                 if (state.lanLabel.isNotEmpty()) Text(state.lanLabel, fontSize = 13.sp, color = Gold, modifier = Modifier.padding(bottom = 8.dp))
                                 if (CompanionMode.needsPhoneSetup(state.connected, state.localModelReady)) {
                                     PhoneSetupCard(state, devicePack, deviceChrome, pickModelFile)
@@ -545,7 +541,7 @@ class MainActivity : FragmentActivity() {
 }
 
 /** First run without a desktop: get a model onto the phone by download or from a file. */
-@Composable private fun PhoneSetupCard(
+@Composable internal fun PhoneSetupCard(
     state: CompanionState,
     devicePack: DevicePackChromeState,
     chrome: CompanionDeviceModelChrome,
@@ -557,7 +553,14 @@ class MainActivity : FragmentActivity() {
             Text(stringResource(R.string.phone_setup_body), fontSize = 13.sp)
             val recommended = devicePack.availablePacks.firstOrNull { it.id == devicePack.selectedPackId } ?: devicePack.availablePacks.firstOrNull()
             recommended?.let { Text(it.label, color = Muted, fontSize = 12.sp) }
-            if (devicePack.status == DevicePackStatus.DOWNLOADING || state.modelImportBusy) {
+            // RFC-0235: per-transfer stage, bytes, rate and Cancel/Resume, layered on the existing setup card.
+            val transfer = devicePack.downloads.values.firstOrNull { it.active }
+                ?: devicePack.downloads[devicePack.selectedPackId]?.takeIf { it.stage != ModelDownloadStage.READY }
+            // The legacy bar and "Downloading… N%" stay exactly as before; the transfer view then skips its own bar.
+            val legacyBar = devicePack.status == DevicePackStatus.DOWNLOADING || state.modelImportBusy
+            if (transfer != null) ModelTransferFeedback(transfer,
+                { chrome.cancelDownload(transfer.packId) }, { chrome.downloadPack(transfer.packId) }, showBar = !legacyBar)
+            if (legacyBar) {
                 LinearProgressIndicator(
                     progress = { (state.localPackProgress / 100f).coerceIn(0f, 1f) },
                     modifier = Modifier.fillMaxWidth(),
@@ -602,6 +605,23 @@ private fun phoneModelStatus(state: CompanionState, devicePack: DevicePackChrome
         if (!state.inferenceLoaded && state.inferenceError.isNotEmpty()) {
             Text(state.inferenceError, color = Muted, fontSize = 11.sp, maxLines = 2)
         }
+    }
+}
+
+/**
+ * Home's reply lines. While an on-device reply streams, [CompanionState.liveLocalReply] is the one
+ * visible copy: the last assistant message is that same partial text (or the previous turn's reply),
+ * so it is hidden until the stream ends.
+ */
+@Composable
+internal fun HomeReplyLines(state: CompanionState) {
+    if (state.liveLocalReply.isNotBlank()) Text(state.liveLocalReply, fontSize = 14.sp, color = Gold,
+        maxLines = 4, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        modifier = Modifier.padding(top = 8.dp))
+    Text(state.activity, fontSize = 12.sp, color = Muted, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
+    if (state.handoffText.isNotBlank()) Text(state.handoffText, color = Color(0xFF3AD4FF), modifier = Modifier.padding(8.dp))
+    if (state.liveLocalReply.isBlank()) state.messages.lastOrNull { it.optString("role") == "assistant" }?.let { reply ->
+        Text(reply.optString("text"), maxLines = 5, modifier = Modifier.padding(8.dp))
     }
 }
 
@@ -656,7 +676,7 @@ private fun inferenceStatus(state: CompanionState): String {
     }
 }
 
-@Composable private fun CompanionModelsSection(
+@Composable internal fun CompanionModelsSection(
     chrome: CompanionDeviceModelChrome,
     devicePack: DevicePackChromeState,
     state: CompanionState,
@@ -676,7 +696,13 @@ private fun inferenceStatus(state: CompanionState): String {
             Text(devicePack.selectedPackLabel.ifBlank { "No pack selected" }, fontWeight = FontWeight.Medium)
             Text(formatStorageBytes(devicePack.bytesOnDisk), color = Muted, fontSize = 12.sp)
             devicePack.error?.let { Text(it, color = Color(0xFFE8A87C), fontSize = 12.sp) }
-            if (devicePack.status == DevicePackStatus.DOWNLOADING && devicePack.downloadProgress != null) {
+            // RFC-0235: live stage, bytes, rate and Cancel/Resume for the selected pack, on top of the status line.
+            val selectedTransfer = devicePack.downloads[devicePack.selectedPackId]?.takeIf { it.stage != ModelDownloadStage.READY }
+            // The legacy bar and "N%" stay exactly as before; the transfer view then skips its own bar.
+            val legacyBar = devicePack.status == DevicePackStatus.DOWNLOADING && devicePack.downloadProgress != null
+            if (selectedTransfer != null) ModelTransferFeedback(selectedTransfer,
+                { chrome.cancelDownload(selectedTransfer.packId) }, { chrome.downloadPack(selectedTransfer.packId) }, showBar = !legacyBar)
+            if (legacyBar) {
                 LinearProgressIndicator(
                     progress = { devicePack.downloadProgress!!.coerceIn(0f, 1f) },
                     modifier = Modifier.fillMaxWidth(),
@@ -727,6 +753,7 @@ private fun inferenceStatus(state: CompanionState): String {
                 enabled = !busy && devicePack.status != DevicePackStatus.DOWNLOADING,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Load model from file (.gguf)") }
+            if (state.modelImportBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             if (state.modelImportMessage.isNotBlank()) Text(state.modelImportMessage, color = Muted, fontSize = 12.sp)
             if (!devicePack.nativeRuntimeBundled) {
                 Text(
@@ -736,6 +763,12 @@ private fun inferenceStatus(state: CompanionState): String {
                 )
             }
         }
+    }
+    // RFC-0235: every catalog model as a card with size, RAM need, install state and its own transfer.
+    if (devicePack.availablePacks.isNotEmpty()) {
+        Text("All models", fontSize = 16.sp, modifier = Modifier.padding(top = 14.dp, bottom = 6.dp))
+        ModelLibraryCards(devicePack.availablePacks, devicePack.selectedPackId, devicePack.downloads, busy,
+            chrome::selectPack, chrome::downloadPack, chrome::cancelDownload, showBar = { it.id != devicePack.selectedPackId })
     }
 }
 

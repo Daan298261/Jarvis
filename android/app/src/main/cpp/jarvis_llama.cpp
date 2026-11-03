@@ -19,6 +19,7 @@ static std::string g_loaded_path;
 static int g_loaded_context = 0;
 static std::atomic<bool> g_llama_cancel{false};
 static std::atomic<uint64_t> g_llama_epoch{0};
+static std::vector<llama_token> g_prompt_tokens;
 
 static std::string jstring_to_std(JNIEnv *env, jstring value) {
     if (!value) return {};
@@ -52,6 +53,7 @@ Java_com_jarvis_companion_CompanionNativeBridge_nativeLoad(JNIEnv *env, jclass, 
     if (path.empty()) return to_jstring(env, "error:Model path is empty");
     if (g_model && g_ctx && g_loaded_path == path && g_loaded_context == contextTokens) return to_jstring(env, "");
 
+    g_prompt_tokens.clear();
     if (g_ctx) {
         llama_free(g_ctx);
         g_ctx = nullptr;
@@ -120,8 +122,6 @@ Java_com_jarvis_companion_CompanionNativeBridge_nativeGenerate(JNIEnv *env, jcla
     if (!g_model || !g_ctx) {
         return to_jstring(env, "error:Model is not loaded");
     }
-    // llama.cpp >= 2025-06 replaced the KV-cache API with the memory API (also covers recurrent/hybrid models such as Qwen3.5).
-    llama_memory_clear(llama_get_memory(g_ctx), true);
     std::string user = jstring_to_std(env, prompt);
     if (user.empty()) return to_jstring(env, "error:Prompt is empty");
     const char *tmpl = llama_model_chat_template(g_model, nullptr);
@@ -160,7 +160,21 @@ Java_com_jarvis_companion_CompanionNativeBridge_nativeGenerate(JNIEnv *env, jcla
         return to_jstring(env, "error:Prompt exceeds context");
     }
 
-    for (int offset = 0; offset < n; ) {
+    // Only transformer memory supports arbitrary prefix rollback. Hybrid/recurrent
+    // models always start fresh. Keep one prompt token to regenerate final logits.
+    int reused = 0;
+    const bool cacheable = !llama_model_is_recurrent(g_model) && !llama_model_is_hybrid(g_model);
+    if (cacheable) {
+        while (reused < n - 1 && reused < (int)g_prompt_tokens.size() &&
+               tokens[reused] == g_prompt_tokens[reused]) ++reused;
+    }
+    if (reused == 0 || !llama_memory_seq_rm(llama_get_memory(g_ctx), 0, reused, -1)) {
+        llama_memory_clear(llama_get_memory(g_ctx), true);
+        reused = 0;
+    }
+    g_prompt_tokens.clear(); // A cancelled/failed prefill must never advertise a valid prefix.
+    __android_log_print(ANDROID_LOG_INFO, LOG_TAG, "prefill prompt_tokens=%d reused_tokens=%d", n, reused);
+    for (int offset = reused; offset < n; ) {
         if (g_llama_epoch.load(std::memory_order_relaxed) != epoch ||
             g_llama_cancel.load(std::memory_order_relaxed)) {
             return to_jstring(env, "error:cancelled");
@@ -172,6 +186,7 @@ Java_com_jarvis_companion_CompanionNativeBridge_nativeGenerate(JNIEnv *env, jcla
         }
         offset += take;
     }
+    if (cacheable) g_prompt_tokens = tokens;
 
     std::string out;
     const int limit = maxTokens > 0 ? maxTokens : 256;
@@ -243,6 +258,7 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_jarvis_companion_CompanionNativeBridge_nativeUnload(JNIEnv *, jclass) {
     std::lock_guard<std::mutex> lock(g_mutex);
     g_llama_cancel.store(false);
+    g_prompt_tokens.clear();
     if (g_ctx) {
         llama_free(g_ctx);
         g_ctx = nullptr;
