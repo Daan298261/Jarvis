@@ -92,22 +92,47 @@ def ollama_pinned(expires_at) -> bool:
     return int(expires_at[:4]) - time.gmtime().tm_year >= 5
 
 
-def ollama_diagnostics(serves: list[dict]) -> list[str]:
+def _ancestor_names(pid: int) -> list[tuple[int, str]]:
+    chain, seen = [], set()
+    try:
+        current = psutil.Process(pid).ppid()
+        while current and current not in seen and len(chain) < 8:
+            seen.add(current)
+            process = psutil.Process(current)
+            chain.append((current, process.name().lower()))
+            current = process.ppid()
+    except (OSError, psutil.Error):
+        pass
+    return chain
+
+
+def ollama_diagnostics(serves: list[dict], listener: dict | None = None) -> list[str]:
     """Owner-facing explanation of a competing tray server; never changes autostart."""
-    from .ollama_runtime import ollama_autostart, ollama_port_conflict, ollama_tray_running
+    from .ollama_runtime import TRAY_APP_NAMES, ollama_autostart, ollama_port_conflict, ollama_tray_running
     notes = []
+    tray = ollama_tray_running()
+    pid = (listener or {}).get("pid")
+    if tray and pid and str((listener or {}).get("name", "")).startswith("ollama"):
+        ancestors = _ancestor_names(int(pid))
+        if ancestors and not any(name in TRAY_APP_NAMES for _, name in ancestors):
+            parent_pid, parent = ancestors[0]
+            notes.append(f"The Ollama server on 11434 (PID {pid}) was started by {parent} (PID {parent_pid}), "
+                         f"not by the Ollama tray app (PID {', '.join(map(str, tray))}), so the tray app cannot "
+                         "run its own server and retries against the busy port. ANZU keeps using the running "
+                         "server and, after this fix, starts Ollama through the tray app. To clear it once: quit "
+                         f"Ollama from the tray, end PID {pid}, then start Ollama from the Start menu.")
     conflict = ollama_port_conflict()
     if conflict:
-        tray = ollama_tray_running()
         notes.append(
             "Ollama's tray app keeps retrying to start a second server because port 11434 is already held"
             + (f" (serve PIDs {', '.join(str(p['pid']) for p in serves)})" if serves else "")
             + f"; {conflict['recent_conflicts']} bind errors in the last log tail, server.log is "
             f"{conflict['log_bytes'] // (1024 * 1024)} MB. ANZU will not start another server. "
-            "Fix: quit Ollama from the tray and start it again from the tray"
-            + (" (tray PIDs " + ", ".join(map(str, tray)) + ")" if tray else "") + ".")
+            "Fix: quit Ollama from the tray"
+            + (" (tray PIDs " + ", ".join(map(str, tray)) + ")" if tray else "")
+            + ", end the other Ollama server, then start Ollama from the Start menu.")
     autostart = ollama_autostart()
-    if autostart and not ollama_tray_running() and serves:
+    if autostart and not tray and serves:
         notes.append("Ollama is set to start at login (" + "; ".join(autostart)
                      + ") but its tray app is not running; another Ollama server owns the port.")
     return notes
@@ -602,7 +627,7 @@ class RunningModels:
             if len(serves) > 1:
                 self.diagnostics.append("Competing ollama serve processes detected: " + ", ".join(str(p["pid"]) for p in serves))
             try:
-                self.diagnostics += await asyncio.wait_for(asyncio.to_thread(ollama_diagnostics, serves), timeout=3)
+                self.diagnostics += await asyncio.wait_for(asyncio.to_thread(ollama_diagnostics, serves, inventory.get(11434)), timeout=3)
             except (TimeoutError, OSError, psutil.Error) as exc:
                 log.debug("ollama diagnostics unavailable: %s", exc)
             configured = {settings.inference.port} if settings.inference.host in {"127.0.0.1", "localhost", "::1"} else set()

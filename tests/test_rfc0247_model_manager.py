@@ -711,3 +711,14 @@ async def test_start_adopts_tray_server_that_is_still_starting(startable, monkey
     mock_http(monkeypatch, lambda r: httpx.Response(200, json={"done": True}))
     await instance._launch_profile(profile, ml.ModelStart(profile_id="small"), 2048)
     assert wait.await_args_list[0].kwargs.get("timeout") == 60
+
+
+def test_tray_running_but_server_owned_by_other_parent_is_explained(monkeypatch):
+    monkeypatch.setattr(ollama_runtime, "ollama_tray_running", lambda: [27892])
+    monkeypatch.setattr(ollama_runtime, "ollama_port_conflict", lambda: None)
+    monkeypatch.setattr(ollama_runtime, "ollama_autostart", lambda: [])
+    monkeypatch.setattr(rm, "_ancestor_names", lambda pid: [(12876, "python.exe"), (100, "explorer.exe")])
+    notes = rm.ollama_diagnostics([], {"pid": 2176, "name": "ollama.exe"})
+    assert len(notes) == 1 and "PID 2176" in notes[0] and "python.exe (PID 12876)" in notes[0]
+    monkeypatch.setattr(rm, "_ancestor_names", lambda pid: [(27892, "ollama app.exe")])
+    assert rm.ollama_diagnostics([], {"pid": 2176, "name": "ollama.exe"}) == []
