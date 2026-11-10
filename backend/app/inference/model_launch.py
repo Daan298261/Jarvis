@@ -26,6 +26,9 @@ class ModelStart(BaseModel):
     kv_cache: Literal["server", "f16", "q8_0", "q4_0"] = "server"
     flash_attention: Literal["server", "on", "off"] = "server"
     n_cpu_moe: int | None = Field(default=None, ge=0, le=256)
+    # "idle" = ANZU's idle-unload policy; "server" = the server's own default, e.g. the
+    # owner's OLLAMA_KEEP_ALIVE=-1 pin. Either way Unload frees VRAM on demand.
+    keep_alive: Literal["idle", "server"] = "idle"
     confirm: bool = False
     confirm_over_budget: bool = False
 
@@ -141,6 +144,7 @@ def launch_profiles(inventory: list[dict]) -> list[dict]:
         p["server_restart_required_for_options"] = p["backend"] == "ollama"
         p["kv_cache_options"] = ["server", "f16", "q8_0", "q4_0"] if p["backend"] != "lmstudio" else ["server"]
         p["flash_attention_options"] = ["server", "on", "off"] if p["backend"] != "lmstudio" else ["server"]
+        p["keep_alive_options"] = ["idle", "server"] if p["backend"] != "llama.cpp" else []
         unique[p["id"]] = p
     return list(unique.values())
 

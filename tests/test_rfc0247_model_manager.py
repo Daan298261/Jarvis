@@ -583,3 +583,131 @@ def test_configured_lmstudio_is_startable_when_native_server_is_down(runtime, mo
     profile = next(p for p in profiles if p["id"] == "runtime-studio")
     assert profile["model"] == "owner/model" and profile["backend"] == "lmstudio"
     assert profile["context_size"] == 16384
+
+
+# --- Tray app / duplicate-serve guard (VRPC: bare serve at boot + tray autostart retry loop) ---
+
+@pytest.fixture
+def free_port_no_ollama(monkeypatch):
+    monkeypatch.setattr(rm, "port_in_use", lambda p: False)
+    monkeypatch.setattr(rm, "ollama_serves", lambda: [])
+    monkeypatch.setattr(ollama_runtime, "ollama_tray_running", lambda: [])
+    monkeypatch.setattr(ollama_runtime, "ollama_cli", lambda: "C:/Ollama/ollama.exe")
+    spawn = Mock()
+    monkeypatch.setattr(ollama_runtime.subprocess, "Popen", spawn)
+    return spawn
+
+
+def test_installed_tray_app_is_launched_instead_of_bare_serve(free_port_no_ollama, monkeypatch):
+    monkeypatch.setattr(ollama_runtime, "ollama_tray_app", lambda: "C:/Ollama/ollama app.exe")
+    assert ollama_runtime._start_server("127.0.0.1", 11434) == "tray-app"
+    argv = free_port_no_ollama.call_args.args[0]
+    assert argv == ["C:/Ollama/ollama app.exe"] and "serve" not in argv
+    free_port_no_ollama.assert_called_once()
+
+
+def test_bare_serve_only_without_tray_app_or_on_custom_port(free_port_no_ollama, monkeypatch):
+    monkeypatch.setattr(ollama_runtime, "ollama_tray_app", lambda: None)
+    assert ollama_runtime._start_server("127.0.0.1", 11434) == "serve"
+    assert free_port_no_ollama.call_args.args[0] == ["C:/Ollama/ollama.exe", "serve"]
+    free_port_no_ollama.reset_mock()
+    monkeypatch.setattr(ollama_runtime, "ollama_tray_app", lambda: "C:/Ollama/ollama app.exe")
+    assert ollama_runtime._start_server("127.0.0.1", 11500) == "serve"
+
+
+def test_running_tray_app_means_pending_server_never_spawn(free_port_no_ollama, monkeypatch):
+    monkeypatch.setattr(ollama_runtime, "ollama_tray_running", lambda: [27892])
+    monkeypatch.setattr(ollama_runtime, "ollama_tray_app", lambda: "C:/Ollama/ollama app.exe")
+    with pytest.raises(ollama_runtime.OllamaAlreadyRunning):
+        ollama_runtime._start_server("127.0.0.1", 11434)
+    free_port_no_ollama.assert_not_called()
+
+
+def test_autostart_detection_is_read_only(monkeypatch, tmp_path):
+    startup = tmp_path / "Microsoft/Windows/Start Menu/Programs/Startup"
+    startup.mkdir(parents=True)
+    shortcut = startup / "Ollama.lnk"
+    shortcut.write_bytes(b"lnk")
+    (startup / "Other.lnk").write_bytes(b"x")
+    monkeypatch.setattr(ollama_runtime.sys, "platform", "win32")
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    found = ollama_runtime.ollama_autostart()
+    assert str(shortcut) in found and not any("Other" in f for f in found)
+    assert shortcut.read_bytes() == b"lnk"
+
+
+def test_port_conflict_loop_detected_from_recent_log_tail(monkeypatch, tmp_path):
+    log_file = tmp_path / "server.log"
+    log_file.write_text("old line\n" + "Error: listen tcp 127.0.0.1:11434: bind: Only one usage of each socket address\n" * 10)
+    monkeypatch.setattr(ollama_runtime, "ollama_server_log", lambda: log_file)
+    conflict = ollama_runtime.ollama_port_conflict()
+    assert conflict["recent_conflicts"] == 10
+    log_file.write_text("time=... msg=\"Listening on 127.0.0.1:11434\"\n")
+    assert ollama_runtime.ollama_port_conflict() is None
+
+
+async def test_scan_reports_tray_retry_loop_diagnostic(runtime, monkeypatch, tmp_path):
+    instance, _, _ = runtime
+    monkeypatch.setattr(rm, "ollama_serves", lambda: [{"pid": 2176, "created": 1.0}])
+    monkeypatch.setattr(ollama_runtime, "ollama_port_conflict",
+                        lambda: {"log": "server.log", "log_bytes": 68 * 1024 * 1024, "recent_conflicts": 40})
+    monkeypatch.setattr(ollama_runtime, "ollama_tray_running", lambda: [27892])
+    monkeypatch.setattr(ollama_runtime, "ollama_autostart", lambda: ["Startup/Ollama.lnk"])
+    monkeypatch.setattr(rm, "probe", AsyncMock(return_value=None))
+    result = await instance.scan(force=True)
+    text = " ".join(result["diagnostics"])
+    assert "2176" in text and "68 MB" in text and "will not start another server" in text
+
+
+def test_pinned_keep_alive_is_detected():
+    assert rm.ollama_pinned("2319-02-20T03:37:31.264628907+01:00")
+    assert not rm.ollama_pinned("2026-11-10T04:05:00+01:00")
+    assert not rm.ollama_pinned(None)
+    assert not rm.ollama_pinned("0001-01-01T00:00:00Z")
+
+
+async def test_ollama_loaded_metadata_marks_pinned(monkeypatch):
+    def handle(request):
+        if request.url.path == "/api/ps":
+            return httpx.Response(200, json={"models": [{"name": "qwen3.5:4b", "model": "qwen3.5:4b",
+                "size_vram": 3079961312, "expires_at": "2319-02-20T03:37:31+01:00"}]})
+        return httpx.Response(404)
+    mock_http(monkeypatch, handle)
+    row = await rm.probe(11434)
+    assert row["metadata"]["qwen3.5:4b"]["pinned"] is True
+
+
+async def test_server_keep_alive_omits_override_so_owner_pin_applies(startable, monkeypatch):
+    instance, _, _, profile = startable
+    instance.inventory = [{"port": 11434, "backend": "ollama", "endpoint": "http://127.0.0.1:11434",
+                           "available_models": [{"name": "small"}]}]
+    monkeypatch.setattr(rm, "port_in_use", lambda p: True)
+    monkeypatch.setattr(instance, "_wait_server", AsyncMock(return_value={}))
+    posts = []
+    mock_http(monkeypatch, lambda r: posts.append(json.loads(r.content)) or httpx.Response(200, json={"done": True}))
+    await instance._launch_profile(profile, ml.ModelStart(profile_id="small", keep_alive="server"), 2048)
+    assert "keep_alive" not in posts[0]
+
+
+async def test_unload_of_pinned_ollama_model_sends_keep_alive_zero(monkeypatch, runtime):
+    posts = []
+    def handle(request):
+        if request.method == "POST":
+            posts.append(json.loads(request.content))
+            return httpx.Response(200, json={"done": True})
+        return httpx.Response(200, json={"models": []})
+    mock_http(monkeypatch, handle)
+    await rm.unload_native({"backend": "ollama", "port": 11434, "model": "qwen3.5:4b",
+                            "base_url": "http://127.0.0.1:11434/v1"})
+    assert posts == [{"model": "qwen3.5:4b", "keep_alive": 0}]
+
+
+async def test_start_adopts_tray_server_that_is_still_starting(startable, monkeypatch):
+    instance, _, _, profile = startable
+    monkeypatch.setattr(ollama_runtime, "_start_server",
+                        Mock(side_effect=ollama_runtime.OllamaAlreadyRunning("tray starting")))
+    wait = AsyncMock(return_value={"available_models": [{"name": "small"}], "endpoint": "http://127.0.0.1:11434"})
+    monkeypatch.setattr(instance, "_wait_server", wait)
+    mock_http(monkeypatch, lambda r: httpx.Response(200, json={"done": True}))
+    await instance._launch_profile(profile, ml.ModelStart(profile_id="small"), 2048)
+    assert wait.await_args_list[0].kwargs.get("timeout") == 60

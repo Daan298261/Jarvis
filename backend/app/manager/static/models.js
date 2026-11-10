@@ -36,6 +36,7 @@ function profileChanged() {
     const select = form.elements[field];
     select.replaceChildren(...values.map(v => { const option = make('option', v === 'server' ? 'Use server settings' : v); option.value = v; return option; }));
   }
+  form.elements.keep_alive.closest('label').hidden = !(profile.keep_alive_options || []).length;
   const moe = form.elements.n_cpu_moe;
   moe.closest('label').hidden = profile.n_cpu_moe == null;
   moe.value = profile.n_cpu_moe ?? '';
@@ -78,14 +79,17 @@ function render() {
       const facts = [metadata.context_size ? `${metadata.context_size.toLocaleString()} context` : '',
         metadata.vram_bytes != null ? `${gib(metadata.vram_bytes / 1024 ** 2)} VRAM` : '',
         metadata.size_bytes != null ? `${gib(metadata.size_bytes / 1024 ** 2)} weights` : '',
+        metadata.pinned ? 'Pinned (keep_alive -1): stays in VRAM until unloaded' : '',
         row.busy ? 'Another client is busy' : 'Other apps may be using this model'];
       item.append(make('p', facts.filter(Boolean).join(' · '), 'model-meta'));
       const actions = make('div', null, 'model-actions');
       const use = make('button', 'Use in ANZU'); use.dataset.requiresCore = 'true';
       use.onclick = () => choose(row, 'use');
-      const stop = make('button', 'Stop', 'quiet');
+      const native = ['ollama', 'lmstudio'].includes(row.backend);
+      const stop = make('button', native ? 'Unload' : 'Stop', 'quiet');
+      stop.title = native ? 'Unload from memory to free VRAM; the server keeps running' : 'Stop this verified server process';
       stop.onclick = () => choose(row, 'stop');
-      if (row.can_stop && (snapshot.core_available || ['ollama', 'lmstudio'].includes(row.backend))) actions.append(stop);
+      if (row.can_stop && (snapshot.core_available || native)) actions.append(stop);
       if (!row.active) actions.prepend(use);
       item.append(actions); loaded.append(item);
     }
@@ -114,8 +118,9 @@ async function transaction(message, action) {
 }
 
 function choose(row, action) {
-  if (!confirm(`${action === 'stop' ? 'Stop' : 'Use'} ${row.model}? ${action === 'stop' ? 'Other apps may be using it.' : 'ANZU will switch its active backend.'}`)) return;
-  return transaction(action === 'stop' ? 'Stopping model…' : 'Connecting ANZU…', () => api(`/${row.id}/choice`, {action, confirm: true}));
+  const verb = action !== 'stop' ? 'Use' : ['ollama', 'lmstudio'].includes(row.backend) ? 'Unload' : 'Stop';
+  if (!confirm(`${verb} ${row.model}? ${action === 'stop' ? 'Other apps may be using it.' : 'ANZU will switch its active backend.'}`)) return;
+  return transaction(action === 'stop' ? `${verb === 'Unload' ? 'Unloading' : 'Stopping'} model…` : 'Connecting ANZU…', () => api(`/${row.id}/choice`, {action, confirm: true}));
 }
 
 picker.onchange = profileChanged;

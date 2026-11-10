@@ -60,6 +60,35 @@ choices reuse it unchanged. New ANZU-started Ollama receives only the two allowe
 environment settings. Loading uses an empty prompt, explicit context and idle
 keep-alive. No implicit pull or owner-server restart.
 
+### Ollama tray app and the duplicate-server loop
+
+Observed on the owner's Windows PC: ANZU's boot path started a bare `ollama serve`;
+minutes later the tray app (`Startup\Ollama.lnk` -> `ollama app.exe`) started its
+own server, found 11434 busy and retried every second (513k errors, 68 MB
+`server.log`). The single Ollama start path (`ollama_runtime._start_server`, used
+by boot, hot-swap, personas and Manager Start) therefore:
+
+1. adopts any answering/occupied port, any `ollama serve` process, and a running
+   tray app (its server may still be starting) — it never spawns a second server;
+2. when the tray app is installed and the target is the default loopback port,
+   launches `ollama app.exe` (which owns its server, so the login autostart finds
+   a running instance) instead of a bare server; bare `ollama serve` only when no
+   tray app exists or a non-default port is requested;
+3. never modifies the owner's Startup shortcut or HKCU Run entry (read-only
+   detection is shown in diagnostics);
+4. reports the bind-retry loop (bounded 64 KB tail of `server.log`, only when the
+   log is recent) with the log size and the fix (quit/restart Ollama from the tray).
+
+### Keep-alive and Unload
+
+The owner sets `OLLAMA_KEEP_ALIVE=-1`, which pins models. ANZU never overrides that
+globally. Start offers `keep_alive`: `idle` (ANZU's idle-unload policy, default) or
+`server` (omit keep_alive so the server default, e.g. the pin, applies). Loaded
+Ollama models whose `/api/ps` expiry is years ahead are labelled *pinned*, and the
+panel's per-model **Unload** (`keep_alive: 0`, verified via `/api/ps`) lets GPU jobs
+free VRAM without stopping the server. Model loads and llama-server readiness allow
+up to 600 s (27B/35B weights from disk).
+
 The Manager adds a Models panel and fixed-path core proxies. Loopback middleware
 and the session token protect mutations. On refused core connections, shared
 discovery is available. Only native Ollama/LM Studio unload can fall back, when
@@ -76,6 +105,8 @@ attaches providers or terminates processes.
 - [x] Manager panel, proxy, offline native stop, loopback/token and confirmation gates tested.
 - [x] Focused inference/API/Manager regressions and `git diff --check` pass (366 tests; no full-suite claim).
 - [x] Live discovery JSON, small-model start/stop log and duplicate-server refusal saved.
+- [x] Tray-app preference, adopt-existing/pending server, no second spawn, read-only autostart detection and retry-loop diagnostic tested.
+- [x] Pinned (keep_alive -1) detection, `server` keep-alive option and Unload (keep_alive 0) tested.
 - [x] Manager panel inspected, including narrow layout and error feedback (temporary source instance, not installed-app acceptance).
 
 ## Likely files

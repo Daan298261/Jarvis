@@ -436,7 +436,7 @@ async def manager_debug_log_verbose(
 # is absent. An unhealthy/restarting core cannot safely lend its request lease.
 async def _model_core(method: str, suffix: str, body: dict | None = None):
     try:
-        async with httpx.AsyncClient(timeout=360 if method == "POST" else 5, trust_env=False,
+        async with httpx.AsyncClient(timeout=660 if method == "POST" else 5, trust_env=False,
                                      follow_redirects=False) as client:
             response = await client.request(method, "http://127.0.0.1:4780/api/model/running" + suffix, json=body)
         if not response.is_success:

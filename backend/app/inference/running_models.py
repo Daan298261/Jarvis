@@ -25,6 +25,7 @@ log = logging.getLogger(__name__)
 Action = Literal["use", "leave", "stop", "replace"]
 KNOWN_PORTS = {1234, 1235, 8080, 8088, 11434, 8000, 5000, 5001, 30000}
 LLAMA_NAMES = {"llama-server", "llama-server.exe"}
+LOAD_TIMEOUT_SECONDS = 600.0
 CLIENT_NAMES = {"cursor", "codex", "aider", "antigravity", "chatgpt"}
 
 
@@ -84,19 +85,47 @@ def ollama_serves() -> list[dict]:
     return rows
 
 
+def ollama_pinned(expires_at) -> bool:
+    """OLLAMA_KEEP_ALIVE=-1 (or a huge keep_alive) shows as an expiry years ahead."""
+    if not isinstance(expires_at, str) or len(expires_at) < 4 or not expires_at[:4].isdigit():
+        return False
+    return int(expires_at[:4]) - time.gmtime().tm_year >= 5
+
+
+def ollama_diagnostics(serves: list[dict]) -> list[str]:
+    """Owner-facing explanation of a competing tray server; never changes autostart."""
+    from .ollama_runtime import ollama_autostart, ollama_port_conflict, ollama_tray_running
+    notes = []
+    conflict = ollama_port_conflict()
+    if conflict:
+        tray = ollama_tray_running()
+        notes.append(
+            "Ollama's tray app keeps retrying to start a second server because port 11434 is already held"
+            + (f" (serve PIDs {', '.join(str(p['pid']) for p in serves)})" if serves else "")
+            + f"; {conflict['recent_conflicts']} bind errors in the last log tail, server.log is "
+            f"{conflict['log_bytes'] // (1024 * 1024)} MB. ANZU will not start another server. "
+            "Fix: quit Ollama from the tray and start it again from the tray"
+            + (" (tray PIDs " + ", ".join(map(str, tray)) + ")" if tray else "") + ".")
+    autostart = ollama_autostart()
+    if autostart and not ollama_tray_running() and serves:
+        notes.append("Ollama is set to start at login (" + "; ".join(autostart)
+                     + ") but its tray app is not running; another Ollama server owns the port.")
+    return notes
+
+
 def audit_control(action: str, *, ok: bool | None = None, detail: dict | None = None) -> None:
     from ..manager import debug_log
     debug_log.write("WARNING" if ok is False else "INFO", "control_start" if ok is None else "control_end",
                     action="model_" + action, ok=ok, detail=detail)
 
 
-async def run_lms(args: list[str]) -> None:
+async def run_lms(args: list[str], *, timeout: float = 120) -> None:
     from .lmstudio_server import lmstudio_cli
     binary = await asyncio.to_thread(lmstudio_cli)
     if not binary:
         raise ValueError("LM Studio CLI (lms) was not found")
     completed = await asyncio.to_thread(subprocess.run, [binary, *args],
-        capture_output=True, text=True, timeout=120, check=False,
+        capture_output=True, text=True, timeout=timeout, check=False,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     if completed.returncode:
         raise ValueError("LM Studio command failed: " + (completed.stderr or completed.stdout)[:300])
@@ -188,6 +217,7 @@ async def probe(port: int, *, api_key: str = "", host: str = "127.0.0.1", includ
                         "display_name": str(item.get("name") or item.get("model")),
                         "size_bytes": item.get("size"), "context_size": item.get("context_length"),
                         "vram_bytes": item.get("size_vram"),
+                        "expires_at": item.get("expires_at"), "pinned": ollama_pinned(item.get("expires_at")),
                         "parameters": _mapping(item.get("details")).get("parameter_size"),
                         "quantization": _mapping(item.get("details")).get("quantization_level"),
                     } for item in body["models"] if isinstance(item, dict)}
@@ -443,18 +473,26 @@ class RunningModels:
                     env["OLLAMA_KV_CACHE_TYPE"] = body.kv_cache
                 if body.flash_attention != "server" or body.kv_cache in {"q8_0", "q4_0"}:
                     env["OLLAMA_FLASH_ATTENTION"] = "0" if body.flash_attention == "off" else "1"
-                await asyncio.to_thread(_start_server, "127.0.0.1", port, env_overrides=env)
-                server = await self._wait_server(port, "ollama")
+                from .ollama_runtime import OllamaAlreadyRunning
+                try:
+                    await asyncio.to_thread(_start_server, "127.0.0.1", port, env_overrides=env)
+                except OllamaAlreadyRunning:
+                    if env:
+                        raise ValueError("An Ollama tray app/server is already starting; its cache/flash settings "
+                                         "cannot be changed by ANZU. Choose server settings or restart it yourself.") from None
+                # Adopt the tray app's (or our) server once it answers.
+                server = await self._wait_server(port, "ollama", timeout=60)
             from .ollama_runtime import _model_present
             available = [p.get("name") for p in server.get("available_models", [])]
             if not _model_present(available, profile["model"]):
                 raise ValueError("This Ollama model is not downloaded. Pull it explicitly before Start.")
             settings = await asyncio.to_thread(load_settings)
             key = settings.inference.api_key if settings.inference.port == port and settings.inference.host in {"localhost", "127.0.0.1", "::1"} else ""
-            async with httpx.AsyncClient(timeout=180, trust_env=False, headers=inference_headers(key)) as client:
-                response = await client.post(server["endpoint"] + "/api/generate", json={
-                    "model": profile["model"], "prompt": "", "stream": False,
-                    "keep_alive": idle_keep_alive(), "options": {"num_ctx": context}})
+            async with httpx.AsyncClient(timeout=LOAD_TIMEOUT_SECONDS, trust_env=False, headers=inference_headers(key)) as client:
+                payload = {"model": profile["model"], "prompt": "", "stream": False, "options": {"num_ctx": context}}
+                if body.keep_alive == "idle":
+                    payload["keep_alive"] = idle_keep_alive()
+                response = await client.post(server["endpoint"] + "/api/generate", json=payload)
                 response.raise_for_status()
             await self._wait_server(port, backend, profile["model"])
         elif backend == "lmstudio":
@@ -463,7 +501,8 @@ class RunningModels:
             if not server:
                 await run_lms(["server", "start", "--port", str(port)])
             from .model_launch import lmstudio_ttl
-            await run_lms(["load", profile["model"], "--context-length", str(context), "-y", *lmstudio_ttl()])
+            ttl = lmstudio_ttl() if body.keep_alive == "idle" else []
+            await run_lms(["load", profile["model"], "--context-length", str(context), "-y", *ttl], timeout=LOAD_TIMEOUT_SECONDS)
             await self._wait_server(port, backend, profile["model"])
         elif backend == "llama.cpp":
             if used or server:
@@ -485,7 +524,8 @@ class RunningModels:
             process, identity = await asyncio.to_thread(spawn)
             self._launched[port] = identity
             try:
-                await self._wait_server(port, backend)
+                # A 27B/35B GGUF needs minutes to map from disk (MoE weights mostly in RAM).
+                await self._wait_server(port, backend, timeout=LOAD_TIMEOUT_SECONDS)
             except BaseException:
                 # This handle belongs exclusively to the child just spawned here.
                 # Failed readiness must not leave an unreachable model consuming VRAM.
@@ -503,8 +543,9 @@ class RunningModels:
         else:
             raise ValueError("Unsupported launch backend")
 
-    async def _wait_server(self, port: int, backend: str, model: str | None = None) -> dict:
-        deadline = time.monotonic() + 30
+    async def _wait_server(self, port: int, backend: str, model: str | None = None,
+                           timeout: float = 30) -> dict:
+        deadline = time.monotonic() + timeout
         existing = next((s for s in self.inventory if s["port"] == port), {})
         host = "::1" if "[::1]" in existing.get("endpoint", "") else "127.0.0.1"
         base = f"http://{'[::1]' if host == '::1' else host}:{port}"
@@ -560,6 +601,10 @@ class RunningModels:
                 self.diagnostics = []
             if len(serves) > 1:
                 self.diagnostics.append("Competing ollama serve processes detected: " + ", ".join(str(p["pid"]) for p in serves))
+            try:
+                self.diagnostics += await asyncio.wait_for(asyncio.to_thread(ollama_diagnostics, serves), timeout=3)
+            except (TimeoutError, OSError, psutil.Error) as exc:
+                log.debug("ollama diagnostics unavailable: %s", exc)
             configured = {settings.inference.port} if settings.inference.host in {"127.0.0.1", "localhost", "::1"} else set()
             ports = sorted(KNOWN_PORTS | configured) + sorted(set(inventory) - KNOWN_PORTS - configured)[:54]
             ports = [p for p in ports if p != settings.front_responder.port
