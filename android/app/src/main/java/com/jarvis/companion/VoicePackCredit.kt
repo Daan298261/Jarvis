@@ -17,11 +17,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 private val URL_PATTERN = Regex("""https://[^\s)]+""")
+
+/** One third-party notice on the buried Licenses screen. */
+data class LicenseNotice(
+    val title: String,
+    val packId: String,
+    val attribution: String?,
+)
 
 /** CC BY credit for on-device voice packs, shown without a tap (RFC-0140 Pocket TTS / Alba voice). */
 object VoicePackCredit {
@@ -51,6 +59,49 @@ object VoicePackCredit {
     /** Pocket's credit shows whenever it is installed or selected; any other selected pack shows its own. */
     fun shouldShow(packId: String, selectedId: String, installed: Boolean): Boolean =
         packId == selectedId || (packId == CompanionVoicePackCatalog.POCKET_TTS_ID && installed)
+
+    /**
+     * Notices for Settings → Licenses. Pocket TTS passes a missing attribution so
+     * [creditText] falls back to the pinned Kyutai / Alba MacKenna credit.
+     * The other rows match android/NOTICE (and the wake-word NOTICE.txt): the native libraries
+     * compiled into the APK (llama.cpp and whisper.cpp from CMake, ONNX Runtime) and every Gradle
+     * runtime library with the license its POM declares ([RuntimeLicenses]).
+     */
+    fun licenseNotices(): List<LicenseNotice> = listOf(
+        LicenseNotice(
+            title = "Pocket TTS",
+            packId = CompanionVoicePackCatalog.POCKET_TTS_ID,
+            attribution = null,
+        ),
+        LicenseNotice(
+            title = "llama.cpp",
+            packId = "llama-cpp",
+            attribution = "llama.cpp (ggml-org) v0.6.0, compiled into libjarvis_llama.so. " +
+                "Copyright (c) 2023-2026 The ggml authors. License: MIT. " +
+                "https://github.com/ggml-org/llama.cpp",
+        ),
+        LicenseNotice(
+            title = "whisper.cpp",
+            packId = "whisper-cpp",
+            attribution = "whisper.cpp v1.7.5, compiled into libjarvis_whisper.so. " +
+                "Copyright (c) 2023-2024 The ggml authors. License: MIT. " +
+                "https://github.com/ggerganov/whisper.cpp",
+        ),
+        LicenseNotice(
+            title = "ONNX Runtime",
+            packId = "onnxruntime-android",
+            attribution = "ONNX Runtime Android (onnxruntime-android) 1.31.0. " +
+                "Copyright (c) Microsoft Corporation. License: MIT. " +
+                "https://github.com/microsoft/onnxruntime",
+        ),
+        LicenseNotice(
+            title = "Keyword spotting",
+            packId = "sherpa-onnx-kws",
+            attribution = "Keyword spotting: k2-fsa sherpa-onnx 1.13.8 (Apache-2.0). " +
+                "Model: sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20. " +
+                "https://github.com/k2-fsa/sherpa-onnx",
+        ),
+    ) + RuntimeLicenses.notices()
 }
 
 /** Colours come from the caller's settings theme so this row matches the rest of the voice-pack card. */
@@ -81,5 +132,23 @@ fun VoicePackCreditText(
             )
         }
         error?.let { Text(it, color = errorColor, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp)) }
+    }
+}
+
+/** Licenses screen: every notice is visible once the settings section is open. Links reuse SponsorCredit. */
+@Composable
+fun LicenseScreen(color: Color, errorColor: Color, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        VoicePackCredit.licenseNotices().forEach { notice ->
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(notice.title, color = color, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                VoicePackCreditText(
+                    packId = notice.packId,
+                    attribution = notice.attribution,
+                    color = color,
+                    errorColor = errorColor,
+                )
+            }
+        }
     }
 }

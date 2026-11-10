@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="licenses">Licenties</string>
+    <string name="licenses_summary">Kennisgevingen van derden, waaronder Pocket TTS</string>
+</resources>
