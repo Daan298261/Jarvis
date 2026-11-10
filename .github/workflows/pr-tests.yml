@@ -139,6 +139,9 @@ jobs:
       - name: Manager control feedback tests (RFC-0229 S1)
         run: npm run test:manager-controls
 
+      - name: Chat appearance compact/classic tests (RFC-0243)
+        run: npm run test:chat-appearance
+
   installer-compile:
     name: installer-compile
     runs-on: windows-latest

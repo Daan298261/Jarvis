@@ -1,23 +1,51 @@
 import { useState } from "react"
 
 export const CHAT_BACKGROUND_KEY = "jarvis.chat.background.v1"
+/** RFC-0243 compact layout (820 px column, capped thread). Off restores the classic layout and fade mask. */
+export const CHAT_COMPACT_KEY = "jarvis.chat.compact.v1"
 
-export function readChatBackground(): boolean {
+/** Both preferences default on; only an explicit "off" turns one off. */
+function readOnByDefault(key: string): boolean {
   try {
-    return localStorage.getItem(CHAT_BACKGROUND_KEY) !== "off"
+    return localStorage.getItem(key) !== "off"
   } catch {
     return true
   }
 }
 
-export function useChatBackground(): [boolean, (enabled: boolean) => void] {
-  const [enabled, setEnabled] = useState(readChatBackground)
+function writeOnOff(key: string, enabled: boolean): void {
+  try {
+    localStorage.setItem(key, enabled ? "on" : "off")
+  } catch {
+    // Keep the current preference even if browser storage is unavailable.
+  }
+}
+
+function usePersistedToggle(key: string): [boolean, (enabled: boolean) => void] {
+  const [enabled, setEnabled] = useState(() => readOnByDefault(key))
   return [enabled, (next) => {
     setEnabled(next)
-    try {
-      localStorage.setItem(CHAT_BACKGROUND_KEY, next ? "on" : "off")
-    } catch {
-      // Keep the current preference even if browser storage is unavailable.
-    }
+    writeOnOff(key, next)
   }]
+}
+
+export function readChatBackground(): boolean {
+  return readOnByDefault(CHAT_BACKGROUND_KEY)
+}
+
+export function useChatBackground(): [boolean, (enabled: boolean) => void] {
+  return usePersistedToggle(CHAT_BACKGROUND_KEY)
+}
+
+export function readChatCompact(): boolean {
+  return readOnByDefault(CHAT_COMPACT_KEY)
+}
+
+export function useChatCompact(): [boolean, (enabled: boolean) => void] {
+  return usePersistedToggle(CHAT_COMPACT_KEY)
+}
+
+/** Class names for the HUD chat root: `chat-compact` scopes the RFC-0243 caps; without it the classic rules apply. */
+export function chatRootClassName(compact: boolean): string {
+  return compact ? "hud-chat chat-compact" : "hud-chat"
 }

@@ -17,7 +17,7 @@ import { MediaComposerBar } from "../components/MediaComposerBar"
 import { TaskActivityPanel } from "../components/TaskActivity"
 import { TaskStatusMeta } from "../components/TaskStatusMeta"
 import { useMediaUploads } from "../chat/useMediaUploads"
-import { useChatBackground } from "../chat/chatAppearance"
+import { chatRootClassName, useChatBackground, useChatCompact } from "../chat/chatAppearance"
 
 type HudChatProps = {
   onMoodChange?: (opts: { recording: boolean; speaking: boolean; task: Task | null; backendUnavailable: boolean }) => void
@@ -46,6 +46,7 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   const [connectionMessage, setConnectionMessage] = useState("")
   const [speaking, setSpeaking] = useState(false)
   const [chatBackground, setChatBackground] = useChatBackground()
+  const [chatCompact, setChatCompact] = useChatCompact()
   const [speakChatReplies, setSpeakChatReplies] = useSpeakChatReplies()
   const threadRef = useRef<HTMLDivElement | null>(null)
   const { active: hexStrikeActive } = useHexStrikeSuiteActive()
@@ -233,8 +234,14 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   const showThread = !!id
 
   return (
-    <div className="hud-chat" data-chat-background={chatBackground ? "on" : "off"}>
+    <div className={chatRootClassName(chatCompact)} data-chat-background={chatBackground ? "on" : "off"}
+      data-chat-compact={chatCompact ? "on" : "off"}>
       <div className="hud-chat-tools">
+        <button type="button" className="hud-icon-btn hud-chat-compact-toggle"
+          aria-pressed={chatCompact} onClick={() => setChatCompact(!chatCompact)}
+          title="Compact chat keeps the conversation in a narrow column; off restores the classic wide layout">
+          Compact chat: {chatCompact ? "On" : "Off"}
+        </button>
         <button type="button" className="hud-icon-btn hud-chat-background-toggle"
           aria-pressed={chatBackground} onClick={() => setChatBackground(!chatBackground)}
           title="Add a translucent background behind the conversation">
