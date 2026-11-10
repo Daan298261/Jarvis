@@ -26,7 +26,6 @@ from ..db.models import Checkpoint, Task, ToolCallRecord, utcnow
 from ..db.session import SessionLocal
 from ..events import BUS
 from ..inference.backends import is_inference_template_error
-from ..inference.idle_unload import IDLE_UNLOAD
 from ..inference.manager import MANAGER
 from ..inference.tool_capability import probe_tool_capability
 from ..inference.profiles import ModelProfile, resolve_profile

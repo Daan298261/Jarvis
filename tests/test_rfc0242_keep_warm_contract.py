@@ -402,7 +402,24 @@ async def test_keep_warm_on_repins_lmstudio_instances_without_ttl(monkeypatch, t
 
 # --- D1 review: owner approvals, entry-point scan, persona bind -------------------------------------------------
 
-async def test_owner_approval_after_unload_respawns_the_model(monkeypatch):
+@pytest.fixture
+async def own_agent_tasks(monkeypatch):
+    """The routes' AGENT with an empty runner table for this test only; whatever the test started is cancelled and
+    awaited on this loop afterwards, so runners other tests left behind (on closed loops) are never touched."""
+    from app.api import tasks as tasks_api
+
+    agent = tasks_api.AGENT
+    mine: dict = {}
+    monkeypatch.setattr(agent, "_tasks", mine)
+    yield agent
+    leftovers = [task for task in mine.values() if isinstance(task, asyncio.Task)]
+    for task in leftovers:
+        task.cancel()
+    await asyncio.gather(*leftovers, return_exceptions=True)
+    mine.clear()
+
+
+async def test_owner_approval_after_unload_respawns_the_model(monkeypatch, own_agent_tasks):
     """Approving a parked task after Unload is an owner act: the hold is lifted before the runner loads."""
     from types import SimpleNamespace
 
@@ -430,14 +447,14 @@ async def test_owner_approval_after_unload_respawns_the_model(monkeypatch):
     assert seen == [False, False, False]
 
 
-async def test_a_real_parked_task_resumes_after_unload_only_through_an_owner_approval(monkeypatch, tmp_path):
+async def test_a_real_parked_task_resumes_after_unload_only_through_an_owner_approval(monkeypatch, tmp_path, own_agent_tasks):
     """End to end through AGENT.confirm_task: _run reaches the guard and the owner route is what clears it."""
     from app.api import tasks as tasks_api
     from app.db import session as session_mod
     from app.db.models import Task
     from app.inference.manager import MANAGER
 
-    AGENT = tasks_api.AGENT
+    AGENT = own_agent_tasks
     await session_mod.configure_database(path=tmp_path / "jarvis.db")
     await session_mod.init_db()
     import app.agent.loop as loop_mod
@@ -459,8 +476,9 @@ async def test_a_real_parked_task_resumes_after_unload_only_through_an_owner_app
         await tasks_api.continue_task("parked-2", tasks_api.ContinueBody(approve=True))
     except Exception:
         pass  # the response shape is not under test; the runner ordering is
-    await asyncio.gather(*[t for t in AGENT._tasks.values()], return_exceptions=True)
-    AGENT._tasks.pop("parked-2", None)
+    runner = AGENT._tasks.get("parked-2")  # only the runner this test started
+    assert runner is not None
+    await asyncio.gather(runner, return_exceptions=True)
     assert guard == [False]
 
 
