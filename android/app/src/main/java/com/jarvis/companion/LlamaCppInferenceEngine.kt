@@ -21,11 +21,16 @@ class LlamaCppInferenceEngine : LocalInferenceEngine {
         return if (n > 0) n else (text.length + 3) / 4
     }
 
-    override fun generate(prompt: String, maxTokens: Int, onToken: (String) -> Unit): GenerateOutcome {
+    override fun beginTurn(): Long = if (isRuntimeAvailable()) CompanionNativeBridge.nativeBeginTurn() else 0L
+
+    override fun generate(prompt: String, maxTokens: Int, onToken: (String) -> Unit): GenerateOutcome =
+        generate(prompt, maxTokens, beginTurn(), onToken)
+
+    override fun generate(prompt: String, maxTokens: Int, turn: Long, onToken: (String) -> Unit): GenerateOutcome {
         if (!isRuntimeAvailable()) {
             return GenerateOutcome(error = "On-device inference runtime is missing from this build")
         }
-        val output = CompanionNativeBridge.nativeGenerate(prompt, maxTokens, OfflinePromptPlanner.N_BATCH,
+        val output = CompanionNativeBridge.nativeGenerate(prompt, maxTokens, OfflinePromptPlanner.N_BATCH, turn,
             object : NativeTokenListener { override fun onToken(token: String) = onToken(token) })
         if (output.startsWith("error:cancelled") || output == "cancelled") {
             return GenerateOutcome(cancelled = true)
@@ -62,7 +67,10 @@ object CompanionNativeBridge {
 
     external fun nativeLoad(modelPath: String, contextTokens: Int): String
     external fun nativeTokenize(text: String): Int
-    external fun nativeGenerate(prompt: String, maxTokens: Int, batchSize: Int, listener: NativeTokenListener): String
+    /** The current cancel epoch: the token of a turn that opens now ([LocalInferenceEngine.beginTurn]). */
+    external fun nativeBeginTurn(): Long
+    /** One pass of the turn [turn]; returns "error:cancelled" at once if a cancel landed since that turn began. */
+    external fun nativeGenerate(prompt: String, maxTokens: Int, batchSize: Int, turn: Long, listener: NativeTokenListener): String
     external fun nativeGenerateCancel()
     external fun nativeUnload()
 }

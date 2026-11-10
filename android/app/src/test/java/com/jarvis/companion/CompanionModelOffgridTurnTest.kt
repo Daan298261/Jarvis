@@ -166,3 +166,33 @@ class CompanionModelTurnCapTest : CompanionModelHarness() {
         pump { assistantTexts().any { it == "Hello from this phone." } && !model.state.value.busy }
     }
 }
+
+/**
+ * The 300 s cap spans every phone-tool step of one turn (RFC-0235 criterion A): each step is far under
+ * every per-pass bound, but the steps together pass the cap and the turn fails with the typed error.
+ */
+@RunWith(KeystoreRobolectricRunner::class)
+@Config(sdk = [34], application = JarvisApp::class, shadows = [ReplaceAtomicFileShadow::class])
+class CompanionModelPhoneToolTurnCapTest : CompanionModelHarness() {
+    private val now = java.util.concurrent.atomic.AtomicLong(0)
+    override val deadlines = LocalStallDeadlines(clockMs = { now.get() })
+
+    @Test fun phoneToolTurnCapSpansEveryStep() {
+        val pkg = context.packageName
+        PhoneToolPermissions(context).apply { enable(true); save(pkg, setOf("navigate")) }
+        context.getSharedPreferences("phone_tools", android.content.Context.MODE_PRIVATE).edit().putBoolean("enabled", true).commit()
+        engine.toolReply = """{"phone_tool":{"action":"launch","package":"$pkg","category":"navigate"}}"""
+        engine.onToolPass = { now.addAndGet(100_000) } // 100 s per step: under 120 s first-token and the 300 s cap on its own
+        engine.mode = "tool"
+        model.send("open my own app")
+        pump(timeoutMs = 30_000) { model.state.value.error != null && !model.state.value.busy && !model.state.value.offlineAnswering && !sendLock().isLocked }
+        val error = model.state.value.error!!
+        assertTrue(error, error.contains("stalled (turn)"))
+        assertTrue(error, error.contains("400s in total"))
+        assertEquals("the fourth step crossed the cap; no fifth step ran", 4, engine.generateCalls)
+        assertEquals("error bubble kept per the ruling", listOf("open my own app", error), texts())
+        assertEquals("", model.state.value.liveLocalReply)
+        assertFalse("CompanionModel.sendLock is released", sendLock().isLocked)
+        PhoneToolPermissions(context).enable(false)
+    }
+}

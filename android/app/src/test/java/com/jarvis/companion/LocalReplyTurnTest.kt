@@ -399,4 +399,138 @@ class LocalReplyTurnTest {
         turn.tick()
         assertEquals("Ready when you are", state.value.activity)
     }
+    // ---- RFC-0235 turn cap across passes and cancel between passes (UX r4 blocker 1) ----
+
+    /** A fake clock the deadlines read; passes move it forward instead of sleeping. */
+    private class FakeClock { val now = java.util.concurrent.atomic.AtomicLong(0); fun advance(ms: Long) { now.addAndGet(ms) } }
+
+    /** Like the old native pass: clears its cancel flag when a pass starts and streams [tokens] tokens unless stopped. */
+    private open class PassEngine(private val passTokens: Int, private val perTokenMs: Long = 10, private val clock: FakeClock? = null, private val perTokenFakeMs: Long = 0) : ScriptedInferenceEngine("") {
+        val streamed = java.util.concurrent.CopyOnWriteArrayList<Int>()
+        @Volatile var cancelRequests = 0
+        var beforePass: (Int) -> Unit = {}
+        override fun requestCancel() { cancelRequests++; cancelled = true }
+        override fun beginPass() { super.beginPass(); beforePass(generateCalls + 1) }
+        override fun generate(prompt: String, maxTokens: Int, onToken: (String) -> Unit): GenerateOutcome {
+            cancelled = false
+            generateCalls++
+            var n = 0
+            while (n < passTokens && !cancelled) { onToken("tok "); n++; clock?.advance(perTokenFakeMs); if (perTokenMs > 0) Thread.sleep(perTokenMs) }
+            streamed.add(n)
+            return GenerateOutcome(cancelled = cancelled)
+        }
+    }
+
+    @Test fun multiStepTurnHitsTheOverallCapAcrossSeparateGenerateCalls() = runBlocking {
+        // Each step streams 10 tokens 10 s apart on the fake clock: 100 s per step, never a first-token
+        // (120 s) or idle (30 s) stall and far under 300 s on its own. Together they pass the turn cap.
+        val clock = FakeClock()
+        val engine = PassEngine(passTokens = 10, perTokenMs = 0, clock = clock, perTokenFakeMs = 10_000)
+        val manager = manager(engine, LocalStallDeadlines(clockMs = { clock.now.get() }))
+        val state = state()
+        val turn = LocalReplyTurn(state, prior, "a1")
+        val result = turn.answer(scope, manager, clearPicked = {}, keepWarm = { false }, onStart = {}, onFinally = {}) { budget ->
+            repeat(10) { step -> manager.generate("step $step", 64, turn = budget, onProgress = turn.progress) { turn.reply.append(it) } }
+            "never landed"
+        }
+        val stall = result.exceptionOrNull() as LocalStreamStallError
+        assertEquals(LocalStreamStallError.TURN, stall.deadline)
+        assertEquals(300_000, stall.budgetMs)
+        assertEquals("measured from the start of the turn, not of the step", 400_000, stall.elapsedMs)
+        assertEquals("the fourth step crossed 300 s; no fifth step ran", 4, engine.generateCalls)
+        assertTrue(state.value.error!!.contains("stalled (turn)"))
+        assertEquals("error bubble per the ruling", prior.size + 1, state.value.messages.size)
+        assertEquals("", state.value.liveLocalReply)
+    }
+
+    @Test fun turnCapExpiringBetweenTwoPassesStopsTheNextPass() = runBlocking {
+        // The cap passes in the gap after the pre-pass check and before the engine starts: the live
+        // watchdog still stops that pass, even though the engine clears its cancel flag on entry.
+        val clock = FakeClock()
+        val engine = PassEngine(passTokens = 400, perTokenMs = 10)
+        engine.beforePass = { pass -> if (pass == 2) clock.advance(301_000) }
+        val manager = manager(engine, LocalStallDeadlines(firstTokenMs = 2_000, idleMs = 2_000, loadMs = 2_000, clockMs = { clock.now.get() }))
+        val budget = manager.openTurn()
+        manager.generate("first", 64, turn = budget) {}
+        val stall = runCatching { manager.generate("second", 64, turn = budget) {} }.exceptionOrNull() as LocalStreamStallError
+        assertEquals(LocalStreamStallError.TURN, stall.deadline)
+        assertEquals(listOf(400), engine.streamed.take(1))
+        assertTrue("the second pass was cancelled, not run to completion: ${engine.streamed}", engine.streamed[1] < 400)
+        assertTrue(engine.cancelRequests >= 1)
+        assertTrue("a third call fails at once", runCatching { manager.generate("third", 64, turn = budget) {} }.exceptionOrNull() is LocalStreamStallError)
+        assertEquals(2, engine.generateCalls)
+        manager.closeTurn(budget)
+    }
+
+    @Test fun cancelBetweenPassesStopsTheNextPassBeforeItStarts() = runBlocking {
+        val engine = PassEngine(passTokens = 3, perTokenMs = 0)
+        val manager = manager(engine)
+        val state = state()
+        val turn = LocalReplyTurn(state, prior, "a1")
+        val outcome = runCatching {
+            turn.answer(scope, manager, clearPicked = {}, keepWarm = { false }, onStart = {}, onFinally = {}) { budget ->
+                manager.generate("step 1", 64, turn = budget) { turn.reply.append(it) }
+                manager.requestCancel() // the stop lands while no pass is running
+                manager.generate("step 2", 64, turn = budget) { turn.reply.append(it) }
+                "never landed"
+            }
+        }
+        assertTrue(outcome.exceptionOrNull() is kotlinx.coroutines.CancellationException)
+        assertEquals("the pass after the cancel never started", 1, engine.generateCalls)
+        assertEquals(prior, state.value.messages)
+        assertEquals("", state.value.liveLocalReply)
+        // The cancel belonged to that turn only: the next turn runs normally.
+        assertTrue(answer(LocalReplyTurn(state(), prior, "a2"), manager).isSuccess)
+    }
+
+    @Test fun cancelInTheGapBeforeTheEngineStartsIsNotLost() = runBlocking {
+        // The stop lands after the pre-pass check (here: inside beginPass), with an engine that clears its
+        // flag on entry like the old native pass. The live watchdog repeats the cancel until it holds.
+        val engine = PassEngine(passTokens = 400, perTokenMs = 10)
+        val manager = manager(engine, LocalStallDeadlines(firstTokenMs = 2_000, idleMs = 2_000, loadMs = 2_000, turnMs = 60_000))
+        engine.beforePass = { pass -> if (pass == 2) manager.requestCancel() }
+        val budget = manager.openTurn()
+        manager.generate("first", 64, turn = budget) {}
+        val second = runCatching { manager.generate("second", 64, turn = budget) {} }.exceptionOrNull()
+        assertTrue(second is kotlinx.coroutines.CancellationException)
+        assertTrue("the second pass stopped early: ${engine.streamed}", engine.streamed[1] < 400)
+        manager.closeTurn(budget)
+    }
+
+    /** Models jarvis_llama.cpp: a cancel bumps an epoch; a pass of a turn refuses to run once its turn's epoch is stale. */
+    private class EpochEngine : ScriptedInferenceEngine("") {
+        private val epoch = java.util.concurrent.atomic.AtomicLong(0)
+        val turns = java.util.concurrent.CopyOnWriteArrayList<Long>()
+        val streamed = java.util.concurrent.CopyOnWriteArrayList<Int>()
+        var beforePass: (Int) -> Unit = {}
+        override fun beginTurn(): Long = epoch.get()
+        override fun requestCancel() { epoch.incrementAndGet() }
+        override fun beginPass() { super.beginPass(); beforePass(turns.size + 1) }
+        override fun generate(prompt: String, maxTokens: Int, onToken: (String) -> Unit): GenerateOutcome = error("passes must carry the turn token")
+        override fun generate(prompt: String, maxTokens: Int, turn: Long, onToken: (String) -> Unit): GenerateOutcome {
+            turns.add(turn)
+            var n = 0
+            while (n < 5 && epoch.get() == turn) { onToken("tok "); n++ }
+            streamed.add(n)
+            return GenerateOutcome(cancelled = epoch.get() != turn)
+        }
+    }
+
+    @Test fun everyPassOfATurnCarriesTheTurnTokenSoAGapCancelStopsTheEngine() = runBlocking {
+        val engine = EpochEngine()
+        val manager = manager(engine)
+        engine.beforePass = { pass -> if (pass == 2) engine.requestCancel() } // after the manager's own check
+        val budget = manager.openTurn()
+        manager.generate("first", 64, turn = budget) {}
+        val second = runCatching { manager.generate("second", 64, turn = budget) {} }.exceptionOrNull()
+        assertTrue(second is kotlinx.coroutines.CancellationException)
+        assertEquals("both passes ran under the token taken when the turn opened", listOf(0L, 0L), engine.turns)
+        assertEquals("the engine refused the second pass outright", listOf(5, 0), engine.streamed)
+        manager.closeTurn(budget)
+        // A new turn takes the new epoch and runs.
+        val next = manager.openTurn()
+        manager.generate("third", 64, turn = next) {}
+        assertEquals(listOf(5, 0, 5), engine.streamed)
+        manager.closeTurn(next)
+    }
 }
