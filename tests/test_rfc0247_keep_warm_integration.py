@@ -233,6 +233,70 @@ async def test_unload_native_itself_drops_only_its_own_ledger_entry(manager, mon
     assert [(e.backend, e.model) for e in LOADED.entries()] == [(LMSTUDIO, "other-model")]
 
 
+@pytest.mark.parametrize("backend,port", [("ollama", 11434), ("lmstudio", 1234)])
+async def test_use_on_the_studio_model_refuses_like_stop_and_loads_nothing(manager, monkeypatch, backend, port):
+    """CoS (#688 comment 6761525875): Use on bgm-ingest-9b would point ANZU at it and load it. It is refused with the
+    same 409 shape as the guarded Stop / Replace / Start, before any scan, load, ledger entry or backend call."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api import model as model_api
+
+    instance, _ = manager
+    calls: list[str] = []
+    mock_http(monkeypatch, lambda request: calls.append(str(request.url)) or httpx.Response(200, json={}))
+    load = AsyncMock()
+    monkeypatch.setattr(MANAGER, "load", load)
+    monkeypatch.setattr(model_api, "RUNNING_MODELS", instance)
+    monkeypatch.setattr(model_api, "audit_control", Mock())
+    MANAGER.state.manually_unloaded = True
+    row = {"id": "b" * 24, "port": port, "backend": backend, "model": FOREIGN, "process": None, "busy": False,
+           "can_stop": True, "active": False, "base_url": f"http://127.0.0.1:{port}/v1", "choice": None}
+    instance.rows = [row]
+    app = FastAPI()
+    app.include_router(model_api.router)
+    with TestClient(app) as client:
+        use = client.post(f"/api/model/running/{row['id']}/choice", json={"action": "use"})
+        instance.scan.assert_not_called()  # refused before discovery runs again
+        stop = client.post(f"/api/model/running/{row['id']}/choice", json={"action": "stop", "confirm": True})
+    assert (use.status_code, use.json()) == (409, {"detail": "ANZU never uses this model"})
+    assert stop.status_code == 409 and stop.json().keys() == use.json().keys()  # the same refusal shape as Stop
+    load.assert_not_called()
+    assert calls == [] and LOADED.entries() == []
+    assert MANAGER.state.manually_unloaded is True, "a refused Use is not an explicit Load"
+    assert rm.load_settings().inference.remote_model != FOREIGN
+
+
+async def test_discovery_never_reconnects_or_offers_the_studio_model(manager, monkeypatch):
+    """A saved "use" choice (or the settings) naming bgm-ingest-9b never auto-loads it, and the chat never offers it."""
+    instance, _ = manager
+    settings = rm.load_settings()
+    settings.inference.auto_load = True
+    settings.inference.backend, settings.inference.host = "ollama", "127.0.0.1"
+    settings.inference.port, settings.inference.remote_model = 11434, FOREIGN
+    load, publish = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(MANAGER, "load", load)
+    monkeypatch.setattr("app.persona.chat_delivery.publish_owner_text", publish)
+    MANAGER.state.loaded = MANAGER.state.loading = False
+    instance.rows = [
+        {"id": "c" * 24, "port": 11434, "backend": "ollama", "model": FOREIGN, "choice": "use", "busy": False},
+        {"id": "d" * 24, "port": 1234, "backend": "lmstudio", "model": FOREIGN, "choice": None, "busy": False},
+    ]
+    task = asyncio.create_task(instance._poll())
+    try:
+        for _ in range(100):
+            if instance.scan.await_count:
+                break
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.1)  # the rest of the iteration, up to its 20 s sleep
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    assert instance.scan.await_count == 1 and instance.error == ""
+    load.assert_not_called()
+    publish.assert_not_called()
+
+
 async def test_the_studio_model_is_never_offered_or_started(manager, monkeypatch):
     instance, profile = manager
     profile["model"] = FOREIGN

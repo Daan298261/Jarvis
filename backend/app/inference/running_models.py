@@ -749,6 +749,9 @@ class RunningModels:
             prior = next((r for r in self.rows if r["id"] == identifier), None)
             if not prior:
                 raise ValueError("That model is no longer available; scan again")
+            if action == "use" and is_denied(prior["model"]):
+                # Same refusal as the guarded Stop / Replace / Start: Use would point ANZU at it and load it.
+                raise ValueError("ANZU never uses this model")
             await self.scan(force=True)
             row = next((r for r in self.rows if r["id"] == identifier), None)
             if not row or row.get("process") != prior.get("process"):
@@ -853,7 +856,7 @@ class RunningModels:
                 if not model_enabled(settings):
                     await asyncio.sleep(10)
                     continue
-                selected = next((r for r in self.rows if r["choice"] == "use"
+                selected = next((r for r in self.rows if r["choice"] == "use" and not is_denied(r["model"])
                                  and r["port"] == settings.inference.port
                                  and r["model"] == settings.inference.remote_model
                                  and settings.inference.host in {"127.0.0.1", "localhost"}), None)
@@ -862,7 +865,8 @@ class RunningModels:
                     async with MANAGER._request_lease.exclusive() as acquired:
                         if acquired:
                             await MANAGER.load(settings)
-                pending = [r for r in self.rows if not r["choice"] and r["id"] not in self._notified]
+                pending = [r for r in self.rows if not r["choice"] and r["id"] not in self._notified
+                           and not is_denied(r["model"])]  # never offer a model ANZU refuses to use or stop
                 if pending:
                     from ..persona.chat_delivery import publish_owner_text
 
