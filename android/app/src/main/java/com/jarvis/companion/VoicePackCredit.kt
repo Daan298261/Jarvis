@@ -63,7 +63,9 @@ object VoicePackCredit {
     /**
      * Notices for Settings → Licenses. Pocket TTS passes a missing attribution so
      * [creditText] falls back to the pinned Kyutai / Alba MacKenna credit.
-     * The other rows match android/NOTICE and the wake-word NOTICE.txt.
+     * The other rows match android/NOTICE (and the wake-word NOTICE.txt): the native libraries
+     * compiled into the APK (llama.cpp and whisper.cpp from CMake, ONNX Runtime) and every Gradle
+     * runtime library with the license its POM declares ([RuntimeLicenses]).
      */
     fun licenseNotices(): List<LicenseNotice> = listOf(
         LicenseNotice(
@@ -72,9 +74,23 @@ object VoicePackCredit {
             attribution = null,
         ),
         LicenseNotice(
+            title = "llama.cpp",
+            packId = "llama-cpp",
+            attribution = "llama.cpp (ggml-org) v0.6.0, compiled into libjarvis_llama.so. " +
+                "Copyright (c) 2023-2026 The ggml authors. License: MIT. " +
+                "https://github.com/ggml-org/llama.cpp",
+        ),
+        LicenseNotice(
+            title = "whisper.cpp",
+            packId = "whisper-cpp",
+            attribution = "whisper.cpp v1.7.5, compiled into libjarvis_whisper.so. " +
+                "Copyright (c) 2023-2024 The ggml authors. License: MIT. " +
+                "https://github.com/ggerganov/whisper.cpp",
+        ),
+        LicenseNotice(
             title = "ONNX Runtime",
             packId = "onnxruntime-android",
-            attribution = "ONNX Runtime Android (onnxruntime-android) 1.20.0. " +
+            attribution = "ONNX Runtime Android (onnxruntime-android) 1.31.0. " +
                 "Copyright (c) Microsoft Corporation. License: MIT. " +
                 "https://github.com/microsoft/onnxruntime",
         ),
@@ -85,7 +101,7 @@ object VoicePackCredit {
                 "Model: sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20. " +
                 "https://github.com/k2-fsa/sherpa-onnx",
         ),
-    )
+    ) + RuntimeLicenses.notices()
 }
 
 /** Colours come from the caller's settings theme so this row matches the rest of the voice-pack card. */
