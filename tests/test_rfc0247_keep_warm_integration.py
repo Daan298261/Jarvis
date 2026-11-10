@@ -232,3 +232,75 @@ async def test_the_studio_model_is_never_offered_or_started(manager, monkeypatch
     assert FOREIGN not in {p["model"] for p in offered} and MODEL in {p["model"] for p in offered}
     with pytest.raises(ValueError, match="never stops"):
         await rm.unload_native({"backend": "ollama", "port": 11434, "model": FOREIGN})
+
+
+# --- CoS owner-pin ruling: a model the owner pinned (not ANZU) keeps "-1" and never idles out ----------------------
+
+PINNED_AT = "2319-02-20T03:37:31+01:00"  # how keep_alive -1 / OLLAMA_KEEP_ALIVE=-1 shows on /api/ps
+NORMAL_AT = "2026-11-10T06:20:00+01:00"
+
+
+async def test_an_owner_pinned_model_seen_on_discovery_keeps_minus_one_on_every_request(tmp_path, monkeypatch):
+    from app.inference import keep_alive
+
+    settings = AppSettings()
+    monkeypatch.setattr(rm, "load_settings", lambda: settings)
+    monkeypatch.setattr(rm, "listener_inventory", lambda: {})
+    monkeypatch.setattr(rm, "ollama_serves", lambda: [])
+    monkeypatch.setattr(rm, "ollama_diagnostics", lambda serves, listener: [])
+    monkeypatch.setattr(rm, "KNOWN_PORTS", {11434})
+    ps = {"models": [{"name": "owner-pinned:9b", "expires_at": PINNED_AT}, {"name": "owner-plain:4b", "expires_at": NORMAL_AT}]}
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.port != 11434:
+            raise httpx.ConnectError("refused", request=request)
+        return httpx.Response(200, json=ps if request.url.path == "/api/ps" else {"models": []})
+    mock_http(monkeypatch, handler)
+    await rm.RunningModels(tmp_path / "choices.json").scan(force=True)  # #691 discovery reads /api/ps
+
+    base = "http://127.0.0.1:11434/v1"
+    assert request_extras(base, "owner-pinned:9b") == {"keep_alive": "-1"}, "never reset the owner's pin to 300s"
+    assert request_extras(base, "owner-plain:4b") == {"keep_alive": "300s"}
+    assert keep_alive.ollama_body("owner-pinned:9b", {"prompt": ""})["keep_alive"] == "-1"  # native touch / warm
+    assert keep_alive.ollama_body("owner-pinned:9b", release=True)["keep_alive"] == 0  # an owner Unload still frees it
+
+    ps["models"] = [{"name": "owner-plain:4b", "expires_at": NORMAL_AT}]  # the owner unloaded it: the pin is gone
+    keep_alive.note_ollama_ps(11434, ps["models"])
+    assert request_extras(base, "owner-pinned:9b") == {"keep_alive": "300s"}
+
+
+async def test_a_model_anzu_pinned_with_keep_warm_is_not_an_owner_pin():
+    from app.inference import keep_alive
+
+    LOADED.record(OLLAMA, MODEL)  # ANZU loaded it; Keep warm ON made /api/ps show it pinned
+    keep_alive.note_ollama_ps(11434, [{"name": MODEL, "expires_at": PINNED_AT}])
+    assert not keep_alive.owner_pinned(MODEL)
+    assert request_extras("http://127.0.0.1:11434/v1", MODEL) == {"keep_alive": "300s"}  # Keep warm now off
+
+
+async def test_the_v1_touch_restates_an_owner_pin_and_the_idle_timer_never_releases_it(monkeypatch):
+    from app.inference import keep_alive
+
+    posts: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/ps":
+            return httpx.Response(200, json={"models": [{"name": "owner-pinned:9b", "expires_at": PINNED_AT}]})
+        posts.append(json.loads(request.content))
+        return httpx.Response(200, json={"done": True})
+    monkeypatch.setattr(keep_alive.httpx, "AsyncClient",
+                        lambda **kw: REAL_CLIENT(**{"transport": httpx.MockTransport(handler), **kw}))
+    assert await keep_alive.touch_ollama_if_resident("http://127.0.0.1:11434/v1", "owner-pinned:9b") is True
+    assert posts == [{"model": "owner-pinned:9b", "prompt": "", "stream": False, "keep_alive": "-1"}]
+
+    # The owner then Uses it (an explicit attach records it): Unload-all may release it, the idle timer may not.
+    LOADED.record(OLLAMA, "owner-pinned:9b")
+    released: list = []
+
+    async def release(source, targets=None):
+        released.append(targets)
+        return {"ok": True, "refused": False, "results": []}
+    timer = IdleUnload(registry=LOADED, settings=lambda: settings_with(False), release=release,
+                       busy=lambda: False, leased=lambda: False)
+    for entry in LOADED.entries():
+        entry.last_use -= 10_000
+    assert (await timer.tick())["reason"] == "active" and released == []

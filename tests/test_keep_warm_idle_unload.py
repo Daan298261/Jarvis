@@ -66,6 +66,7 @@ def clean_state(monkeypatch, tmp_path):
 
 def reset() -> None:
     LOADED.clear()
+    keep_alive.clear_owner_pins()
     IDLE_UNLOAD.held = False
     IDLE_UNLOAD.front_released = False
     IDLE_UNLOAD.last_idle_released = []

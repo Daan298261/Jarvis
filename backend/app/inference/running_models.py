@@ -21,7 +21,7 @@ import psutil
 from ..config import data_dir, load_settings, save_settings
 from .backends import inference_headers, parse_models_payload
 from .idle_unload import IDLE_UNLOAD
-from .keep_alive import is_denied, lmstudio_ttl_seconds, ollama_request
+from .keep_alive import is_denied, lmstudio_ttl_seconds, note_ollama_ps, ollama_pinned, ollama_request
 from .loaded_models import LLAMA_SERVER, LMSTUDIO, LOADED, OLLAMA
 from .model_launch import ModelStart, launch_profiles, budget_check, vram_snapshot
 
@@ -87,13 +87,6 @@ def ollama_serves() -> list[dict]:
     except (OSError, psutil.Error):
         pass
     return rows
-
-
-def ollama_pinned(expires_at) -> bool:
-    """OLLAMA_KEEP_ALIVE=-1 (or a huge keep_alive) shows as an expiry years ahead."""
-    if not isinstance(expires_at, str) or len(expires_at) < 4 or not expires_at[:4].isdigit():
-        return False
-    return int(expires_at[:4]) - time.gmtime().tm_year >= 5
 
 
 def _ancestor_names(pid: int) -> list[tuple[int, str]]:
@@ -711,6 +704,9 @@ class RunningModels:
             for result in results:
                 if not result:
                     continue
+                if result.get("source") == "ollama_ps":  # a full /api/ps listing: refresh the owner pins (keep_alive.py)
+                    note_ollama_ps(result["port"], [{"name": name, "expires_at": meta.get("expires_at")}
+                                                    for name, meta in result["metadata"].items()])
                 process = inventory.get(result["port"])
                 host = (process or {}).get("host", "127.0.0.1")
                 base = f"http://{'[::1]' if host == '::1' else host}:{result['port']}"

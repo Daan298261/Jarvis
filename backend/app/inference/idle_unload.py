@@ -14,8 +14,8 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from ..config import AppSettings, load_settings
-from .keep_alive import idle_unload_seconds, keep_warm_enabled
-from .loaded_models import LOADED, LoadedModels
+from .keep_alive import idle_unload_seconds, keep_warm_enabled, owner_pinned
+from .loaded_models import LOADED, OLLAMA, LoadedModels
 
 log = logging.getLogger(__name__)
 POLL_SECONDS = 15.0
@@ -177,8 +177,10 @@ class IdleUnload:
         if keep_warm_enabled(settings):
             return {"action": "skipped", "reason": "keep_warm"}
         window = idle_unload_seconds(settings)
-        # An entry without the idle policy (a Model Manager-spawned llama-server) is released only by an owner Unload.
-        due = [e for e in self.registry.entries() if e.idle_policy and self.registry.idle_for(e) >= window]
+        # Released only by an owner Unload, never by this timer: an entry without the idle policy (a Model
+        # Manager-spawned llama-server) and an Ollama model the owner pinned before ANZU attached to it.
+        due = [e for e in self.registry.entries() if e.idle_policy and self.registry.idle_for(e) >= window
+               and not (e.backend == OLLAMA and owner_pinned(e.model))]
         if not due:
             return {"action": "skipped", "reason": "active"}
         if self.is_busy():

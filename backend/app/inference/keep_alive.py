@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -59,6 +60,50 @@ def idle_unload_seconds(settings: AppSettings | None = None) -> int:
     return int((settings or current_settings()).inference.idle_unload_seconds)
 
 
+# Owner pins (CoS ruling): Ollama models the owner pinned (keep_alive -1 / OLLAMA_KEEP_ALIVE=-1) while ANZU had not
+# loaded them, as seen on /api/ps: canonical model -> port. ANZU restates the pin ("-1") on every request instead of
+# resetting it to its idle policy, and never idle-unloads them. Refreshed from each full /api/ps listing.
+_OWNER_PINS: set[tuple[int, str]] = set()  # (port, canonical model)
+
+
+def ollama_pinned(expires_at: Any) -> bool:
+    """keep_alive -1 (or a huge keep_alive) shows on /api/ps as an ``expires_at`` years ahead."""
+    if not isinstance(expires_at, str) or len(expires_at) < 4 or not expires_at[:4].isdigit():
+        return False
+    return int(expires_at[:4]) - time.gmtime().tm_year >= 5
+
+
+def note_ollama_ps(port: int, models: list[Any]) -> None:
+    """Record owner pins from one complete Ollama ``/api/ps`` listing on ``port``.
+
+    A pinned model ANZU did not load (not in ``LOADED``) is the owner's pin; it stays one until it leaves
+    ``/api/ps`` or shows a normal expiry. A model ANZU loaded is never an owner pin (Keep warm ON pins it too).
+    """
+    port = int(port)
+    seen: set[str] = set()
+    for item in models:
+        if not isinstance(item, dict):
+            continue
+        name = canonical(str(item.get("name") or item.get("model") or ""))
+        if not name:
+            continue
+        seen.add(name)
+        if not ollama_pinned(item.get("expires_at")):
+            _OWNER_PINS.discard((port, name))
+        elif (port, name) not in _OWNER_PINS and LOADED.match(OLLAMA, [name]) is None:
+            _OWNER_PINS.add((port, name))
+    _OWNER_PINS.difference_update({(p, n) for p, n in _OWNER_PINS if p == port and n not in seen})
+
+
+def owner_pinned(model: str) -> bool:
+    name = canonical(model)
+    return any(n == name for _p, n in _OWNER_PINS)
+
+
+def clear_owner_pins() -> None:
+    _OWNER_PINS.clear()
+
+
 def ollama_keep_alive(settings: AppSettings | None = None) -> str:
     """``keep_alive`` for an ANZU-originated Ollama request: ``"300s"`` idle policy, ``"-1"`` pinned."""
     app = settings or current_settings()
@@ -89,6 +134,11 @@ def backend_family(base_url: str, settings: AppSettings | None = None) -> str | 
     return _DEFAULT_PORTS.get(port)
 
 
+def ollama_keep_alive_for(model: str, settings: AppSettings | None = None) -> str:
+    """The policy value for ``model``, except an owner pin, which is restated (``"-1"``), never reset to 300s."""
+    return OLLAMA_PINNED_KEEP_ALIVE if owner_pinned(model) else ollama_keep_alive(settings)
+
+
 def request_extras(base_url: str, model: str, settings: AppSettings | None = None) -> dict[str, Any]:
     """Keep-alive fields for one request to ``model`` at ``base_url`` (empty for a denied model).
 
@@ -102,7 +152,7 @@ def request_extras(base_url: str, model: str, settings: AppSettings | None = Non
     if family is None or is_denied(model):
         return {}
     if family == OLLAMA:
-        return {"keep_alive": ollama_keep_alive(settings)}
+        return {"keep_alive": ollama_keep_alive_for(model, settings)}
     if LOADED.match(family, [model]) is None:
         return {}
     ttl = lmstudio_ttl_seconds(settings, model)
@@ -129,7 +179,7 @@ def ollama_body(model: str, body: dict[str, Any] | None = None, *, release: bool
     """
     if is_denied(model):
         raise DeniedModelError(f"{model} is not an ANZU model; ANZU never sends it a request.")
-    return {**(body or {}), "model": model, "keep_alive": 0 if release else ollama_keep_alive(settings)}
+    return {**(body or {}), "model": model, "keep_alive": 0 if release else ollama_keep_alive_for(model, settings)}
 
 
 async def ollama_request(client: httpx.AsyncClient, host: str, port: int, path: str, model: str,
@@ -161,7 +211,9 @@ async def touch_ollama_if_resident(base_url: str, model: str, api_key: str = "",
         async with httpx.AsyncClient(timeout=5.0, trust_env=False, headers=inference_headers(api_key)) as client:
             ps = await client.get(f"http://{host}:{port}/api/ps")
             ps.raise_for_status()
-            resident = {canonical(str(m.get("name") or m.get("model") or "")) for m in (ps.json().get("models") or []) if isinstance(m, dict)}
+            listing = [m for m in (ps.json().get("models") or []) if isinstance(m, dict)]
+            note_ollama_ps(port, listing)
+            resident = {canonical(str(m.get("name") or m.get("model") or "")) for m in listing}
             if canonical(model) not in resident:
                 return False
             response = await ollama_request(client, host, port, "/api/generate", model, {"prompt": "", "stream": False}, settings=settings)
