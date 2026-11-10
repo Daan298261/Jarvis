@@ -18,16 +18,14 @@ export const MYTHIC_LEGACY_D_AVATAR_ID = "mythic_legacy_d"
 export const LEGACY_HUMANOID_AVATAR_ID = "humanoid_legacy"
 
 export const MYTHIC_AVATAR_CHOICES = [
-  { id: MYTHIC_PORTRAIT_A_AVATAR_ID, label: "A · original portrait / side view" },
-  { id: MYTHIC_LIVE_B_AVATAR_ID, label: "B · detailed 3D / live gaze" },
-  { id: MYTHIC_LEGACY_C_AVATAR_ID, label: "C · classic particle figures" },
-  { id: MYTHIC_LEGACY_D_AVATAR_ID, label: "D · legacy live figures" },
-  { id: MYTHIC_LIVING_AVATAR_ID, label: "E · living body / Anzu and Nabu" },
+  { id: MYTHIC_LIVING_AVATAR_ID, label: "Full body · living point cloud" },
+  { id: MYTHIC_LIVE_B_AVATAR_ID, label: "Portrait · 3D live gaze" },
+  { id: MYTHIC_PORTRAIT_A_AVATAR_ID, label: "Portrait · original artwork" },
 ] as const
 
 export function mythicAvatarForSelection(avatarId: string): string {
   return MYTHIC_AVATAR_CHOICES.some(choice => choice.id === avatarId)
-    ? avatarId : MYTHIC_LIVE_B_AVATAR_ID
+    ? avatarId : MYTHIC_LIVING_AVATAR_ID
 }
 
 export function legacyPersonaShapeId(avatarId: string, shapeId: string): string | undefined {

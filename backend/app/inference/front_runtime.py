@@ -253,6 +253,9 @@ class FrontRuntime:
         return ""
 
     def provider(self, settings: AppSettings | None = None) -> Any | None:
+        from ..engine_mode import model_enabled
+        if not model_enabled(settings):
+            return None
         if self._test_provider is not None:
             return self._test_provider
         if self._decision.healthy and self._provider is not None:
@@ -272,6 +275,9 @@ class FrontRuntime:
         gguf_present: bool | None = None,
     ) -> FrontDecision:
         app = settings or load_settings()
+        from ..engine_mode import model_enabled
+        if not model_enabled(app):
+            return FrontDecision(reason="reflex_only")
         cfg = app.front_responder
         decision = FrontDecision(
             placement=cfg.placement,
@@ -472,6 +478,9 @@ class FrontRuntime:
 
     async def ensure_started(self, settings: AppSettings | None = None) -> FrontDecision:
         app = settings or load_settings()
+        from ..engine_mode import model_enabled
+        if not model_enabled(app):
+            return FrontDecision(reason="reflex_only")
         async with self._lock:
             remote_ok = None
             remote_error = ""

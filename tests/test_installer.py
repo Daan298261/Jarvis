@@ -297,7 +297,7 @@ def test_installer_and_desktop_versions_match():
     lock = json.loads(_read(REPO_ROOT / "frontend" / "package-lock.json"))
     cargo_lock = _read(REPO_ROOT / "frontend" / "src-tauri" / "Cargo.lock")
     gradle = _read(REPO_ROOT / "android" / "app" / "build.gradle.kts")
-    assert installer_version == "1.5.3-beta"
+    assert installer_version == "1.6.0-beta"
     assert installer_version == backend
     assert cargo["package"]["version"] == installer_version
     assert tauri["version"] == installer_version

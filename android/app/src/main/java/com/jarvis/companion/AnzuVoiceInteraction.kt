@@ -31,15 +31,26 @@ class AnzuVoiceSession(context: android.content.Context) : VoiceInteractionSessi
     }
     override fun onHandleAssist(state: AssistState) {
         super.onHandleAssist(state)
+        if (!WakeSettings(context).screenContext) return
         val structure = state.assistStructure ?: return
         val collected = StringBuilder()
         fun visit(node: AssistStructure.ViewNode, depth: Int) {
             if (depth > 16 || collected.length > 4000 || node.isAssistBlocked) return
-            if (node.inputType and android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD == android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD) return
+            if (isSensitiveAssistInput(node.inputType)) return
             node.text?.let { collected.append(it.take(300)).append('\n') }
             for (i in 0 until node.childCount) visit(node.getChildAt(i), depth + 1)
         }
         for (i in 0 until structure.windowNodeCount) visit(structure.getWindowNodeAt(i).rootViewNode, 0)
         PhoneTools.assistantContext = collected.toString().take(4000)
     }
+}
+
+internal fun isSensitiveAssistInput(inputType: Int): Boolean {
+    val kind = inputType and android.text.InputType.TYPE_MASK_CLASS
+    val variation = inputType and android.text.InputType.TYPE_MASK_VARIATION
+    return (kind == android.text.InputType.TYPE_CLASS_TEXT && variation in setOf(
+        android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD,
+        android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+        android.text.InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
+    )) || (kind == android.text.InputType.TYPE_CLASS_NUMBER && variation == android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD)
 }

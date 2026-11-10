@@ -47,8 +47,8 @@ import java.time.ZoneId
 import java.util.concurrent.atomic.AtomicBoolean
 
 private val Gold = Color(0xFFF5A623)
-private val Ink = Color(0xFF070B12)
-private val Panel = Color(0xFF111B28)
+private val Ink = Color(0xFF02050A)
+private val Panel = Color(0xFF0B151E)
 internal val Muted = Color(0xFF8C9CAF)
 /** Shared error text colour for settings rows (voice packs, sponsor credit). */
 internal val ErrorText = Color(0xFFE8A87C)
@@ -61,6 +61,10 @@ class MainActivity : FragmentActivity() {
     override fun onResume() {
         super.onResume()
         if (::secureScreen.isInitialized) secureScreen.apply()
+        if (WakeSettings(this).enabled && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            runCatching { startForegroundService(Intent(this, AnzuWakeService::class.java).setAction("enable")) }
+                .onFailure { WakeAudioState.status.value = "Could not resume wake listening: ${it.message}" }
+        }
     }
     override fun onStop() {
         if (::accessLock.isInitialized) accessLock.background()
@@ -96,7 +100,6 @@ class MainActivity : FragmentActivity() {
             }
             val model: CompanionModel = viewModel()
             val state by model.state.collectAsStateWithLifecycle()
-            LaunchedEffect(state.recording, state.speaking) { WakeAudioState.busy = state.recording || state.speaking }
             val app = application as JarvisApp
             val deviceChrome = app.deviceModelChrome
             val devicePack by deviceChrome.state.collectAsStateWithLifecycle()
@@ -189,7 +192,10 @@ class MainActivity : FragmentActivity() {
             val postPairVoiceOffer = remember(showPostPairVoiceOffer, state.voiceSttStatus) { recommendedVoicePackOffer(model) }
             LaunchedEffect(latestIntent) {
                 val delivered = latestIntent ?: return@LaunchedEffect
-                if (delivered.component?.className?.endsWith("AssistantSettingsActivity") == true) tab = "Assistant"
+                if (delivered.getBooleanExtra("anzu_assistant_settings", false)) {
+                    tab = "Assistant"
+                    delivered.removeExtra("anzu_assistant_settings")
+                }
                 delivered.getStringExtra("incoming_call")?.let { incomingCall = it }
                 if (delivered.action == Intent.ACTION_ASSIST || delivered.action == ANZU_VOICE_ASSIST_ACTION || delivered.getBooleanExtra("anzu_assist", false)) {
                     tab = "Chat"
@@ -344,6 +350,7 @@ class MainActivity : FragmentActivity() {
                                 }
                             }
                         }
+                        if (tab == "Home" || tab == "Chat") DesktopProjectsButton(state, model) { tab = "Chat" }
                         when (tab) {
                             NOTIFICATIONS_TAB -> NotificationsScreen(
                                 notices = notices,
@@ -399,6 +406,10 @@ class MainActivity : FragmentActivity() {
                                 )
                                 if (state.liveTranscript.isNotEmpty()) Text(state.liveTranscript, fontSize = 14.sp, color = Gold, modifier = Modifier.padding(top = 8.dp))
                                 Text(state.activity, fontSize = 12.sp, color = Muted, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
+                                if (state.handoffText.isNotBlank()) Text(state.handoffText, color = Color(0xFF3AD4FF), modifier = Modifier.padding(8.dp))
+                                state.messages.lastOrNull { it.optString("role") == "assistant" }?.let { reply ->
+                                    Text(reply.optString("text"), maxLines = 5, modifier = Modifier.padding(8.dp))
+                                }
                                 if (state.lanLabel.isNotEmpty()) Text(state.lanLabel, fontSize = 13.sp, color = Gold, modifier = Modifier.padding(bottom = 8.dp))
                                 if (CompanionMode.needsPhoneSetup(state.connected, state.localModelReady)) {
                                     PhoneSetupCard(state, devicePack, deviceChrome, pickModelFile)
@@ -444,6 +455,8 @@ class MainActivity : FragmentActivity() {
                                 }
                             }
                             "Chat" -> {
+                                if (state.liveTranscript.isNotBlank() && state.recording) Text(state.liveTranscript, color = Gold)
+                                if (state.handoffText.isNotBlank()) Text(state.handoffText, color = Color(0xFF3AD4FF))
                                 PhoneAnswerOptions(model) { tab = "Memory" }
                                 if (state.connected) ConversationPickers(state, model::selectModel, model::selectVoice)
                                 else Text(phoneModelStatus(state, devicePack), color = Muted, fontSize = 11.sp)
