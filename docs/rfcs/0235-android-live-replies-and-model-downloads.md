@@ -107,10 +107,10 @@ Local Qwen replies on the phone look stalled, because generated tokens are buffe
 
 | Area | Test (file) |
 | --- | --- |
-| A | `idleStallRaisesTypedErrorStopsDecodeAndReleasesTheSendLock`, `firstTokenStallRaisesTypedError`, `steadyStreamUnderTheDeadlinesIsNotAStall` (`LocalReplyTurnTest.kt`; the lock assertion uses a test-local `Mutex`, not `CompanionModel.sendLock`) |
+| A | `idleStallRaisesTypedErrorAndStopsDecode`, `firstTokenStallRaisesTypedError`, `steadyStreamUnderTheDeadlinesIsNotAStall` (`LocalReplyTurnTest.kt`); the idle stall's lock release is asserted against the real `CompanionModel.sendLock` in `CompanionModelOffgridTurnTest.stallThroughSendOffgridReleasesTheRealSendLock` |
 | B | `stageTickerKeepsTheMemoryPressureWarningVisible`, `stageTickerWithoutPressureShowsStageAndElapsed` (`LocalReplyTurnTest.kt`) |
 | C | `errorMidAnswerUnloadsAndClearsPicked` (`StandaloneModeTest.kt`, failure only) |
-| D | `cancelledStreamLeavesNoPartialReplyInChatOrOnHome`, `landedReplyClearsTheHomePreviewAndStaysInChat` (calls `turn.landed()` by hand), `failedStreamShowsTheErrorAsAnErrorNotAsAReply` (`LocalReplyTurnTest.kt`; **its last assertion, `messages == prior`, contradicts the ruling and must change**) |
+| D | `cancelledStreamLeavesNoPartialReplyInChatOrOnHome`, `landedReplyClearsTheHomePreviewAndStaysInChat` (calls `turn.landed()` by hand), `failedStreamDropsThePartialAndKeepsTheErrorBubble` (`LocalReplyTurnTest.kt`; asserts the ruling: `messages` is `prior` plus one assistant error bubble carrying the error text, and `liveLocalReply` is empty) |
 | streaming | `publishesFirstTokenBeforeCompletionAndCoalescesLaterTokens`, `splitReasoningAndTemplateMarkersNeverLeak` (`LiveLocalReplyTest.kt`) |
 | F (transfers) | `connectingIsVisibleBeforeHeadersAndCancellationUnblocksNetwork`, `partialDownloadCanResumeAndOnlyBecomesReadyAfterVerification`, `checksumFailureIsAnInlineErrorAndNeverReady`, `transientServerFailureShowsRetryAndRecovers` (`ModelDownloadFeedbackTest.kt`); `downloadHasImmediateFeedbackAndCanBePausedAndResumed`, `renderModelCardsWithDownloadProgress` (`ModelDownloadsUiTest.kt`) |
 | F (live UI kept) | `modelsScreenKeepsStatusDropdownAndRedownloadWithProgressOnTop`, `setupCardKeepsDownloadButtonWhileShowingTransferFeedback`, `legacyProgressStaysVisibleDuringATrackedDownload`, `modelsCardKeepsLegacyPercentDuringATrackedDownload` (`ModelScreensLiveUiTest.kt`; the last one asserts two bars today, see criterion F) |
@@ -120,7 +120,7 @@ Local Qwen replies on the phone look stalled, because generated tokens are buffe
 
 | # | Test (proposed file) | Proves |
 | --- | --- | --- |
-| 1 | `failedTurnKeepsItsErrorBubbleAndClearsOnlyThePartialAndHomePreview` (`LocalReplyTurnTest.kt`); the existing `failedStreamShowsTheErrorAsAnErrorNotAsAReply` and `idleStallRaisesTypedErrorStopsDecodeAndReleasesTheSendLock` change their `messages == prior` assertion to `prior + error bubble` | D: the CoS ruling |
+| 1 | `failedTurnKeepsItsErrorBubbleAndClearsOnlyThePartialAndHomePreview` (`LocalReplyTurnTest.kt`); the existing tests, renamed `failedStreamDropsThePartialAndKeepsTheErrorBubble` and `idleStallRaisesTypedErrorAndStopsDecode`, now assert `prior` plus exactly one error bubble instead of `messages == prior` | D: the CoS ruling |
 | 2 | `failedTurnErrorBubbleIsNeverSavedOrQueued` (new `CompanionModelOffgridTurnTest.kt`, fake engine and pack manager, through `sendOffgrid`) | D: bubble absent from the local store and the offline queue |
 | 3 | `stallThroughSendOffgridReleasesTheRealSendLock` (same file) | A: `CompanionModel.sendLock`, not a test-local mutex |
 | 4 | `sendOffgridLandsTheReplyAndClearsTheHomePreview` (same file) | D: the `sendOffline` wiring of `answer`, `landed`, `onFinally` |
