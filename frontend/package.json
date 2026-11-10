@@ -21,7 +21,7 @@
     "test:hexstrike-autostart": "node --experimental-strip-types --import ./apply-runtime-profile-test-register.mjs --test apply-runtime-profile.test.mjs",
     "test:persona-morph-hook": "node --experimental-strip-types --test persona-morph-hook.test.mjs",
     "test:manager-controls": "node --test manager-controls.test.mjs",
-    "test:chat-appearance": "node --experimental-strip-types --import ./chat-appearance-test-register.mjs --test chat-appearance.test.mjs",
+    "test:chat-appearance": "node --experimental-strip-types --import ./chat-appearance-test-register.mjs --test chat-appearance.test.mjs chat-appearance-render.test.mjs",
     "test:hud-model-menu": "node --experimental-strip-types --test hud-model-menu-status.test.mjs && node --experimental-strip-types --import ./hud-model-selector-render-test-register.mjs --test hud-model-selector-render.test.mjs"
   },
   "dependencies": {

@@ -2,10 +2,8 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { test } from "node:test"
 import { JSDOM } from "jsdom"
-import React, { act } from "react"
-import { createRoot } from "react-dom/client"
 
-const dom = new JSDOM("<!doctype html><body><div id='root'></div><div id='settings'></div></body>", { url: "http://127.0.0.1:4780/" })
+const dom = new JSDOM("<!doctype html><body></body>", { url: "http://127.0.0.1:4780/" })
 const { window } = dom
 for (const key of ["window", "document", "localStorage", "HTMLElement", "Node", "Event", "MouseEvent"]) {
   Object.defineProperty(globalThis, key, { value: key === "window" ? window : window[key], configurable: true, writable: true })
@@ -13,7 +11,6 @@ for (const key of ["window", "document", "localStorage", "HTMLElement", "Node", 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
 const appearance = await import("./src/chat/chatAppearance.ts")
-const { ChatAppearanceToggles } = await import("./src/chat/ChatAppearanceToggles.tsx")
 const css = readFileSync(new URL("./src/hud/hud-v2.css", import.meta.url), "utf8")
 
 function rules(source) {
@@ -38,6 +35,18 @@ test("compact chat defaults on and persists like the background toggle", () => {
   assert.equal(appearance.readChatCompact(), true)
 })
 
+test("compact toggle writes off and a reload reads off", async () => {
+  localStorage.clear()
+  appearance.setChatCompact(false)
+  assert.equal(localStorage.getItem(appearance.CHAT_COMPACT_KEY), "off")
+  const reloaded = await import("./src/chat/chatAppearance.ts?reload=off")
+  assert.equal(reloaded.readChatCompact(), false, "a fresh module instance (a reload) reads Off from storage")
+  appearance.setChatCompact(true)
+  assert.equal(localStorage.getItem(appearance.CHAT_COMPACT_KEY), "on")
+  const reloadedOn = await import("./src/chat/chatAppearance.ts?reload=on")
+  assert.equal(reloadedOn.readChatCompact(), true)
+})
+
 test("compact on adds the chat-compact class and its rules carry the RFC-0243 caps", () => {
   assert.equal(appearance.chatRootClassName(true), "hud-chat chat-compact")
   const body = compactRules.map((rule) => rule.body).join("\n")
@@ -60,7 +69,7 @@ test("compact off restores the classic layout and fade mask", () => {
   assert.ok(!classicRules.some((rule) => rule.selector.includes(".hud-thread") && /mask-image: none/.test(rule.body)))
 })
 
-test("the reading panel is compact-only and classic thread styling stays transparent", () => {
+test("classic mode has no chat background panel", () => {
   for (const rule of classicRules.filter((rule) => /\.hud-thread\b/.test(rule.selector))) {
     if (rule.selector === ".hud-thread") {
       assert.match(rule.body, /background:\s*transparent\s*;/)
@@ -77,7 +86,7 @@ test("the reading panel is compact-only and classic thread styling stays transpa
   assert.match(panels[0].body, /box-shadow:/)
 })
 
-test("compact bubbles only adjust layout and preserve development role colours", () => {
+test("compact keeps the role bubble colours", () => {
   const bubbles = compactRules.filter((rule) => /\.hud-bubble(?![\w-])/.test(rule.selector))
   assert.ok(bubbles.length)
   for (const rule of bubbles) {
@@ -93,62 +102,6 @@ test("compact bubbles only adjust layout and preserve development role colours",
   ]) {
     assert.ok(classicRules.some((rule) => rule.selector.split(",").map((part) => part.trim()).includes(selector)
       && rule.body.includes(`background: ${background};`)), `${selector} keeps its original background`)
-  }
-})
-
-test("HUD and Settings toggles share persisted state and restore classic mode together", async () => {
-  function ChatRoot() {
-    const [compact] = appearance.useChatCompact()
-    return React.createElement("div", { className: appearance.chatRootClassName(compact) }, React.createElement(ChatAppearanceToggles))
-  }
-  const host = document.getElementById("root")
-  const settings = document.getElementById("settings")
-  const root = createRoot(host)
-  const settingsRoot = createRoot(settings)
-  const click = (button) => act(async () => button.dispatchEvent(new window.MouseEvent("click", { bubbles: true })))
-  const compact = (surface) => surface.querySelector(".hud-chat-compact-toggle")
-  const background = (surface) => surface.querySelector(".hud-chat-background-toggle")
-  try {
-    await act(async () => {
-      root.render(React.createElement(ChatRoot))
-      settingsRoot.render(React.createElement("section", { "aria-label": "Chat" }, React.createElement(ChatAppearanceToggles)))
-    })
-    assert.ok(host.querySelector(".chat-compact"))
-    await click(compact(host))
-    assert.equal(localStorage.getItem(appearance.CHAT_COMPACT_KEY), "off")
-    assert.equal(host.querySelector(".chat-compact"), null)
-    assert.equal(host.firstChild.className, "hud-chat")
-    for (const surface of [host, settings]) {
-      assert.equal(compact(surface).textContent, "Compact chat: Off")
-      assert.equal(compact(surface).getAttribute("aria-pressed"), "false")
-      assert.equal(background(surface).disabled, true)
-      assert.match(background(surface).title, /only applies to Compact chat/)
-    }
-    await click(compact(settings))
-    assert.equal(localStorage.getItem(appearance.CHAT_COMPACT_KEY), "on")
-    assert.ok(host.querySelector(".chat-compact"))
-    assert.equal(compact(host).textContent, "Compact chat: On")
-    assert.equal(background(host).disabled, false)
-    await click(background(settings))
-    assert.equal(localStorage.getItem(appearance.CHAT_BACKGROUND_KEY), "off")
-    assert.equal(background(host).textContent, "Chat background: Off")
-    await click(background(host))
-    assert.equal(background(settings).textContent, "Chat background: On")
-
-    await act(async () => {
-      localStorage.setItem(appearance.CHAT_COMPACT_KEY, "off")
-      window.dispatchEvent(new window.StorageEvent("storage", { key: appearance.CHAT_COMPACT_KEY, storageArea: localStorage }))
-    })
-    assert.equal(compact(settings).textContent, "Compact chat: Off")
-    assert.equal(host.querySelector(".chat-compact"), null)
-    await act(async () => {
-      localStorage.clear()
-      window.dispatchEvent(new window.StorageEvent("storage", { key: null, storageArea: localStorage }))
-    })
-    assert.equal(compact(settings).textContent, "Compact chat: On")
-    assert.ok(host.querySelector(".chat-compact"))
-  } finally {
-    await act(async () => { root.unmount(); settingsRoot.unmount() })
   }
 })
 

@@ -18,7 +18,7 @@ import {
   MYTHIC_LIVE_B_AVATAR_ID,
 } from "../presence/mythicPersonaVariant"
 import { PullLampThemeToggle } from "../vendor/shipnotes/PullLampThemeToggle"
-import { ChatAppearanceToggles } from "../chat/ChatAppearanceToggles"
+import { ChatAppearanceSettingsSection } from "../chat/ChatAppearanceToggles"
 
 type AppearanceSettingsPaneProps = {
   settings: PresentationSettings
@@ -82,10 +82,6 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
 
   return (
     <div className="settings-appearance-pane">
-      <section role="group" aria-label="Chat">
-        <h3>Chat</h3>
-        <ChatAppearanceToggles />
-      </section>
       <CollapsibleSection title="Presence style" storageKey="appearance-presence-style">
       <p className="jarvis-presence-mode-lede" id="jarvis-presence-mode-help">
         Presence modes are style and profile controls on one shared renderer. Previews match the live look for each profile.
@@ -262,6 +258,7 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
       </label>
 
       </CollapsibleSection>
+      <ChatAppearanceSettingsSection />
       <PullLampThemeToggle />
 
       {message && <p className="jarvis-presence-controls-message" role="status">{message}</p>}
