@@ -15,7 +15,25 @@ type Run = {
   branch: string; base_sha: string; result?: unknown
   task: { current_action?: string; current_tool?: string; result?: string; error?: string; waiting_for_confirmation?: boolean; confirmation_payload?: string }
 }
-type State = { config: Config; items: Item[]; runs: Run[]; drive_status: string; error: string; failures: number; next_run: number; emergency_stop: boolean }
+type Check = { command: string[]; returncode: number }
+type Finding = { severity: string; file: string; issue: string }
+type Delivery = {
+  id: string; title: string; stage: string; branch: string; base_sha: string; head_sha: string; repairs: number
+  pr: number | null; merge_sha: string; error: string; waiting?: string; authorized_by: string
+  tests: { head_sha: string; ok: boolean; checks: Check[] } | null
+  review: { head_sha: string; approved: boolean; findings: Finding[]; north_star: string } | null
+  history: { stage: string; at: number; detail: string }[]
+}
+type Build = { merge_sha: string; status: string; attempts: number; error: string; artifact: string; sha256: string; log: string }
+type SummaryEntry = { title: string; pr: number | null; merge_sha: string; artifact: string; sha256: string; error: string; tests: { command: string; returncode: number }[] }
+type Away = {
+  enabled: boolean; activated_at: number; waiting?: string
+  summary: null | { since: number; until: number; reason: string; completed: SummaryEntry[]; merged_build_failed: SummaryEntry[]; blocked: SummaryEntry[]; in_progress: SummaryEntry[]; merged_prs: number[] }
+}
+type State = {
+  config: Config; items: Item[]; runs: Run[]; drive_status: string; error: string; failures: number; next_run: number; emergency_stop: boolean
+  away: Away; deliveries: Delivery[]; builds: Build[]; status: { phase: string; detail: string }
+}
 const endpoint = "/api/self-dev/scheduler"
 
 export function SelfDevelopmentPage() {
@@ -24,6 +42,7 @@ export function SelfDevelopmentPage() {
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
   const [drive, setDrive] = useState({ file_id: "", title: "", content: "" })
+  const [explanation, setExplanation] = useState("")
   const refresh = useCallback(async () => {
     try {
       const result = await api<State>(endpoint)
@@ -48,6 +67,31 @@ export function SelfDevelopmentPage() {
     <p><Link to="/coding">Coding review</Link> · <Link to="/mcp">Connections</Link> · <Link to="/tools">Tool permissions</Link></p>
     {(error || state.error) && <p role="alert">{error || state.error}</p>}
     {state.emergency_stop && <p role="alert">ANZU’s emergency stop is active. Resume it in System before starting work.</p>}
+    <section className="card self-development-away" style={{ padding: 20, marginBottom: 20 }} aria-label="Away Mode">
+      <h2>Away Mode — develop ANZU</h2>
+      <label className="self-development-switch">
+        <input type="checkbox" role="switch" checked={state.away.enabled} disabled={busy || (state.emergency_stop && !state.away.enabled)}
+          onChange={async e => {
+            setBusy(true); setError("")
+            try {
+              const result = await api<State & { explanation: string }>(endpoint + "/away", { method: "PUT", body: JSON.stringify({ enabled: e.target.checked }) })
+              setExplanation(result.explanation)
+              await refresh()
+            } catch (err) { setError(String(err)) } finally { setBusy(false) }
+          }} />
+        <span>{state.away.enabled ? "On" : "Off"}</span>
+      </label>
+      {explanation && <p role="status">{explanation}</p>}
+      <p role="status"><strong>{state.status.phase}</strong>{state.status.detail ? ` · ${state.status.detail}` : ""}</p>
+      <p>You can also say “I’m AFK, go develop yourself” in chat, and “I’m back” to pause. Each change is tested, independently reviewed against the North Star, merged into development only when every check passes, and built into a development installer. Nothing is installed on this PC automatically.</p>
+      {state.away.summary && <details open={!state.away.enabled}>
+        <summary>While you were away ({new Date(state.away.summary.since * 1000).toLocaleString()} – {new Date(state.away.summary.until * 1000).toLocaleString()})</summary>
+        {!state.away.summary.completed.length && !state.away.summary.blocked.length && !state.away.summary.merged_build_failed.length && <p>No tasks finished.</p>}
+        {state.away.summary.completed.map(entry => <p key={entry.merge_sha}>✓ {entry.title} · PR #{entry.pr} · <span style={{ overflowWrap: "anywhere" }}>{entry.artifact}</span> · sha256 {entry.sha256.slice(0, 16)} · {entry.tests.filter(t => t.returncode === 0).length}/{entry.tests.length} checks passed</p>)}
+        {state.away.summary.merged_build_failed.map(entry => <p key={entry.merge_sha}>Merged, build not ready: {entry.title} · PR #{entry.pr} · {entry.error}</p>)}
+        {state.away.summary.blocked.map((entry, index) => <p key={index}>Needs you: {entry.title} · {entry.error}</p>)}
+      </details>}
+    </section>
     <section className="card" style={{ padding: 20, marginBottom: 20 }}>
       <h2>Local worker</h2>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16 }}>
@@ -85,6 +129,26 @@ export function SelfDevelopmentPage() {
         <strong>{item.title}</strong><p>{item.source.startsWith("drive:") ? <a href={item.url} target="_blank" rel="noreferrer">Drive source</a> : item.source.split(":").at(-1)} · {item.status} · revision {item.revision.slice(0, 10)}</p>
         <button disabled={busy || ["unavailable", "needs_refresh", "running"].includes(item.status)} onClick={() => void action(`/items/${item.id}`, { revision: item.revision, queued: item.status !== "queued" })}>{item.status === "queued" ? "Remove from queue" : "Queue this revision"}</button>
       </article>)}
+    </section>
+    <section className="card" style={{ padding: 20, marginBottom: 20 }}><h2>Deliveries</h2>
+      {!state.deliveries.length && <p>No deliveries yet.</p>}
+      {[...state.deliveries].reverse().map(delivery => {
+        const build = state.builds.find(b => b.merge_sha && b.merge_sha === delivery.merge_sha)
+        return <article key={delivery.id} style={{ padding: "14px 0", borderTop: "1px solid var(--border, #333)" }}>
+          <strong>{delivery.title}</strong>
+          <p>{delivery.stage.replace(/_/g, " ")}{delivery.waiting ? ` · ${delivery.waiting}` : ""}{delivery.repairs ? ` · ${delivery.repairs} repair${delivery.repairs > 1 ? "s" : ""}` : ""}{delivery.pr ? ` · PR #${delivery.pr}` : ""}{delivery.merge_sha ? ` · merged ${delivery.merge_sha.slice(0, 12)}` : ""}</p>
+          {delivery.error && <p role="alert">{delivery.error}</p>}
+          {delivery.tests && <p>Controller checks at {delivery.tests.head_sha.slice(0, 12)}: {delivery.tests.ok ? "passed" : "failed"} ({delivery.tests.checks.map(c => `${c.command.join(" ")} → ${c.returncode}`).join("; ")})</p>}
+          {delivery.review && <details><summary>Independent review: {delivery.review.approved ? "approved" : "changes requested"} at {delivery.review.head_sha.slice(0, 12)}</summary>
+            {delivery.review.north_star && <p>{delivery.review.north_star}</p>}
+            <ul>{delivery.review.findings.map((f, i) => <li key={i}>[{f.severity}] {f.file}: {f.issue}</li>)}</ul>
+          </details>}
+          {delivery.stage === "approved" && !state.away.enabled && <button disabled={busy} onClick={() => void action(`/deliveries/${delivery.id}/publish`)}>Publish to development</button>}
+          {build && <p>Build: {build.status}{build.attempts ? ` · attempt ${build.attempts}` : ""}{build.artifact ? ` · ${build.artifact} · sha256 ${build.sha256.slice(0, 16)}` : ""}{build.error ? ` · ${build.error}` : ""}</p>}
+          {build && ["failed", "pending"].includes(build.status) && <button disabled={busy} onClick={() => void action(`/builds/${build.merge_sha}/retry`)}>{build.status === "failed" ? "Retry build" : "Build now"}</button>}
+          <details><summary>Timeline</summary><ul>{delivery.history.map((h, i) => <li key={i}>{new Date(h.at * 1000).toLocaleString()} · {h.stage.replace(/_/g, " ")}{h.detail ? ` · ${h.detail.slice(0, 300)}` : ""}</li>)}</ul></details>
+        </article>
+      })}
     </section>
     <section className="card" style={{ padding: 20 }}><h2>Missions</h2>
       {!state.runs.length && <p>No missions yet.</p>}

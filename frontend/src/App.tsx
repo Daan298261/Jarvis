@@ -54,6 +54,7 @@ import { collectHealthIssues, type SelfCheckSnapshot } from "./hud/systemHealth"
 import { DesktopBridge, type BackendLifecycleStatus } from "./desktop/bridge"
 import { HelpPanel, HelpTrigger } from "./help/HelpPanel"
 import { PortalNav } from "./components/PortalNav"
+import { UpcomingTasks } from "./components/UpcomingTasks"
 import { BootNova } from "./boot/BootNova"
 import { HudShell } from "./hud/HudShell"
 import { PendingApprovalHost } from "./chat/PendingApprovalHost"
@@ -573,6 +574,7 @@ function OwnerPortal() {
       >
         {routes}
       </HudShell>
+      <UpcomingTasks variant="hud" />
       </BootNova>
     )
   }
@@ -684,6 +686,7 @@ function OwnerPortal() {
       <main className={`main${chat ? " chat-main" : ""}${obsidian ? " obsidian-main" : ""}`}>
         {routes}
       </main>
+      <UpcomingTasks variant="classic" />
     </div>
     </BootNova>
   )
