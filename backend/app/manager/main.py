@@ -25,6 +25,7 @@ from ..hardware import hardware_dict
 from . import debug_log
 from .redact import redact_headers, register_secret
 from .supervisor import LAUNCH_LOG_MAX_BYTES, LAUNCH_LOGS_KEPT, CoreSupervisor, rotate_file
+from ..inference.model_launch import ModelStart, vram_snapshot
 
 # RFC-0229 S1: app.js is an ES module, and browsers/WebView2 refuse a module served
 # as anything but JavaScript. Starlette's StaticFiles takes Content-Type from
@@ -429,6 +430,126 @@ async def manager_debug_log_verbose(
         raise HTTPException(status_code=403, detail="Verbose logging can be changed only from the ANZU Manager page")
     debug_log.set_verbose(body.enabled)
     return {"verbose": debug_log.is_verbose()}
+
+
+# RFC-0247: proxy the existing model controls; share discovery only when core
+# is absent. An unhealthy/restarting core cannot safely lend its request lease.
+async def _model_core(method: str, suffix: str, body: dict | None = None):
+    try:
+        async with httpx.AsyncClient(timeout=360 if method == "POST" else 5, trust_env=False,
+                                     follow_redirects=False) as client:
+            response = await client.request(method, "http://127.0.0.1:4780/api/model/running" + suffix, json=body)
+        if not response.is_success:
+            try:
+                detail = response.json().get("detail", "Core model API failed")
+            except (ValueError, AttributeError):
+                detail = "Core model API failed"
+            raise HTTPException(response.status_code, detail)
+        return response.json()
+    except httpx.ConnectError:
+        return None
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(503, "Core model API unavailable; no fallback mutation attempted") from exc
+
+
+def _model_token(token: str | None):
+    if not _token_ok(token):
+        raise HTTPException(403, "Manager session token required")
+
+
+@app.get("/api/manager/v1/models")
+async def manager_models():
+    result = await _model_core("GET", "")
+    if result is not None:
+        return {**result, "core_available": True}
+    from ..inference.running_models import RUNNING_MODELS
+    return {**(await RUNNING_MODELS.scan()), "core_available": False}
+
+
+@app.get("/api/manager/v1/models/profiles")
+async def manager_model_profiles():
+    result = await _model_core("GET", "/profiles")
+    if result is not None:
+        return result
+    from ..inference.running_models import RUNNING_MODELS
+    return await RUNNING_MODELS.profiles()
+
+
+@app.get("/api/manager/v1/models/vram")
+async def manager_model_vram():
+    result = await _model_core("GET", "/vram")
+    return result if result is not None else await asyncio.to_thread(vram_snapshot)
+
+
+@app.post("/api/manager/v1/models/scan")
+async def manager_model_scan(token: str | None = Header(default=None, alias=TOKEN_HEADER)):
+    _model_token(token)
+    result = await _model_core("POST", "/scan")
+    if result is not None:
+        return {**result, "core_available": True}
+    from ..inference.running_models import RUNNING_MODELS
+    return {**(await RUNNING_MODELS.scan(force=True)), "core_available": False}
+
+
+@app.post("/api/manager/v1/models/start/preview")
+async def manager_model_preview(body: ModelStart, token: str | None = Header(default=None, alias=TOKEN_HEADER)):
+    _model_token(token)
+    result = await _model_core("POST", "/start/preview", body.model_dump())
+    if result is None:
+        raise HTTPException(409, "Start ANZU before starting a model")
+    return result
+
+
+@app.post("/api/manager/v1/models/start")
+async def manager_model_start(body: ModelStart, token: str | None = Header(default=None, alias=TOKEN_HEADER)):
+    _model_token(token)
+    if not body.confirm:
+        raise HTTPException(400, "Explicit confirmation is required")
+    result = await _model_core("POST", "/start", body.model_dump())
+    if result is None:
+        raise HTTPException(409, "Start ANZU before starting a model")
+    return result
+
+
+class ModelChoiceRequest(BaseModel):
+    action: Literal["use", "leave", "stop", "replace"]
+    confirm: bool = False
+
+
+@app.post("/api/manager/v1/models/{identifier}/choice")
+async def manager_model_choice(identifier: str, body: ModelChoiceRequest,
+                               token: str | None = Header(default=None, alias=TOKEN_HEADER)):
+    _model_token(token)
+    # Reject path metacharacters before interpolating an owner-supplied id into a proxy URL.
+    if len(identifier) != 24 or any(c not in "0123456789abcdef" for c in identifier):
+        raise HTTPException(400, "Invalid model identifier")
+    if body.action in {"stop", "replace"} and not body.confirm:
+        raise HTTPException(400, "Explicit confirmation is required")
+    result = await _model_core("POST", f"/{identifier}/choice", body.model_dump())
+    if result is not None:
+        return {**result, "core_available": True}
+    if body.action != "stop":
+        raise HTTPException(409, "Start ANZU before choosing a model")
+    # Refuse fallback while a process exists, a launcher is in flight, or the
+    # core port is occupied. A 500/timeout above never reaches this fallback.
+    from ..inference.running_models import RUNNING_MODELS, port_in_use
+    async def core_absent():
+        return not await asyncio.to_thread(_managed_process_running) and not await asyncio.to_thread(port_in_use, 4780)
+    if SUPERVISOR.state.control_in_flight or SUPERVISOR.state.restarting:
+        raise HTTPException(409, "Core may still be running; cannot safely acquire its request lease")
+    try:
+        # The same supervisor exclusion used by core controls also prevents an
+        # automatic core restart between offline validation and native unload.
+        async with SUPERVISOR.control_action("model_stop"):
+            if not await core_absent():
+                raise HTTPException(409, "Core may still be running; cannot safely acquire its request lease")
+            return {**(await RUNNING_MODELS.stop_offline(identifier, confirm=body.confirm, core_absent=core_absent)), "core_available": False}
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(503, f"Model stop failed: {exc}") from exc
 
 
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")

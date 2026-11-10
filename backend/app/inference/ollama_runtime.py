@@ -25,6 +25,10 @@ SERVER_WAIT_SECONDS = 45.0
 POLL_SECONDS = 1.0
 
 
+class OllamaAlreadyRunning(ValueError):
+    """The existing listener/process must be reused, never replaced."""
+
+
 def is_loopback_host(host: str) -> bool:
     return (host or "").strip().lower() in LOOPBACK
 
@@ -43,8 +47,15 @@ def ollama_cli() -> str | None:
     return None
 
 
-def _start_server(host: str, port: int) -> None:
+def _start_server(host: str, port: int, *, env_overrides: dict[str, str] | None = None) -> None:
+    from .running_models import port_in_use, ollama_serves
+    if port_in_use(port) or ollama_serves():
+        raise OllamaAlreadyRunning("Ollama port/process is already in use; duplicate server launch refused")
+    if not ollama_cli():
+        raise FileNotFoundError("ollama CLI is not installed")
     env = os.environ.copy()
+    env.update({k: v for k, v in (env_overrides or {}).items()
+                if k in {"OLLAMA_KV_CACHE_TYPE", "OLLAMA_FLASH_ATTENTION"}})
     address = f"[{host}]" if ":" in host else host
     env["OLLAMA_HOST"] = f"{address}:{int(port)}"
     subprocess.Popen(
@@ -116,6 +127,8 @@ async def ensure_local_ollama(
             }
         try:
             await asyncio.to_thread(_start_server, host, port)
+        except OllamaAlreadyRunning:
+            _log.info("Ollama already has a listener/process; waiting for the existing server")
         except OSError as exc:
             return {"ok": False, "method": "start-failed", "detail": str(exc)}
         probe = await _wait_until_up(host, port, timeout)
