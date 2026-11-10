@@ -29,6 +29,9 @@ abstract class CompanionModelHarness {
         @Volatile var cancelRequests = 0
         @Volatile var released = false
         @Volatile var loadDelayMs = 0L
+        /** Mode "tool": the reply every pass gives (a phone-tool command) and what each such pass does first. */
+        @Volatile var toolReply = ""
+        @Volatile var onToolPass: () -> Unit = {}
         override fun requestCancel() { cancelRequests++; cancelled = true }
         override fun load(modelPath: String, contextTokens: Int): String? {
             val until = System.currentTimeMillis() + loadDelayMs
@@ -41,6 +44,7 @@ abstract class CompanionModelHarness {
             when (mode) {
                 "ok" -> { onToken("Hello "); onToken("from this phone."); return GenerateOutcome() }
                 "error" -> { onToken("Half an answer"); return GenerateOutcome(error = "model crashed mid-answer") }
+                "tool" -> { onToolPass(); onToken(toolReply); return GenerateOutcome() }
                 "hold" -> {
                     // Quiet until the test releases it (no token, so the first-token budget applies).
                     val until = System.currentTimeMillis() + 15_000

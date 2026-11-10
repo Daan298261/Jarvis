@@ -17,7 +17,9 @@ static llama_model *g_model = nullptr;
 static llama_context *g_ctx = nullptr;
 static std::string g_loaded_path;
 static int g_loaded_context = 0;
-static std::atomic<bool> g_llama_cancel{false};
+// Cancel epoch: every cancel bumps it. A turn takes the value when it opens (nativeBeginTurn) and every
+// pass of that turn runs against it, so a cancel landing between two passes (or before a pass takes the
+// lock) stops that pass instead of being lost. Nothing ever resets it, so no pending cancel is dropped.
 static std::atomic<uint64_t> g_llama_epoch{0};
 static std::vector<llama_token> g_prompt_tokens;
 
@@ -48,7 +50,6 @@ static jstring to_jstring(JNIEnv *env, const std::string &value) {
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_jarvis_companion_CompanionNativeBridge_nativeLoad(JNIEnv *env, jclass, jstring modelPath, jint contextTokens) {
     std::lock_guard<std::mutex> lock(g_mutex);
-    g_llama_cancel.store(false);
     const std::string path = jstring_to_std(env, modelPath);
     if (path.empty()) return to_jstring(env, "error:Model path is empty");
     if (g_model && g_ctx && g_loaded_path == path && g_loaded_context == contextTokens) return to_jstring(env, "");
@@ -107,16 +108,20 @@ Java_com_jarvis_companion_CompanionNativeBridge_nativeTokenize(JNIEnv *env, jcla
     return n < 0 ? -1 : n;
 }
 
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_jarvis_companion_CompanionNativeBridge_nativeBeginTurn(JNIEnv *, jclass) {
+    return (jlong)g_llama_epoch.load(std::memory_order_acquire);
+}
+
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_jarvis_companion_CompanionNativeBridge_nativeGenerate(JNIEnv *env, jclass, jstring prompt, jint maxTokens, jint batchSize, jobject listener) {
-    const uint64_t epoch = g_llama_epoch.load(std::memory_order_acquire);
-    std::lock_guard<std::mutex> lock(g_mutex);
-    if (g_llama_epoch.load(std::memory_order_relaxed) != epoch) {
+Java_com_jarvis_companion_CompanionNativeBridge_nativeGenerate(JNIEnv *env, jclass, jstring prompt, jint maxTokens, jint batchSize, jlong turn, jobject listener) {
+    // The turn's epoch, not the one at entry: a cancel since the turn began stops this pass before it starts.
+    const uint64_t epoch = (uint64_t)turn;
+    if (g_llama_epoch.load(std::memory_order_acquire) != epoch) {
         return to_jstring(env, "error:cancelled");
     }
-    g_llama_cancel.store(false, std::memory_order_relaxed);
-    if (g_llama_epoch.load(std::memory_order_relaxed) != epoch ||
-        g_llama_cancel.load(std::memory_order_relaxed)) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_llama_epoch.load(std::memory_order_acquire) != epoch) {
         return to_jstring(env, "error:cancelled");
     }
     if (!g_model || !g_ctx) {
@@ -175,8 +180,7 @@ Java_com_jarvis_companion_CompanionNativeBridge_nativeGenerate(JNIEnv *env, jcla
     g_prompt_tokens.clear(); // A cancelled/failed prefill must never advertise a valid prefix.
     __android_log_print(ANDROID_LOG_INFO, LOG_TAG, "prefill prompt_tokens=%d reused_tokens=%d", n, reused);
     for (int offset = reused; offset < n; ) {
-        if (g_llama_epoch.load(std::memory_order_relaxed) != epoch ||
-            g_llama_cancel.load(std::memory_order_relaxed)) {
+        if (g_llama_epoch.load(std::memory_order_relaxed) != epoch) {
             return to_jstring(env, "error:cancelled");
         }
         const int take = std::min(n_batch, n - offset);
@@ -199,8 +203,7 @@ Java_com_jarvis_companion_CompanionNativeBridge_nativeGenerate(JNIEnv *env, jcla
     std::string pending_utf8;
     int n_past = n;
     for (int i = 0; i < limit; ++i) {
-        if (g_llama_epoch.load(std::memory_order_relaxed) != epoch ||
-            g_llama_cancel.load(std::memory_order_relaxed)) {
+        if (g_llama_epoch.load(std::memory_order_relaxed) != epoch) {
             llama_sampler_free(sampler);
             return to_jstring(env, "error:cancelled");
         }
@@ -250,14 +253,12 @@ Java_com_jarvis_companion_CompanionNativeBridge_nativeGenerate(JNIEnv *env, jcla
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_jarvis_companion_CompanionNativeBridge_nativeGenerateCancel(JNIEnv *, jclass) {
-    g_llama_cancel.store(true);
     g_llama_epoch.fetch_add(1, std::memory_order_acq_rel);
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_jarvis_companion_CompanionNativeBridge_nativeUnload(JNIEnv *, jclass) {
     std::lock_guard<std::mutex> lock(g_mutex);
-    g_llama_cancel.store(false);
     g_prompt_tokens.clear();
     if (g_ctx) {
         llama_free(g_ctx);

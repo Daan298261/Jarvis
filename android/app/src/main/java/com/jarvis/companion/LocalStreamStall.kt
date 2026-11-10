@@ -1,13 +1,18 @@
 package com.jarvis.companion
 
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+
 /**
  * Deadlines for one on-device reply, mirroring the desktop provider stall contract
  * (`StreamStallError`, first_token and idle) and adding two bounds the phone needs.
  * - [firstTokenMs] runs from the start of a native pass (prefill included) to its first token.
  * - [idleMs] is the longest gap between two tokens of a pass.
  * - [loadMs] bounds loading the model into memory (180 s).
- * - [turnMs] caps one whole [CompanionPackManager.generate] call (300 s): the load, every section
- *   summary pass of a sectioned prompt, and the reply pass together.
+ * - [turnMs] caps one whole turn (300 s), measured from the moment the turn opens ([LocalTurnBudget]):
+ *   every [CompanionPackManager.generate] call of the turn together, i.e. each load, every section
+ *   summary pass of a sectioned prompt, the reply pass and every phone-tool step. It never restarts
+ *   per call or per pass.
  */
 data class LocalStallDeadlines(
     val firstTokenMs: Long = 120_000,
@@ -44,5 +49,36 @@ class LocalStreamStallError(
         const val IDLE = "idle"
         const val LOAD = "load"
         const val TURN = "turn"
+    }
+}
+
+/**
+ * The one time budget and cancel scope of an on-device reply turn (RFC-0235). It is opened once, when
+ * the turn opens ([CompanionPackManager.openTurn]), and passed to every [CompanionPackManager.generate]
+ * call of that turn: the chat reply, each section summary and every phone-tool step. So:
+ * - the [LocalStallDeadlines.turnMs] cap runs from [startedAtMs] across all of them and never restarts;
+ * - a cancel is remembered for the rest of the turn, so a stop that lands between two passes stops the
+ *   next pass before it starts instead of being lost. [engineTurn] is the engine's own turn token
+ *   ([LocalInferenceEngine.beginTurn]), which makes native decode refuse a pass after such a cancel too.
+ */
+class LocalTurnBudget internal constructor(
+    private val deadlines: LocalStallDeadlines,
+    internal val engineTurn: Long,
+) {
+    val startedAtMs: Long = deadlines.clockMs()
+    private val cancelled = AtomicBoolean(false)
+    private val capped = AtomicReference<LocalStreamStallError?>(null)
+
+    val isCancelled: Boolean get() = cancelled.get()
+
+    internal fun cancel() { cancelled.set(true) }
+
+    /** The turn-cap error once [LocalStallDeadlines.turnMs] has passed since [startedAtMs]; the first one is kept. */
+    internal fun overCap(model: String): LocalStreamStallError? {
+        capped.get()?.let { return it }
+        val elapsed = deadlines.clockMs() - startedAtMs
+        if (elapsed <= deadlines.turnMs) return null
+        capped.compareAndSet(null, LocalStreamStallError(LocalStreamStallError.TURN, elapsed, deadlines.turnMs, model))
+        return capped.get()
     }
 }

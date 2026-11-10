@@ -64,6 +64,9 @@ internal class LocalReplyTurn(
 
     /**
      * Runs the turn's [block] under [withOfflineAnswerCleanup] with the stage ticker in [scope].
+     * The turn's [LocalTurnBudget] opens here, when the turn starts, and is handed to [block]: every
+     * `generate` of the turn passes it on, so the 300 s cap covers the whole turn and a cancel between
+     * two passes stops the next one. It is closed when the turn ends.
      * A cancelled turn rethrows after dropping its partial reply; a failed or stalled turn returns
      * the failure after showing it as an error (and its error bubble).
      */
@@ -74,10 +77,11 @@ internal class LocalReplyTurn(
         keepWarm: () -> Boolean,
         onStart: () -> Unit,
         onFinally: () -> Unit,
-        block: suspend () -> T,
+        block: suspend (LocalTurnBudget) -> T,
     ): Result<T> {
         var answered = false
         var ticker: Job? = null
+        val budget = packManager.openTurn()
         return withOfflineAnswerCleanup(
             packManager = packManager,
             clearPicked = clearPicked,
@@ -85,10 +89,11 @@ internal class LocalReplyTurn(
             onStart = { onStart(); ticker = ticker(scope) },
             onFinally = {
                 ticker?.cancel()
+                packManager.closeTurn(budget)
                 if (!answered) discard()
                 onFinally()
             },
-        ) { block().also { answered = true } }
+        ) { block(budget).also { answered = true } }
             .onFailure { failed(it.message ?: "On-device answer failed") }
     }
 

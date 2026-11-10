@@ -536,10 +536,35 @@ class CompanionPackManager(
         history: List<org.json.JSONObject> = emptyList(),
         latest: String = "",
         pickedText: String? = null,
+        /** The turn this call belongs to ([openTurn]); without one the call is a turn of its own. */
+        turn: LocalTurnBudget? = null,
         onProgress: (String) -> Unit = {},
         onToken: (String) -> Unit,
     ): GenerateResult {
         val received = android.os.SystemClock.elapsedRealtime()
+        val budget = turn ?: openTurn()
+        try {
+            return generateInTurn(prompt, maxTokens, requireMinimalRefusal, preferFast, memoryContext, history,
+                latest, pickedText, budget, received, onProgress, onToken)
+        } finally {
+            if (turn == null) closeTurn(budget)
+        }
+    }
+
+    private suspend fun generateInTurn(
+        prompt: String,
+        maxTokens: Int,
+        requireMinimalRefusal: Boolean,
+        preferFast: Boolean,
+        memoryContext: String,
+        history: List<org.json.JSONObject>,
+        latest: String,
+        pickedText: String?,
+        budget: LocalTurnBudget,
+        received: Long,
+        onProgress: (String) -> Unit,
+        onToken: (String) -> Unit,
+    ): GenerateResult {
         return withContext(llamaDispatcher) {
             val pack = resolveOfflinePack(preferFast) ?: selectedPack() ?: error("No pack selected")
             check(!requireMinimalRefusal || CompanionPackCatalog.isVerifiedMinimalRefusal(pack)) {
@@ -548,10 +573,12 @@ class CompanionPackManager(
             DeviceInferenceGuard.blockReason(app, pack)?.let { error(it) }
             val path = packFile(pack)
             if (!path.isFile) error("Install the companion model pack first")
+            val turn = TurnGuard(stallDeadlines, pack.id, budget)
+            // A cancel or the turn cap may already have landed between this turn's earlier calls.
+            turn.throwIfExpired()
             statusRef.set(CompanionPackStatus.RUNNING)
             val nCtx = DeviceInferenceGuard.contextTokens(app, pack)
             val parentJob = coroutineContext[Job]!!
-            val turn = TurnGuard(stallDeadlines, pack.id)
             // Started UNDISPATCHED on Unconfined: the watcher is already suspended in
             // awaitCancellation() before the engine runs, and cancel() resumes it inline on the
             // cancelling thread. A Default-dispatched watcher could be cancelled before it ever ran
@@ -561,10 +588,10 @@ class CompanionPackManager(
                 try {
                     awaitCancellation()
                 } finally {
-                    if (parentJob.isCancelled) engine.requestCancel()
+                    if (parentJob.isCancelled) { budget.cancel(); engine.requestCancel() }
                 }
             }
-            // Bounds the load phase (180 s) and the whole call (300 s, sectioned prompts included).
+            // Bounds the load phase (180 s) and what is left of the whole turn's 300 s cap.
             val turnWatch = launch(Dispatchers.Default) { turn.watch(engine) }
             try {
                 val started = android.os.SystemClock.elapsedRealtime()
@@ -694,6 +721,12 @@ class CompanionPackManager(
             val watchdog = launch(Dispatchers.Default) {
                 while (isActive) {
                     kotlinx.coroutines.delay(stallDeadlines.checkEveryMs)
+                    // The turn cap and a cancel are enforced while the pass is live, not only between
+                    // passes: a stop that lands just before the engine starts is repeated until it holds.
+                    if (turn.mustStop()) {
+                        engine.requestCancel()
+                        continue
+                    }
                     val now = clock()
                     val last = lastToken.get()
                     val stalled = if (last == Long.MIN_VALUE) {
@@ -713,7 +746,7 @@ class CompanionPackManager(
                 }
             }
             try {
-                val outcome = engine.generate(prompt, maxTokens) { chunk ->
+                val outcome = engine.generate(prompt, maxTokens, turn.engineTurn) { chunk ->
                     lastToken.set(clock())
                     onToken(chunk)
                 }
@@ -726,28 +759,42 @@ class CompanionPackManager(
         }
 
     /**
-     * The load-phase (180 s) and whole-call (300 s) bounds of one [generate] call. [watch] runs off the
-     * llama thread: when a bound passes it records a typed [LocalStreamStallError] and asks the engine to
-     * stop (native decode honours that; a native model load cannot be interrupted, so a load past its
-     * budget fails the turn as soon as it returns). Each pass then rethrows the error, which is a normal
-     * failure: same cleanup and send-lock release as a stall, never a cancellation.
+     * The load-phase bound (180 s) of one [generate] call and the whole turn's cap (300 s, from the
+     * [LocalTurnBudget] the turn opened with, so it spans every call and pass of the turn). [watch] runs
+     * off the llama thread: when a bound passes it records a typed [LocalStreamStallError] and asks the
+     * engine to stop (native decode honours that; a native model load cannot be interrupted, so a load
+     * past its budget fails the turn as soon as it returns). Each pass then rethrows the error, which is
+     * a normal failure: same cleanup and send-lock release as a stall, never a cancellation. A cancel of
+     * the turn is rethrown as a cancellation before any later pass starts.
      */
-    private class TurnGuard(private val deadlines: LocalStallDeadlines, private val model: String) {
+    private class TurnGuard(private val deadlines: LocalStallDeadlines, private val model: String, private val budget: LocalTurnBudget) {
         private val clock = deadlines.clockMs
         private val start = clock()
         @Volatile private var loadedAt = Long.MIN_VALUE
         private val expired = AtomicReference<LocalStreamStallError?>(null)
+
+        val engineTurn: Long get() = budget.engineTurn
 
         fun loaded() { loadedAt = clock() }
 
         private fun check(now: Long): LocalStreamStallError? {
             val loading = loadedAt == Long.MIN_VALUE
             val loadElapsed = (if (loading) now else loadedAt) - start
-            return when {
-                loadElapsed > deadlines.loadMs -> LocalStreamStallError(LocalStreamStallError.LOAD, loadElapsed, deadlines.loadMs, model)
-                now - start > deadlines.turnMs -> LocalStreamStallError(LocalStreamStallError.TURN, now - start, deadlines.turnMs, model)
-                else -> null
+            return if (loadElapsed > deadlines.loadMs) {
+                LocalStreamStallError(LocalStreamStallError.LOAD, loadElapsed, deadlines.loadMs, model)
+            } else {
+                budget.overCap(model)
             }
+        }
+
+        /** True once this turn must not keep decoding: a bound passed or the turn was cancelled. */
+        fun mustStop(): Boolean {
+            if (budget.isCancelled || expired.get() != null) return true
+            val hit = check(clock()) ?: return false
+            if (expired.compareAndSet(null, hit)) {
+                Log.w(TAG, "local_reply_stall model=$model deadline=${hit.deadline} elapsed_ms=${hit.elapsedMs} budget_ms=${hit.budgetMs}")
+            }
+            return true
         }
 
         suspend fun watch(engine: LocalInferenceEngine) {
@@ -765,6 +812,7 @@ class CompanionPackManager(
         fun throwIfExpired() {
             expired.get()?.let { throw it }
             check(clock())?.let { if (expired.compareAndSet(null, it)) throw it else throw expired.get()!! }
+            if (budget.isCancelled) throw CancellationException("generate cancelled")
         }
     }
 
@@ -774,7 +822,21 @@ class CompanionPackManager(
         error(message)
     }
 
+    private val openTurns: MutableSet<LocalTurnBudget> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /**
+     * Opens one reply turn: its 300 s cap starts now and it remembers any [requestCancel] until
+     * [closeTurn]. Pass it to every [generate] of the turn.
+     */
+    fun openTurn(): LocalTurnBudget = LocalTurnBudget(stallDeadlines, engine.beginTurn()).also { openTurns.add(it) }
+
+    fun closeTurn(turn: LocalTurnBudget) {
+        openTurns.remove(turn)
+    }
+
+    /** Stops the running pass and every later pass of each open turn, even one that has not started yet. */
     fun requestCancel() {
+        openTurns.forEach { it.cancel() }
         engine.requestCancel()
     }
 
