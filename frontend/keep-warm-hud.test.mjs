@@ -20,17 +20,17 @@ const click = (element) => act(async () => { element.dispatchEvent(new window.Mo
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b }); return { promise, resolve, reject } }
 
 /** A tiny in-memory backend: settings persist across mounts like the real settings file. */
-function backend({ keepWarm = false, unload = async () => ({ ok: true, refused: false, reason: "", released_count: 2, results: [] }), saveError = null } = {}) {
-  const state = { keepWarm, calls: [] }
+function backend({ keepWarm = false, idleSeconds = 300, unload = async () => ({ ok: true, refused: false, reason: "", released_count: 2, results: [] }), saveError = null } = {}) {
+  const state = { keepWarm, idleSeconds, calls: [] }
   globalThis.__hudModelApi = {
     api: async (path, init) => {
       state.calls.push({ path, method: init?.method || "GET", body: init?.body ? JSON.parse(init.body) : undefined })
       if (path === "/api/settings" && init?.method === "PUT") {
         if (saveError) throw saveError
         state.keepWarm = JSON.parse(init.body).inference_keep_warm
-        return { inference: { keep_warm: state.keepWarm } }
+        return { inference: { keep_warm: state.keepWarm, idle_unload_seconds: state.idleSeconds } }
       }
-      if (path === "/api/settings") return { inference: { keep_warm: state.keepWarm } }
+      if (path === "/api/settings") return { inference: { keep_warm: state.keepWarm, idle_unload_seconds: state.idleSeconds } }
       if (path === "/api/model/unload-all") return unload()
       throw new Error(`unexpected ${path}`)
     },
@@ -139,14 +139,27 @@ test("a full unload (200) lists every model as verified", async () => {
   })
 })
 
-test("a backend that fails to release (502) reports its own reason instead of a success", async () => {
-  backend({ unload: async () => { throw new ApiError(502, "ollama 127.0.0.1:11434: still loaded after unload: stuck:1b") } })
+test("an error status is never shown as a partial unload: unload-all answers 200/207/409, never 502", async () => {
+  backend({ unload: async () => { throw new ApiError(500, "internal error") } })
   await withView(async (view) => {
     await click(view.unloadButton())
     await flush()
-    assert.equal(view.note().textContent, "Unload incomplete: ollama 127.0.0.1:11434: still loaded after unload: stuck:1b")
+    assert.equal(view.note().textContent, "Not unloaded: internal error")
     assert.equal(view.unloadButton().disabled, false)
   })
+  const source = readFileSync(new URL("./src/hud/modelRelease.ts", import.meta.url), "utf8")
+  assert.ok(!source.includes("502"), "no 502 branch: the endpoint never returns it")
+})
+
+test("the Keep warm title shows the configured idle window, not a fixed 5 minutes", async () => {
+  for (const [seconds, words] of [[300, "5 minutes"], [900, "15 minutes"], [45, "45 seconds"], [3600, "1 hour"]]) {
+    backend({ idleSeconds: seconds })
+    await withView(async (view) => {
+      assert.equal(view.toggle().getAttribute("title"), `Models unload after ${words} without a turn`)
+    })
+  }
+  backend({ keepWarm: true, idleSeconds: 900 })
+  await withView(async (view) => { assert.equal(view.toggle().getAttribute("title"), "Models stay loaded") })
 })
 
 test("Unload with nothing loaded is a 409 with its reason on the control", async () => {

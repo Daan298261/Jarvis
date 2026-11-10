@@ -31,8 +31,16 @@ export function releaseNote(result: ReleaseResult): ReleaseNote {
   return { tone: "ok", text: `Unloaded ${released} model${released === 1 ? "" : "s"}. They load again on your next turn or a Load.`, lines }
 }
 
-/** 409 = refused, nothing touched. 502 (older backends) = a backend failed to release or could not be verified. */
-export function failureNote(status: number | undefined, message: string): ReleaseNote {
-  if (status === 502) return { tone: "error", text: `Unload incomplete: ${message || "a model is still loaded."}` }
+/** Any error status (409 refused, nothing touched): nothing was unloaded. A partial unload is a 207 body (releaseNote). */
+export function failureNote(message: string): ReleaseNote {
   return { tone: "error", text: `Not unloaded: ${message || "the request was refused."}` }
+}
+
+/** The configured idle window (``inference.idle_unload_seconds``, 30 to 86400) in words for the Keep warm title. */
+export function idleWindowText(seconds: number | null | undefined): string {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) return "the idle window"
+  const plural = (value: number, unit: string) => `${value} ${unit}${value === 1 ? "" : "s"}`
+  if (seconds % 3600 === 0) return plural(seconds / 3600, "hour")
+  if (seconds % 60 === 0) return plural(seconds / 60, "minute")
+  return plural(seconds, "second")
 }
