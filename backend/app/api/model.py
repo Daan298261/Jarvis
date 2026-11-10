@@ -23,7 +23,8 @@ from ..inference.backends import probe_remote_server
 from ..inference.hardware_gate import hardware_purchase_gate
 from ..inference.harness import load_last_report, run_harness
 from ..inference.manager import MANAGER
-from ..inference.running_models import RUNNING_MODELS, Action
+from ..inference.running_models import RUNNING_MODELS, Action, audit_control
+from ..inference.model_launch import ModelStart, vram_snapshot
 from ..inference.tool_capability import capability_status, probe_tool_capability
 from ..inference.profiles import declared_profiles, resolve_profile
 from ..runtime_install import component_status_payload, start_component_install
@@ -57,15 +58,51 @@ async def scan_running_models():
     return await RUNNING_MODELS.scan(force=True)
 
 
-@router.post("/running/{identifier}/choice")
-async def choose_running_model(identifier: str, body: RunningModelChoice):
-    if body.action in {"stop", "replace"} and not body.confirm:
-        raise HTTPException(400, "Confirm stopping this model; other clients may be using it")
+@router.get("/running/profiles")
+async def running_model_profiles():
+    return await RUNNING_MODELS.profiles()
+
+
+@router.get("/running/vram")
+async def running_model_vram():
+    return await asyncio.to_thread(vram_snapshot)
+
+
+@router.post("/running/start/preview")
+async def preview_running_model_start(body: ModelStart):
     try:
-        return await RUNNING_MODELS.decide(identifier, body.action)
+        return await RUNNING_MODELS.start_model(body, preview=True)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/running/start")
+async def start_running_model(body: ModelStart):
+    if not body.confirm:
+        raise HTTPException(400, "Explicit confirmation is required to start a model")
+    try:
+        return await RUNNING_MODELS.start_model(body)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
     except Exception as exc:
+        raise HTTPException(503, f"Model start failed: {exc}") from exc
+
+
+@router.post("/running/{identifier}/choice")
+async def choose_running_model(identifier: str, body: RunningModelChoice):
+    audit_control(body.action, detail={"identifier": identifier, "confirm": body.confirm})
+    if body.action in {"stop", "replace"} and not body.confirm:
+        audit_control(body.action, ok=False, detail={"error": "confirmation required"})
+        raise HTTPException(400, "Confirm stopping this model; other clients may be using it")
+    try:
+        result = await RUNNING_MODELS.decide(identifier, body.action)
+        audit_control(body.action, ok=True, detail={"identifier": identifier})
+        return result
+    except ValueError as exc:
+        audit_control(body.action, ok=False, detail={"error": str(exc)[:300]})
+        raise HTTPException(409, str(exc)) from exc
+    except Exception as exc:
+        audit_control(body.action, ok=False, detail={"error": str(exc)[:300]})
         raise HTTPException(503, f"The model choice failed: {exc}") from exc
 
 
