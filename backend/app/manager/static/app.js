@@ -2,6 +2,7 @@
 // The original page logic is kept line for line; RFC-0229 S1 adds button feedback
 // (controls.js state machine) and the Debug drawer alongside it.
 import {createControls,press,schedulePressedTick,applyProgress,succeed,fail,dismiss,tick,view,resultMessage,makeRequestId,filterLines,formatLine,CONTROL_ACTIONS} from './controls.js';
+import './models.js';
 const REQUEST_ID_HEADER='X-Anzu-Request-Id';
 const state=document.querySelector('#state'),cards=document.querySelector('#cards');
 const bytes=n=>new Intl.NumberFormat().format(Math.round(n/1024/1024/1024*10)/10)+' GB';
