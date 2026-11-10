@@ -43,6 +43,8 @@ Copy [`TEMPLATE.md`](TEMPLATE.md) to `docs/rfcs/NNNN-short-slug.md` and fill it 
 
 Living spec: [`JARVIS_1.4_SPECS.md`](../../JARVIS_1.4_SPECS.md). Implement tickets:
 
+PC first-response latency (P0): [0230](0230-pc-first-response-latency.md) — measured breakdown (box + VRPC, sources per number), per-turn latency trace + one-command PC repro (S0), first audible word ≤ 1.5 s target, STT/front/worker-load/TTS/reflex slices (**accepted**; first on shared files; reuses #648/#649).
+
 | RFC | Concern |
 | --- | --- |
 | [0111](0111-kokoro-real-runtime.md) | Kokoro as real runtime (work package A) |
@@ -58,6 +60,8 @@ Interesting integrations **in** 1.4: [0107](0107-obsidian-linked-memory-brain.md
 Taco goals memo (decision, not an implement ticket): [0118](0118-taco-goals-highest-leverage.md). Follow-on implement contracts: [0120](0120-coding-and-3d-real-tools.md) coding+3D real tools (**implemented**, #378); [0121](0121-projects-folder-chats-db-media-placement.md) projects folder + chats-in-DB + media placement (**implemented**, #381). [0109](0109-media-file-video-upload-phone-and-pc.md) amended for explicit OCR. [0123](0123-companion-reachability-and-anti-impersonation.md) companion LAN / port-forward / mobile-relay + anti-impersonation (accepted). [0125](0125-companion-hud-lan-pair.md) companion HUD render + Wi‑Fi pair request (implemented). [0108](0108-phone-companion-offline-ai-model.md) amended 2026-09-18 for pinned pack URL + Leader cache + post-pair popup, and 2026-10-08 by [0204](0204-android-anzu-standalone-upgrade.md) (abliterated on-device pack permitted; Instruct packs remain the fallback). [0124](0124-clean-install-reinstall-owned-path-wipe.md) owner Clean Install / Reinstall + owned-path wipe (accepted; P0; layer on RFC-0093). [0136](0136-zombie-kill-setup-next-and-start.md) zombie-kill on Setup installation-method Next and before `start-jarvis.ps1` binds 4780 (accepted; extends RFC-0093; does not rewrite 0124).
 
 **Jarvis 1.4.1 priority bugfix (specs first; do not block RFC-0108):** [0122](0122-ingress-size-gate-spill-and-trajectory-cap.md) ingress size-gate, DB spill (optional Obsidian mirror), trajectory quality cap. RFC-0114 recovery stays; this fixes **what enters** the budget.
+
+**2026-10-20 ANZU P0 bug (Taco; spec 2026-10-20):** [0232](0232-ffs-path-routes-to-re-tool.md) FFS / APK path + question routes to the RE tool, no context overflow (P0; root cause D1 + D2; **accepted**, this PR #664). **Numbering:** **0230** has landed (#666, `94a62fa`), **0245** is an in-flight RFC (#665) and **0233** is reserved — do not take them. This row folds into the single next-free line after #652 lands.
 
 Memory recall follow-up: [0132](0132-supermemory-semantic-recall-sidecar.md) adds an optional self-hosted Supermemory semantic sidecar while keeping ContextRepo authoritative, native fallback mandatory, and Obsidian as the owner-editable linked vault.
 

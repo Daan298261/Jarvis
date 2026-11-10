@@ -302,8 +302,16 @@ function Ensure-Venv([string]$PythonExe) {
 function Ensure-PipPackages([string]$VenvPython) {
     $req = Join-Path $Root "backend\requirements.txt"
     if (-not (Test-Path $req)) { throw "Missing $req" }
-    if (Test-PythonImport -VenvPython $VenvPython -Code "import uvicorn, fastapi") {
-        Write-Skip "Python packages (uvicorn/fastapi present)"
+    $stamp = Join-Path $Root ".venv\requirements.sha256"
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    try {
+        $fingerprint = [BitConverter]::ToString($hasher.ComputeHash([IO.File]::ReadAllBytes($req))).Replace('-', '')
+    } finally {
+        $hasher.Dispose()
+    }
+    if ((Test-Path $stamp) -and ((Get-Content -LiteralPath $stamp -Raw).Trim() -eq $fingerprint) -and
+        (Test-PythonImport -VenvPython $VenvPython -Code "import uvicorn, fastapi")) {
+        Write-Skip "Python packages (requirements unchanged)"
         return
     }
     Write-Host "    Installing Python packages (this may take several minutes)..."
@@ -312,6 +320,7 @@ function Ensure-PipPackages([string]$VenvPython) {
     if (-not (Test-PythonImport -VenvPython $VenvPython -Code "import uvicorn, fastapi")) {
         throw "Python packages are still missing after pip install."
     }
+    Set-Content -LiteralPath $stamp -Value $fingerprint
     Write-Ok "Python packages from requirements.txt installed."
 }
 
@@ -543,8 +552,12 @@ function Ensure-Front2bGguf([string]$VenvPython) {
 }
 
 function Ensure-DefaultModels([string]$VenvPython) {
-    Ensure-BootstrapGguf -VenvPython $VenvPython
-    Ensure-Front2bGguf -VenvPython $VenvPython
+    if ($SkipModelDownload) {
+        Write-Skip "Bundled model downloads (preserving installed models and selection)"
+    } else {
+        Ensure-BootstrapGguf -VenvPython $VenvPython
+        Ensure-Front2bGguf -VenvPython $VenvPython
+    }
     if (-not $InstallLocalLLM) {
         Write-Host "    Skipping extra Qwen GGUF download (bootstrap and front models are enough). Re-run with -InstallLocalLLM to fetch 9B."
         return
@@ -674,9 +687,13 @@ function Ensure-VoiceStudio([string]$VenvPython) {
 }
 
 function Ensure-PocketTTS([string]$VenvPython) {
+    if (Test-PythonImport -VenvPython $VenvPython -Code "import importlib.metadata; assert importlib.metadata.version('pocket-tts') == '3.3.0'") {
+        Write-Skip "Pocket TTS 3.3.0"
+        return
+    }
     Write-Host "    Ensuring Pocket TTS (pip install pocket-tts)..."
     try {
-        Invoke-ProcessWithTimeout -Label "pip pocket-tts" -FilePath $VenvPython -Arguments @("-m", "pip", "install", "pocket-tts", "--quiet") -TimeoutMinutes $StepTimeoutMinutes
+        Invoke-ProcessWithTimeout -Label "pip pocket-tts" -FilePath $VenvPython -Arguments @("-m", "pip", "install", "pocket-tts==3.3.0", "--quiet") -TimeoutMinutes $StepTimeoutMinutes
         Write-Ok "Pocket TTS installed."
     } catch {
         Write-BootstrapLog "Pocket TTS install failed: $($_.Exception.Message)"
@@ -723,6 +740,11 @@ function Ensure-UmiOllamaBrain([string]$VenvPython) {
             Write-BootstrapLog "Umi voice pack failed: $($_.Exception.Message)"
             Write-Warning "Umi voice pack could not be prepared; download it later from Persona settings."
         }
+    }
+    $installed = & ollama list 2>$null
+    if (($LASTEXITCODE -eq 0) -and ($installed | Where-Object { ($_ -split '\s+')[0] -in @($model, "${model}:latest") })) {
+        Write-Skip "Umi Ollama brain already installed"
+        return
     }
     Write-Host "    Pulling Umi brain weights into Ollama (one-time; may take several minutes)..."
     try {

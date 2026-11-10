@@ -69,6 +69,8 @@ export type PresenceShapeDefinition = {
   buildField?: (density: number) => ParticleOrb[]
   framing?: PresenceShapeFraming
   appearance?: DotAppearanceProfile
+  /** Persona-only anatomy. Absent for the preserved humanoid and existing shapes. */
+  rig?: { headPivot: readonly [number, number, number]; anatomy: "stag" | "bird" | "dragon" | "mythic" }
 }
 
 export type PresenceShapeCatalog = ReadonlyMap<PresenceShapeId, PresenceShapeDefinition>

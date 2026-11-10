@@ -51,10 +51,16 @@ fun ModelTransferFeedback(download: ModelDownloadState, onCancel: () -> Unit, on
     }
 }
 
+/**
+ * One card per catalog model. [showBar] says whether a model's card draws its own progress bar: the
+ * Models screen turns it off for the selected model, whose status card already draws that download's
+ * one bar (the legacy bar, or the transfer view's), so a download never shows two bars there.
+ */
 @Composable
 fun ModelLibraryCards(
     packs: List<DevicePackOption>, selectedId: String, downloads: Map<String, ModelDownloadState>, busy: Boolean,
     onSelect: (String) -> Unit, onDownload: (String) -> Unit, onCancel: (String) -> Unit,
+    showBar: (DevicePackOption) -> Boolean = { true },
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         packs.forEach { pack ->
@@ -72,7 +78,7 @@ fun ModelLibraryCards(
                         style = MaterialTheme.typography.bodySmall, color = Muted)
                     if (pack.id == CompanionPackCatalog.ABLITERATED_06B_ID) Text("Smallest download · quicker replies, lighter answers", style = MaterialTheme.typography.bodySmall)
                     if (transfer == null && pack.resumeBytes > 0) Text("Partial download saved · ${modelDownloadBytes(pack.resumeBytes)}", style = MaterialTheme.typography.bodySmall)
-                    if (transfer != null) ModelTransferFeedback(transfer, { onCancel(pack.id) }, { onDownload(pack.id) })
+                    if (transfer != null) ModelTransferFeedback(transfer, { onCancel(pack.id) }, { onDownload(pack.id) }, showBar = showBar(pack))
                     if (transfer?.active != true && transfer?.stage !in setOf(ModelDownloadStage.PAUSED, ModelDownloadStage.ERROR)) {
                         if (pack.installed) OutlinedButton(onClick = { onSelect(pack.id) }, enabled = !busy && !selected,
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(if (selected) "In use" else "Use this model") }

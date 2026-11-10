@@ -394,12 +394,39 @@ async def transcribe_audio(data: bytes, filename: str = "audio.webm") -> str:
                 pass
 
 
+def _windows_whisper_cuda_ready() -> bool:
+    """Probe optional GPU dependencies before CTranslate2 lazily enters CUDA code."""
+    import ctypes
+
+    handles = []
+    for name in ("cublasLt64_12.dll", "cublas64_12.dll", "cudnn64_9.dll"):
+        candidates = [Path(sys.prefix) / "Scripts" / name, Path(sys.executable).parent / name,
+                      Path(getattr(sys, "_MEIPASS", sys.prefix)) / name, repo_root() / name]
+        loaded = None
+        for candidate in [str(p) for p in candidates if p.is_file()] + [name]:
+            try:
+                loaded = ctypes.WinDLL(candidate)
+                break
+            except OSError:
+                continue
+        if loaded is None:
+            return False
+        handles.append(loaded)
+    # Keep dependencies loaded throughout the native inference operation.
+    _windows_whisper_cuda_ready.handles = handles
+    return True
+
+
 def _transcribe_faster_whisper(path: Path, model_path: str | None) -> str:
     from faster_whisper import WhisperModel
 
     name = model_path or resolved_faster_whisper_model() or "base"
+    options = {}
+    if sys.platform == "win32" and not _windows_whisper_cuda_ready():
+        logger.warning("Whisper CUDA runtime unavailable; using CPU speech recognition")
+        options = {"device": "cpu", "compute_type": "int8"}
     try:
-        model = WhisperModel(name, local_files_only=True)
+        model = WhisperModel(name, local_files_only=True, **options)
     except Exception as exc:
         raise VoiceSTTError(
             "faster-whisper is installed but no local model is cached. "

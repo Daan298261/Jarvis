@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import httpx
 import logging
+import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
 import time
 from typing import Any
 
-from .backends import probe_remote_server, resolve_advertised_model
+from .backends import probe_remote_server
 from .gpu_prefer import ensure_ollama_gpu
 from ..persona.persona_brain import UMI_OLLAMA_MODEL
 
@@ -34,26 +37,44 @@ def ollama_cli() -> str | None:
         local = shutil.which("ollama.exe")
         if local:
             return local
+        local = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/Ollama/ollama.exe"
+        if local.is_file():
+            return str(local)
     return None
+
+
+def _start_server(host: str, port: int) -> None:
+    env = os.environ.copy()
+    address = f"[{host}]" if ":" in host else host
+    env["OLLAMA_HOST"] = f"{address}:{int(port)}"
+    subprocess.Popen(
+        [ollama_cli(), "serve"], env=env, stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+    )
 
 
 def _model_present(advertised: list[str], model: str) -> bool:
     hint = (model or "").strip()
     if not hint:
         return bool(advertised)
-    resolved = resolve_advertised_model(hint, advertised)
-    if resolved in advertised:
-        return True
-    lower = hint.lower()
-    return any(lower in name.lower() or name.lower() in lower for name in advertised)
+    def canonical(name: str) -> str:
+        name = name.strip().lower()
+        return name[:-7] if name.endswith(":latest") else name
+    return any(canonical(name) == canonical(hint) for name in advertised)
 
 
-def _run_ollama(args: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
+def _run_ollama(args: list[str], *, timeout: float, host: str = "127.0.0.1", port: int = 11434) -> subprocess.CompletedProcess[str]:
     cli = ollama_cli()
     if not cli:
         raise FileNotFoundError("ollama CLI is not installed")
+    env = os.environ.copy()
+    address = f"[{host}]" if ":" in host else host
+    env["OLLAMA_HOST"] = f"{address}:{int(port)}"
     return subprocess.run(
         [cli, *args],
+        env=env,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -93,6 +114,10 @@ async def ensure_local_ollama(
                 "method": "missing-cli",
                 "detail": "Ollama is not installed. Re-run the Jarvis installer Umi brain option.",
             }
+        try:
+            await asyncio.to_thread(_start_server, host, port)
+        except OSError as exc:
+            return {"ok": False, "method": "start-failed", "detail": str(exc)}
         probe = await _wait_until_up(host, port, timeout)
         if not probe.get("ok"):
             return {
@@ -110,7 +135,7 @@ async def ensure_local_ollama(
             completed = await asyncio.to_thread(
                 _run_ollama,
                 ["pull", hint],
-                timeout=PULL_TIMEOUT_SECONDS,
+                timeout=PULL_TIMEOUT_SECONDS, host=host, port=port,
             )
         except subprocess.TimeoutExpired:
             return {"ok": False, "method": "pull-timeout", "detail": f"Timed out pulling {hint}"}
@@ -120,18 +145,32 @@ async def ensure_local_ollama(
         probe = await probe_remote_server(host, port, timeout=8.0, retry=True)
         advertised = list(probe.get("models") or [])
 
-    resolved = resolve_advertised_model(hint, advertised) if hint else (advertised[0] if advertised else "")
-    if hint and advertised and not _model_present(advertised, hint):
+    resolved = next((name for name in advertised if _model_present([name], hint)), hint)
+    if hint and not _model_present(advertised, hint):
         return {
             "ok": False,
             "method": "model-missing",
-            "detail": f"Model {hint} is not available after pull",
+            "detail": f"Model {hint} is not installed; download it from the Model page",
             "models": advertised[:8],
         }
 
     warm: dict[str, Any] = {"ok": True, "method": "ready"}
     if resolved:
-        warm = await ensure_ollama_gpu(host=host, port=port, model=resolved)
+        warm = await ensure_ollama_gpu(host=host, port=port, model=resolved, timeout=120.0)
+        if warm.get("method") == "skipped":
+            address = f"[{host}]" if ":" in host else host
+            try:
+                async with httpx.AsyncClient(timeout=120.0, trust_env=False) as client:
+                    response = await client.post(
+                        f"http://{address}:{int(port)}/api/generate",
+                        json={"model": resolved, "prompt": "", "stream": False, "keep_alive": "24h"},
+                    )
+                    response.raise_for_status()
+                warm = {"ok": True, "detail": "Model loaded"}
+            except Exception as exc:
+                warm = {"ok": False, "detail": str(exc)[:240]}
+        if not warm.get("ok"):
+            return {"ok": False, "method": "warm-failed", "detail": warm.get("detail") or "Model failed to load"}
 
     return {
         "ok": True,

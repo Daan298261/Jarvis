@@ -37,6 +37,10 @@ class ModelCandidate:
     recommended: bool = False
     benchmark_required: bool = True
     notes: str = ""
+    filename: str = ""
+    revision: str = ""
+    sha256: str = ""
+    verified_at: str = ""
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -72,6 +76,75 @@ class PersonalityPreset:
 
 
 MODEL_CANDIDATES: dict[str, ModelCandidate] = {
+    'huihui-qwen35-08b-q4': ModelCandidate(
+        key='huihui-qwen35-08b-q4',
+        label='Huihui Qwen3.5 0.8B Abliterated',
+        model_id='mradermacher/Huihui-Qwen3.5-0.8B-abliterated-GGUF',
+        role='micro',
+        runtime='llama.cpp/lm-studio',
+        quantization='Q4_K_M',
+        weight_gb=0.528,
+        context_limit=32768,
+        uncensored=True,
+        license_id='apache-2.0',
+        notes='Verified public Apache-2.0 GGUF on 2026-10-28; publisher describes reduced refusals. Q4_K_M weights only; RAM/context overhead additional. Local benchmark required.',
+        filename='Huihui-Qwen3.5-0.8B-abliterated.Q4_K_M.gguf',
+        revision='a8afb4737641a05ee0d02b0cef43ac3b6404db28',
+        sha256='411e0f945a5d57c63f33bcb5bfa4d5c2711d1ce28cb7635201ac0c311a7dfdf0',
+        verified_at='2026-10-28',
+    ),
+    'huihui-qwen35-2b-q4': ModelCandidate(
+        key='huihui-qwen35-2b-q4',
+        label='Huihui Qwen3.5 2B Abliterated',
+        model_id='mradermacher/Huihui-Qwen3.5-2B-abliterated-GGUF',
+        role='small',
+        runtime='llama.cpp/lm-studio',
+        quantization='Q4_K_M',
+        weight_gb=1.271,
+        context_limit=32768,
+        uncensored=True,
+        license_id='apache-2.0',
+        notes='Verified public Apache-2.0 GGUF on 2026-10-28; publisher describes reduced refusals. Q4_K_M weights only; RAM/context overhead additional. Local benchmark required.',
+        filename='Huihui-Qwen3.5-2B-abliterated.Q4_K_M.gguf',
+        revision='7f5aee7d2dc4df18bd67eab85ea81e0bc2e98a2c',
+        sha256='aa25eea787afe56a097268f7ed3460cb623e1901d2e89cd2b654cabb42f80636',
+        verified_at='2026-10-28',
+    ),
+    'qwen35-4b-uncensored-q4': ModelCandidate(
+        key='qwen35-4b-uncensored-q4',
+        label='Qwen3.5 4B Uncensored',
+        model_id='mradermacher/Qwen3.5-4B-Uncensored-GGUF',
+        role='small',
+        runtime='llama.cpp/lm-studio',
+        quantization='Q4_K_M',
+        weight_gb=2.783,
+        context_limit=32768,
+        uncensored=True,
+        license_id='apache-2.0',
+        notes='Verified public Apache-2.0 GGUF on 2026-10-28; publisher describes reduced refusals. Q4_K_M weights only; RAM/context overhead additional. Local benchmark required.',
+        filename='Qwen3.5-4B-Uncensored.Q4_K_M.gguf',
+        revision='66f108b5a3136fa25b991fab2cae5d1d1d7f81da',
+        sha256='f3a2e8f1837f52247a5b7b28f379923c98cc38fa8b339a943ba49b518be8b562',
+        verified_at='2026-10-28',
+    ),
+    'distilqwen3-17b-uncensored-q4': ModelCandidate(
+        key='distilqwen3-17b-uncensored-q4',
+        label='DistilQwen3 1.7B Uncensored',
+        model_id='reaperdoesntknow/DistilQwen3-1.7B-uncensored-GGUF',
+        role='small',
+        runtime='llama.cpp/lm-studio',
+        quantization='Q4_K_M',
+        weight_gb=1.282,
+        context_limit=32768,
+        uncensored=True,
+        license_id='apache-2.0',
+        notes='Verified public Apache-2.0 GGUF on 2026-10-28; publisher describes reduced refusals. Q4_K_M weights only; RAM/context overhead additional. Local benchmark required.',
+        filename='DistilQwen3-1.7B-uncensored-Q4_K_M.gguf',
+        revision='643a98295edc18f5ea615309c6f041f192d1864a',
+        sha256='93e3bd8d7e9964c68cdbe49faef9935bd23a48a4a4e69951b7388f63ac0f3b7f',
+        verified_at='2026-10-28',
+    ),
+
     "umi-opus-9b-ollama": ModelCandidate(
         key="umi-opus-9b-ollama",
         label="Umi · Qwen3.5 9B Opus reasoning (Ollama)",
