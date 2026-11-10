@@ -2040,7 +2040,7 @@ html[data-session-mode] .hud-app {
   mask-image: none;
 }
 
-.hud-chat[data-chat-background="on"] .hud-thread {
+.hud-chat.chat-compact[data-chat-background="on"] .hud-thread {
   border-color: var(--hud-line-strong);
   background: rgba(5, 11, 18, 0.82);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.2);
@@ -2052,5 +2052,4 @@ html[data-session-mode] .hud-app {
   padding: 9px 12px;
   font-size: clamp(14px, 0.8vw, 16px);
   line-height: 1.5;
-  background: rgba(7, 14, 22, 0.65);
 }
