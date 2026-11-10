@@ -8,6 +8,8 @@
 
 **Amended 2026-11-03 (Architect):** the spec now describes everything #671 ships: the stall deadlines and typed error, the turn lifecycle (stage ticker with the memory-pressure warning, cleanup, cancel and failure), the Home status lines, side-effect-free pack selection and the download entry points. Each has acceptance criteria and names the tests #671 already has at their real paths; tests the spec needs and #671 lacks are listed in *Tests the spec needs that #671 does not have yet* (they are named, not written, and nothing here claims they pass). **CoS ruling on UX item 1:** a failed turn keeps its error bubble in Chat (add-only); only the partial reply and the Home preview are cleared. *Where the code at `8b30a715` does not yet meet this text* is listed in its own section. Citations are by file and symbol, never by line.
 
+**Amended 2026-11-10 (Architect):** UX verified the #671 gaps closed; each was checked against the code at #671's head on 2026-11-10. Criteria A to F are ticked with the symbol or test that meets them, the tests formerly listed as missing are present (*Tests the spec added to #671*), and the gap list records each gap as closed. One item stays open: the CoS ruling that the 300 s cap starts when the turn starts and covers the whole turn (gap 7). The two renamed tests are `idleStallRaisesTypedErrorAndStopsDecode` and `failedStreamDropsThePartialAndKeepsTheErrorBubble`.
+
 > RFC-0235 covers the streamed local replies and the model download feedback split out of #650. The solar context HUD part (planets, rings, thinking pulses, star field fading with context use, and the native context-usage counters that drive it) stays in #650 as RFC-0234 (`0234-android-solar-context-and-live-replies.md`), pending Astra's sign-off.
 
 ## Problem
@@ -69,39 +71,39 @@ Local Qwen replies on the phone look stalled, because generated tokens are buffe
 ### Acceptance criteria per feature (tests are named in the next section)
 
 **A. Stall deadlines.**
-- [ ] The default deadlines are 120 s to the first token, 30 s idle, 180 s load phase and 300 s overall turn cap, and non-positive values are rejected.
-- [ ] A model load that is not ready to generate 180 s after it started ends the turn with `LocalStreamStallError(load)`, the load is stopped, and the pack is unloaded.
-- [ ] A turn still running 300 s after it started ends with `LocalStreamStallError(turn)`, including when no single pass is stalled: for a sectioned prompt the cap is shared by all summary passes and the reply pass.
-- [ ] Load and turn-cap stalls take the same failure path as first-token and idle stalls: the error bubble per the ruling, the real `sendLock` released, the same cleanup.
-- [ ] A pass that streams a partial and then goes quiet ends with `LocalStreamStallError(idle)` after the idle budget, native decode is asked to stop, and the turn returns a failure (not a cancellation).
-- [ ] A pass that never produces a token ends with `LocalStreamStallError(first_token)` after its budget.
-- [ ] A steady stream under both deadlines is never a stall.
-- [ ] A stall in a section-summary pass fails the turn the same way.
-- [ ] After a stall the real `CompanionModel.sendLock` is released (the next `sendOffgrid` runs), the engine is unloaded and a `RUNNING` pack is `READY` again; `localPackError` stays empty.
+- [x] The default deadlines are 120 s to the first token, 30 s idle, 180 s load phase and 300 s overall turn cap, and non-positive values are rejected. *Met:* `defaultStallDeadlinesAre120s30s180sAnd300s`, `nonPositiveStallDeadlineIsRejected`.
+- [x] A model load that is not ready to generate 180 s after it started ends the turn with `LocalStreamStallError(load)`, the load is stopped, and the pack is unloaded. *Met:* `loadPhaseDeadlineIs180sAndRaisesTypedError`, `CompanionModelOffgridTurnTest.loadDeadlineThroughSendOffgridRaisesTheTypedErrorAndReleasesTheLock`.
+- [ ] A turn still running 300 s after it started ends with `LocalStreamStallError(turn)`, including when no single pass is stalled: for a sectioned prompt the cap is shared by all summary passes and the reply pass. *Open (CoS ruling, the spec stands; the code follows):* the cap must start when `LocalReplyTurn` opens and cover the whole turn. At the branch head `CompanionPackManager.TurnGuard` starts its clock per `CompanionPackManager.generate` call, so the cap covers one call (its load, summary passes and reply pass, as `overallTurnCapIs300sAcrossSummaryPasses` and `overallTurnCapThroughSendOffgridRaisesTheTypedErrorAndReleasesTheRealSendLock` prove) but not the time before it, and each `generate` of the phone-tool loop in `phoneLocalAnswer` gets its own 300 s.
+- [x] Load and turn-cap stalls take the same failure path as first-token and idle stalls: the error bubble per the ruling, the real `sendLock` released, the same cleanup. *Met:* `loadAndTurnCapStallsFailTheTurnLikeAnyOtherStall`, `CompanionModelOffgridTurnTest.loadDeadlineThroughSendOffgridRaisesTheTypedErrorAndReleasesTheLock` and `overallTurnCapThroughSendOffgridRaisesTheTypedErrorAndReleasesTheRealSendLock`.
+- [x] A pass that streams a partial and then goes quiet ends with `LocalStreamStallError(idle)` after the idle budget, native decode is asked to stop, and the turn returns a failure (not a cancellation). *Met:* `idleStallRaisesTypedErrorAndStopsDecode`.
+- [x] A pass that never produces a token ends with `LocalStreamStallError(first_token)` after its budget. *Met:* `firstTokenStallRaisesTypedError`.
+- [x] A steady stream under both deadlines is never a stall. *Met:* `steadyStreamUnderTheDeadlinesIsNotAStall`.
+- [x] A stall in a section-summary pass fails the turn the same way. *Met:* `sectionSummaryPassStallRaisesTypedError`.
+- [x] After a stall the real `CompanionModel.sendLock` is released (the next `sendOffgrid` runs), the engine is unloaded and a `RUNNING` pack is `READY` again; `localPackError` stays empty. *Met:* `CompanionModelOffgridTurnTest.stallThroughSendOffgridReleasesTheRealSendLock`, `stalledTurnUnloadsTheEngineAndLeavesPackReadyWithNoPackError`.
 
 **B. Stage ticker and memory-pressure warning.**
-- [ ] The ticker shows stage and elapsed seconds on every tick; with a pressure reason set, every tick starts with it, in the chat path and in the phone-tool path.
-- [ ] A desktop poll during a local answer changes neither `activity` nor `messages`.
+- [x] The ticker shows stage and elapsed seconds on every tick; with a pressure reason set, every tick starts with it, in the chat path and in the phone-tool path. *Met:* `stageTickerKeepsTheMemoryPressureWarningVisible`, `stageTickerWithoutPressureShowsStageAndElapsed`, `CompanionModelOffgridTurnTest.phoneToolPassesShowTheMemoryPressureWarning`.
+- [x] A desktop poll during a local answer changes neither `activity` nor `messages`. *Met:* `CompanionModelOffgridTurnTest.desktopPollDuringALocalAnswerLeavesActivityAndMessagesAlone`.
 
 **C. Cleanup.**
-- [ ] After success, failure, stall or cancellation, the picked text is cleared and the ticker is cancelled.
-- [ ] The engine is unloaded after failure, stall and cancellation, and after success unless keep-warm holds; a keep-warm success schedules the 30 s idle unload.
+- [x] After success, failure, stall or cancellation, the picked text is cleared and the ticker is cancelled. *Met:* `StandaloneModeTest.errorMidAnswerUnloadsAndClearsPicked`, `cancelledTurnUnloadsTheEngineAndClearsPicked`.
+- [x] The engine is unloaded after failure, stall and cancellation, and after success unless keep-warm holds; a keep-warm success schedules the 30 s idle unload. *Met:* `stalledTurnUnloadsTheEngineAndLeavesPackReadyWithNoPackError`, `cancelledTurnUnloadsTheEngineAndClearsPicked`, `keepWarmKeepsTheModelOnlyAfterASuccessfulTurn`.
 
 **D. Failed and cancelled turns (CoS ruling).**
-- [ ] After a failure or stall, `messages` is `prior` plus one unsaved error bubble carrying the error text, the partial reply is in no message, `liveLocalReply` is empty and `error` is set.
-- [ ] The error bubble is not in the local conversation store and not in the offline queue.
-- [ ] After a cancellation, `messages` is `prior`, `liveLocalReply` is empty and `error` is unchanged.
-- [ ] After a landed reply, `messages` is `prior` plus the saved reply and `liveLocalReply` is empty, through `sendOffline` itself.
+- [x] After a failure or stall, `messages` is `prior` plus one unsaved error bubble carrying the error text, the partial reply is in no message, `liveLocalReply` is empty and `error` is set. *Met:* `failedTurnKeepsItsErrorBubbleAndClearsOnlyThePartialAndHomePreview` (`LocalReplyTurnTest`, and through `sendOffgrid` in `CompanionModelOffgridTurnTest`), `failedStreamDropsThePartialAndKeepsTheErrorBubble`; code: `LocalReplyTurn.failed`.
+- [x] The error bubble is not in the local conversation store and not in the offline queue. *Met:* `CompanionModelOffgridTurnTest.failedTurnErrorBubbleIsNeverSavedOrQueued`.
+- [x] After a cancellation, `messages` is `prior`, `liveLocalReply` is empty and `error` is unchanged. *Met:* `cancelledStreamLeavesNoPartialReplyInChatOrOnHome`, `CompanionModelOffgridTurnTest.cancelledTurnLeavesNoPartialAndNoErrorAndReleasesTheLock`.
+- [x] After a landed reply, `messages` is `prior` plus the saved reply and `liveLocalReply` is empty, through `sendOffline` itself. *Met:* `CompanionModelOffgridTurnTest.sendOffgridLandsTheReplyAndClearsTheHomePreview`.
 
 **E. Home.**
-- [ ] The streamed reply appears once on Home: while `liveLocalReply` is not blank the existing last-assistant line is not rendered (it would show the same text a second time); when it is blank the existing line renders exactly as before.
-- [ ] `Downloading fast phone model · N%` and `Fast phone model ready` appear in `activity` for the fast-model download, and the Memory & speed card shows the transfer view and the ready line.
+- [x] The streamed reply appears once on Home: while `liveLocalReply` is not blank the existing last-assistant line is not rendered (it would show the same text a second time); when it is blank the existing line renders exactly as before. *Met:* `HomeLiveReplyUiTest.homeShowsTheStreamedReplyOnce`.
+- [x] `Downloading fast phone model · N%` and `Fast phone model ready` appear in `activity` for the fast-model download, and the Memory & speed card shows the transfer view and the ready line. *Met:* `CompanionModelDownloadTest.installFastPhoneModelPublishesTheHomeStatusLines`, `PhoneMemoryUiTest.memorySpeedFastModelSectionShowsTransferAndReadyLine`.
 
 **F. Downloads and pack selection.**
-- [ ] A failed download sets `error`, a retry clears it, and the fast-model button is disabled while its download runs.
-- [ ] `selectCompanionPack` leaves `error` and `busy` as they were and publishes the new selection.
-- [ ] A download shows one determinate bar per card: while the legacy status-card bar is visible for the selected pack, that pack's "All models" card shows no second bar (its own bar is shown for any other pack).
-- [ ] Downloaded content lists each non-ready transfer with Cancel/Resume.
+- [x] A failed download sets `error`, a retry clears it, and the fast-model button is disabled while its download runs. *Met:* `CompanionModelDownloadTest.failedDownloadSetsErrorAndRetryClearsIt`, `fastModelButtonIsDisabledWhileItsDownloadRuns`.
+- [x] `selectCompanionPack` leaves `error` and `busy` as they were and publishes the new selection. *Met:* `CompanionModelDownloadTest.selectCompanionPackLeavesErrorAndBusyUntouched`.
+- [x] A download shows one determinate bar per card: while the legacy status-card bar is visible for the selected pack, that pack's "All models" card shows no second bar (its own bar is shown for any other pack). *Met:* `ModelScreensLiveUiTest.libraryCardShowsNoSecondBarForTheSelectedPackWhileTheLegacyBarIsVisible`.
+- [x] Downloaded content lists each non-ready transfer with Cancel/Resume. *Met:* `DownloadedContentUiTest.downloadedContentShowsModelTransferRows`.
 
 ### Tests #671 already has (all under `android/app/src/test/java/com/jarvis/companion/`)
 
@@ -113,33 +115,33 @@ Local Qwen replies on the phone look stalled, because generated tokens are buffe
 | D | `cancelledStreamLeavesNoPartialReplyInChatOrOnHome`, `landedReplyClearsTheHomePreviewAndStaysInChat` (calls `turn.landed()` by hand), `failedStreamDropsThePartialAndKeepsTheErrorBubble` (`LocalReplyTurnTest.kt`; asserts the ruling: `messages` is `prior` plus one assistant error bubble carrying the error text, and `liveLocalReply` is empty) |
 | streaming | `publishesFirstTokenBeforeCompletionAndCoalescesLaterTokens`, `splitReasoningAndTemplateMarkersNeverLeak` (`LiveLocalReplyTest.kt`) |
 | F (transfers) | `connectingIsVisibleBeforeHeadersAndCancellationUnblocksNetwork`, `partialDownloadCanResumeAndOnlyBecomesReadyAfterVerification`, `checksumFailureIsAnInlineErrorAndNeverReady`, `transientServerFailureShowsRetryAndRecovers` (`ModelDownloadFeedbackTest.kt`); `downloadHasImmediateFeedbackAndCanBePausedAndResumed`, `renderModelCardsWithDownloadProgress` (`ModelDownloadsUiTest.kt`) |
-| F (live UI kept) | `modelsScreenKeepsStatusDropdownAndRedownloadWithProgressOnTop`, `setupCardKeepsDownloadButtonWhileShowingTransferFeedback`, `legacyProgressStaysVisibleDuringATrackedDownload`, `modelsCardKeepsLegacyPercentDuringATrackedDownload` (`ModelScreensLiveUiTest.kt`; the last one asserts two bars today, see criterion F) |
+| F (live UI kept) | `modelsScreenKeepsStatusDropdownAndRedownloadWithProgressOnTop`, `setupCardKeepsDownloadButtonWhileShowingTransferFeedback`, `legacyProgressStaysVisibleDuringATrackedDownload`, `modelsCardKeepsLegacyPercentDuringATrackedDownload` (`ModelScreensLiveUiTest.kt`; the last one now asserts the legacy percent text on both cards and no second bar, criterion F) |
 | F (files off main) | `snapshotReadsPackFilesOnTheFileDispatcherNotTheMainThread`, `chromeStateTakesFileFactsFromTheSnapshotWithoutTouchingDisk` (`PackFileSnapshotTest.kt`) |
 
-### Tests the spec needs that #671 does not have yet: 24 tests in 20 rows (named here, not written; no pass is claimed)
+### Tests the spec added to #671: 24 tests in 20 rows (all present at the branch head; they run in the Android companion CI job's `:app:testDebugUnitTest`)
 
 | # | Test (proposed file) | Proves |
 | --- | --- | --- |
-| 1 | `failedTurnKeepsItsErrorBubbleAndClearsOnlyThePartialAndHomePreview` (`LocalReplyTurnTest.kt`); the existing tests, renamed `failedStreamDropsThePartialAndKeepsTheErrorBubble` and `idleStallRaisesTypedErrorAndStopsDecode`, now assert `prior` plus exactly one error bubble instead of `messages == prior` | D: the CoS ruling |
-| 2 | `failedTurnErrorBubbleIsNeverSavedOrQueued` (new `CompanionModelOffgridTurnTest.kt`, fake engine and pack manager, through `sendOffgrid`) | D: bubble absent from the local store and the offline queue |
-| 3 | `stallThroughSendOffgridReleasesTheRealSendLock` (same file) | A: `CompanionModel.sendLock`, not a test-local mutex |
+| 1 | `failedTurnKeepsItsErrorBubbleAndClearsOnlyThePartialAndHomePreview` (`LocalReplyTurnTest.kt`); the existing tests, renamed `failedStreamDropsThePartialAndKeepsTheErrorBubble` and `idleStallRaisesTypedErrorAndStopsDecode`, assert `prior` plus exactly one error bubble instead of `messages == prior` | D: the CoS ruling |
+| 2 | `failedTurnErrorBubbleIsNeverSavedOrQueued` (`CompanionModelOffgridTurnTest.kt`, fake engine and pack manager, through `sendOffgrid`) | D: bubble absent from the local store and the offline queue |
+| 3 | `stallThroughSendOffgridReleasesTheRealSendLock` (same file; `loadDeadlineThroughSendOffgridRaisesTheTypedErrorAndReleasesTheLock` and `overallTurnCapThroughSendOffgridRaisesTheTypedErrorAndReleasesTheRealSendLock` drive the load and turn-cap stalls through it too) | A: `CompanionModel.sendLock`, not a test-local mutex |
 | 4 | `sendOffgridLandsTheReplyAndClearsTheHomePreview` (same file) | D: the `sendOffline` wiring of `answer`, `landed`, `onFinally` |
 | 5 | `defaultStallDeadlinesAre120s30s180sAnd300s` (the default-values test, now covering all four) and `nonPositiveStallDeadlineIsRejected` (`LocalReplyTurnTest.kt`) | A: the defaults |
 | 6 | `sectionSummaryPassStallRaisesTypedError` (`LocalReplyTurnTest.kt`) | A: summary passes are watched |
 | 7 | `stalledTurnUnloadsTheEngineAndLeavesPackReadyWithNoPackError` (`LocalReplyTurnTest.kt`) | A, C |
 | 8 | `cancelledTurnUnloadsTheEngineAndClearsPicked` and `keepWarmKeepsTheModelOnlyAfterASuccessfulTurn` (`LocalReplyTurnTest.kt`) | C |
-| 9 | `phoneToolPassesShowTheMemoryPressureWarning` (`LocalReplyTurnTest.kt` or `CompanionModelOffgridTurnTest.kt`) | B: the phone-tool path |
+| 9 | `phoneToolPassesShowTheMemoryPressureWarning` (`CompanionModelOffgridTurnTest.kt`) | B: the phone-tool path |
 | 10 | `desktopPollDuringALocalAnswerLeavesActivityAndMessagesAlone` (`CompanionModelOffgridTurnTest.kt`) | B |
-| 11 | `homeShowsTheStreamedReplyOnce` (new `HomeLiveReplyUiTest.kt`, Compose, the Home block extracted into an `internal` composable) | E |
+| 11 | `homeShowsTheStreamedReplyOnce` (`HomeLiveReplyUiTest.kt`, Compose, the Home block extracted into an `internal` composable) | E |
 | 12 | `installFastPhoneModelPublishesTheHomeStatusLines` (`CompanionModelDownloadTest.kt`, fake pack manager) | E: "Downloading fast phone model · N%" and "Fast phone model ready" |
-| 13 | `memorySpeedFastModelSectionShowsTransferAndReadyLine` (new `PhoneMemoryUiTest.kt`) | E |
+| 13 | `memorySpeedFastModelSectionShowsTransferAndReadyLine` (`PhoneMemoryUiTest.kt`) | E |
 | 14 | `failedDownloadSetsErrorAndRetryClearsIt`, `fastModelButtonIsDisabledWhileItsDownloadRuns` (`CompanionModelDownloadTest.kt`) | F |
 | 15 | `selectCompanionPackLeavesErrorAndBusyUntouched` (`CompanionModelDownloadTest.kt`) | F |
-| 16 | `libraryCardShowsNoSecondBarForTheSelectedPackWhileTheLegacyBarIsVisible` (`ModelScreensLiveUiTest.kt`; replaces the two-bar assertion of `modelsCardKeepsLegacyPercentDuringATrackedDownload`) | F |
-| 17 | `downloadedContentShowsModelTransferRows` (new `DownloadedContentUiTest.kt`) | F |
+| 16 | `libraryCardShowsNoSecondBarForTheSelectedPackWhileTheLegacyBarIsVisible` (`ModelScreensLiveUiTest.kt`; `modelsCardKeepsLegacyPercentDuringATrackedDownload` no longer asserts two bars) | F |
+| 17 | `downloadedContentShowsModelTransferRows` (`DownloadedContentUiTest.kt`) | F |
 | 18 | `loadPhaseDeadlineIs180sAndRaisesTypedError` (`LocalReplyTurnTest.kt`, fake engine whose load never becomes ready, injected clock) | A: load phase, `deadline = load` |
 | 19 | `overallTurnCapIs300sAcrossSummaryPasses` (`LocalReplyTurnTest.kt`, several summary passes each under their own first-token and idle budgets whose sum passes 300 s) | A: turn cap, `deadline = turn` |
-| 20 | `loadAndTurnCapStallsFailTheTurnLikeAnyOtherStall` (`LocalReplyTurnTest.kt`: error bubble, lock, cleanup; the real `sendLock` is covered by row 3 once it also drives a load stall) | A, D: one failure path (added by the Architect to cover the same-path criterion) |
+| 20 | `loadAndTurnCapStallsFailTheTurnLikeAnyOtherStall` (`LocalReplyTurnTest.kt`: error bubble, lock, cleanup; the real `sendLock` is covered by row 3, which drives the load and turn-cap stalls too) | A, D: one failure path (added by the Architect to cover the same-path criterion) |
 
 ### Live-UI add-alongside reasoning
 
@@ -156,20 +158,23 @@ Local Qwen replies on the phone look stalled, because generated tokens are buffe
 
 **Astra boundary:** persona, WebGL, presence, solar, orb and HUD components are not touched, and no context-usage plumbing is added (that stays in RFC-0234, #650).
 
-### Where the code at `8b30a715` does not yet meet this text (the spec is right, #671's code follows). *Pinned by CoS, 2026-11-03:* the 180 s load deadline and the 300 s overall turn cap (formerly item 6 of this list: no deadline on model load and no overall limit) are no longer a disclosed gap but a requirement that applies to #671 itself; criteria A and rows 18 to 20 above cover them, and `LocalStallDeadlines`, `watchedGenerate` and the load path must gain them
+### Gaps against this text: closed at the #671 branch head, except the turn-cap start (verified by UX; each checked against the code)
 
-1. `LocalReplyTurn.failed` and `discard` set `messages = prior`, removing the failed-turn error bubble (ruling above); two tests assert that.
-2. Home renders both `liveLocalReply` and the existing last-assistant line, so the streamed text shows twice (criterion E).
-3. `downloadModelPack` only logs a failure: it neither sets `error = null` on start nor `error` on failure, and the two download entry points no longer count as `busy` (criterion F).
-4. The Models screen shows two determinate bars for one download: the legacy status-card bar and the "All models" card (`ModelLibraryCards` calls `ModelTransferFeedback` with the default `showBar`); `modelsCardKeepsLegacyPercentDuringATrackedDownload` asserts two.
-5. The memory-pressure reason is read once, at the start of the chat branch only (`turn.pressure(...)` is not called in `phoneLocalAnswer`), and `LocalReplyTurn.pressure` writes `activity` even after the turn is closed. The spec requires the warning in both paths and no write after the turn ends.
-6. `CompanionPackManager.downloadSelected()` is no longer called from `src/main` (only tests); it should be removed or used.
+*Pinned by CoS, 2026-11-03:* the 180 s load deadline and the 300 s overall turn cap (formerly item 6 of this list: no deadline on model load and no overall limit) are a requirement on #671 itself, not a disclosed gap. The load deadline is met (criterion A). The turn cap is **open** (item 7).
+
+1. **Closed.** `LocalReplyTurn.failed` ends with `prior` plus the unsaved error bubble; only `discard` (cancellation) sets `messages = prior`. Tests: `failedTurnKeepsItsErrorBubbleAndClearsOnlyThePartialAndHomePreview`, `failedStreamDropsThePartialAndKeepsTheErrorBubble`, `idleStallRaisesTypedErrorAndStopsDecode`.
+2. **Closed.** Home (`MainActivity`, the Home reply lines) renders the last-assistant line only while `liveLocalReply` is blank. Test: `HomeLiveReplyUiTest.homeShowsTheStreamedReplyOnce`.
+3. **Closed.** `CompanionModel.downloadModelPack` sets `error = null` and `busy` on start, sets `error` on a non-cancel failure, and keeps `busy` until the last active download ends. Tests: `CompanionModelDownloadTest.failedDownloadSetsErrorAndRetryClearsIt`, `fastModelButtonIsDisabledWhileItsDownloadRuns`.
+4. **Closed.** `ModelLibraryCards` takes a `showBar` predicate and the Models screen passes `showBar = { it.id != devicePack.selectedPackId }`, so the selected pack's library card draws no second bar. Test: `ModelScreensLiveUiTest.libraryCardShowsNoSecondBarForTheSelectedPackWhileTheLegacyBarIsVisible`.
+5. **Closed.** `phoneLocalAnswer` reads the pressure reason and reports it through `turn::pressure`, and `LocalReplyTurn.pressure` writes `activity` only while the turn is open. Tests: `CompanionModelOffgridTurnTest.phoneToolPassesShowTheMemoryPressureWarning`, `stageTickerKeepsTheMemoryPressureWarningVisible`.
+6. **Closed.** `CompanionPackManager.downloadSelected()` is removed; every download goes through `downloadModelPack`.
+7. **Open: the 300 s cap must start when the turn starts and cover the whole turn (CoS ruling; the spec stands, the code follows).** `CompanionPackManager.TurnGuard` starts its clock per `CompanionPackManager.generate` call. One call's load, summary passes and reply pass share the cap, but the time before that call is not counted, and each `generate` of the phone-tool loop in `phoneLocalAnswer` gets its own 300 s. The PR fixer is moving the cap's start to `LocalReplyTurn`'s opening; criterion A's turn-cap line stays unmet until then.
 
 ## Files
 
 All under `android/app/src/main/java/com/jarvis/companion/` unless noted: CompanionModel (turn wiring, `installFastPhoneModel`, `downloadModelPack`, `selectCompanionPack`), CompanionPackManager (`watchedGenerate`, downloads, `packFileSnapshot`), **LocalReplyTurn** (new: stage ticker, preview, cleanup wiring, landed and failed turns), **LocalStreamStall** (new: `LocalStallDeadlines`, `LocalStreamStallError`), LiveLocalReply, LocalInferenceEngine, `android/app/src/main/cpp/jarvis_llama.cpp`, MainActivity (Home live-reply line and the Models section), ModelDownloadState, ModelDownloadsUi, CompanionDeviceModelChrome, DevicePackChromePublisher, PhoneMemoryUi and DownloadedContentUi. `GenerateOutcome.kt::withOfflineAnswerCleanup` is used unchanged.
 
-Tests, under `android/app/src/test/java/com/jarvis/companion/`: LiveLocalReplyTest, **LocalReplyTurnTest** (new), ModelDownloadFeedbackTest, ModelDownloadsUiTest, ModelScreensLiveUiTest and PackFileSnapshotTest; existing StandaloneModeTest is cited for cleanup. Files the spec needs and #671 does not have yet: CompanionModelOffgridTurnTest, CompanionModelDownloadTest, HomeLiveReplyUiTest, PhoneMemoryUiTest and DownloadedContentUiTest (see *Tests the spec needs*).
+Tests, under `android/app/src/test/java/com/jarvis/companion/`: LiveLocalReplyTest, **LocalReplyTurnTest** (new), ModelDownloadFeedbackTest, ModelDownloadsUiTest, ModelScreensLiveUiTest and PackFileSnapshotTest; existing StandaloneModeTest is cited for cleanup. Added for the spec: CompanionModelOffgridTurnTest (with the CompanionModelHarness helper), CompanionModelDownloadTest, HomeLiveReplyUiTest, PhoneMemoryUiTest and DownloadedContentUiTest (see *Tests the spec added*).
 
 ## Out of scope
 
