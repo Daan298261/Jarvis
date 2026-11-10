@@ -417,7 +417,11 @@ async def test_owner_approval_after_unload_respawns_the_model(monkeypatch):
         seen.append(MANAGER.state.manually_unloaded)  # what _run -> _guard_background_load would see
         return SimpleNamespace(id=task_id)
 
-    monkeypatch.setattr(type(AGENT), "confirm_task", confirm_task)
+    async def route_confirm(task_id, approved, **kwargs):
+        return await confirm_task(None, task_id, approved, **kwargs)
+
+    # Replace the route's own AGENT: other test modules reload app modules, so patching a class is not airtight.
+    monkeypatch.setattr(tasks_api, "AGENT", SimpleNamespace(confirm_task=route_confirm))
     monkeypatch.setattr(tasks_api, "_task_dict", lambda task: {"id": task.id})
     for body in (tasks_api.ContinueBody(approve=True), tasks_api.ContinueBody(grant_mode="allow_once"),
                  tasks_api.ContinueBody(approve=False)):
@@ -436,6 +440,10 @@ async def test_a_real_parked_task_resumes_after_unload_only_through_an_owner_app
     AGENT = tasks_api.AGENT
     await session_mod.configure_database(path=tmp_path / "jarvis.db")
     await session_mod.init_db()
+    import app.agent.loop as loop_mod
+
+    monkeypatch.setattr(loop_mod, "SessionLocal", session_mod.SessionLocal)  # names imported before the reconfigure
+    monkeypatch.setattr(tasks_api, "SessionLocal", session_mod.SessionLocal)
     async with session_mod.SessionLocal() as session:
         session.add(Task(id="parked-2", title="t", prompt="p", status="running", stage="waiting",
                          waiting_for_confirmation=True, confirmation_payload="{}"))
