@@ -12,7 +12,7 @@ from pathlib import Path
 
 import httpx
 
-from .development_scheduler import DevelopmentConfig, model_capabilities, ollama_keep_alive, read_json, write_json
+from .development_scheduler import MODEL_POLICY, DevelopmentConfig, model_capabilities, read_json, write_json
 from ..providers.openai_compat import OpenAICompatProvider
 from ..inference.vision import messages_need_vision
 from ..providers.base import ChatResult, _timeout_s, to_openai_messages
@@ -22,13 +22,22 @@ from ..providers.tool_call_compat import normalize_tool_calls
 class NativeOllamaProvider(OpenAICompatProvider):
     """Ollama's native thinking, image and tool protocol for local missions."""
     name = "ollama-native"
-    def __init__(self, url, model, *, context_size=16384, keep_alive=None):
+    def __init__(self, url, model, *, policy_path: Path, context_size=16384):
         super().__init__(url.rstrip("/") + "/v1", model=model, timeout=180)
         self.native = httpx.AsyncClient(base_url=url.rstrip("/"), timeout=180)
         self.context_size = context_size
-        # keep_alive always comes from the shared helper ("300s" with Keep warm off, "-1" with it
-        # on). None means "ask the helper per request" so a Keep warm toggle applies mid-mission.
-        self.keep_alive = keep_alive
+        # The owner's scheduler publishes keep_alive (shared helper: "300s" with Keep warm off,
+        # "-1" with it on) and the manual-unload guard here; this process's settings are a
+        # frozen copy, so it never resolves either itself.
+        self.policy_path = Path(policy_path)
+
+    def policy(self) -> dict:
+        policy = read_json(self.policy_path, None)
+        if not isinstance(policy, dict) or not isinstance(policy.get("keep_alive"), str) or not policy["keep_alive"]:
+            raise RuntimeError("The scheduler's model policy is missing; refusing to call Ollama")
+        if policy.get("held"):
+            raise RuntimeError("The owner unloaded the models; this mission must not load them again")
+        return policy
 
     def arguments(self, messages, tools=None, temperature=None, top_p=None, top_k=None, max_tokens=None, thinking=None, **_):
         converted = to_openai_messages(messages)
@@ -60,7 +69,7 @@ class NativeOllamaProvider(OpenAICompatProvider):
                 options[key] = value
         # A bounded tool mission uses explicit no-thinking mode. Generic template
         # kwargs do not control Ollama's native thinking channel.
-        body = {"model": self.model, "messages": converted, "stream": False, "think": False, "options": options, "keep_alive": self.keep_alive or ollama_keep_alive()}
+        body = {"model": self.model, "messages": converted, "stream": False, "think": False, "options": options, "keep_alive": self.policy()["keep_alive"]}
         if tools:
             body["tools"] = tools
         return body
@@ -211,8 +220,8 @@ async def execute(control: Path):
     save_registry([spec])
     save_coding_tasks([CodingTaskRecord(task_id=task_id, base_sha=spec.start_commit, branch=spec.branch, worktree_id=spec.id, worktree_path=spec.path, created_at=spec.created_at)])
     await init_db()
-    coder = NativeOllamaProvider(config.ollama_url, config.coder_model)
-    vision = NativeOllamaProvider(config.ollama_url, config.vision_model)
+    coder = NativeOllamaProvider(config.ollama_url, config.coder_model, policy_path=control / MODEL_POLICY)
+    vision = NativeOllamaProvider(config.ollama_url, config.vision_model, policy_path=control / MODEL_POLICY)
     provider = OllamaDevelopmentProvider(coder, vision)
     original_load = MANAGER.load
     async def load(*args, **kwargs):

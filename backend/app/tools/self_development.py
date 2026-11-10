@@ -20,14 +20,90 @@ _DEACTIVATE = (
 )
 
 
+_APOSTROPHES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u02bc": "'", "\uff07": "'"})
+
+
+def own_words(text: str) -> str:
+    """The owner's own words: quotes, `>` quotes and code removed; smart apostrophes made plain."""
+    # Quotes are stripped first so a ‘quoted’ span still counts as quoted, then phone
+    # keyboards' ’ becomes ' so "I’m back" reads as "I'm back".
+    return _QUOTED.sub(" ", text or "").translate(_APOSTROPHES)
+
+
 def away_intent(text: str) -> str:
     """'activate', 'deactivate' or '' for the owner's own words; quoted text never counts."""
-    own = _QUOTED.sub(" ", text or "")
+    own = own_words(text)
     if any(p.search(own) for p in _DEACTIVATE):
         return "deactivate"
     if any(p.search(own) for p in _ACTIVATE):
         return "activate"
     return ""
+
+
+_REORDER = re.compile(r"\b(?:next|first|last|top|bottom|move|up|down|before|after|earlier|later|sooner|reorder|priorit\w*|deprioritis\w*|deprioritiz\w*)\b", re.I)
+_UNDO = re.compile(r"\b(?:undo|revert|put (?:it|that|them) back)\b", re.I)
+_QUEUE = re.compile(r"\b(?:queue|add|schedule|develop|implement|work on|pick up|build)\b", re.I)
+_UNQUEUE = re.compile(r"\b(?:unqueue|dequeue|remove|drop|skip|cancel|take .* off)\b", re.I)
+_RUN = re.compile(r"\b(?:run|start|launch|kick off|begin)\b", re.I)
+_RUN_OBJECT = re.compile(r"\b(?:mission|development|self[- ]?dev\w*|rfc|ticket|task|scheduler)\b", re.I)
+_CONFIGURE = re.compile(r"\b(?:set|change|switch|use|configure|enable|disable|turn (?:on|off)|every|interval)\b", re.I)
+# Settings only the Self-development page may change: releasing Grokbot's reservation must be
+# explicit (or come from a trusted lease coordinator), and repointing the repository is not a
+# chat-level change.
+_PAGE_ONLY = {"resource_hold": "the reservation", "repo": "the repository"}
+
+
+def mentions_item(own: str, item: dict[str, Any] | None) -> bool:
+    if not item:
+        return False
+    lowered = own.lower()
+    if item.get("id") and item["id"].lower() in lowered:
+        return True
+    number = item.get("rfc") or ""
+    if not number:
+        found = re.search(r"\brfc[-_ ]?0*(\d{1,5})\b", f"{item.get('title', '')} {item.get('path', '')}", re.I)
+        number = found.group(1) if found else ""
+    if number and re.search(rf"(?:\brfc[-_ ]?|#)0*{int(number)}\b", lowered):
+        return True
+    title = (item.get("title") or "").strip().lower()
+    return len(title) >= 4 and title in lowered
+
+
+def owner_asked(text: str, action: str, *, item: dict[str, Any] | None = None, changes: dict[str, Any] | None = None) -> str:
+    """'' when the owner's own message asks for ``action``; otherwise why it does not count.
+
+    Owner authority comes only from the owner's own words (or the Self-development page),
+    never from a model argument, an RFC, or tool output.
+    """
+    own = own_words(text)
+    if action == "move":
+        ok = bool(_REORDER.search(own)) and mentions_item(own, item)
+        return "" if ok else "Reordering as you needs your own request naming that task (for example \"do RFC-0211 next\"), or a drag in the Upcoming list"
+    if action == "undo":
+        return "" if _UNDO.search(own) else "Undoing your order needs you to ask for it, or the Undo button in the Upcoming list"
+    if action == "queue":
+        return "" if _QUEUE.search(own) and mentions_item(own, item) else "Queueing a ticket needs your own request naming it, or the Self-development page"
+    if action == "unqueue":
+        return "" if _UNQUEUE.search(own) and mentions_item(own, item) else "Removing a queued ticket needs your own request naming it, or the Self-development page"
+    if action == "run":
+        return "" if _RUN.search(own) and _RUN_OBJECT.search(own) else "Starting a development mission needs your own request, or Run in Self-development"
+    if action == "configure":
+        changes = changes or {}
+        for key, label in _PAGE_ONLY.items():
+            if key in changes:
+                return f"Change {label} on the Self-development page"
+        if not changes:
+            return "Nothing to change"
+        if not _CONFIGURE.search(own):
+            return "Changing the scheduler settings needs your own request, or the Self-development page"
+        lowered = own.lower()
+        for key, value in changes.items():
+            if isinstance(value, bool):
+                continue  # enable/disable is covered by the request verb
+            if str(value).lower() not in lowered:
+                return f"Your message does not ask for {key} = {value}"
+        return ""
+    return "Unknown control"
 
 
 async def latest_owner_message(task_id: str) -> str:
@@ -55,7 +131,9 @@ class SelfDevelopmentTool(Tool):
         "when the owner directly asked in their own message (\"I'm AFK, go develop yourself\" / \"I'm back\"). "
         "upcoming shows the active task and the ordered upcoming list; move reorders it (owner instructions such as "
         "\"do this next\" use actor=owner; your own re-prioritisation uses actor=anzu with a reason); undo reverts the "
-        "latest reorder. scan/queue/unqueue/run/stop/configure manage individual RFC revisions."
+        "latest reorder. scan/queue/unqueue/run/stop/configure manage individual RFC revisions. Acting as the owner "
+        "(actor=owner, queue, unqueue, run, configure) works only when the owner's own latest message asks for that "
+        "exact change; the reservation and repository can only be changed on the Self-development page."
     )
     risk = RiskLevel.MEDIUM
     parameters = {"type": "object", "properties": {
@@ -77,14 +155,27 @@ class SelfDevelopmentTool(Tool):
         if os.environ.get("ANZU_DEVELOPMENT_MISSION"):
             return ToolResult(False, "", error="Development missions cannot control the owner's scheduler")
         try:
-            needs_owner = action in {"away_on", "away_off"} or (action in {"move", "undo"} and actor == "owner")
+            if actor not in {"owner", "anzu"}:
+                raise ValueError("actor must be owner or anzu")
+            needs_owner = action in {"away_on", "away_off", "queue", "unqueue", "run", "configure"} or (action in {"move", "undo"} and actor == "owner")
+            owner_text = ""
             if needs_owner:
                 if not _task_id:
-                    raise ValueError("This control needs the owner's own request in chat or the switch in Self-development")
+                    raise ValueError("This control needs the owner's own request in chat or the Self-development page")
+                owner_text = await latest_owner_message(_task_id)
             if action in {"away_on", "away_off"}:
                 wanted = "activate" if action == "away_on" else "deactivate"
-                if away_intent(await latest_owner_message(_task_id)) != wanted:
+                if away_intent(owner_text) != wanted:
                     raise ValueError("Away Mode changes only when you ask directly in your own message or use the Away Mode switch")
+            elif needs_owner:
+                current = DEVELOPMENT.state()
+                item = current["items"].get(item_id) if item_id else None
+                if action in {"queue", "unqueue", "move"} and item_id and item is None:
+                    raise ValueError("Unknown task")
+                changes = {k: v for k, v in (config or {}).items() if current["config"].get(k) != v} if action == "configure" else None
+                refusal = owner_asked(owner_text, action, item=item, changes=changes)
+                if refusal:
+                    raise ValueError(refusal)
             if action == "status": result = DEVELOPMENT.public()
             elif action == "scan": result = await DEVELOPMENT.scan()
             elif action in {"queue", "unqueue"}: result = await DEVELOPMENT.select(item_id, revision, action == "queue")
@@ -93,7 +184,8 @@ class SelfDevelopmentTool(Tool):
                 result = await DEVELOPMENT.launch()
             elif action == "stop": result = await DEVELOPMENT.stop()
             elif action == "configure":
-                result = await DEVELOPMENT.configure(DevelopmentConfig.model_validate({**DEVELOPMENT.state()["config"], **(config or {})}))
+                # A chat change never clears the failure breaker; that is the page's explicit resume.
+                result = await DEVELOPMENT.configure(DevelopmentConfig.model_validate({**DEVELOPMENT.state()["config"], **(config or {})}), resume=False)
             elif action in {"away_on", "away_off"}:
                 result = await DEVELOPMENT.set_away(action == "away_on", actor="owner", reason="You said you are back")
             elif action == "upcoming":
@@ -101,8 +193,6 @@ class SelfDevelopmentTool(Tool):
             elif action in {"move", "undo"}:
                 if expected_revision is None:
                     raise ValueError("Read the upcoming list first and pass its revision as expected_revision")
-                if actor not in {"owner", "anzu"}:
-                    raise ValueError("actor must be owner or anzu")
                 if action == "move":
                     if position is None:
                         raise ValueError("position is required to move a task")

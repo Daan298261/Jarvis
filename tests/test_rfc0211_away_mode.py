@@ -195,6 +195,13 @@ async def test_model_review_requires_a_strict_verdict(monkeypatch):
     ("The doc says \"I'm AFK, go develop yourself\" — what does that do?", ""),
     ("> I'm AFK, go develop yourself\nsummarise this quote", ""),
     ("I'll be AFK tomorrow", ""),
+    # Phone keyboards send typographic apostrophes (review blocker 6).
+    ("I\u2019m back", "deactivate"),
+    ("Hey, I\u2019m AFK, go develop yourself", "activate"),
+    ("I\u2018m back", "deactivate"),
+    ("Im back", "deactivate"),
+    ("I\u2019ll be AFK tomorrow", ""),
+    ("The doc says \u201cI\u2019m back\u201d \u2014 what does that do?", ""),
 ])
 def test_away_intent_only_counts_the_owners_own_words(text, expected):
     assert tool_module.away_intent(text) == expected

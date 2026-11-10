@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -207,6 +208,15 @@ async def test_priority_reservation_skips_all_inference(scheduler, monkeypatch):
     assert scheduler.state()["runs"] == []
 
 
+def policy_file(keep_alive="300s", held=False):
+    """A scheduler-published model policy, as the owner's process writes it for a mission."""
+    import tempfile
+    from app.agent import development_scheduler as ds
+    control = Path(tempfile.mkdtemp())
+    ds.publish_model_policy(control, {"keep_alive": keep_alive, "held": held, "updated_at": 0})
+    return control / ds.MODEL_POLICY
+
+
 @pytest.mark.asyncio
 async def test_native_ollama_uses_real_tool_protocol_and_thinking_flag():
     import httpx
@@ -216,7 +226,7 @@ async def test_native_ollama_uses_real_tool_protocol_and_thinking_flag():
         body = json.loads(request.content)
         captured.append(body)
         return httpx.Response(200, json={"message": {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "filesystem", "arguments": {"action": "read", "path": "test.py"}}}]}, "eval_count": 20})
-    provider = NativeOllamaProvider("http://127.0.0.1:11434", "coder")
+    provider = NativeOllamaProvider("http://127.0.0.1:11434", "coder", policy_path=policy_file())
     await provider.native.aclose()
     provider.native = httpx.AsyncClient(base_url="http://127.0.0.1:11434", transport=httpx.MockTransport(handler))
     try:
@@ -234,7 +244,7 @@ def test_native_ollama_translates_images_and_tool_results():
     provider = NativeOllamaProvider.__new__(NativeOllamaProvider)
     provider.model = "vision"
     provider.context_size = 16384
-    provider.keep_alive = "300s"
+    provider.policy_path = policy_file("300s")
     messages = [ChatMessage("user", [{"type": "text", "text": "Inspect screenshot"}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,abcd"}}]), ChatMessage("assistant", "", tool_calls=[{"id": "call1", "type": "function", "function": {"name": "desktop", "arguments": '{"action":"screenshot"}'}}]), ChatMessage("tool", "Captured", tool_call_id="call1")]
     body = provider.arguments(messages)
     assert body["messages"][0]["images"] == ["abcd"]
@@ -245,20 +255,50 @@ def test_native_ollama_translates_images_and_tool_results():
 
 
 @pytest.mark.parametrize("helper_value", ["300s", "-1"])
-def test_mission_and_review_requests_follow_the_shared_keep_alive_helper(monkeypatch, helper_value):
-    # CoS ruling: "300s" with Keep warm off, "-1" with it on, always via the shared helper.
+def test_mission_requests_follow_the_owners_live_keep_alive_across_the_process_boundary(tmp_path, monkeypatch, helper_value):
+    # CoS ruling: "300s" with Keep warm off, "-1" with it on, always via the shared helper,
+    # resolved in the owner's process (the worker only has a frozen settings copy).
     from app.agent import development_scheduler as ds
-    from app.agent import development_worker as dw
     from app.inference import model_launch
+    control = tmp_path / "control"
+    control.mkdir()
     monkeypatch.setattr(model_launch, "idle_keep_alive", lambda: helper_value)
-    assert ds.ollama_keep_alive() == helper_value
-    provider = dw.NativeOllamaProvider.__new__(dw.NativeOllamaProvider)
-    provider.model, provider.context_size, provider.keep_alive = "coder", 16384, None
-    assert provider.arguments([ChatMessage("user", "hi")])["keep_alive"] == helper_value
-    # A Keep warm toggle mid-mission applies to the next request.
+    monkeypatch.setattr(ds, "models_held_unloaded", lambda: False)
+    ds.publish_model_policy(control)
+    # The worker runs in its own interpreter with JARVIS_ROOT=control and reads the policy file.
+    code = (
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        "from app.agent.development_worker import NativeOllamaProvider\n"
+        "from app.providers.base import ChatMessage\n"
+        "p = NativeOllamaProvider.__new__(NativeOllamaProvider)\n"
+        "p.model, p.context_size, p.policy_path = 'coder', 16384, Path(sys.argv[1]) / 'model_policy.json'\n"
+        "print(json.dumps(p.arguments([ChatMessage('user', 'hi')])['keep_alive']))\n"
+    )
+    import subprocess, sys
+    env = dict(os.environ, JARVIS_ROOT=str(control), PYTHONPATH=str(Path(__file__).resolve().parents[1] / "backend"), JARVIS_SKIP_MODEL="1")
+    def worker_keep_alive():
+        out = subprocess.run([sys.executable, "-c", code, str(control)], env=env, capture_output=True, text=True, timeout=120)
+        assert out.returncode == 0, out.stderr
+        return json.loads(out.stdout.strip().splitlines()[-1])
+    assert worker_keep_alive() == helper_value
+    # The owner toggles Keep warm mid-mission; the scheduler republishes on its next tick.
     flipped = "-1" if helper_value == "300s" else "300s"
     monkeypatch.setattr(model_launch, "idle_keep_alive", lambda: flipped)
-    assert provider.arguments([ChatMessage("user", "hi")])["keep_alive"] == flipped
+    ds.publish_model_policy(control)
+    assert worker_keep_alive() == flipped
+
+
+def test_worker_refuses_to_call_ollama_when_the_owner_unloaded_or_policy_is_missing(tmp_path):
+    from app.agent.development_worker import NativeOllamaProvider
+    provider = NativeOllamaProvider.__new__(NativeOllamaProvider)
+    provider.model, provider.context_size = "coder", 16384
+    provider.policy_path = policy_file("300s", held=True)
+    with pytest.raises(RuntimeError, match="unloaded"):
+        provider.arguments([ChatMessage("user", "hi")])
+    provider.policy_path = tmp_path / "missing.json"
+    with pytest.raises(RuntimeError, match="missing"):
+        provider.arguments([ChatMessage("user", "hi")])
 
 
 def test_rfc0211_code_has_no_raw_keep_alive_values():
@@ -329,7 +369,9 @@ async def test_launch_keeps_owner_model_and_uses_trusted_code(scheduler, tmp_pat
     mission = ds.read_json(ds.root() / run["id"] / "mission.json")
     # The mission pins the North Star revision and uses the shared keep-alive helper.
     assert mission["north_star_blob"] == "b" * 40
-    assert mission["keep_alive"] == ds.ollama_keep_alive()
+    # keep_alive is not frozen into mission.json; the live policy file carries it.
+    assert "keep_alive" not in mission
+    assert ds.read_json(ds.root() / run["id"] / ds.MODEL_POLICY)["keep_alive"] == ds.ollama_keep_alive()
     assert state["deliveries"][0]["stage"] == "implementing" and state["deliveries"][0]["id"] == run["delivery_id"]
     control = ds.root() / run["id"]
     saved = ds.read_json(control / "data/settings.json")
@@ -367,7 +409,7 @@ class _SlowNdjson(httpx.AsyncByteStream):
 def _native_provider(stream):
     from app.agent.development_worker import NativeOllamaProvider
 
-    provider = NativeOllamaProvider("http://ollama.test", "qwen-coder")
+    provider = NativeOllamaProvider("http://ollama.test", "qwen-coder", policy_path=policy_file())
     provider.native = httpx.AsyncClient(
         base_url="http://ollama.test",
         transport=httpx.MockTransport(lambda request: httpx.Response(200, stream=stream)),
@@ -464,7 +506,10 @@ async def test_chat_tool_run_returns_tool_error_when_models_unavailable(schedule
     await _queued(scheduler, monkeypatch)
     monkeypatch.setattr(ds, "DEVELOPMENT", scheduler)
     monkeypatch.delenv("ANZU_DEVELOPMENT_MISSION", raising=False)
-    result = await SelfDevelopmentTool().execute(action="run")
+    import app.tools.self_development as tool_module
+    async def owner(_task): return "start the development mission"
+    monkeypatch.setattr(tool_module, "latest_owner_message", owner)
+    result = await SelfDevelopmentTool().execute(action="run", _task_id="task")
     assert result.success is False
     assert reason in result.error
     assert scheduler.public()["runs"] == []

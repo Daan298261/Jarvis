@@ -120,6 +120,25 @@ def ollama_keep_alive() -> str:
     return idle_keep_alive()
 
 
+MODEL_POLICY = "model_policy.json"
+
+
+def model_policy() -> dict[str, Any]:
+    """What a running mission may send to Ollama right now, resolved in the owner's process.
+
+    Workers run under their control directory with a frozen settings copy, so they never
+    resolve keep_alive or the manual-unload guard themselves: the scheduler publishes both
+    here on launch and on every tick.
+    """
+    return {"keep_alive": ollama_keep_alive(), "held": models_held_unloaded(), "updated_at": time.time()}
+
+
+def publish_model_policy(control: Path, policy: dict[str, Any] | None = None) -> dict[str, Any]:
+    policy = policy or model_policy()
+    write_json(control / MODEL_POLICY, policy)
+    return policy
+
+
 def source_item(source: str, title: str, content: str, url: str = "", path: str = "", *, kind: str = "", meta: dict[str, Any] | None = None):
     if not content.strip() or len(content.encode("utf-8")) > 1_000_000:
         raise ValueError("RFC must contain text and fit within 1 MB")
@@ -229,15 +248,21 @@ class DevelopmentScheduler:
     def save(self, state):
         write_json(root() / "state.json", state)
 
-    async def configure(self, config: DevelopmentConfig):
+    async def configure(self, config: DevelopmentConfig, *, resume: bool = True):
+        """Save the scheduler settings.
+
+        ``resume`` (the owner's explicit save in Self-development) also clears the
+        consecutive-failure breaker; chat changes never do.
+        """
         async with self.lock:
             state = self.state()
             if any(r["status"] == "running" for r in state["runs"]):
                 raise ValueError("Stop the active mission before changing its configuration")
             state["config"] = config.model_dump()
             state["next_run"] = time.time() + config.interval_minutes * 60
-            state["failures"] = 0
-            state["error"] = ""
+            if resume:
+                state["failures"] = 0
+                state["error"] = ""
             self.save(state)
             return self.public(state)
 
@@ -247,7 +272,16 @@ class DevelopmentScheduler:
         return next((d for d in state["deliveries"].values() if d["stage"] in ACTIVE_STAGES), None)
 
     def publish_authorized(self, state, delivery) -> bool:
-        return not kill_switch_active() and (state["away"]["enabled"] or delivery.get("authorized_by") == "owner")
+        """Push/PR/merge only for the owner's Publish, or an Away Mode task while Away Mode is on.
+
+        Manual, scheduled and chat launches keep the owner-requested policy: they stop at
+        "approved" and wait for the Publish button. Turning Away Mode off revokes it.
+        """
+        if kill_switch_active():
+            return False
+        if delivery.get("authorized_by") == "owner":
+            return True
+        return delivery.get("authorized_by") == "away" and bool(state["away"]["enabled"])
 
     def gates(self, state, config: DevelopmentConfig) -> str:
         """Why autonomous development cannot dispatch now ("" when it can)."""
@@ -479,7 +513,8 @@ class DevelopmentScheduler:
                 # Preserve the slot rules even when nothing is queued.
                 self.check_slot(state, config)
                 return self.public(state)
-            await self.launch_mission(state, config, item, authorized_by="owner")
+            # Not a publish authorization: the result waits at "approved" for the owner's Publish.
+            await self.launch_mission(state, config, item, authorized_by="")
             return self.public(state)
 
     def check_slot(self, state, config: DevelopmentConfig):
@@ -533,7 +568,7 @@ class DevelopmentScheduler:
                             "spec": spec.as_dict(), "worktree": spec.path, "branch": spec.branch, "base_sha": spec.start_commit,
                             "base_ref": config.base_ref, "north_star_blob": north_star_blob, "stage": "implementing", "head_sha": "",
                             "tests": None, "review": None, "repairs": 0, "pr": None, "merge_sha": "", "history": [], "error": "",
-                            "authorized_by": authorized_by if authorized_by == "owner" else "", "started_at": time.time(), "base_changes": 0}
+                            "authorized_by": authorized_by if authorized_by in {"owner", "away"} else "", "started_at": time.time(), "base_changes": 0}
                 state["deliveries"][delivery["id"]] = delivery
                 stage = "implementing"
             else:
@@ -558,7 +593,8 @@ class DevelopmentScheduler:
             task_id = str(uuid.uuid4())
             write_json(control / "mission.json", {"id": run_id, "task_id": task_id, "item": item, "config": config.model_dump(), "spec": spec.as_dict(),
                                                   "owner_root": str(repo_root()), "started_at": time.time(), "delivery_id": delivery["id"],
-                                                  "north_star_blob": delivery["north_star_blob"], "findings": findings, "keep_alive": ollama_keep_alive()})
+                                                  "north_star_blob": delivery["north_star_blob"], "findings": findings})
+            publish_model_policy(control)
             env = dict(os.environ, JARVIS_ROOT=str(control), PYTHONPATH=str(Path(__file__).resolve().parents[2]), ANZU_DEVELOPMENT_MISSION=run_id)
             # Load trusted running code, never the candidate checkout's Python modules.
             log = (control / "worker.log").open("w", encoding="utf-8")
@@ -672,7 +708,7 @@ class DevelopmentScheduler:
         item = state["items"].get(delivery["item_id"])
         delivery["repairs"] += 1
         try:
-            await self.launch_mission(state, config, item, authorized_by=delivery.get("authorized_by") or "away", delivery=delivery, findings=findings)
+            await self.launch_mission(state, config, item, authorized_by=delivery.get("authorized_by", ""), delivery=delivery, findings=findings)
         except (ValueError, RuntimeError, OSError, subprocess.CalledProcessError) as exc:
             self.attention(state, delivery, f"Repair could not start: {exc}. {findings}")
 
@@ -968,6 +1004,11 @@ class DevelopmentScheduler:
             try:
                 await self.launch_mission(state, config, item, authorized_by="away")
                 state["away"]["waiting"] = ""
+            except ModelCheckError as exc:
+                # Ollama down or a model missing is the environment, not a mission failure:
+                # wait visibly and retry on the next tick, without tripping the breaker.
+                item.update(status="available", approved_revision="")
+                state["away"]["waiting"] = f"Waiting for local models: {exc}"
             except (ValueError, RuntimeError, OSError, subprocess.CalledProcessError) as exc:
                 item.update(status="available", approved_revision="")
                 state["failures"] += 1
@@ -981,6 +1022,24 @@ class DevelopmentScheduler:
         async with self.lock:
             state = self.state()
             config = DevelopmentConfig.model_validate(state["config"])
+            running = [run for run in state["runs"] if run["status"] == "running"]
+            if running:
+                policy = model_policy()
+                if policy["held"]:
+                    # The owner unloaded the models: stop before the worker's next request
+                    # reloads them, keep its edits, and let the ticket run again later.
+                    for run in running:
+                        publish_model_policy(root() / run["id"], policy)
+                    await self.halt(state, "you unloaded the models")
+                    for run in running:
+                        item = state["items"].get(run["item_id"])
+                        if item and item.get("status") == "stopped":
+                            item.update(status="available", attempted_revision="")
+                    queue.replan(state)
+                    self.save(state)
+                else:
+                    for run in running:
+                        publish_model_policy(root() / run["id"], policy)
             for run in state["runs"]:
                 if run["status"] != "running":
                     continue
