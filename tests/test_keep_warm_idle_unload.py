@@ -121,7 +121,7 @@ def test_keep_alive_helper_values_for_off_and_on():
 
 
 def test_no_hardcoded_keep_alive_string_outside_the_helper():
-    literal = re.compile(r"""keep_alive["']?\s*[:=]\s*["']""")
+    literal = re.compile(r"""keep_alive["']?\s*(:|=(?!=))\s*["']""")  # an assignment, not a == comparison
     offenders = [str(path.relative_to(BACKEND_APP)) for path in BACKEND_APP.rglob("*.py")
                  if path.name != "keep_alive.py" and literal.search(path.read_text(encoding="utf-8"))]
     assert offenders == []
@@ -844,7 +844,7 @@ async def test_denied_model_is_never_addressed_even_if_the_ledger_lists_it(monke
 
 import ast  # noqa: E402
 
-KEEP_ALIVE_VALUE = re.compile(r"""keep_alive["']?\s*[:=]\s*(?P<value>[^\s,)}]+)""")
+KEEP_ALIVE_VALUE = re.compile(r"""keep_alive["']?\s*(:|=(?!=))\s*(?P<value>[^\s,)}]+)""")
 KEEP_ALIVE_FILES_EXEMPT = {"inference/keep_alive.py", "workers/browser.py"}  # the helper; an unrelated browser flag
 UNLOAD_ONLY = '"keep_alive": 0'
 
@@ -863,7 +863,8 @@ def test_static_scan_finds_no_hardcoded_keep_alive_anywhere_in_backend():
             offenders.append(f"{name}: hours literal (such as '24h') next to keep_alive")
         for match in KEEP_ALIVE_VALUE.finditer(text):
             value = match.group("value").strip("`.;")
-            if not (value.startswith("ollama_keep_alive(") or value == "0"):
+            # ``Literal[...]`` is RFC-0247's ModelStart choice field (idle policy or server default), not a value.
+            if not (value.startswith("ollama_keep_alive(") or value == "0" or value.startswith("Literal[")):
                 offenders.append(f"{name}: keep_alive = {value}")
     assert offenders == []
 
@@ -928,8 +929,8 @@ def test_static_scan_every_direct_load_and_warm_call_site_sits_behind_the_manual
             is_warmup = name == "inference/front_runtime.py" and fn.name == "_warmup"
             if not (loads or is_warmup):
                 continue
-            if UNLOAD_ONLY in segment or "keep_alive\": 0" in segment:
-                continue  # an owner-chosen unload request, not a load
+            if UNLOAD_ONLY in segment or "keep_alive\": 0" in segment or "release=True" in segment:
+                continue  # an owner-chosen unload request (keep_alive 0 via ollama_request(release=True)), not a load
             if "/load" in " ".join(loads) or "models/load" in " ".join(loads) or "/api/generate" in " ".join(loads) \
                     or "load" in loads or is_warmup:
                 sites.append(f"{name}:{fn.name}")

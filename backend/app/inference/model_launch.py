@@ -17,7 +17,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from ..config import data_dir, load_settings, runtime_dir
+from ..config import data_dir, runtime_dir
+from .keep_alive import is_denied
 
 
 class ModelStart(BaseModel):
@@ -125,6 +126,8 @@ def launch_profiles(inventory: list[dict]) -> list[dict]:
     for p in profiles:
         if not p.get("id") or not p.get("model") or str(p["model"]).startswith("-"):
             continue
+        if is_denied(str(p["model"])):
+            continue  # RFC-0242: ANZU never starts, touches or unloads a denied model (bgm-ingest-9b)
         try:
             port = int(p.get("port", 0))
             context = int(p.get("context_size", 4096))
@@ -147,26 +150,6 @@ def launch_profiles(inventory: list[dict]) -> list[dict]:
         p["keep_alive_options"] = ["idle", "server"] if p["backend"] != "llama.cpp" else []
         unique[p["id"]] = p
     return list(unique.values())
-
-
-def idle_keep_alive() -> str:
-    # Shared helper in #690. Until it lands, use the same default, no parallel timer.
-    try:
-        from .keep_alive import ollama_keep_alive
-    except ImportError:
-        settings = load_settings()
-        return f"{int(getattr(settings.inference, 'idle_unload_seconds', 300))}s"
-    return ollama_keep_alive()
-
-
-def lmstudio_ttl() -> list[str]:
-    try:
-        from .keep_alive import lmstudio_ttl_seconds
-    except ImportError:
-        seconds = int(getattr(load_settings().inference, "idle_unload_seconds", 300))
-    else:
-        seconds = lmstudio_ttl_seconds()
-    return ["--ttl", str(seconds)] if seconds is not None else []
 
 
 def vram_snapshot() -> dict:

@@ -31,6 +31,12 @@ class Entry:
     aliases: set[str] = field(default_factory=set)
     last_use: float = 0.0
     primary: bool = False  # used by every turn (the main model and the front responder)
+    # Loopback port of the server holding it, when not the backend's default (a Model Manager Start, RFC-0247).
+    port: int | None = None
+    # False when the owner chose the server's own keep-alive at Start (the RFC-0247 ``server`` keep-alive choice) or the
+    # backend has no idle policy (a Manager-started llama-server): Unload-all still releases it, the idle timer
+    # and the Keep warm re-pin leave it alone.
+    idle_policy: bool = True
 
     @property
     def key(self) -> tuple[str, str]:
@@ -45,9 +51,13 @@ class LoadedModels:
         self._clock = clock
         self._entries: dict[tuple[str, str], Entry] = {}
 
-    def record(self, backend: str, model: str, *, aliases: Iterable[str] = (), primary: bool = False) -> Entry:
-        """ANZU loaded (or attached to) this model just now."""
-        probe = Entry(backend, model, set(aliases), self._clock(), primary)
+    def record(self, backend: str, model: str, *, aliases: Iterable[str] = (), primary: bool = False,
+               port: int | None = None, idle_policy: bool | None = None) -> Entry:
+        """ANZU loaded (or attached to) this model just now. One entry per (backend, model): a later
+        record (e.g. an explicit Use of a model the Model Manager started) merges, never duplicates.
+        ``port`` / ``idle_policy`` left as ``None`` keep what an earlier record said."""
+        probe = Entry(backend, model, set(aliases), self._clock(), primary, port,
+                      True if idle_policy is None else idle_policy)
         entry = self._entries.get(probe.key)
         if entry is None:
             self._entries[probe.key] = entry = probe
@@ -55,6 +65,10 @@ class LoadedModels:
             entry.aliases |= probe.aliases
             entry.last_use = probe.last_use
             entry.primary = entry.primary or primary
+            if port is not None:
+                entry.port = port
+            if idle_policy is not None:
+                entry.idle_policy = idle_policy
         return entry
 
     def match(self, backend: str, ids: Iterable[str]) -> Entry | None:

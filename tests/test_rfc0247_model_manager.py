@@ -28,7 +28,6 @@ def runtime(tmp_path, monkeypatch):
     manager = InferenceManager()
     monkeypatch.setattr("app.inference.manager.MANAGER", manager)
     monkeypatch.setattr(rm, "load_settings", lambda: settings)
-    monkeypatch.setattr(ml, "load_settings", lambda: settings)
     monkeypatch.setattr(ml, "data_dir", lambda: tmp_path)
     monkeypatch.setattr(rm, "listener_inventory", lambda: {})
     monkeypatch.setattr(rm, "ollama_serves", lambda: [])
@@ -238,7 +237,6 @@ async def test_start_reuses_ollama_with_empty_prompt_and_idle_policy(startable, 
     spawn = Mock(side_effect=AssertionError("must not spawn"))
     monkeypatch.setattr(ollama_runtime, "_start_server", spawn)
     monkeypatch.setattr(instance, "_wait_server", AsyncMock(return_value={}))
-    monkeypatch.setattr(rm, "idle_keep_alive", lambda: "300s")
     posts = []
     def handle(r):
         posts.append(json.loads(r.content))

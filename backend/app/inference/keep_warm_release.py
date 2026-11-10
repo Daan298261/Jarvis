@@ -5,8 +5,9 @@ timer (the models that went idle). The registry of ANZU-loaded models (``LoadedM
 filters every backend listing: a model ANZU did not load is never unloaded, so Black
 Grid's ``bgm-ingest-9b`` in Ollama or LM Studio stays resident whatever the toggle says.
 Covered: loopback Ollama (``keep_alive=0``), loopback LM Studio (its unload API; the CLI
-per instance for older builds) and ANZU's llama-server workers (main model and front
-responder). Each backend is re-read afterwards; a model still resident is a failure with a
+per instance for older builds), ANZU's llama-server workers (main model and front
+responder) and llama-servers the Model Manager's Start spawned (RFC-0247; Ollama / LM Studio
+models it started are ledger entries like any other ANZU load). Each backend is re-read afterwards; a model still resident is a failure with a
 reason, never a silent success.
 """
 from __future__ import annotations
@@ -48,14 +49,20 @@ def _run_cli(args: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(args, capture_output=True, text=True, timeout=60, check=False)
 
 
-def _endpoints(settings: AppSettings, aliases: set[str], default_port: int) -> list[tuple[str, int, str]]:
-    """Loopback endpoints ANZU talks to for one backend family (never another computer)."""
+def _endpoints(settings: AppSettings, aliases: set[str], default_port: int,
+               entries: list[Entry] = ()) -> list[tuple[str, int, str]]:
+    """Loopback endpoints ANZU talks to for one backend family (never another computer): the configured one,
+    the default port, and the port a Model Manager Start (RFC-0247) recorded on a ledger entry."""
     found: list[tuple[str, int, str]] = []
     inference = settings.inference
-    if (inference.backend or "").strip().lower() in aliases and (inference.host or "").strip().lower() in LOOPBACK:
+    configured = (inference.backend or "").strip().lower() in aliases and (inference.host or "").strip().lower() in LOOPBACK
+    if configured:
         found.append((inference.host.strip(), int(inference.port), inference.api_key or ""))
-    if all(port != default_port for _, port, _ in found):
-        found.append(("127.0.0.1", default_port, ""))
+    for port in [default_port, *sorted({e.port for e in entries if e.port})]:
+        if all(port != known for _, known, _ in found):
+            same = (inference.host or "").strip().lower() in LOOPBACK and port == inference.port
+            key = (inference.api_key or "") if same else ""
+            found.append(("127.0.0.1", port, key))
     return found
 
 
@@ -335,7 +342,36 @@ async def _release_workers(selection: _Selection) -> tuple[list[dict[str, Any]],
         rows.append(row)
     elif front is not None:
         selection.done[front.key] = front
+    rows.extend(await _release_launched(selection))
     return rows, front_stopped
+
+
+async def _release_launched(selection: _Selection) -> list[dict[str, Any]]:
+    """llama-servers the Model Manager's Start spawned (RFC-0247): stopped through ``RUNNING_MODELS``, which holds
+    the spawn identity, so this module never keeps a second process record."""
+    from .manager import MANAGER
+    from .running_models import RUNNING_MODELS
+
+    rows: list[dict[str, Any]] = []
+    for entry in [e for e in selection.entries.values() if e.backend == LLAMA_SERVER and e.port
+                  and not e.ids() & {WORKER, FRONT}]:
+        row = _row("llama-server", f"127.0.0.1:{entry.port}")
+        row["released"].append(entry.model)
+        if not MANAGER.state.manages_process and MANAGER.provider is not None and MANAGER.state.port == entry.port \
+                and (MANAGER.state.host or "").strip().lower() in LOOPBACK:
+            await MANAGER.unload()  # ANZU was using it (Use): detach before the server goes away
+        try:
+            await RUNNING_MODELS.release_launched(entry.port)
+        except (ValueError, OSError, psutil.Error) as exc:
+            row.update(ok=False, detail=str(exc)[:240])
+        row["models"].append({**_model(LLAMA_SERVER, entry.model, "model_manager_stop"),
+                              "verified": row["ok"], "error": None if row["ok"] else row["detail"]})
+        if row["ok"]:
+            selection.done[entry.key] = entry
+        else:
+            selection.failed.add(entry.key)
+        rows.append(row)
+    return rows
 
 
 def _refusal(reason: str, **extra: Any) -> dict[str, Any]:
@@ -393,11 +429,13 @@ async def release_models(
                                 + (f" {len(cancelled)} running task(s) were cancelled." if cancelled else ""),
                                 cancelled_tasks=cancelled)
             results: list[dict[str, Any]] = []
-            for host, port, key in _endpoints(app, OLLAMA_ALIASES, OLLAMA_DEFAULT_PORT):
-                if any(e.backend == OLLAMA for e in chosen):
+            ollama = [e for e in chosen if e.backend == OLLAMA]
+            lmstudio = [e for e in chosen if e.backend == LMSTUDIO]
+            for host, port, key in _endpoints(app, OLLAMA_ALIASES, OLLAMA_DEFAULT_PORT, ollama):
+                if ollama:
                     results.append(await _release_ollama(host, port, key, factory, selection))
-            for host, port, key in _endpoints(app, LMSTUDIO_ALIASES, LMSTUDIO_DEFAULT_PORT):
-                if any(e.backend == LMSTUDIO for e in chosen):
+            for host, port, key in _endpoints(app, LMSTUDIO_ALIASES, LMSTUDIO_DEFAULT_PORT, lmstudio):
+                if lmstudio:
                     results.append(await _release_lmstudio(host, port, key, factory, runner, selection))
             workers, front_stopped = await _release_workers(selection)
             results.extend(workers)
@@ -460,7 +498,7 @@ async def repin_loaded_models(
         return {"action": "skipped", "reason": "unloaded", "results": []}
     factory = client_factory or _client
     results: list[dict[str, Any]] = []
-    mine = [e for e in LOADED.entries() if e.backend == OLLAMA and not is_denied(e.model)]
+    mine = [e for e in LOADED.entries() if e.backend == OLLAMA and not is_denied(e.model) and e.idle_policy]
     if mine:
         for host, port, key in _endpoints(app, OLLAMA_ALIASES, OLLAMA_DEFAULT_PORT):
             try:
@@ -470,8 +508,8 @@ async def repin_loaded_models(
                     resident = parse_models_payload("/api/ps", response.json())
                     for name in resident:
                         entry = LOADED.match(OLLAMA, [name])
-                        if entry is None or is_denied(name):
-                            continue
+                        if entry is None or is_denied(name) or not entry.idle_policy:
+                            continue  # not ANZU's, denied, or the owner chose the server's keep-alive at Start
                         try:
                             pinned = await ollama_request(client, host, port, "/api/generate", name,
                                                           {"prompt": "", "stream": False}, settings=app)

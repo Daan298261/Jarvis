@@ -177,7 +177,9 @@ class IdleUnload:
         if keep_warm_enabled(settings):
             return {"action": "skipped", "reason": "keep_warm"}
         window = idle_unload_seconds(settings)
-        due = [e for e in self.registry.entries() if self.registry.idle_for(e) >= window]
+        # An entry without the idle policy (the owner chose the server's keep-alive at a Model Manager Start)
+        # is released only by an owner Unload, never by this timer.
+        due = [e for e in self.registry.entries() if e.idle_policy and self.registry.idle_for(e) >= window]
         if not due:
             return {"action": "skipped", "reason": "active"}
         if self.is_busy():
