@@ -493,12 +493,31 @@ def test_static_scan_every_owner_task_entry_point_touches_before_it_reaches_the_
                 continue
             if (name, None) in background or (name, fn.name) in background:
                 continue
-            first_lift = min([c.lineno for c in ast.walk(fn) if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
-                              and c.func.attr in lifts and isinstance(c.func.value, ast.Name)
-                              and c.func.value.id == "IDLE_UNLOAD"] or [10**9])
             owners.append(f"{name}:{fn.name}")
-            if first_lift > min(agent_calls):
-                offenders.append(f"{name}:{fn.name}")
+            # Each call site must be dominated by a lift: an ``IDLE_UNLOAD.touch()`` / ``explicit_load()`` statement
+            # earlier in the same block or in an enclosing block (so every branch, e.g. a retry path, has its own).
+            parents = {child: node for node in ast.walk(fn) for child in ast.iter_child_nodes(node)}
+
+            def is_lift(stmt) -> bool:
+                return (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call)
+                        and isinstance(stmt.value.func, ast.Attribute) and stmt.value.func.attr in lifts
+                        and isinstance(stmt.value.func.value, ast.Name) and stmt.value.func.value.id == "IDLE_UNLOAD")
+
+            def dominated(node) -> bool:
+                while node in parents:
+                    parent = parents[node]
+                    for field in ("body", "orelse", "finalbody"):
+                        block = getattr(parent, field, None)
+                        if isinstance(block, list) and node in block:
+                            if any(is_lift(stmt) for stmt in block[:block.index(node)]):
+                                return True
+                    node = parent
+                return False
+
+            for call in ast.walk(fn):
+                if isinstance(call, ast.Call) and call.lineno in agent_calls and isinstance(call.func, ast.Attribute) \
+                        and call.func.attr in methods and not dominated(call):
+                    offenders.append(f"{name}:{fn.name}:{call.lineno}")
     assert offenders == []
     # The scan sees the owner routes it is meant to police (a rename of AGENT would otherwise empty it).
     for expected in ("api/tasks.py:continue_task", "api/tasks.py:create_task", "api/voice.py:voice_command",
@@ -584,6 +603,37 @@ async def test_a_real_load_after_an_explicit_load_records_the_model(monkeypatch,
     LOADED.clear()
     await _real_attach(monkeypatch, backend, model, port)
     assert LOADED.entries() == []
+
+
+@pytest.mark.parametrize("backend,model,port", [("ollama", "owner-started:7b", 11434), ("lmstudio", "owner-lm", 1234)])
+async def test_a_real_load_that_waits_for_the_server_records_only_after_an_explicit_load(monkeypatch, backend, model, port):
+    """The second _load_impl branch (server not answering at the probe, ready after backend.start) follows the same
+    rule as the attach branch: only an explicit owner Load makes the model ANZU-loaded."""
+    from app.inference import backends as backends_mod, manager as manager_mod
+
+    async def probe(*args, **kwargs):
+        return {"ok": False}
+
+    async def nothing(*args, **kwargs):
+        return None
+
+    async def start(self, profile, **kwargs):
+        self.last_probe = {"ok": True, "models": [model]}
+        return True
+
+    monkeypatch.setattr(manager_mod, "probe_remote_server", probe)
+    monkeypatch.setattr(MANAGER, "refresh_resources", nothing)
+    for cls in (backends_mod.OllamaBackend, backends_mod.LMStudioBackend):
+        monkeypatch.setattr(cls, "start", start)
+    settings = settings_with(False, backend=backend, host="127.0.0.1", port=port, remote_model=model)
+    _reset_manager()
+    await MANAGER.load(settings, force=True)
+    assert MANAGER.state.loaded is True and LOADED.entries() == []
+    _reset_manager()
+    IDLE_UNLOAD.explicit_load()
+    await MANAGER.load(settings, force=True)
+    assert LOADED.match(backend, [model]) is not None
+    _reset_manager()
 
 
 async def test_an_explicit_load_that_never_reaches_a_load_cannot_leak_into_a_later_background_attach(monkeypatch):
