@@ -234,11 +234,14 @@ def test_native_ollama_translates_images_and_tool_results():
     provider = NativeOllamaProvider.__new__(NativeOllamaProvider)
     provider.model = "vision"
     provider.context_size = 16384
+    provider.keep_alive = "300s"
     messages = [ChatMessage("user", [{"type": "text", "text": "Inspect screenshot"}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,abcd"}}]), ChatMessage("assistant", "", tool_calls=[{"id": "call1", "type": "function", "function": {"name": "desktop", "arguments": '{"action":"screenshot"}'}}]), ChatMessage("tool", "Captured", tool_call_id="call1")]
     body = provider.arguments(messages)
     assert body["messages"][0]["images"] == ["abcd"]
     assert body["messages"][1]["tool_calls"][0]["function"]["arguments"] == {"action": "screenshot"}
     assert body["messages"][2]["tool_name"] == "desktop"
+    # Every mission request carries the shared idle keep-alive; nothing pins the model resident.
+    assert body["keep_alive"] == "300s"
 
 
 @pytest.mark.asyncio
@@ -291,11 +294,17 @@ async def test_launch_keeps_owner_model_and_uses_trusted_code(scheduler, tmp_pat
         captured.update(command=command, **kwargs)
         return SimpleNamespace(pid=99999)
     monkeypatch.setattr(ds.subprocess, "Popen", popen)
+    monkeypatch.setattr(ds.review, "north_star_at", lambda repo, sha: ("North Star text", "b" * 40))
     await scheduler.import_drive("ticket", "RFC fix", "Implement one fix")
     i = scheduler.public()["items"][0]
     await scheduler.select(i["id"], i["revision"], True)
     state = await scheduler.launch()
     run = state["runs"][0]
+    mission = ds.read_json(ds.root() / run["id"] / "mission.json")
+    # The mission pins the North Star revision and uses the shared keep-alive helper.
+    assert mission["north_star_blob"] == "b" * 40
+    assert mission["keep_alive"] == ds.ollama_keep_alive()
+    assert state["deliveries"][0]["stage"] == "implementing" and state["deliveries"][0]["id"] == run["delivery_id"]
     control = ds.root() / run["id"]
     saved = ds.read_json(control / "data/settings.json")
     assert saved["inference"]["remote_model"] == "anzu-coder-27b:latest"

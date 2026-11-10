@@ -12,7 +12,7 @@ from pathlib import Path
 
 import httpx
 
-from .development_scheduler import DevelopmentConfig, model_capabilities, read_json, write_json
+from .development_scheduler import DevelopmentConfig, model_capabilities, ollama_keep_alive, read_json, write_json
 from ..providers.openai_compat import OpenAICompatProvider
 from ..inference.vision import messages_need_vision
 from ..providers.base import ChatResult, _timeout_s, to_openai_messages
@@ -22,10 +22,12 @@ from ..providers.tool_call_compat import normalize_tool_calls
 class NativeOllamaProvider(OpenAICompatProvider):
     """Ollama's native thinking, image and tool protocol for local missions."""
     name = "ollama-native"
-    def __init__(self, url, model, *, context_size=16384):
+    def __init__(self, url, model, *, context_size=16384, keep_alive=None):
         super().__init__(url.rstrip("/") + "/v1", model=model, timeout=180)
         self.native = httpx.AsyncClient(base_url=url.rstrip("/"), timeout=180)
         self.context_size = context_size
+        # Shared idle keep-alive (RFC-0247 / #690): the mission never pins a model resident.
+        self.keep_alive = keep_alive or ollama_keep_alive()
 
     def arguments(self, messages, tools=None, temperature=None, top_p=None, top_k=None, max_tokens=None, thinking=None, **_):
         converted = to_openai_messages(messages)
@@ -57,7 +59,7 @@ class NativeOllamaProvider(OpenAICompatProvider):
                 options[key] = value
         # A bounded tool mission uses explicit no-thinking mode. Generic template
         # kwargs do not control Ollama's native thinking channel.
-        body = {"model": self.model, "messages": converted, "stream": False, "think": False, "options": options}
+        body = {"model": self.model, "messages": converted, "stream": False, "think": False, "options": options, "keep_alive": self.keep_alive}
         if tools:
             body["tools"] = tools
         return body
@@ -208,8 +210,9 @@ async def execute(control: Path):
     save_registry([spec])
     save_coding_tasks([CodingTaskRecord(task_id=task_id, base_sha=spec.start_commit, branch=spec.branch, worktree_id=spec.id, worktree_path=spec.path, created_at=spec.created_at)])
     await init_db()
-    coder = NativeOllamaProvider(config.ollama_url, config.coder_model)
-    vision = NativeOllamaProvider(config.ollama_url, config.vision_model)
+    keep_alive = mission.get("keep_alive") or ollama_keep_alive()
+    coder = NativeOllamaProvider(config.ollama_url, config.coder_model, keep_alive=keep_alive)
+    vision = NativeOllamaProvider(config.ollama_url, config.vision_model, keep_alive=keep_alive)
     provider = OllamaDevelopmentProvider(coder, vision)
     original_load = MANAGER.load
     async def load(*args, **kwargs):
@@ -225,9 +228,19 @@ async def execute(control: Path):
         if not item["path"]:
             ticket_path.parent.mkdir(parents=True, exist_ok=True)
             ticket_path.write_text(item["content"], encoding="utf-8")
+        findings = mission.get("findings", "")
+        repair = (
+            "This is a repair pass on your earlier candidate in the same checkout. The trusted controller or the "
+            "independent reviewer rejected it. Fix every finding below with real code and tests, then re-run the checks.\n"
+            f"Findings:\n{findings}\n\n"
+        ) if findings else ""
         prompt = (
-            f"Implement exactly one RFC: {ticket_path}. Work only in {spec.path}. "
-            f"Base revision: {spec.start_commit}. Read AGENTS.md and docs/PROCESS.md first. "
+            repair +
+            f"Implement exactly one ticket: {ticket_path}. Work only in {spec.path}. "
+            f"Base revision: {spec.start_commit}. Read AGENTS.md, docs/PROCESS.md and ANZU_PRODUCT_NORTH_STAR.md "
+            f"(pinned blob {mission.get('north_star_blob', '')}) first; the change must meet that North Star. "
+            "Keep the diff focused, add meaningful regression tests, handle errors and cancellation, and never leave "
+            "stubs, placeholders, skipped or weakened tests. "
             "Use filesystem, git, terminal, browser, screenshot and desktop tools as needed. "
             "Use actual tools to edit and test; a proposal is not completion. "
             "For UI bugs inspect screenshots and verify the rendered result with computer vision. "
