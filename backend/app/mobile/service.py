@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 from sqlalchemy import select, or_
 
+from ..inference.idle_unload import IDLE_UNLOAD
 from ..agent.loop import AGENT
 from ..api.tasks import _task_dict
 from ..config import load_settings
@@ -94,6 +95,7 @@ async def approve(task_id: str, token: str, approved: bool):
         if not task or hashlib.sha256((task.confirmation_payload or "").encode()).hexdigest() != approval["payload_hash"]:
             raise HTTPException(409, "The pending action has changed")
         try:
+            IDLE_UNLOAD.touch()  # an owner approval is an owner turn: lifts the Unload hold before the runner loads
             await AGENT.confirm_task(task_id, approved, expected_payload=task.confirmation_payload or "")
         except ValueError as exc:
             raise HTTPException(409, str(exc))
@@ -143,6 +145,7 @@ async def submit(device_id: str, request_id: str, prompt: str, profile: str | No
                 raise HTTPException(409, "Request ID reused with different content")
             await record_message(previous["conversation_id"], request_id, prompt, task_id, attachments)
             # The task has a deterministic ID, so a retry after a crash is safe.
+            IDLE_UNLOAD.touch()  # an owner-started task is a real owner turn: lifts the hold before it loads
             await AGENT.create_task(previous["task_prompt"], profile=previous["profile"], request_id=task_id)
             return {"task_id": task_id, "conversation_id": previous["conversation_id"]}
         selected = profile_choice(profile)
@@ -171,6 +174,7 @@ async def submit(device_id: str, request_id: str, prompt: str, profile: str | No
         with database() as db:
             put(db, "submission", task_id, {"fingerprint": fingerprint, "conversation_id": cid, "task_prompt": task_prompt, "profile": selected})
         await record_message(cid, request_id, prompt, task_id, attachments)
+        IDLE_UNLOAD.touch()  # an owner-started task is a real owner turn: lifts the hold before it loads
         await AGENT.create_task(task_prompt, profile=selected, request_id=task_id)
     return {"task_id": task_id, "conversation_id": cid}
 

@@ -8,6 +8,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from ..inference.idle_unload import IDLE_UNLOAD
 from ..policy.approval_grant import (
     TRUSTED_CHANNELS,
     decide_approval_request,
@@ -82,6 +83,7 @@ async def _resume_task_with_grant(task_id: str, grant: dict[str, Any]) -> dict[s
             payload["arguments"] = {}
         task.confirmation_payload = json.dumps(payload)
         await session.commit()
+    IDLE_UNLOAD.touch()  # an owner approval is an owner turn: lifts the Unload hold before the runner loads
     await AGENT.confirm_task(task_id, True, grant_mode=grant_mode)
     return {"resumed": True, "grant_mode": grant_mode}
 
@@ -124,6 +126,7 @@ async def pending_decide(pending_id: str, body: DecideBody):
         try:
             from ..agent.loop import AGENT
 
+            IDLE_UNLOAD.touch()  # an owner approval is an owner turn: lifts the Unload hold before the runner loads
             await AGENT.confirm_task(str(task_id), False)
             outcome["terminated"] = True
         except Exception as exc:  # noqa: BLE001

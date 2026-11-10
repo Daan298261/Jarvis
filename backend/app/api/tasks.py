@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sse_starlette.sse import EventSourceResponse
 
+from ..inference.idle_unload import IDLE_UNLOAD
 from ..agent.chat_turns import visible_chat_turns
 from ..agent.execution_status import (
     active_worker,
@@ -224,6 +225,7 @@ async def create_task(body: TaskCreate):
                 assert_mode_entitled(body.security_role)
             except SecurityAgentDenied as exc:
                 raise HTTPException(403, str(exc)) from exc
+        IDLE_UNLOAD.touch()  # an owner-started task is a real owner turn: lifts the hold before it loads
         task = await AGENT.create_task(
             prompt,
             body.autonomy,
@@ -319,6 +321,7 @@ async def continue_task(task_id: str, body: ContinueBody | None = None):
                 approved = True
             else:
                 approved = bool(body.approve)
+            IDLE_UNLOAD.touch()  # an owner approval is an owner turn: lifts the Unload hold before the runner loads
             task = await AGENT.confirm_task(
                 task_id,
                 approved,
@@ -330,6 +333,7 @@ async def continue_task(task_id: str, body: ContinueBody | None = None):
             if body.media_ids:
                 suffix = _media_prompt_suffix(body.media_ids)
                 extra = f"{extra}{suffix}".strip() or "Review the attached media."
+            IDLE_UNLOAD.touch()  # an owner-started task is a real owner turn: lifts the hold before it loads
             task = await AGENT.continue_task(task_id, extra or body.prompt)
         return _task_dict(task)
     except KillSwitchActive as exc:

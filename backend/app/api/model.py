@@ -22,6 +22,7 @@ from ..inference.benchmarks import list_benchmarks, record_benchmark_sample, tas
 from ..inference.backends import probe_remote_server
 from ..inference.hardware_gate import hardware_purchase_gate
 from ..inference.harness import load_last_report, run_harness
+from ..inference.idle_unload import IDLE_UNLOAD
 from ..inference.manager import MANAGER
 from ..inference.running_models import RUNNING_MODELS, Action, audit_control
 from ..inference.model_launch import ModelStart, vram_snapshot
@@ -288,6 +289,7 @@ async def load_model(body: LoadBody | None = None):
     from ..engine_mode import model_enabled
     if not model_enabled(settings):
         raise HTTPException(status_code=409, detail="JEV/Laya only is active. Enable a model mode before loading.")
+    IDLE_UNLOAD.explicit_load()  # an explicit Load lifts the Unload hold
     profile = (body.profile if body else None) or settings.inference.profile
     previous_context = int(MANAGER.state.context_size or settings.inference.context_size or 0)
     target = resolve_profile(profile)

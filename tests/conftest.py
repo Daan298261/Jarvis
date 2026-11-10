@@ -115,3 +115,14 @@ def _disable_background_verify_by_default(request, monkeypatch):
     if "rfc0128" in request.node.nodeid:
         return
     monkeypatch.setenv("JARVIS_BACKGROUND_VERIFY", "0")
+
+
+@pytest.fixture(autouse=True)
+def _fresh_anzu_loaded_ledger():
+    """The keep-warm ledger of ANZU-loaded models is process-global: one test's load must not make a model
+    'ANZU-loaded' (and so subject to the idle TTL policy) in the next test."""
+    from app.inference.loaded_models import LOADED
+
+    LOADED.clear()
+    yield
+    LOADED.clear()

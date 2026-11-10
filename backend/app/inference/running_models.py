@@ -13,13 +13,17 @@ from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
 import httpx
 import psutil
 
 from ..config import data_dir, load_settings, save_settings
 from .backends import inference_headers, parse_models_payload
-from .model_launch import ModelStart, launch_profiles, budget_check, vram_snapshot, idle_keep_alive
+from .idle_unload import IDLE_UNLOAD
+from .keep_alive import is_denied, lmstudio_ttl_seconds, note_ollama_ps, ollama_pinned, ollama_request
+from .loaded_models import LLAMA_SERVER, LMSTUDIO, LOADED, OLLAMA
+from .model_launch import ModelStart, launch_profiles, budget_check, vram_snapshot
 
 log = logging.getLogger(__name__)
 Action = Literal["use", "leave", "stop", "replace"]
@@ -83,13 +87,6 @@ def ollama_serves() -> list[dict]:
     except (OSError, psutil.Error):
         pass
     return rows
-
-
-def ollama_pinned(expires_at) -> bool:
-    """OLLAMA_KEEP_ALIVE=-1 (or a huge keep_alive) shows as an expiry years ahead."""
-    if not isinstance(expires_at, str) or len(expires_at) < 4 or not expires_at[:4].isdigit():
-        return False
-    return int(expires_at[:4]) - time.gmtime().tm_year >= 5
 
 
 def _ancestor_names(pid: int) -> list[tuple[int, str]]:
@@ -157,6 +154,9 @@ async def run_lms(args: list[str], *, timeout: float = 120) -> None:
 
 
 async def unload_native(row: dict) -> None:
+    """The one native unload (Manager Stop, offline stop); unload-all releases through the same verify."""
+    if is_denied(row["model"]):
+        raise ValueError("ANZU never stops this model")
     settings = await asyncio.to_thread(load_settings)
     key = settings.inference.api_key if settings.inference.port == row["port"] and settings.inference.host in {"localhost", "127.0.0.1", "::1"} else ""
     base = row.get("base_url", f"http://127.0.0.1:{row['port']}/v1").removesuffix("/v1")
@@ -171,9 +171,17 @@ async def unload_native(row: dict) -> None:
             else:
                 raise ValueError("No safe unload operation for this LM Studio instance")
         else:
-            response = await client.post(base + "/api/generate", json={"model": row["model"], "keep_alive": 0})
+            # keep_alive 0 comes from the one keep-alive helper (RFC-0242), never spelled here.
+            url = urlparse(base)
+            response = await ollama_request(client, url.hostname or "127.0.0.1", url.port or row["port"],
+                                            "/api/generate", row["model"], release=True)
             response.raise_for_status()
         await verify_unloaded(client, row)
+    # A verified native unload (Manager Stop, offline stop): the ledger no longer lists it (one source of truth).
+    meta = _mapping(_mapping(row.get("metadata")).get(row["model"]))
+    entry = LOADED.match(row["backend"], [row["model"], str(meta.get("model_key") or "")])
+    if entry is not None:
+        LOADED.forget(entry)
 
 
 def _mapping(value) -> dict:
@@ -432,6 +440,8 @@ class RunningModels:
                     profile = next((p for p in profiles if p["id"] == body.profile_id), None)
                     if profile is None:
                         raise ValueError("Launch profile is no longer available; scan again")
+                    if is_denied(profile["model"]):
+                        raise ValueError("ANZU never starts this model")
                     settings = await asyncio.to_thread(load_settings)
                     if profile["port"] == settings.front_responder.port or (
                         MANAGER.state.manages_process and profile["port"] == MANAGER.state.port
@@ -446,7 +456,10 @@ class RunningModels:
                         return report
                     if report["requires_confirmation"] and not body.confirm_over_budget:
                         raise ValueError("VRAM budget exceeded or unknown; review /running/start/preview and explicitly confirm_over_budget")
+                    # An owner Start is an explicit Load (RFC-0242): it lifts an earlier Unload hold.
+                    IDLE_UNLOAD.explicit_load()
                     await self._launch_profile(profile, body, report["context_size"])
+                    self._record_started(profile)
                     result = await self.scan(force=True)
                     result["start"] = {"profile_id": body.profile_id, "model": profile["model"], "budget": report}
             audit_control("start", ok=True, detail={"profile": body.profile_id})
@@ -454,6 +467,42 @@ class RunningModels:
         except Exception as exc:
             audit_control("start", ok=False, detail={"profile": body.profile_id, "error": str(exc)[:300]})
             raise
+
+    def _record_started(self, profile: dict) -> None:
+        """A successful Start is an ANZU load: one ledger entry (RFC-0242 ``LOADED``), so Unload-all and the idle
+        timer release it. A Manager-spawned llama-server has no per-turn use clock, so only an owner Unload stops it."""
+        backend = {"ollama": OLLAMA, "lmstudio": LMSTUDIO, "llama.cpp": LLAMA_SERVER}[profile["backend"]]
+        LOADED.record(backend, profile["model"], port=int(profile["port"]), idle_policy=backend != LLAMA_SERVER)
+
+    async def release_launched(self, port: int) -> None:
+        """Stop the llama-server this manager's Start spawned on ``port`` (Unload-all / Stop).
+
+        Only the process recorded at spawn is stopped, after the same PID / create-time / listener check
+        as a Stop; a process that is already gone just leaves the record. Raises when it cannot be stopped.
+        """
+        identity = self._launched.get(port)
+        if not identity:
+            return
+        listener = (await asyncio.to_thread(listener_inventory)).get(port) or {}
+        if all(listener.get(k) == identity.get(k) for k in ("pid", "created")):
+            await asyncio.to_thread(stop_listener, {"port": port, "process": listener})
+        else:
+            def same_process_alive() -> bool:
+                try:
+                    return psutil.Process(identity["pid"]).create_time() == identity["created"]
+                except (psutil.Error, OSError):
+                    return False
+            if await asyncio.to_thread(same_process_alive):
+                raise ValueError(f"ANZU's llama-server on port {port} no longer answers there; it was not stopped")
+        self._launched.pop(port, None)
+
+    def _forget_stopped(self, row: dict) -> None:
+        """A verified process Stop: the ledger and the spawn record no longer list it (``unload_native`` drops the
+        Ollama / LM Studio entry itself)."""
+        self._launched.pop(row["port"], None)
+        for entry in LOADED.entries():
+            if entry.backend == LLAMA_SERVER and entry.port == row["port"]:
+                LOADED.forget(entry)
 
     async def _launch_profile(self, profile: dict, body: ModelStart, context: int) -> None:
         port, backend = profile["port"], profile["backend"]
@@ -514,10 +563,11 @@ class RunningModels:
             settings = await asyncio.to_thread(load_settings)
             key = settings.inference.api_key if settings.inference.port == port and settings.inference.host in {"localhost", "127.0.0.1", "::1"} else ""
             async with httpx.AsyncClient(timeout=LOAD_TIMEOUT_SECONDS, trust_env=False, headers=inference_headers(key)) as client:
-                payload = {"model": profile["model"], "prompt": "", "stream": False, "options": {"num_ctx": context}}
-                if body.keep_alive == "idle":
-                    payload["keep_alive"] = idle_keep_alive()
-                response = await client.post(server["endpoint"] + "/api/generate", json=payload)
+                # keep_alive from the one helper: "300s" with Keep warm off, "-1" with it on.
+                endpoint = urlparse(server["endpoint"])
+                response = await ollama_request(client, endpoint.hostname or "127.0.0.1", endpoint.port or port,
+                                                "/api/generate", profile["model"],
+                                                {"prompt": "", "stream": False, "options": {"num_ctx": context}})
                 response.raise_for_status()
             await self._wait_server(port, backend, profile["model"])
         elif backend == "lmstudio":
@@ -525,8 +575,8 @@ class RunningModels:
                 raise ValueError("LM Studio cache/flash settings must be configured in LM Studio")
             if not server:
                 await run_lms(["server", "start", "--port", str(port)])
-            from .model_launch import lmstudio_ttl
-            ttl = lmstudio_ttl() if body.keep_alive == "idle" else []
+            seconds = lmstudio_ttl_seconds(model=profile["model"])  # 300 with Keep warm off, none with it on
+            ttl = ["--ttl", str(seconds)] if seconds is not None else []
             await run_lms(["load", profile["model"], "--context-length", str(context), "-y", *ttl], timeout=LOAD_TIMEOUT_SECONDS)
             await self._wait_server(port, backend, profile["model"])
         elif backend == "llama.cpp":
@@ -654,6 +704,9 @@ class RunningModels:
             for result in results:
                 if not result:
                     continue
+                if result.get("source") == "ollama_ps":  # a full /api/ps listing: refresh the owner pins (keep_alive.py)
+                    note_ollama_ps(result["port"], [{"name": name, "expires_at": meta.get("expires_at")}
+                                                    for name, meta in result["metadata"].items()])
                 process = inventory.get(result["port"])
                 host = (process or {}).get("host", "127.0.0.1")
                 base = f"http://{'[::1]' if host == '::1' else host}:{result['port']}"
@@ -696,6 +749,9 @@ class RunningModels:
             prior = next((r for r in self.rows if r["id"] == identifier), None)
             if not prior:
                 raise ValueError("That model is no longer available; scan again")
+            if action == "use" and is_denied(prior["model"]):
+                # Same refusal as the guarded Stop / Replace / Start: Use would point ANZU at it and load it.
+                raise ValueError("ANZU never uses this model")
             await self.scan(force=True)
             row = next((r for r in self.rows if r["id"] == identifier), None)
             if not row or row.get("process") != prior.get("process"):
@@ -709,7 +765,8 @@ class RunningModels:
                 await asyncio.to_thread(self._save, choices)
                 row["choice"] = "leave"
                 # Startup waits for this owner choice instead of competing for VRAM.
-                if model_enabled(settings) and not MANAGER.state.loaded and not MANAGER.state.loading and settings.inference.auto_load:
+                if (model_enabled(settings) and not MANAGER.state.loaded and not MANAGER.state.loading
+                        and settings.inference.auto_load and not IDLE_UNLOAD.background_blocked()):
                     await MANAGER.load(settings)
                 return self.snapshot()
             async with MANAGER._request_lease.exclusive() as acquired:
@@ -717,6 +774,9 @@ class RunningModels:
                     raise ValueError("ANZU is answering a request; try again when it finishes")
                 before = MANAGER.live_context_size()
                 if action in {"stop", "replace"}:
+                    if is_denied(row["model"]) or (row["backend"] not in {"ollama", "lmstudio"} and any(
+                            is_denied(other["model"]) for other in self.rows if other["port"] == row["port"])):
+                        raise ValueError("ANZU never stops this model")
                     if not row["can_stop"]:
                         raise ValueError("This server does not expose a safe stop operation")
                     native_unload = row["backend"] in {"ollama", "lmstudio"}
@@ -724,6 +784,7 @@ class RunningModels:
                         await unload_native(row)
                     else:
                         await asyncio.to_thread(stop_listener, row)
+                        self._forget_stopped(row)
                     if row["active"]:
                         await MANAGER.unload()
                         if action == "stop":
@@ -739,6 +800,7 @@ class RunningModels:
                             choices[other["id"]] = "leave"
                     await asyncio.to_thread(self._save, choices)
                 if action in {"use", "replace"}:
+                    IDLE_UNLOAD.explicit_load()  # the owner chose this model: an explicit Load
                     updated = settings.model_copy(deep=True)
                     if action == "use":
                         # A discovered llama.cpp is external too: never take ownership of its process.
@@ -794,15 +856,17 @@ class RunningModels:
                 if not model_enabled(settings):
                     await asyncio.sleep(10)
                     continue
-                selected = next((r for r in self.rows if r["choice"] == "use"
+                selected = next((r for r in self.rows if r["choice"] == "use" and not is_denied(r["model"])
                                  and r["port"] == settings.inference.port
                                  and r["model"] == settings.inference.remote_model
                                  and settings.inference.host in {"127.0.0.1", "localhost"}), None)
-                if settings.inference.auto_load and selected and not selected.get("busy") and not MANAGER.state.loaded and not MANAGER.state.loading:
+                if (settings.inference.auto_load and selected and not selected.get("busy") and not MANAGER.state.loaded
+                        and not MANAGER.state.loading and not IDLE_UNLOAD.background_blocked()):
                     async with MANAGER._request_lease.exclusive() as acquired:
                         if acquired:
                             await MANAGER.load(settings)
-                pending = [r for r in self.rows if not r["choice"] and r["id"] not in self._notified]
+                pending = [r for r in self.rows if not r["choice"] and r["id"] not in self._notified
+                           and not is_denied(r["model"])]  # never offer a model ANZU refuses to use or stop
                 if pending:
                     from ..persona.chat_delivery import publish_owner_text
 

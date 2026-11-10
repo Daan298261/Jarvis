@@ -36,7 +36,6 @@ function profileChanged() {
     const select = form.elements[field];
     select.replaceChildren(...values.map(v => { const option = make('option', v === 'server' ? 'Use server settings' : v); option.value = v; return option; }));
   }
-  form.elements.keep_alive.closest('label').hidden = !(profile.keep_alive_options || []).length;
   const moe = form.elements.n_cpu_moe;
   moe.closest('label').hidden = profile.n_cpu_moe == null;
   moe.value = profile.n_cpu_moe ?? '';

@@ -13,6 +13,7 @@ from typing import Any
 import psutil
 
 from ..observability.rolling_log import record_event
+from .keep_alive import is_denied, lmstudio_ttl_seconds
 from .request_lease import RequestLease
 
 _log = logging.getLogger(__name__)
@@ -84,7 +85,14 @@ def instance_load_args(row: dict[str, Any], *, key: str, identifier: str, contex
     if parallel is not None:
         args.extend(["--parallel", parallel])
     args.extend(["--context-length", context_length, "--yes"])
-    ttl = row.get("ttl", config.get("ttl"))
+    # An instance ANZU loaded follows the idle policy (300 s TTL, none while Keep warm is on); an
+    # instance ANZU did not load is rebuilt exactly as it was, its own TTL included.
+    from .loaded_models import LMSTUDIO, LOADED
+
+    if LOADED.match(LMSTUDIO, [identifier, key]) is not None:
+        ttl = lmstudio_ttl_seconds(model=identifier)
+    else:
+        ttl = row.get("ttl", config.get("ttl"))
     if isinstance(ttl, (int, float)) and not isinstance(ttl, bool) and ttl > 0:
         args.extend(["--ttl", int(ttl)])
     flash = row.get("flashAttention", config.get("flashAttention", config.get("flash_attn")))
@@ -107,6 +115,12 @@ async def grow_local_instance(
     lease: RequestLease | None = None,
     on_unloaded: Any | None = None,
 ) -> int | None:
+    from .idle_unload import warm_blocked
+
+    if warm_blocked():  # after Unload / idle unload nothing reloads until a turn or an explicit Load
+        return None
+    if is_denied(identifier):  # never closed, reloaded or re-TTL'd (name guard)
+        return None
     # CLI talks to the local daemon. Never use it for another computer/port.
     if settings.inference.host not in {"localhost", "127.0.0.1", "::1"} or settings.inference.port != 1234:
         return None
@@ -228,3 +242,88 @@ async def _restore_original(run, identifier: str, original_args: list[Any], old:
         raise LocalContextRestoreError(
             f"The local model was unloaded and could not be restored at {old} context: {exc}"
         ) from exc
+
+
+async def repin_local_instances(
+    settings,
+    *,
+    lease: RequestLease | None = None,
+) -> list[dict[str, Any]]:
+    """Keep warm turned ON: drop the TTL from the LM Studio instances ANZU loaded.
+
+    No in-place TTL change exists (LM Studio's SDK backend interface has ``ttlMs`` only on load, and the
+    documented ``/api/v1/models/load`` has no ``ttl``), so each ANZU-loaded instance that still carries a TTL
+    gets a verified unload and a reload without ``--ttl``. An instance ANZU did not load, a denied name, a busy
+    instance or a held engine lease is never touched. Returns one ``{model, backend, via, verified, error}`` row each.
+    """
+    from .idle_unload import warm_blocked
+    from .loaded_models import LMSTUDIO, LOADED
+
+    if warm_blocked():
+        return []
+    if settings.inference.host not in {"localhost", "127.0.0.1", "::1"} or settings.inference.port != 1234:
+        return []
+    cli = shutil.which("lms")
+    fallback = Path.home() / ".lmstudio/bin/lms.exe"
+    if not cli and fallback.is_file():
+        cli = str(fallback)
+    if not cli:
+        return []
+    lease = lease or RequestLease()
+
+    async def run(*args):
+        def execute():
+            flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+            result = subprocess.run([cli, *map(str, args)], capture_output=True, text=True,
+                                    timeout=180, creationflags=flags)
+            if result.returncode:
+                raise RuntimeError(result.stderr or result.stdout)
+            return result.stdout
+        return await asyncio.to_thread(execute)
+
+    rows: list[dict[str, Any]] = []
+
+    def row(identifier: str, verified: bool, error: str | None = None) -> dict[str, Any]:
+        return {"model": identifier, "backend": LMSTUDIO, "via": "lmstudio_reload_without_ttl",
+                "verified": verified, "error": error}
+
+    async with _resize_lock:
+        try:
+            ps = json.loads(await run("ps", "--json"))
+        except (RuntimeError, ValueError, OSError, subprocess.SubprocessError):
+            return []
+        for item in ps:
+            identifier = str(item.get("identifier") or "")
+            key = str(item.get("modelKey") or identifier)
+            if not identifier or is_denied(identifier) or is_denied(key):
+                continue
+            if LOADED.match(LMSTUDIO, [identifier, key]) is None:
+                continue  # not ANZU-loaded: its TTL is the owner's
+            if "ttlMs" in item and item["ttlMs"] in (None, 0):
+                continue  # already without a TTL
+            async with lease.exclusive() as acquired:
+                if not acquired:
+                    rows.append(row(identifier, False, "ANZU is answering a request; the TTL stays until it finishes"))
+                    continue
+                current = next((r for r in json.loads(await run("ps", "--json")) if r.get("identifier") == identifier), None)
+                if not current or current.get("status") != "idle" or current.get("queued", 0):
+                    rows.append(row(identifier, False, "the instance is busy; the TTL stays until it is idle"))
+                    continue
+                old = int(current["contextLength"])
+                original_args = instance_load_args(current, key=key, identifier=identifier, context_length=old)
+                try:
+                    await run("unload", identifier)
+                    await run("load", *original_args)
+                    back = next((r for r in json.loads(await run("ps", "--json")) if r.get("identifier") == identifier), None)
+                    if back is None or int(back["contextLength"]) != old:
+                        raise ValueError("the instance did not come back at its original context")
+                    rows.append(row(identifier, True))
+                except Exception as exc:  # restore what was there; never leave the slot empty silently
+                    try:
+                        await _restore_original(run, identifier, original_args, old)
+                    except Exception as restore_exc:
+                        _surface_restore_failure(identifier, restore_exc)
+                        rows.append(row(identifier, False, f"{exc}; restore failed: {restore_exc}"[:240]))
+                    else:
+                        rows.append(row(identifier, False, str(exc)[:240]))
+    return rows

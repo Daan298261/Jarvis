@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
+from ..inference.idle_unload import IDLE_UNLOAD
 from ..agent.loop import AGENT
 from ..agent.tool_exposure import tool_names_for
 from ..db.models import Task
@@ -154,6 +155,7 @@ async def set_security_agent_mode(body: ModeSetBody):
                 "specialist_persona_ids": json.loads(task.specialist_persona_ids or "[]"),
             }
     elif body.prompt:
+        IDLE_UNLOAD.touch()  # an owner-started task is a real owner turn: lifts the hold before it loads
         task = await AGENT.create_task(body.prompt, security_role=role)
         if role == "purple-team":
             purple = init_purple(task.id).as_dict()
