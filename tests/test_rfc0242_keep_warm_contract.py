@@ -426,8 +426,6 @@ async def test_owner_approval_after_unload_respawns_the_model(monkeypatch, own_a
     from app.api import tasks as tasks_api
     from app.inference.manager import MANAGER  # resolved at call time: other tests reload app modules
 
-    AGENT = tasks_api.AGENT
-
     seen: list[bool] = []
 
     async def confirm_task(self, task_id, approved, **kwargs):
@@ -487,7 +485,7 @@ def test_static_scan_every_owner_task_entry_point_touches_before_it_reaches_the_
     act) or is on the explicit allowlist (background starters, automatic timeouts, guest approvals)."""
     import ast
 
-    from tests.test_keep_warm_idle_unload import BACKEND_APP, _outermost_functions, _python_files
+    from tests.test_keep_warm_idle_unload import _outermost_functions, _python_files
 
     background = {  # (file, function): why it must NOT lift manually_unloaded
         ("agent/acp_adapter.py", None): "ACP client, not the owner's HUD",
