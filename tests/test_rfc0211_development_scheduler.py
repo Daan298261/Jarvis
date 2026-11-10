@@ -244,6 +244,32 @@ def test_native_ollama_translates_images_and_tool_results():
     assert body["keep_alive"] == "300s"
 
 
+@pytest.mark.parametrize("helper_value", ["300s", "-1"])
+def test_mission_and_review_requests_follow_the_shared_keep_alive_helper(monkeypatch, helper_value):
+    # CoS ruling: "300s" with Keep warm off, "-1" with it on, always via the shared helper.
+    from app.agent import development_scheduler as ds
+    from app.agent import development_worker as dw
+    from app.inference import model_launch
+    monkeypatch.setattr(model_launch, "idle_keep_alive", lambda: helper_value)
+    assert ds.ollama_keep_alive() == helper_value
+    provider = dw.NativeOllamaProvider.__new__(dw.NativeOllamaProvider)
+    provider.model, provider.context_size, provider.keep_alive = "coder", 16384, None
+    assert provider.arguments([ChatMessage("user", "hi")])["keep_alive"] == helper_value
+    # A Keep warm toggle mid-mission applies to the next request.
+    flipped = "-1" if helper_value == "300s" else "300s"
+    monkeypatch.setattr(model_launch, "idle_keep_alive", lambda: flipped)
+    assert provider.arguments([ChatMessage("user", "hi")])["keep_alive"] == flipped
+
+
+def test_rfc0211_code_has_no_raw_keep_alive_values():
+    import pathlib, re
+    root = pathlib.Path(__file__).resolve().parents[1] / "backend" / "app"
+    files = [*root.glob("agent/development_*.py"), root / "api" / "self_dev.py", root / "tools" / "self_development.py"]
+    raw = re.compile(r"keep_alive[\"']?\s*[:=]\s*[\"'](?:-1|\d+[smh]?|server)[\"']")
+    offenders = [f"{f.name}: {m.group(0)}" for f in files for m in raw.finditer(f.read_text())]
+    assert offenders == []
+
+
 @pytest.mark.asyncio
 async def test_worker_cannot_recursively_schedule(monkeypatch):
     from app.tools.self_development import SelfDevelopmentTool

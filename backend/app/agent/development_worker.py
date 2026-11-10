@@ -26,8 +26,9 @@ class NativeOllamaProvider(OpenAICompatProvider):
         super().__init__(url.rstrip("/") + "/v1", model=model, timeout=180)
         self.native = httpx.AsyncClient(base_url=url.rstrip("/"), timeout=180)
         self.context_size = context_size
-        # Shared idle keep-alive (RFC-0247 / #690): the mission never pins a model resident.
-        self.keep_alive = keep_alive or ollama_keep_alive()
+        # keep_alive always comes from the shared helper ("300s" with Keep warm off, "-1" with it
+        # on). None means "ask the helper per request" so a Keep warm toggle applies mid-mission.
+        self.keep_alive = keep_alive
 
     def arguments(self, messages, tools=None, temperature=None, top_p=None, top_k=None, max_tokens=None, thinking=None, **_):
         converted = to_openai_messages(messages)
@@ -59,7 +60,7 @@ class NativeOllamaProvider(OpenAICompatProvider):
                 options[key] = value
         # A bounded tool mission uses explicit no-thinking mode. Generic template
         # kwargs do not control Ollama's native thinking channel.
-        body = {"model": self.model, "messages": converted, "stream": False, "think": False, "options": options, "keep_alive": self.keep_alive}
+        body = {"model": self.model, "messages": converted, "stream": False, "think": False, "options": options, "keep_alive": self.keep_alive or ollama_keep_alive()}
         if tools:
             body["tools"] = tools
         return body
@@ -210,9 +211,8 @@ async def execute(control: Path):
     save_registry([spec])
     save_coding_tasks([CodingTaskRecord(task_id=task_id, base_sha=spec.start_commit, branch=spec.branch, worktree_id=spec.id, worktree_path=spec.path, created_at=spec.created_at)])
     await init_db()
-    keep_alive = mission.get("keep_alive") or ollama_keep_alive()
-    coder = NativeOllamaProvider(config.ollama_url, config.coder_model, keep_alive=keep_alive)
-    vision = NativeOllamaProvider(config.ollama_url, config.vision_model, keep_alive=keep_alive)
+    coder = NativeOllamaProvider(config.ollama_url, config.coder_model)
+    vision = NativeOllamaProvider(config.ollama_url, config.vision_model)
     provider = OllamaDevelopmentProvider(coder, vision)
     original_load = MANAGER.load
     async def load(*args, **kwargs):
