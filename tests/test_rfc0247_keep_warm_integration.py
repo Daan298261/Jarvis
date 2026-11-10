@@ -219,6 +219,20 @@ async def test_a_manager_stop_removes_the_model_from_the_ledger(manager, monkeyp
     assert LOADED.entries() == []
 
 
+async def test_unload_native_itself_drops_only_its_own_ledger_entry(manager, monkeypatch):
+    """The offline stop (core down) calls only unload_native, so the ledger drop lives there, not in decide()."""
+    instance, _ = manager
+    ollama_posts(monkeypatch)
+    await instance.start_model(ml.ModelStart(profile_id="p", confirm=True))
+    LOADED.record(LMSTUDIO, "other-model", port=1234)
+    servers = FakeServers(ollama=[MODEL])
+    mock_http(monkeypatch, servers.handler)
+    await rm.unload_native({"backend": "ollama", "port": 11434, "model": MODEL,
+                            "base_url": "http://127.0.0.1:11434/v1"})
+    assert servers.unload_requests() == [{"model": MODEL, "keep_alive": 0}]
+    assert [(e.backend, e.model) for e in LOADED.entries()] == [(LMSTUDIO, "other-model")]
+
+
 async def test_the_studio_model_is_never_offered_or_started(manager, monkeypatch):
     instance, profile = manager
     profile["model"] = FOREIGN

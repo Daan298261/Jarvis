@@ -177,6 +177,11 @@ async def unload_native(row: dict) -> None:
                                             "/api/generate", row["model"], release=True)
             response.raise_for_status()
         await verify_unloaded(client, row)
+    # A verified native unload (Manager Stop, offline stop): the ledger no longer lists it (one source of truth).
+    meta = _mapping(_mapping(row.get("metadata")).get(row["model"]))
+    entry = LOADED.match(row["backend"], [row["model"], str(meta.get("model_key") or "")])
+    if entry is not None:
+        LOADED.forget(entry)
 
 
 def _mapping(value) -> dict:
@@ -492,13 +497,8 @@ class RunningModels:
         self._launched.pop(port, None)
 
     def _forget_stopped(self, row: dict) -> None:
-        """A verified Stop: the ledger no longer lists what it stopped (a single source of truth)."""
-        if row["backend"] in {OLLAMA, LMSTUDIO}:
-            meta = (row.get("metadata") or {}).get(row["model"]) or {}
-            entry = LOADED.match(row["backend"], [row["model"], str(meta.get("model_key") or "")])
-            if entry is not None:
-                LOADED.forget(entry)
-            return
+        """A verified process Stop: the ledger and the spawn record no longer list it (``unload_native`` drops the
+        Ollama / LM Studio entry itself)."""
         self._launched.pop(row["port"], None)
         for entry in LOADED.entries():
             if entry.backend == LLAMA_SERVER and entry.port == row["port"]:
@@ -781,7 +781,7 @@ class RunningModels:
                         await unload_native(row)
                     else:
                         await asyncio.to_thread(stop_listener, row)
-                    self._forget_stopped(row)
+                        self._forget_stopped(row)
                     if row["active"]:
                         await MANAGER.unload()
                         if action == "stop":
