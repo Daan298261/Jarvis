@@ -158,3 +158,162 @@ except the key id and reserved range, and it does not guess them.
 2. **Locate the decoder in the Autel APK.** Use the RFC-0207 apk sidecar and search the native libraries for the `30 00 45 58` descriptor constant and the `AT\0\2` magic. The decoder is the authoritative source for the field names in §2.
 3. Explain the 14 files with byte 07 = 0x59 or 0x69, and the byte 0x0A flag values.
 4. Characterise the Mazda `tool_b1`, Ford and LandRover families.
+
+## 8. Known-plaintext recovery experiment (2026-10-20)
+
+Implemented in `backend/app/reverse_engineering/tab_recovery.py` and called by
+`FFSIngest` after indexing, before the investigation is marked complete. This
+advances ANZU's local, evidence-based analysis: both successful recovery and
+negative results become citable investigation evidence. No dump bytes or derived
+vendor tables are committed.
+
+### Matching and acceptance rules
+
+The metadata pass considers every plain AT2 table and every profiler-identified
+single-byte-XOR candidate. For plain AT2 references, nominate keyed tables with
+equal **body length**, table type, format revision and record count. Names are not
+required to agree, so renamed copies and copies under other makes are included.
+For XOR references, require equal body length and case-insensitive basename;
+decode the reference's reported XOR key and require both tab and newline bytes.
+Language prefixes remain part of the basename, preventing accidental cross-language
+TSV nomination. These are candidate rules, not proof of identical content. They
+deliberately do not align unequal-length versions or infer semantic translations.
+
+For each nominated pair, read the entire bounded member through the existing safe
+FFS iterator and verify its SHA-256 against the index. Strip 16 bytes from plain
+AT2 and 64 from keyed AT2. Test these models, with `i` the zero-based body offset:
+
+| Model | Observed mapping |
+|---|---|
+| Position independent | `T[c] = p` |
+| Cipher XOR offset | `T[c XOR (i mod 256)] = p` |
+| Plain XOR offset | `T[c] = p XOR (i mod 256)` |
+| Cipher minus offset | `T[(c - i) mod 256] = p` |
+
+One input mapping to two outputs rejects that model. A candidate needs at least
+64 body bytes, 16 observed inputs and 16 distinct outputs. Maps retain unknown
+entries as JSON null; distinct-output counts distinguish partial functions from
+full bijections. A full fixed map is also checked explicitly for bit permutation
+plus XOR; this family is a subset of position-independent substitution, so failure
+of that broader model already excludes it **for the proposed pair**.
+
+Compatible observations merge per key id; conflicting accepted pairs disable
+decoding for that key. Only 256 observed inputs with 256 distinct outputs and no
+conflict enable decoding. No extrapolated or guessed entry is used. The report
+separates files independently paired with reference content from unpaired files
+decoded by applying the recovered hypothesis. Decoding every file does **not**
+prove the same transform is correct for every file without independent plaintext.
+
+The analysis rereads only nominated members (and, when solved, members of solved
+keys), streaming ZIP members without extraction. Candidate reads are bounded to
+8 MiB/member and reference retention to 64 MiB; budget exclusions are reported as
+gaps. Every reread is checked against the index size and SHA-256. A member whose
+bytes no longer match is reported as *changed* (`*_changed` gaps); one that cannot
+be read while the source is still present is reported as *unreadable*
+(`*_unreadable` gaps). Both are listed with their paths under `integrity`, and FFS
+ingest declares them as unknowns, so coverage becomes partial. A change also sets
+`source_unchanged` to false in custody and in the `ffs_ingest` evidence. If the
+source itself disappears, the run is interrupted (resumable) rather than completed.
+Cancellation, or any other failure, removes the derivatives that run already wrote,
+and derivatives left by a killed earlier run are removed (and counted as
+`stale_derivatives_removed`) before the next run.
+Decoded bodies have SHA-256 filenames within `index/decoded_tables/`, source and
+output hashes, and no executable interpretation. Existing allow-list admission
+and safe-member/link exclusions remain in force.
+
+Future ingests write `index/tab_recovery.json`, add `known_plaintext_recovery` to
+the table-profile summary alongside `container_census`, and record a separate
+`ffs_tab_recovery` evidence item linked to `ffs_tab_profile`. That item seals the
+recovery report with its SHA-256; the report contains pair paths, source hashes,
+per-key maps, validation coverage, rejected candidates and decoded-body hashes.
+Specifically:
+
+- `gaps.keyed_without_key_id` (also in `corpus`) counts keyed tables indexed before
+  the container parser. Their key id is unknown, so they are neither paired nor
+  decoded.
+- Every tested pair carries `model_outcomes`, giving the result per model:
+  `inconsistent`, `below_minimum_body_bytes`, `below_minimum_symbols` or `accepted`,
+  with observed-input and distinct-output counts when the mapping is consistent.
+- A pair with no accepted model is recorded in `rejected_pairs` with
+  `outcome: "rejected"` when every model is inconsistent. It is recorded as
+  `outcome: "skipped_below_minimum"` when some model fits but is under the 64-byte
+  or 16-symbol minimum, which is also counted in `gaps.pairs_below_minimum`.
+  `models_rejected` lists only the inconsistent models.
+- Each `decoded` entry carries `plaintext_verified`, which is true only when its
+  decoded output equals the body of a paired reference. In that case
+  `verified_against` lists that reference's path, file SHA-256 and body SHA-256;
+  otherwise it is empty. Per key and overall, `decoded_plaintext_verified` and
+  `decoded_hypothesis_only` give the counts.
+- Each key id has `decode_gaps`. These count solved-key members that were not
+  decoded: `decode_skipped_anomalous`, `decode_source_missing`,
+  `decode_source_changed` and `decode_source_unreadable`. For a solved key,
+  `files` equals `decoded_files` plus the sum of `decode_gaps`.
+Completed historical investigations remain immutable and are not auto-upgraded.
+
+### Measured result on Root.zip
+
+The existing index's manifest SHA-256 is
+`0eee174c6f7ea0f58d68d3d849b5ba77025887b9ee60210244e6035a5a9139eb`.
+Its older profiles did not contain full headers or XOR keys. The measurement
+therefore refreshed all 279,170 `.tab` headers from read-only ZIP streams and
+reprofiled the non-container members, retaining the original indexed hashes.
+The finished store was not rewritten. The source size and modification timestamp
+were unchanged across the final recovery run.
+
+| Measurement | Result |
+|---|---:|
+| Keyed AT2 files / key ids | 267,355 / 49 |
+| Plain AT2 references screened | 98 |
+| Plain references actually under `Scan/PubTab/` | 83 |
+| Other plain AT2 references | 15 |
+| XOR candidates screened | 1,207 |
+| Metadata-nominated plain references read | 2 |
+| Nominated keyed/reference pairs tested | 4 |
+| XOR pairs meeting length and basename rule | 0 |
+| Accepted known-plaintext pairs | **0** |
+| Recovered partial maps / full bijections | **0 / 0** |
+| Solved key ids | **None (0/49)** |
+| Decoded keyed files / coverage | **0/267,355 (0%)** |
+| Read/hash/budget gaps among nominated pairs | 0 |
+
+The 98 plain files are **not all PubTab files**, correcting the earlier location
+description in sections 1–2 without changing the population total.
+
+| Key id | Keyed candidates | Reference | Result |
+|---|---|---|---|
+| `0x35` | Fawcar `LANG_CHANGE.tab`, `TURBO.tab`, `TURBO_BesTune.tab` | Fawcar `Headlamp_Fawcar_en.tab` | No model accepted for any pair* |
+| `0x99` | `VehiclePub/AUTOVIN/VIN2VEHICLE/VWVIN.tab` | `Scan/VIN2VEHICLE/VWVIN.tab` | No model accepted* |
+
+\* Measured before per-model outcome recording (`model_outcomes`) was added, with
+code that counted below-minimum skips as rejections. Inconsistent mappings and
+below-minimum skips are therefore **not split** for these four pairs, and this
+result has not been re-verified with the current code. The dump was not available
+where the change was made. A re-run with the current code would report the
+outcome of each model.
+
+For example, the two VWVIN files have 91 records and 1,916-byte bodies, but no
+model was accepted for the pair (see the note above: whether each model was
+inconsistent or below a minimum was not recorded). The shared name and metadata
+do not establish identical records. The Fawcar candidates are weaker
+metadata collisions and likewise establish no plaintext identity. Key `0x35` has
+59,255 files and key `0x99` has 1,252; neither group is explained by this experiment.
+The other 47 key ids have no nominated pair under these rules. No assertion of
+cross-file mapping consistency or of non-bijectivity is possible for any key id.
+These negative results do not disprove substitution for genuinely identical
+tables, nor exclude other position-dependent or multi-byte transforms.
+
+The local measured report is
+`C:\Users\daanv\anzu-supervisor\codex-at2-keymap\tab_recovery.json`, SHA-256
+`fb5eb44c4f85c04cf8c1a255cee293d2944665e6146028d4867e0a40f1a2bd31`.
+It records all 49 unsolved groups and the four unaccepted pairs with indexed hashes.
+It predates the current report format (`version` 2) and has no `model_outcomes`.
+The reusable recovery capability is implemented; actual Autel key recovery remains
+unexplained. Obtaining a demonstrably identical keyed/plain table, or locating the
+decoder in the APK (next step 2), is still necessary before claiming a solved key.
+
+Validation: `tests/test_tab_recovery.py` has 37 synthetic, dump-free test
+functions (46 collected cases with parametrisation). They cover the minimums at
+both boundaries, the guards on derivatives, integrity and cancellation, and
+ingest-level cancel/resume. The full repository suite in CI (pytest, Linux) for
+the head that introduced them (`5e77e33c`, run 42774271436) reported **3670 passed,
+0 failed, 9 skipped, 21 xfailed**. No path-admission policy was changed.
