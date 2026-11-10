@@ -99,7 +99,7 @@ def request_extras(base_url: str, model: str, settings: AppSettings | None = Non
     ``ttl`` only for an instance ANZU loaded, and only while Keep warm is off.
     """
     family = backend_family(base_url, settings)
-    if family is None or is_denied(model) or server_keep_alive(family, model):
+    if family is None or is_denied(model):
         return {}
     if family == OLLAMA:
         return {"keep_alive": ollama_keep_alive(settings)}
@@ -107,14 +107,6 @@ def request_extras(base_url: str, model: str, settings: AppSettings | None = Non
         return {}
     ttl = lmstudio_ttl_seconds(settings, model)
     return {} if ttl is None else {"ttl": ttl}
-
-
-def server_keep_alive(family: str, model: str) -> bool:
-    """True when the owner started ``model`` from the Model Manager with the ``server`` keep-alive choice (RFC-0247):
-    the server's own keep-alive (e.g. the owner's ``OLLAMA_KEEP_ALIVE=-1`` pin) applies, so no request,
-    touch or re-pin restates ANZU's policy on it. Unload-all still releases it."""
-    entry = LOADED.match(family, [model])
-    return entry is not None and not entry.idle_policy
 
 
 def is_denied(model: str) -> bool:
@@ -128,29 +120,24 @@ class DeniedModelError(ValueError):
 
 
 def ollama_body(model: str, body: dict[str, Any] | None = None, *, release: bool = False,
-                server_default: bool = False, settings: AppSettings | None = None) -> dict[str, Any]:
+                settings: AppSettings | None = None) -> dict[str, Any]:
     """The one place an Ollama request body gets its ``keep_alive``.
 
     ``"300s"`` (idle window) with Keep warm off, ``"-1"`` with it on, ``0`` for an explicit
     unload (``release=True``). Ollama applies its own 5 minute default to a request that omits
     the field, so every native request ANZU sends goes through here. Raises for a denied model.
-    ``server_default=True`` is the one omission: the owner's explicit Model Manager Start with
-    the ``server`` keep-alive choice (RFC-0247), so the server's own setting (e.g. ``OLLAMA_KEEP_ALIVE=-1``) applies.
     """
     if is_denied(model):
         raise DeniedModelError(f"{model} is not an ANZU model; ANZU never sends it a request.")
-    if server_default and not release:
-        return {**(body or {}), "model": model}
     return {**(body or {}), "model": model, "keep_alive": 0 if release else ollama_keep_alive(settings)}
 
 
 async def ollama_request(client: httpx.AsyncClient, host: str, port: int, path: str, model: str,
                          body: dict[str, Any] | None = None, *, release: bool = False,
-                         server_default: bool = False, settings: AppSettings | None = None) -> httpx.Response:
+                         settings: AppSettings | None = None) -> httpx.Response:
     """POST a native Ollama generate or chat request with the policy keep_alive (the only sender)."""
     address = f"[{host}]" if ":" in host and not host.startswith("[") else host
-    payload = ollama_body(model, body, release=release, server_default=server_default, settings=settings)
-    return await client.post(f"http://{address}:{int(port)}{path}", json=payload)
+    return await client.post(f"http://{address}:{int(port)}{path}", json=ollama_body(model, body, release=release, settings=settings))
 
 
 async def touch_ollama_if_resident(base_url: str, model: str, api_key: str = "",
@@ -166,7 +153,7 @@ async def touch_ollama_if_resident(base_url: str, model: str, api_key: str = "",
 
     if warm_blocked():  # after Unload / idle unload nothing is touched or reloaded until an owner turn or Load
         return False
-    if backend_family(base_url, settings) != OLLAMA or is_denied(model) or server_keep_alive(OLLAMA, model):
+    if backend_family(base_url, settings) != OLLAMA or is_denied(model):
         return False
     parsed = urlparse(base_url)
     host, port = parsed.hostname or "127.0.0.1", int(parsed.port or 11434)

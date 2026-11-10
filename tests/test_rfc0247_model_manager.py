@@ -675,7 +675,16 @@ async def test_ollama_loaded_metadata_marks_pinned(monkeypatch):
     assert row["metadata"]["qwen3.5:4b"]["pinned"] is True
 
 
-async def test_server_keep_alive_omits_override_so_owner_pin_applies(startable, monkeypatch):
+@pytest.mark.parametrize("keep_warm,expected", [(False, "300s"), (True, "-1")])
+async def test_a_saved_server_keep_alive_choice_migrates_to_the_keep_warm_policy(startable, monkeypatch, tmp_path,
+                                                                                   keep_warm, expected):
+    """CoS ruling (#690 x #691): Start has no ``server`` keep-alive option. A cached request or a saved launch profile
+    that still carries it is migrated: every Ollama request sends the Keep warm value ("300s" off, "-1" on)."""
+    from app.inference import keep_alive
+
+    monkeypatch.setattr("app.config.settings_path", lambda: tmp_path / "settings.json")
+    (tmp_path / "settings.json").write_text(json.dumps({"inference": {"keep_warm": keep_warm}}), encoding="utf-8")
+    keep_alive._cache = None
     instance, _, _, profile = startable
     instance.inventory = [{"port": 11434, "backend": "ollama", "endpoint": "http://127.0.0.1:11434",
                            "available_models": [{"name": "small"}]}]
@@ -683,8 +692,19 @@ async def test_server_keep_alive_omits_override_so_owner_pin_applies(startable, 
     monkeypatch.setattr(instance, "_wait_server", AsyncMock(return_value={}))
     posts = []
     mock_http(monkeypatch, lambda r: posts.append(json.loads(r.content)) or httpx.Response(200, json={"done": True}))
-    await instance._launch_profile(profile, ml.ModelStart(profile_id="small", keep_alive="server"), 2048)
-    assert "keep_alive" not in posts[0]
+    legacy = ml.ModelStart.model_validate({"profile_id": "small", "keep_alive": "server"})
+    assert "keep_alive" not in legacy.model_dump()
+    try:
+        await instance._launch_profile(profile, legacy, 2048)
+    finally:
+        keep_alive._cache = None
+    assert posts[0]["keep_alive"] == expected
+    saved = [{"id": "local", "label": "x", "backend": "ollama", "model": "small", "port": 11434,
+              "context_size": 2048, "context_ceiling": 4096, "keep_alive": "server", "keep_alive_options": ["server"]}]
+    (tmp_path / "model-launch-profiles.json").write_text(json.dumps(saved), encoding="utf-8")
+    monkeypatch.setattr("app.inference.runtime_profiles.list_runtime_profiles", lambda: [])
+    migrated = next(p for p in ml.launch_profiles([]) if p["id"] == "local")
+    assert "keep_alive" not in migrated and "keep_alive_options" not in migrated
 
 
 async def test_unload_of_pinned_ollama_model_sends_keep_alive_zero(monkeypatch, runtime):

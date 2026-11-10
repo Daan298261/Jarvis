@@ -498,7 +498,7 @@ async def repin_loaded_models(
         return {"action": "skipped", "reason": "unloaded", "results": []}
     factory = client_factory or _client
     results: list[dict[str, Any]] = []
-    mine = [e for e in LOADED.entries() if e.backend == OLLAMA and not is_denied(e.model) and e.idle_policy]
+    mine = [e for e in LOADED.entries() if e.backend == OLLAMA and not is_denied(e.model)]
     if mine:
         for host, port, key in _endpoints(app, OLLAMA_ALIASES, OLLAMA_DEFAULT_PORT):
             try:
@@ -508,8 +508,8 @@ async def repin_loaded_models(
                     resident = parse_models_payload("/api/ps", response.json())
                     for name in resident:
                         entry = LOADED.match(OLLAMA, [name])
-                        if entry is None or is_denied(name) or not entry.idle_policy:
-                            continue  # not ANZU's, denied, or the owner chose the server's keep-alive at Start
+                        if entry is None or is_denied(name):
+                            continue
                         try:
                             pinned = await ollama_request(client, host, port, "/api/generate", name,
                                                           {"prompt": "", "stream": False}, settings=app)

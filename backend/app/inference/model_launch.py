@@ -15,7 +15,7 @@ import subprocess
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from ..config import data_dir, runtime_dir
 from .keep_alive import is_denied
@@ -27,11 +27,17 @@ class ModelStart(BaseModel):
     kv_cache: Literal["server", "f16", "q8_0", "q4_0"] = "server"
     flash_attention: Literal["server", "on", "off"] = "server"
     n_cpu_moe: int | None = Field(default=None, ge=0, le=256)
-    # "idle" = ANZU's idle-unload policy; "server" = the server's own default, e.g. the
-    # owner's OLLAMA_KEEP_ALIVE=-1 pin. Either way Unload frees VRAM on demand.
-    keep_alive: Literal["idle", "server"] = "idle"
     confirm: bool = False
     confirm_over_budget: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_keep_alive_choice(cls, data):
+        """CoS ruling (#690 x #691): Start has no keep-alive choice. A saved or cached ``keep_alive`` (``idle`` or
+        the removed ``server``) is dropped, so the value always derives from Keep warm (keep_alive.py)."""
+        if isinstance(data, dict) and "keep_alive" in data:
+            data = {k: v for k, v in data.items() if k != "keep_alive"}
+        return data
 
 
 BUILTIN_LAUNCH_PROFILES = [
@@ -121,7 +127,8 @@ def launch_profiles(inventory: list[dict]) -> list[dict]:
                 raise ValueError("Invalid local launch profile")
             if p["backend"] == "llama.cpp" and not all(Path(p.get(k) or "__missing__").is_file() for k in ("binary", "model")):
                 continue
-            profiles.append(dict(p))
+            # A saved keep-alive choice (RFC-0247's removed ``server`` option) is migrated away: Keep warm decides.
+            profiles.append({k: v for k, v in p.items() if k not in {"keep_alive", "keep_alive_options"}})
     unique = {}
     for p in profiles:
         if not p.get("id") or not p.get("model") or str(p["model"]).startswith("-"):
@@ -147,7 +154,6 @@ def launch_profiles(inventory: list[dict]) -> list[dict]:
         p["server_restart_required_for_options"] = p["backend"] == "ollama"
         p["kv_cache_options"] = ["server", "f16", "q8_0", "q4_0"] if p["backend"] != "lmstudio" else ["server"]
         p["flash_attention_options"] = ["server", "on", "off"] if p["backend"] != "lmstudio" else ["server"]
-        p["keep_alive_options"] = ["idle", "server"] if p["backend"] != "llama.cpp" else []
         unique[p["id"]] = p
     return list(unique.values())
 

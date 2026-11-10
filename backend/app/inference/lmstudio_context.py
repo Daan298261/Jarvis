@@ -86,12 +86,10 @@ def instance_load_args(row: dict[str, Any], *, key: str, identifier: str, contex
         args.extend(["--parallel", parallel])
     args.extend(["--context-length", context_length, "--yes"])
     # An instance ANZU loaded follows the idle policy (300 s TTL, none while Keep warm is on); an
-    # instance ANZU did not load, or one started with the server's keep-alive (RFC-0247), is rebuilt
-    # exactly as it was, its own TTL included.
+    # instance ANZU did not load is rebuilt exactly as it was, its own TTL included.
     from .loaded_models import LMSTUDIO, LOADED
 
-    entry = LOADED.match(LMSTUDIO, [identifier, key])
-    if entry is not None and entry.idle_policy:
+    if LOADED.match(LMSTUDIO, [identifier, key]) is not None:
         ttl = lmstudio_ttl_seconds(model=identifier)
     else:
         ttl = row.get("ttl", config.get("ttl"))
@@ -299,9 +297,8 @@ async def repin_local_instances(
             key = str(item.get("modelKey") or identifier)
             if not identifier or is_denied(identifier) or is_denied(key):
                 continue
-            entry = LOADED.match(LMSTUDIO, [identifier, key])
-            if entry is None or not entry.idle_policy:
-                continue  # not ANZU-loaded, or started with the server's keep-alive: its TTL is the owner's
+            if LOADED.match(LMSTUDIO, [identifier, key]) is None:
+                continue  # not ANZU-loaded: its TTL is the owner's
             if "ttlMs" in item and item["ttlMs"] in (None, 0):
                 continue  # already without a TTL
             async with lease.exclusive() as acquired:

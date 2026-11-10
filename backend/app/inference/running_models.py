@@ -461,7 +461,7 @@ class RunningModels:
                     # An owner Start is an explicit Load (RFC-0242): it lifts an earlier Unload hold.
                     IDLE_UNLOAD.explicit_load()
                     await self._launch_profile(profile, body, report["context_size"])
-                    self._record_started(profile, body)
+                    self._record_started(profile)
                     result = await self.scan(force=True)
                     result["start"] = {"profile_id": body.profile_id, "model": profile["model"], "budget": report}
             audit_control("start", ok=True, detail={"profile": body.profile_id})
@@ -470,13 +470,11 @@ class RunningModels:
             audit_control("start", ok=False, detail={"profile": body.profile_id, "error": str(exc)[:300]})
             raise
 
-    def _record_started(self, profile: dict, body: ModelStart) -> None:
-        """A successful Start is an ANZU load: one ledger entry (RFC-0242 ``LOADED``), so Unload-all releases
-        it and, under the idle policy, the idle timer does too. the ``server`` keep-alive choice and llama-server
-        (no idle option) are released only by an owner Unload."""
+    def _record_started(self, profile: dict) -> None:
+        """A successful Start is an ANZU load: one ledger entry (RFC-0242 ``LOADED``), so Unload-all and the idle
+        timer release it. A Manager-spawned llama-server has no per-turn use clock, so only an owner Unload stops it."""
         backend = {"ollama": OLLAMA, "lmstudio": LMSTUDIO, "llama.cpp": LLAMA_SERVER}[profile["backend"]]
-        idle = body.keep_alive == "idle" and backend != LLAMA_SERVER
-        LOADED.record(backend, profile["model"], port=int(profile["port"]), idle_policy=idle)
+        LOADED.record(backend, profile["model"], port=int(profile["port"]), idle_policy=backend != LLAMA_SERVER)
 
     async def release_launched(self, port: int) -> None:
         """Stop the llama-server this manager's Start spawned on ``port`` (Unload-all / Stop).
@@ -572,12 +570,11 @@ class RunningModels:
             settings = await asyncio.to_thread(load_settings)
             key = settings.inference.api_key if settings.inference.port == port and settings.inference.host in {"localhost", "127.0.0.1", "::1"} else ""
             async with httpx.AsyncClient(timeout=LOAD_TIMEOUT_SECONDS, trust_env=False, headers=inference_headers(key)) as client:
-                # keep-alive from the one helper: the idle policy, or (the ``server`` choice) the server's own.
+                # keep_alive from the one helper: "300s" with Keep warm off, "-1" with it on.
                 endpoint = urlparse(server["endpoint"])
                 response = await ollama_request(client, endpoint.hostname or "127.0.0.1", endpoint.port or port,
                                                 "/api/generate", profile["model"],
-                                                {"prompt": "", "stream": False, "options": {"num_ctx": context}},
-                                                server_default=body.keep_alive == "server")
+                                                {"prompt": "", "stream": False, "options": {"num_ctx": context}})
                 response.raise_for_status()
             await self._wait_server(port, backend, profile["model"])
         elif backend == "lmstudio":
@@ -585,7 +582,7 @@ class RunningModels:
                 raise ValueError("LM Studio cache/flash settings must be configured in LM Studio")
             if not server:
                 await run_lms(["server", "start", "--port", str(port)])
-            seconds = lmstudio_ttl_seconds(model=profile["model"]) if body.keep_alive == "idle" else None
+            seconds = lmstudio_ttl_seconds(model=profile["model"])  # 300 with Keep warm off, none with it on
             ttl = ["--ttl", str(seconds)] if seconds is not None else []
             await run_lms(["load", profile["model"], "--context-length", str(context), "-y", *ttl], timeout=LOAD_TIMEOUT_SECONDS)
             await self._wait_server(port, backend, profile["model"])

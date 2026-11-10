@@ -33,9 +33,8 @@ class Entry:
     primary: bool = False  # used by every turn (the main model and the front responder)
     # Loopback port of the server holding it, when not the backend's default (a Model Manager Start, RFC-0247).
     port: int | None = None
-    # False when the owner chose the server's own keep-alive at Start (the RFC-0247 ``server`` keep-alive choice) or the
-    # backend has no idle policy (a Manager-started llama-server): Unload-all still releases it, the idle timer
-    # and the Keep warm re-pin leave it alone.
+    # False for a llama-server the Model Manager spawned (RFC-0247): no turn resets its clock, so only an owner
+    # Unload releases it; the idle timer leaves it alone.
     idle_policy: bool = True
 
     @property

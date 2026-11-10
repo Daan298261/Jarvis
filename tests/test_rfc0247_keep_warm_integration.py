@@ -1,8 +1,8 @@
 """#690 x #691: a model the Model Manager (RFC-0247) starts is an ANZU load in the one ledger (``LOADED``).
 
 Start records it exactly once, lifts an Unload hold (an explicit Load) and takes its keep-alive / TTL from
-``keep_alive.py``; Unload-all (200 / 207 / 409) releases it; the idle timer follows the owner's keep-alive
-choice; a Manager Stop removes it from the ledger; ``bgm-ingest-9b`` is never started.
+``keep_alive.py`` (no ``server`` choice: CoS ruling); Unload-all (200 / 207 / 409) and the idle timer release it;
+a Manager Stop removes it from the ledger; ``bgm-ingest-9b`` is never started.
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from app.inference.keep_alive import request_extras
 from app.inference.loaded_models import LLAMA_SERVER, LMSTUDIO, LOADED, OLLAMA
 from app.inference.manager import MANAGER
 from tests.test_keep_warm_idle_unload import (  # noqa: F401  (clean_state is an autouse fixture)
-    FOREIGN, FakeServers, api_client, clean_state, settings_with,
+    FOREIGN, FakeServers, api_client, clean_state, settings_with, write_settings,
 )
 
 MODEL = "qwen3.5:4b"
@@ -127,14 +127,18 @@ async def test_unload_all_reaches_a_manager_started_ollama_on_a_non_default_port
     assert second.status_code == 200 and resident[11500] == [] and LOADED.entries() == []
 
 
-async def test_server_keep_alive_start_is_released_by_unload_all_but_never_by_the_idle_timer(manager, monkeypatch):
+@pytest.mark.parametrize("keep_warm,expected", [(False, "300s"), (True, "-1")])
+async def test_start_sends_the_keep_warm_value_and_the_idle_timer_releases_only_ollama_lm_studio_starts(
+        manager, monkeypatch, tmp_path, keep_warm, expected):
+    """CoS ruling: no ``server`` keep-alive choice; Start always sends the Keep warm value, and a started Ollama
+    model idles out like any ANZU load. A Manager-spawned llama-server (no per-turn clock) never does."""
     instance, _ = manager
+    write_settings(tmp_path, keep_warm=keep_warm)
     posts = ollama_posts(monkeypatch)
-    await instance.start_model(ml.ModelStart(profile_id="p", confirm=True, keep_alive="server"))
-    assert "keep_alive" not in posts[0], "the owner's server keep-alive (e.g. OLLAMA_KEEP_ALIVE=-1) applies"
-    [entry] = LOADED.entries()
-    assert entry.idle_policy is False
-    assert request_extras("http://127.0.0.1:11434/v1", MODEL) == {}, "no request restates ANZU's policy on it"
+    await instance.start_model(ml.ModelStart.model_validate({"profile_id": "p", "confirm": True, "keep_alive": "server"}))
+    assert posts[0]["keep_alive"] == expected
+    assert request_extras("http://127.0.0.1:11434/v1", MODEL) == {"keep_alive": expected}
+    LOADED.record(LLAMA_SERVER, "/models/m.gguf", port=8080, idle_policy=False)
 
     released: list = []
 
@@ -143,12 +147,10 @@ async def test_server_keep_alive_start_is_released_by_unload_all_but_never_by_th
         return {"ok": True, "refused": False, "results": []}
     timer = IdleUnload(registry=LOADED, settings=lambda: settings_with(False), release=release,
                        busy=lambda: False, leased=lambda: False)
-    entry.last_use -= 10_000
-    assert (await timer.tick())["reason"] == "active" and released == []
-
-    servers = FakeServers(ollama=[MODEL]).install(monkeypatch)
-    result = await keep_warm_release.release_models("manual")
-    assert result["ok"] and servers.ollama == [] and LOADED.entries() == []
+    for entry in LOADED.entries():
+        entry.last_use -= 10_000
+    assert (await timer.tick())["action"] == "released"
+    assert released == [[(OLLAMA, MODEL)]]
 
 
 async def test_an_lm_studio_start_gets_the_helper_ttl_and_unload_all_releases_it(manager, monkeypatch):
