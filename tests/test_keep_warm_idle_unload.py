@@ -1080,17 +1080,26 @@ def test_no_front_keep_warm_loop_or_watchdog_restart_exists_in_this_tree_yet():
 
 
 async def test_every_ollama_generate_and_chat_call_goes_through_the_one_helper():
-    """No /api/generate or /api/chat request in backend/app is built outside ollama_request()."""
+    """No /api/generate or /api/chat request in backend/app is built outside ollama_request() (the #686 only-sender
+    rule), including #691's Model Manager senders after the development merge."""
     offenders: list[str] = []
+    senders: set[str] = set()
     for name, text in _python_files():
         if name == "inference/keep_alive.py":
             continue
         for fn in _outermost_functions(ast.parse(text)):
             literals = [c.value for c in ast.walk(fn) if isinstance(c, ast.Constant) and isinstance(c.value, str)
-                        and c.value in {"/api/generate", "/api/chat"}]
-            if literals and "ollama_request" not in _calls(fn):
+                        and c.value.endswith(("/api/generate", "/api/chat"))]  # a path or URL, not a docstring
+            if not literals:
+                continue
+            senders.add(f"{name}:{fn.name}")
+            if "ollama_request" not in _calls(fn):
                 offenders.append(f"{name}:{fn.name}")
     assert offenders == []
+    # The scan really sees every known sender: #690's own and #691's Stop (unload_native) and Start load (_launch_profile).
+    expected = {"inference/running_models.py:unload_native", "inference/running_models.py:_launch_profile",
+                "inference/keep_warm_release.py:_release_ollama", "inference/keep_warm_release.py:repin_loaded_models"}
+    assert expected <= senders, expected - senders
 
 
 async def test_ollama_v1_turn_is_followed_by_a_keep_alive_touch_only_if_resident(monkeypatch, tmp_path):
