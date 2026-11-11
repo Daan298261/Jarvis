@@ -289,6 +289,10 @@ async def test_live_stdio_mcp_refresh_expose_and_call():
         names = [item["function"]["name"] for item in schemas_for("mixed")]
         assert "mcp_echo_ping" in names
         assert "mcp_call" in names
+        schema = next(item["function"]["parameters"] for item in MCP.openai_tools()
+                      if item["function"]["name"] == "mcp_echo_ping")
+        assert schema["required"] == ["text"]
+        assert schema["properties"]["text"]["type"] == "string"
         result = await MCP.call("mcp_echo_ping", {"text": "usable"})
         assert result.success, result.error
         assert "pong:usable" in result.output
@@ -338,3 +342,12 @@ def test_small_model_keeps_requested_connected_function():
     for request in ("Use the Docker MCP get_current_time tool.", "Get the current time using Docker MCP."):
         chosen = select_turn_schemas(schemas, model_family="9b-abliterated", prompt=request)
         assert "mcp_docker_catalog_get_current_time" in {item["function"]["name"] for item in chosen}
+
+
+def test_direct_mcp_read_has_proxy_policy_parity():
+    from app.policy.reversibility import resolve_action_effect
+    direct = resolve_action_effect("mcp_docker_catalog_get_current_time", arguments={"timezone": "UTC"})
+    proxy = resolve_action_effect("mcp_call", arguments={"mcp_tool": "mcp_docker_catalog_get_current_time", "arguments": {"timezone": "UTC"}})
+    assert not direct.side_effecting
+    assert direct.reversibility == proxy.reversibility
+    assert resolve_action_effect("mcp_service_delete_record", arguments={"id": "example"}).side_effecting

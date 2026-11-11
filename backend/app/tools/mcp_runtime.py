@@ -354,7 +354,7 @@ class MCPRuntime:
     async def _list_tools(self, server: dict[str, Any]) -> list[dict[str, Any]]:
         session = await self._connect(server)
         listing = await session.list_tools()
-        return [t.model_dump() if hasattr(t, "model_dump") else dict(t) for t in listing.tools]
+        return [t.model_dump(by_alias=True) if hasattr(t, "model_dump") else dict(t) for t in listing.tools]
 
     def _lookup(self, tool_key: str) -> dict[str, Any] | None:
         spec = self._tools.get(tool_key)
