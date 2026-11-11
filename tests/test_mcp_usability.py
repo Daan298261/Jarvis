@@ -351,3 +351,42 @@ def test_direct_mcp_read_has_proxy_policy_parity():
     assert not direct.side_effecting
     assert direct.reversibility == proxy.reversibility
     assert resolve_action_effect("mcp_service_delete_record", arguments={"id": "example"}).side_effecting
+
+
+async def test_tool_event_stream_uses_one_sse_envelope():
+    import asyncio
+    import json
+    from sse_starlette.sse import ServerSentEvent
+    from app.events import EventBus
+
+    bus = EventBus()
+    stream = bus.stream()
+    waiting = asyncio.create_task(anext(stream))
+    await asyncio.sleep(0)
+    await bus.publish("example", "tool", "Running connected tool", persist=False)
+    frame = await waiting
+    try:
+        wire = ServerSentEvent(**frame).encode().decode("utf-8")
+        assert wire.startswith("data: {")
+        payload = json.loads(wire.removeprefix("data: "))
+        assert payload["kind"] == "tool"
+        assert payload["task_id"] == "example"
+    finally:
+        await stream.aclose()
+
+
+async def test_rea_status_keeps_catalog_out_of_model_text(monkeypatch):
+    import json
+    from app.tools.reverse_engineer import ReverseEngineerTool
+    data = {
+        "status": "ready", "stage": "Static analysis engine installed",
+        "versions": {"rea": {"version": "3.2.1"}},
+        "capabilities": {"tools": [{"name": "operation", "description": "x" * 100000}]},
+    }
+    monkeypatch.setattr("app.reverse_engineering.provision.readiness", lambda: data)
+    result = await ReverseEngineerTool(lambda: {}).execute(action="status")
+    assert result.success
+    assert result.data is data
+    assert len(result.output) < 1000
+    assert json.loads(result.output)["status"] == "ready"
+    assert json.loads(result.output)["capabilities_available"]
