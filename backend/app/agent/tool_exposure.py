@@ -81,9 +81,8 @@ CAPABILITY_ALIASES: dict[str, str] = {
     "lta": "lta_protected_folder",
     "protected_folder": "lta_protected_folder",
     "protected-folder": "lta_protected_folder",
-    "rea": "rea_investigate",
-    "reverse-engineer": "rea_investigate",
-    "reverse_engineer": "rea_investigate",
+    "rea": "reverse_engineer",
+    "reverse-engineer": "reverse_engineer",
     "gmail": "mcp_call",
     "email": "mcp_call",
     "whatsapp": "mcp_call",
@@ -200,8 +199,8 @@ def tool_names_for(
         if "vault_memory" not in wanted:
             wanted.append("vault_memory")
     if any(token in lowered_prompt for token in (" reverse engineer", "rea ", "rea this", "investigate the extract")):
-        if "rea_investigate" not in wanted:
-            wanted.append("rea_investigate")
+        if "reverse_engineer" not in wanted:
+            wanted.append("reverse_engineer")
     for name in extras:
         if name == MCP_CAPABILITY:
             continue

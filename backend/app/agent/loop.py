@@ -3695,6 +3695,7 @@ class AgentRuntime:
             await self._release_lazy_vision()
             raise
         except Exception as exc:
+            log.exception("Agent task %s failed", task_id)
             await self._fail_task(task_id, str(exc), working, metrics)
         finally:
             if progress_watch is not None:

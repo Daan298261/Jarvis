@@ -176,6 +176,7 @@ async def probe_remote_server(
     last_error = ""
     deadline = time.time() + timeout
     n_ctx = 0
+    loaded_model_contexts: dict[str, int] = {}
     async with httpx.AsyncClient(timeout=2, headers=headers) as client:
         while True:
             for path in PROBE_PATHS:
@@ -205,6 +206,16 @@ async def probe_remote_server(
             await asyncio.sleep(0.4)
         if health_path:
             n_ctx = await _probe_loaded_n_ctx(client, base, payloads)
+            try:
+                response = await client.get(base + "/api/ps")
+                response.raise_for_status()
+                for row in response.json().get("models", []):
+                    name = str(row.get("name") or row.get("model") or "")
+                    context = row.get("context_length")
+                    if name and isinstance(context, int) and context > 0:
+                        loaded_model_contexts[name] = context
+            except (httpx.HTTPError, ValueError, AttributeError, TypeError):
+                pass
     return {
         "ok": health_path is not None,
         "host": host,
@@ -213,6 +224,7 @@ async def probe_remote_server(
         "health_path": health_path,
         "models": models,
         "n_ctx": n_ctx,
+        "loaded_model_contexts": loaded_model_contexts,
         "error": "" if health_path else (last_error or "no health endpoint answered"),
     }
 

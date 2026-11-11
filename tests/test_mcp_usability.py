@@ -266,6 +266,7 @@ async def test_mcp_list_includes_status(jarvis_env, monkeypatch):
 
 
 async def test_live_stdio_mcp_refresh_expose_and_call():
+    import asyncio
     import sys
     from pathlib import Path
 
@@ -282,7 +283,8 @@ async def test_live_stdio_mcp_refresh_expose_and_call():
         "enabled": True,
     }
     try:
-        status = await MCP.refresh([server])
+        status = await asyncio.create_task(MCP.refresh([server]))
+        owner = MCP._sessions["echo-live"].owner
         assert status["echo"].startswith("1 tool"), status
         names = [item["function"]["name"] for item in schemas_for("mixed")]
         assert "mcp_echo_ping" in names
@@ -293,6 +295,46 @@ async def test_live_stdio_mcp_refresh_expose_and_call():
         proxy = await REGISTRY.execute("mcp_call", {"mcp_tool": "mcp_echo_ping", "arguments": {"text": "proxy"}})
         assert proxy.success
         assert "pong:proxy" in proxy.output
+        await asyncio.create_task(MCP.refresh([]))
+        assert owner.done()
+        assert not MCP.connected_keys()
     finally:
         await MCP.close_all()
         MCP.reset_for_tests()
+
+
+def test_explicit_multi_word_tool_requests_use_agent_path():
+    from app.agent.ingress_gate import heuristic_needs_tools
+    from app.agent.planning import classify_task, requests_agent_tools
+
+    prompts = {
+        "Use the native Obsidian vault_memory tool to search my vault.": "vault_memory",
+        "Search my bound Obsidian vault for the launch checklist.": "vault_memory",
+        "Call the connected Docker MCP get_current_time tool.": "mcp_call",
+        "Use REA to inspect C:/samples/example.exe.": "reverse_engineer",
+    }
+    for prompt, expected in prompts.items():
+        assert requests_agent_tools(prompt)
+        task_class = classify_task(prompt)
+        assert heuristic_needs_tools(prompt, task_class) is True
+        extras = ["mcp"] if expected == "mcp_call" else []
+        assert expected in tool_names_for(task_class, extras, prompt=prompt)
+    assert not requests_agent_tools("What is an MCP server?")
+
+
+def test_native_vault_lookup_is_observational():
+    from app.policy.reversibility import resolve_action_effect
+    for action in ("search", "read", "resolve", "neighborhood", "follow"):
+        effect = resolve_action_effect("vault_memory", arguments={"action": action, "query": "project"})
+        assert not effect.side_effecting
+        assert not effect.high_consequence
+    assert resolve_action_effect("vault_memory", arguments={"action": "edit"}).side_effecting
+
+
+def test_small_model_keeps_requested_connected_function():
+    from app.agent.turn_tools import select_turn_schemas
+    names = ("request_tools", "request_capability", "filesystem", "python", "docker", "mcp_call", "mcp_docker_catalog_get_current_time")
+    schemas = [{"type": "function", "function": {"name": name, "parameters": {"type": "object"}}} for name in names]
+    for request in ("Use the Docker MCP get_current_time tool.", "Get the current time using Docker MCP."):
+        chosen = select_turn_schemas(schemas, model_family="9b-abliterated", prompt=request)
+        assert "mcp_docker_catalog_get_current_time" in {item["function"]["name"] for item in chosen}

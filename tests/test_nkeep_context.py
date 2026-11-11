@@ -256,3 +256,15 @@ async def test_explicit_n_keep_minus_one_is_clamped_below_n_ctx():
     assert captured["extra"]["n_keep"] < 4096
     assert captured["extra"]["n_keep"] <= MAX_KEEP_TOKENS
     assert captured["extra"]["n_keep"] >= 0
+
+
+def test_ollama_probe_uses_selected_loaded_model_context():
+    mgr = InferenceManager()
+    settings = _settings(backend="ollama", host="127.0.0.1", port=11434, remote_model="owner-model")
+    mgr.state.context_size = 32768
+    mgr._record_probe({
+        "models": ["front-model", "owner-model"],
+        "loaded_model_contexts": {"front-model": 2048, "owner-model": 4096},
+    }, settings)
+    assert mgr.live_context_size() == 4096
+    assert mgr.state.remote_model == "owner-model"
