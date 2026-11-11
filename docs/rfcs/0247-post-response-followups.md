@@ -1,6 +1,6 @@
 # RFC-0247: Deliver results before optional follow-up work
 
-**Status:** accepted
+**Status:** implemented
 **Queue item:** Owner-authorized response-time improvements, 2026-11-11
 **Author:** Codex desktop session
 **Date:** 2026-11-11

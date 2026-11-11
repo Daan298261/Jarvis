@@ -193,6 +193,27 @@ async def test_timed_out_optional_work_is_retained_as_failed(jarvis_env, monkeyp
         assert job.status == "failed" and job.last_error == "TimeoutError"
 
 
+async def test_promotion_waits_for_trajectory_without_spending_retries(jarvis_env, monkeypatch):
+    from datetime import timedelta
+    from app.db.models import utcnow
+
+    order = []
+    async def handler(job):
+        order.append(job.kind)
+
+    monkeypatch.setattr(post_response, "execute", handler)
+    await seed(working=WorkingState(goal="Read clock"))
+    async with SessionLocal() as session:
+        promotion = await session.get(PostResponseJob, ("response", "promotion"))
+        promotion.available_at = utcnow() - timedelta(seconds=10)
+        await session.commit()
+    post_response.start()
+    await wait_done()
+    assert order.index("trajectory") < order.index("promotion")
+    async with SessionLocal() as session:
+        assert (await session.get(PostResponseJob, ("response", "promotion"))).attempts == 0
+
+
 async def test_replaying_handlers_does_not_duplicate_memory_or_usage(jarvis_env, monkeypatch):
     monkeypatch.setattr("app.trajectories.store.save_trajectory", lambda row: row)
     monkeypatch.setattr("app.trajectories.consumer.enqueue_trajectory", lambda row: None)

@@ -12,7 +12,8 @@ import logging
 import time
 from datetime import timedelta
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, or_, select
+from sqlalchemy.orm import aliased
 
 from ..db.models import PostResponseJob, Task, TaskEvent, utcnow
 from ..db.session import SessionLocal
@@ -79,9 +80,15 @@ async def _drain(lane: str) -> None:
         wake = _wake[lane]
         wake.clear()
         delivered = exists().where(TaskEvent.task_id == PostResponseJob.task_id, TaskEvent.kind == "completed")
+        dependency = aliased(PostResponseJob)
+        pending_trajectory = exists().where(
+            dependency.task_id == PostResponseJob.task_id, dependency.kind == "trajectory",
+            dependency.status == "pending",
+        )
         async with SessionLocal() as session:
             job = await session.scalar(select(PostResponseJob).where(
                 PostResponseJob.status == "pending", delivered,
+                or_(PostResponseJob.kind != "promotion", ~pending_trajectory),
                 (PostResponseJob.kind == "speech") if lane == "delivery" else (PostResponseJob.kind != "speech"),
             ).order_by(PostResponseJob.available_at, PostResponseJob.task_id, PostResponseJob.kind).limit(1))
         if job is None:
