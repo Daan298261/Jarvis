@@ -396,6 +396,11 @@ def _side_effect_decision(
     )
 
 
+def tool_results_fallback(working: WorkingState, reason: str) -> str:
+    observations = "\n\n".join(working.observations[-3:])
+    return f"Recorded tool results\n\n{observations}\n\n{reason}" if observations else reason
+
+
 _TERMINAL_TASK_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 
@@ -3222,7 +3227,8 @@ class AgentRuntime:
                             continue
                         if tools_used and work_wrap_retries < 1:
                             work_wrap_retries += 1
-                            wrap = "The requested work already ran on disk."
+                            log.warning("Model report failed for task %s with HTTP %s", task_id, exc.status_code)
+                            wrap = tool_results_fallback(working, "The model could not finish the final report.")
                             if await self._complete(
                                 task_id,
                                 messages,
@@ -3253,10 +3259,7 @@ class AgentRuntime:
                 except TimeoutError:
                     await self._release_lazy_vision()
                     if tools_used and verifying:
-                        content = (
-                            "The model timed out while writing the final report. "
-                            "Actions already executed are in the activity log; verify files from that log."
-                        )
+                        content = tool_results_fallback(working, "The model timed out while writing the final report.")
                         if await self._complete(task_id, messages, content, "Timed out after verification tools ran.", working, metrics):
                             return
                         continue

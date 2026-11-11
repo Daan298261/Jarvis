@@ -295,10 +295,10 @@ async def test_live_stdio_mcp_refresh_expose_and_call():
         assert schema["properties"]["text"]["type"] == "string"
         result = await MCP.call("mcp_echo_ping", {"text": "usable"})
         assert result.success, result.error
-        assert "pong:usable" in result.output
+        assert result.output == "pong:usable"
         proxy = await REGISTRY.execute("mcp_call", {"mcp_tool": "mcp_echo_ping", "arguments": {"text": "proxy"}})
         assert proxy.success
-        assert "pong:proxy" in proxy.output
+        assert proxy.output == "pong:proxy"
         await asyncio.create_task(MCP.refresh([]))
         assert owner.done()
         assert not MCP.connected_keys()
@@ -390,3 +390,16 @@ async def test_rea_status_keeps_catalog_out_of_model_text(monkeypatch):
     assert len(result.output) < 1000
     assert json.loads(result.output)["status"] == "ready"
     assert json.loads(result.output)["capabilities_available"]
+
+
+def test_model_report_failure_keeps_successful_tool_results():
+    from app.agent.loop import tool_results_fallback
+    from app.agent.planning import WorkingState
+
+    working = WorkingState()
+    working.note_tool("mcp_time", '{"datetime":"2026-11-11T00:00:00Z"}', True)
+    working.note_tool("filesystem", "ERROR: cancelled", False)
+    text = tool_results_fallback(working, "The model could not finish the final report.")
+    assert "2026-11-11T00:00:00Z" in text
+    assert "ERROR: cancelled" not in text
+    assert "The model could not finish" in text

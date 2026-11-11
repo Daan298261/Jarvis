@@ -531,7 +531,12 @@ class MCPRuntime:
                     await self._close_session(server_id)
                     continue
             is_error = bool(getattr(result, "is_error", False) or getattr(result, "isError", False))
-            return ToolResult(not is_error, str(getattr(result, "content", result)), error=str(result.content) if is_error else "")
+            content = getattr(result, "content", result)
+            if isinstance(content, list) and all(getattr(item, "type", None) == "text" for item in content):
+                output = "\n".join(str(item.text) for item in content)
+            else:
+                output = str(content)
+            return ToolResult(not is_error, output, error=output if is_error else "")
         return ToolResult(False, "", error=last_error or f"MCP call failed for {tool_key}")
 
     def openai_tools(self) -> list[dict[str, Any]]:
