@@ -21,14 +21,17 @@ Time is the active Docker catalog connection. Obsidian and REA use their existin
 This graph covers a tool-using request. The normal desktop HUD posts to /api/tasks. The owner-chat API delegates tool requests to the same AGENT.create_task path. The detailed timeline below comes from an owner-chat loopback API sample.
 
 ```mermaid
+---
+title: ANZU prompt path with separate timing samples
+---
 flowchart TD
-    D["Desktop text<br/>render ms unmeasured"] --> DE["POST /api/tasks<br/>desktop ingress measurement pending"]
+    D["Desktop text<br/>render ms unmeasured"] --> DE["POST /api/tasks<br/>admission RTT 12,253 ms"]
     DV["Desktop microphone<br/>capture ms unmeasured"] --> STT["Transcription<br/>STT ms unmeasured"]
     STT --> DE
-    P["Phone text or voice<br/>capture and endpointing ms unmeasured"] --> PM["Local or desktop route<br/>ms unmeasured"]
+    P["Phone typed or transcribed text<br/>capture and STT ms unmeasured"] --> PM["Local or desktop route<br/>ms unmeasured"]
     PM --> PL["Local or offline inference<br/>ms unmeasured"]
     PM --> PN["LAN or WAN transport<br/>ms unmeasured"]
-    PN --> PA["Paired-device authentication<br/>ms unmeasured"]
+    PN --> PA["POST /api/companion/messages<br/>paired-device authentication<br/>ms unmeasured"]
     PA --> PJ["Request-ID dedupe and conversation journal<br/>ms unmeasured"]
     PJ --> AG
     DE --> AG["Shared agent admission and intake<br/>1,079 ms representative backend segment"]
@@ -53,7 +56,7 @@ flowchart TD
     PL --> OUT
 ```
 
-The graph combines shared architecture and separate measured scenarios. Provider RPC time is nested within the larger MCP tool stage.
+The graph combines shared architecture and separate measured scenarios. Provider RPC time is nested within the larger MCP tool stage. Phone voice can use on-device STT, companion transcription upload or the realtime voice WebSocket. Their capture, endpointing, transport and transcription times remain unmeasured.
 
 ## Detailed timeline
 
@@ -99,6 +102,26 @@ The client measurement used HTTP polling. Its final observation includes polling
 
 Three gateway API-call samples after the persistent-session correction were 1,181 ms, 2,978 ms and 875 ms. They were collected under desktop load.
 
+
+## Normal desktop API and event stream
+
+The normal HUD entry completed its backend task in 488,078 ms. It executed two successful MCP calls. Their recorded agent-tool durations were 118,628 ms in total.
+
+| Cumulative client milestone | ms from submission |
+| --- | --- |
+| Task submission HTTP response | 12,253 |
+| First acknowledgement received | 12,356 |
+| Front response received | 31,552 |
+| First worker-model event received | 63,787 |
+| First tool-start event received | 148,473 |
+| First tool result received | 218,983 |
+
+The client sampler reached its 420,000 ms sampling window while verification continued. The completion event was published 16,641 ms after terminal state was persisted. The final client-render time remains unmeasured.
+
+Within the normal sample, registry MCP calls measured 4,518 ms and 4,630 ms. They sat inside recorded agent-tool stages of 61,209 ms and 57,419 ms. Docker provider RPC timing was about 666 ms in a subsequent call. Durable execution, surrounding bookkeeping and shared-loop scheduling account for much of the larger observed span. Individual database and scheduling costs need narrower instrumentation.
+
+The final report request returned HTTP 500. The old completion fallback replaced the returned datetime with a generic disk-work message. The correction now retains successful recorded tool observations when final report inference fails. The installed correction was checked against the actual saved observations from this task.
+
 ## Task samples
 
 These durations use database task creation and finish timestamps.
@@ -108,8 +131,12 @@ These durations use database task creation and finish timestamps.
 | vault owner chat | completed | 67,230 | 4 | 824 |
 | gateway owner chat | completed | 267,671 | 4 | 20,411 |
 | rea owner chat | failed | 284,139 | 1 | 42,358 |
+| desktop tasks | completed | 488,078 | 3 | 118,628 |
+| rea desktop | completed | 358,683 | 3 | 49,432 |
 
 The first REA status attempt returned ready through the tool, then its reporting turn encountered a transient inference connection error. Its model-visible status output has since been compacted, retaining the full result in ToolResult.data.
+
+The clean normal-desktop REA retry completed through the API and SSE stream in 383,098 ms. It made 3 model turns and 1 successful status call, returning engine ready.
 
 ## Corrections
 
@@ -124,6 +151,7 @@ The first REA status attempt returned ready through the tool, then its reporting
 - The selected model's default context was set to 32,768 tokens after tool requests exceeded its 4,096-token default. Original model metadata and Modelfile were saved locally.
 - REA status text is compact. The full result remains in ToolResult.data.
 - Desktop task SSE frames use one data envelope.
+- MCP text results remain readable JSON or text. Final-report failures retain successful tool observations.
 
 ## Resume and reproduce
 
@@ -143,7 +171,7 @@ docker mcp gateway run --profile anzu-catalog
 
 ## Verification limits
 
-Focused tests passed. The final count is recorded in focused-final.log and RESUME.md.
+158 targeted tests passed across eight isolated test-file processes. Per-file results are recorded in verify-results.jsonl and RESUME.md.
 
 An unfiltered suite stalled in a persona-decision test. Another run reached 650 passing tests and six skips before Windows separator assertions failed. Those separator failures also reproduced on untouched development. Full-suite green remains unverified.
 
