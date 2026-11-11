@@ -150,6 +150,7 @@ async def commit_step_result(
     cost_ms: float = 0.0,
     cost_usd: float = 0.0,
     success: bool = True,
+    completed_attempt_id: int | None = None,
 ) -> ExecutionStep:
     now = utcnow()
     status = StepStatus.COMPLETED.value if success else StepStatus.FAILED.value
@@ -165,6 +166,12 @@ async def commit_step_result(
         step.cost_usd = cost_usd
         step.committed_at = now
         step.updated_at = now
+        if completed_attempt_id is not None:
+            attempt = await session.get(ExecutionAttempt, completed_attempt_id)
+            if attempt is None or attempt.step_id != step_id:
+                raise ValueError("attempt does not belong to the committed step")
+            attempt.status = AttemptStatus.COMPLETED.value
+            attempt.finished_at = now
         await session.commit()
         await session.refresh(step)
         return step
@@ -221,7 +228,8 @@ async def mark_step_running(step_id: int) -> None:
         await session.commit()
 
 
-async def claim_attempt(step_id: int, worker_id: str, lease_seconds: int = DEFAULT_LEASE_SECONDS) -> ExecutionAttempt:
+async def claim_attempt(step_id: int, worker_id: str, lease_seconds: int = DEFAULT_LEASE_SECONDS, *,
+                        mark_running: bool = False) -> ExecutionAttempt:
     now = utcnow()
     lease_until = now + timedelta(seconds=lease_seconds)
     async with SessionLocal() as session:
@@ -232,6 +240,10 @@ async def claim_attempt(step_id: int, worker_id: str, lease_seconds: int = DEFAU
         )
         if step is None:
             raise ValueError(f"step {step_id} missing")
+
+        if mark_running:
+            step.status = StepStatus.RUNNING.value
+            step.updated_at = now
 
         for attempt in step.attempts:
             if attempt.status != AttemptStatus.ACTIVE.value:

@@ -115,6 +115,8 @@ async def init_db() -> None:
     async with ENGINE.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_add_missing_columns)
+        # create_all does not add indexes to pre-existing tables during upgrades.
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_task_events_task_kind ON task_events (task_id, kind)"))
         await conn.execute(text("PRAGMA journal_mode=WAL"))
         await conn.execute(text("PRAGMA busy_timeout=30000"))
 

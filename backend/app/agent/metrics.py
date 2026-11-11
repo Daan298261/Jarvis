@@ -20,7 +20,9 @@ class LiveTaskMetrics:
         payload = timings or {}
         prompt_ms = float(payload.get("prompt_ms") or 0)
         predicted_ms = float(payload.get("predicted_ms") or 0)
-        self.model_ms += prompt_ms + predicted_ms
+        self.model_ms += max(0.0, float(payload.get("provider_wall_ms") or
+                                       (prompt_ms + predicted_ms) or
+                                       payload.get("total_ms") or payload.get("generation_ms") or 0))
 
     def note_model_elapsed(self, duration_ms: float) -> None:
         """Record a streamed model call when the provider exposes no timing payload."""

@@ -18,7 +18,6 @@ log = logging.getLogger("jarvis.agent.loop")
 
 from openai import APIConnectionError, APIStatusError
 
-from ..coding.usage import record_task_usage
 from ..config import AppSettings, load_settings
 from sqlalchemy import func, select, update
 
@@ -185,7 +184,6 @@ from .skills import (
     bind_parameters,
     has_secret_parameters,
     instantiate_steps,
-    promote_from_trajectories,
     relevant_skills,
     steps_are_executable,
 )
@@ -751,7 +749,8 @@ class AgentRuntime:
         except (TimeoutError, asyncio.CancelledError, Exception):
             return
 
-    async def _update(self, task_id: str, **fields: Any) -> None:
+    async def _update(self, task_id: str, *, defer_followups: bool = False,
+                      post_response_working: WorkingState | None = None, **fields: Any) -> None:
         incoming_status = fields.get("status")
         async with SessionLocal() as session:
             task = await session.get(Task, task_id)
@@ -776,6 +775,10 @@ class AgentRuntime:
                 )
                 await session.commit()
                 return
+            if incoming_status == "completed" and task.status != "completed" and defer_followups:
+                from .post_response import stage_jobs
+
+                stage_jobs(session, task_id, post_response_working, bool(fields.get("verification")))
             for key, value in fields.items():
                 setattr(task, key, value)
             from ..db.models import TaskPromptStep
@@ -820,7 +823,9 @@ class AgentRuntime:
                 task_class = str(getattr(task, "task_class", "") or "")
                 # Conversation replies are already spoken; managed tasks need a
                 # natural outcome, and every failure/cancel is spoken in plain language.
-                if terminal_status in {"failed", "cancelled"} or route == MANAGED_TASK or (
+                if terminal_status == "completed" and defer_followups:
+                    pass  # Speech is persisted in the outbox and runs after completion delivery.
+                elif terminal_status in {"failed", "cancelled"} or route == MANAGED_TASK or (
                     task_class and task_class != CONVERSATION_CLASS
                 ):
                     await speak_outcome(
@@ -939,15 +944,13 @@ class AgentRuntime:
         }
         if metrics is not None:
             fields.update(metrics.as_fields())
-        await self._update(task_id, **fields)
-        if working is not None:
-            await record_trajectory(task_id, working, "completed")
-            await record_task_usage(task_id, "completed", verified=bool(verification))
-            for skill in await promote_from_trajectories():
-                await BUS.publish(task_id, "progress", f"Promoted reusable skill: {skill.name}", skill.description[:800])
+        await self._update(task_id, defer_followups=True, post_response_working=working, **fields)
         await complete_coding_route(task_id, "completed", verification)
         await self._release_lazy_vision()
         await BUS.publish(task_id, "completed", "Task completed", content[:2000], stage="completed")
+        from .post_response import start as start_followups
+
+        start_followups()
         return True
 
     async def _fail_task(
@@ -3093,7 +3096,8 @@ class AgentRuntime:
                     turn_max_tokens = 400 if force_final else 1024
 
                     async def _model_turn_inner() -> ChatResult:
-                        return await asyncio.wait_for(
+                        provider_started = time.perf_counter()
+                        chat = await asyncio.wait_for(
                             MANAGER.chat(
                                 messages,
                                 tools=turn_tools,
@@ -3107,6 +3111,9 @@ class AgentRuntime:
                             ),
                             timeout=90 if force_final else 180,
                         )
+                        chat.timings = dict(chat.timings or {})
+                        chat.timings["provider_wall_ms"] = (time.perf_counter() - provider_started) * 1000
+                        return chat
 
                     async def _model_turn() -> ChatResult:
                         nonlocal model_turn_index
@@ -3128,7 +3135,7 @@ class AgentRuntime:
                             usage = chat.usage or {}
                             timings = chat.timings or {}
                             tokens = int(usage.get("total_tokens") or usage.get("completion_tokens") or 0)
-                            ms = float(timings.get("total_ms") or timings.get("generation_ms") or 0.0)
+                            ms = float(timings.get("provider_wall_ms") or timings.get("total_ms") or timings.get("generation_ms") or 0.0)
                             return tokens, ms, 0.0
 
                         return await run_model_step(

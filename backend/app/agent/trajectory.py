@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Any, Iterable
@@ -79,9 +80,16 @@ def _denylist_reason(row: Trajectory) -> str | None:
     return None
 
 
-async def record_trajectory(task_id: str, working: WorkingState, outcome: str) -> Trajectory | None:
+async def record_trajectory(task_id: str, working: WorkingState, outcome: str, *,
+                            idempotent: bool = False) -> Trajectory | None:
     """Persist an actionable summary of a finished task."""
     async with SessionLocal() as session:
+        if idempotent:
+            existing = await session.scalar(select(Trajectory).where(
+                Trajectory.task_id == task_id, Trajectory.outcome == outcome,
+            ).limit(1))
+            if existing is not None:
+                return existing
         task = await session.get(Task, task_id)
         if not task:
             return None
@@ -139,7 +147,11 @@ async def record_trajectory(task_id: str, working: WorkingState, outcome: str) -
             from ..trajectories.consumer import enqueue_trajectory
             from ..trajectories.store import save_trajectory
 
-            enqueue_trajectory(save_trajectory(from_native_trajectory(row)))
+            # Redaction, JSON encoding and file/index writes are synchronous.
+            # Keep them off the event loop so enrichment cannot stall the next prompt.
+            normalized = from_native_trajectory(row)
+            saved = await asyncio.to_thread(save_trajectory, normalized)
+            enqueue_trajectory(saved)
         except Exception:
             pass
         return row

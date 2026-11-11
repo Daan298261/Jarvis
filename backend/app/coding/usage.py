@@ -84,9 +84,17 @@ async def record_usage(
         return row
 
 
-async def record_task_usage(task_id: str, outcome: str, verified: bool) -> CodingUsageSample | None:
+async def record_task_usage(task_id: str, outcome: str, verified: bool, *,
+                            idempotent: bool = False) -> CodingUsageSample | None:
     """Record local-supervisor usage when a software-engineering task finishes."""
     async with SessionLocal() as session:
+        if idempotent:
+            existing = await session.scalar(select(CodingUsageSample).where(
+                CodingUsageSample.task_id == task_id, CodingUsageSample.worker == "local",
+                CodingUsageSample.model == "local-qwen",
+            ).limit(1))
+            if existing is not None:
+                return existing
         task = await session.get(Task, task_id)
         if not task:
             return None

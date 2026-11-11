@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -12,6 +12,20 @@ def utcnow() -> datetime:
 
 class Base(DeclarativeBase):
     pass
+
+
+class PostResponseJob(Base):
+    """Optional enrichment outbox, committed with the terminal task result."""
+
+    __tablename__ = "post_response_jobs"
+
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), primary_key=True)
+    payload: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_error: Mapped[str] = mapped_column(String(400), default="")
 
 
 class Task(Base):
@@ -90,6 +104,7 @@ class TaskPromptStep(Base):
 
 class TaskEvent(Base):
     __tablename__ = "task_events"
+    __table_args__ = (Index("ix_task_events_task_kind", "task_id", "kind"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"))
