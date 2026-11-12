@@ -4,8 +4,8 @@
 #define MyAppName "ANZU"
 ; AppVersion is the semver customers see (pre-release tags allowed).
 ; Windows VERSIONINFO is numeric only, so VersionInfoVersion uses the core
-; before the first '-' (1.6.0-beta -> 1.6.0.0).
-#define MyAppVersion "1.6.0-beta"
+; before the first '-' (1.7.0-beta -> 1.7.0.0).
+#define MyAppVersion "1.7.0-beta"
 #define MyAppVersionCore Copy(MyAppVersion, 1, Pos("-", MyAppVersion + "-") - 1)
 #define MyAppPublisher "ANZU"
 #define MyAppURL "https://github.com/Daan298261/Jarvis"
@@ -826,7 +826,7 @@ begin
   Result := ComparePackedVersion(InstallerPacked, InstalledPacked);
   if Result <> 0 then
     Exit;
-  { Same numeric core: a pre-release (1.6.0-beta) is older than the final (1.6.0). }
+  { Same numeric core: a pre-release (1.7.0-beta) is older than the final (1.7.0). }
   InstallerPre := Pos('-', InstallerVersion) > 0;
   InstalledPre := Pos('-', InstalledVersion) > 0;
   if InstallerPre and (not InstalledPre) then
