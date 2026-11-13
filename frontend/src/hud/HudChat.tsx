@@ -17,6 +17,8 @@ import { MediaComposerBar } from "../components/MediaComposerBar"
 import { TaskActivityPanel } from "../components/TaskActivity"
 import { TaskStatusMeta } from "../components/TaskStatusMeta"
 import { useMediaUploads } from "../chat/useMediaUploads"
+import { chatRootClassName, useChatBackground, useChatCompact } from "../chat/chatAppearance"
+import { ChatAppearanceToggles } from "../chat/ChatAppearanceToggles"
 
 type HudChatProps = {
   onMoodChange?: (opts: { recording: boolean; speaking: boolean; task: Task | null; backendUnavailable: boolean }) => void
@@ -44,6 +46,8 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   const [backendUnavailable, setBackendUnavailable] = useState(false)
   const [connectionMessage, setConnectionMessage] = useState("")
   const [speaking, setSpeaking] = useState(false)
+  const [chatBackground] = useChatBackground()
+  const [chatCompact] = useChatCompact()
   const [speakChatReplies, setSpeakChatReplies] = useSpeakChatReplies()
   const threadRef = useRef<HTMLDivElement | null>(null)
   const { active: hexStrikeActive } = useHexStrikeSuiteActive()
@@ -231,7 +235,11 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   const showThread = !!id
 
   return (
-    <div className="hud-chat">
+    <div className={chatRootClassName(chatCompact)} data-chat-background={chatBackground ? "on" : "off"}
+      data-chat-compact={chatCompact ? "on" : "off"}>
+      <div className="hud-chat-tools">
+        <ChatAppearanceToggles />
+      </div>
       {showSetupProblem && (
         <div className="hud-auth-card" role="status">
           <strong>Setup problem</strong>

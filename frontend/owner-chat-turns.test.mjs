@@ -7,6 +7,16 @@ await register("./presence-lifecycle-loader.mjs", import.meta.url)
 const view = await import("./src/chat/ownerChatView.ts")
 
 const QUICK = "Your meeting is at 3 pm."
+
+test("a new owner turn clears the previous live reply and replacement state", () => {
+  const reduced = view.reduceLiveAssistantEvents([
+    { kind: "replace_previous_text", detail: "Answer to the original question." },
+    { kind: "owner_turn_started", detail: "" },
+    { kind: "assistant_delta", detail: "Answer to the follow-up." },
+  ])
+  assert.equal(reduced.text, "Answer to the follow-up.")
+  assert.equal(reduced.replaced, false)
+})
 const CORRECTION = "Actually, the meeting moved to 4 pm tomorrow in room B."
 
 test("replace_previous_text replaces the live quick answer", () => {

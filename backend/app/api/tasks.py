@@ -352,5 +352,5 @@ async def cancel_task(task_id: str):
 
 
 @router.get("/{task_id}/events")
-async def task_events(task_id: str):
-    return EventSourceResponse(BUS.stream(task_id))
+async def task_events(task_id: str, current_turn: bool = False):
+    return EventSourceResponse(BUS.stream(task_id, current_turn=current_turn))

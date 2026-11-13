@@ -328,6 +328,7 @@ export function applyLiveAssistantEvent(
   acc: string,
   event: { kind?: string; detail?: string },
 ): { text: string; replaced: boolean } {
+  if (event.kind === "owner_turn_started") return { text: "", replaced: false }
   if ((event.kind || "") === "replace_previous_text") {
     return { text: event.detail || "", replaced: true }
   }
@@ -345,7 +346,7 @@ export function reduceLiveAssistantEvents(
   for (const event of events) {
     const next = applyLiveAssistantEvent(text, event)
     text = next.text
-    replaced = replaced || next.replaced
+    replaced = event.kind === "owner_turn_started" ? false : replaced || next.replaced
   }
   return { text, replaced }
 }
@@ -354,28 +355,30 @@ export function reduceLiveAssistantEvents(
 export function useLiveAssistantPreview(
   taskId: string,
   running: boolean,
+  turnKey = "",
 ): { text: string; replaced: boolean } {
-  const [preview, setPreview] = useState<{ text: string; replaced: boolean }>({ text: "", replaced: false })
+  const [preview, setPreview] = useState({ taskId: "", turnKey: "", text: "", replaced: false })
   useEffect(() => {
     if (!taskId || !running) {
       return
     }
     let acc = ""
     let replaced = false
-    const stream = new EventSource(getAuthUrl(`/api/tasks/${encodeURIComponent(taskId)}/events`))
+    const stream = new EventSource(getAuthUrl(`/api/tasks/${encodeURIComponent(taskId)}/events?current_turn=true`))
     stream.onmessage = (message) => {
       try {
         const event = JSON.parse(message.data) as { kind?: string; detail?: string }
         const next = applyLiveAssistantEvent(acc, event)
-        if (next.text === acc && !next.replaced) return
+        if (next.text === acc && !next.replaced && event.kind !== "owner_turn_started") return
         acc = next.text
-        replaced = replaced || next.replaced
-        setPreview({ text: acc, replaced })
+        replaced = event.kind === "owner_turn_started" ? false : replaced || next.replaced
+        setPreview({ taskId, turnKey, text: acc, replaced })
       } catch {
         // Keep the last good preview.
       }
     }
     return () => stream.close()
-  }, [taskId, running])
-  return running ? preview : { text: "", replaced: false }
+  }, [taskId, running, turnKey])
+  return running && preview.taskId === taskId && preview.turnKey === turnKey
+    ? preview : { text: "", replaced: false }
 }

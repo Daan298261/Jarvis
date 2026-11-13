@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import timezone
 from typing import Any, AsyncIterator
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from .db.models import TaskEvent, utcnow
 from .db.session import SessionLocal
@@ -79,14 +79,19 @@ class EventBus:
         """Notify subscribers without persisting a TaskEvent (no task FK)."""
         await self.publish(channel, kind, title, detail, stage, persist=False)
 
-    async def stream(self, task_id: str | None = None) -> AsyncIterator[str]:
+    async def stream(self, task_id: str | None = None, *, current_turn: bool = False) -> AsyncIterator[str]:
         queue = self.subscribe(task_id)
         try:
             if task_id:
                 async with SessionLocal() as session:
+                    boundary = 0
+                    if current_turn:
+                        boundary = (await session.scalar(select(func.max(TaskEvent.id)).where(
+                            TaskEvent.task_id == task_id, TaskEvent.kind == "owner_turn_started",
+                        ))) or 0
                     rows = (
                         await session.execute(
-                            select(TaskEvent).where(TaskEvent.task_id == task_id).order_by(TaskEvent.id)
+                            select(TaskEvent).where(TaskEvent.task_id == task_id, TaskEvent.id > boundary).order_by(TaskEvent.id)
                         )
                     ).scalars().all()
                     for row in rows:

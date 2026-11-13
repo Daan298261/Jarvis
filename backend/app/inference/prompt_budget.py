@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Iterable
 
@@ -59,13 +60,29 @@ class ModelCapacityExceeded(Exception):
         super().__init__(context_capacity_error(budget))
 
 
-def context_capacity_error(budget: PromptBudget) -> str:
-    return (
-        "Context capacity exceeded after compact/expand recovery: "
-        f"required_context={budget.required_context} tokens, "
+def context_capacity_error(budget: PromptBudget, *, server_error: str = "") -> str:
+    heading = "Context capacity exceeded after compact/expand recovery: "
+    if server_error and budget.required_context <= budget.active_context:
+        heading = "Inference server rejected context despite the local token estimate: "
+    detail = (
+        heading + f"required_context={budget.required_context} tokens, "
         f"active_context={budget.active_context}, profile_cap={budget.profile_cap} "
         f"(pressure={budget.pressure:.2f})."
     )
+    return detail + (f" Server response: {server_error[:1000]}" if server_error else "")
+
+
+def server_context_limit(exc: BaseException) -> int | None:
+    """Accept explicit loaded limits, never a request's token count."""
+    text = f"{exc} {getattr(exc, 'body', '')} {getattr(exc, 'message', '')}"
+    for pattern in (
+        r"loaded with (?:a )?context (?:length|size)(?: of)?(?: only)?\s*[:=]?\s*(\d+)",
+        r"maximum context length is\s*(\d+)",
+    ):
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match and int(match.group(1)) > 0:
+            return int(match.group(1))
+    return None
 
 
 _OVERFLOW_MARKERS = (
@@ -78,6 +95,8 @@ _OVERFLOW_MARKERS = (
 
 
 def is_context_overflow(exc: BaseException) -> bool:
+    if server_context_limit(exc) is not None:
+        return True
     if is_n_keep_overflow(getattr(exc, "body", None)) or is_n_keep_overflow(exc):
         return True
     text = str(exc).lower()

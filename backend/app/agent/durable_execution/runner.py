@@ -25,6 +25,7 @@ from .repository import (
     claim_attempt,
     commit_step_result,
     finish_attempt,
+    get_step_by_key,
     mark_ambiguous_effect,
     mark_step_running,
     park_step,
@@ -86,6 +87,11 @@ async def run_durable_step(
     idempotency_key = stable_idempotency_key(run_id, step_key, operation_type.value, {"hash": input_hash})
 
     await assert_run_recoverable(run_id)
+
+    if operation_type == OperationType.MODEL_CALL:
+        existing = await get_step_by_key(run_id, step_key)
+        if existing is not None and existing.input_hash != input_hash:
+            raise StepBlocked(f"Model step {step_key} belongs to different inputs; start a new model step")
 
     reused = await reuse_if_completed(run_id, step_key)
     if reused is not None:

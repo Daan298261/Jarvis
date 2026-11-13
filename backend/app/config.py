@@ -94,6 +94,8 @@ class InferenceSettings(BaseModel):
     prompt_tps_fallback: float = Field(default=80.0, gt=0, le=20000)
     stream_first_token_min_ms: int = Field(default=3000, ge=0, le=300000)
     stream_first_token_max_ms: int = Field(default=180000, ge=1000, le=600000)
+    generation_tps_fallback: float = Field(default=10.0, gt=0, le=20000)
+    chat_call_max_ms: int = Field(default=180000, ge=1000, le=600000)
 
 
 class FrontResponderSettings(BaseModel):
