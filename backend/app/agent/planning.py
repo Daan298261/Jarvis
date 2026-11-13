@@ -428,7 +428,7 @@ def classify_task(prompt: str) -> str:
     if simple_file_control(prompt):
         return "filesystem"
     if is_plain_conversation(prompt):
-        return CONVERSATION_CLASS
+        return "mixed" if requests_agent_tools(prompt) else CONVERSATION_CLASS
     text = intent_text(prompt).lower()
     scored: list[tuple[int, str]] = []
     for name, keywords in TASK_CATEGORIES:
@@ -449,10 +449,10 @@ _TOOL_REQUEST = re.compile(
     r"(?i)\b("
     r"run\s+(?:the\s+)?(?:(?:[\w.-]+\s+){0,4})?tool\b|"
     r"run\s+(?:the\s+)?(?:command|harness)\b|"
-    r"use\s+(?:the\s+)?[\w.-]+\s+tool\b|"
+    r"(?:use|call|invoke)\s+(?:the\s+)?(?:[\w.-]+\s+){1,5}tool\b|"
+    r"(?:search|read|look\s+up)\s+(?:(?:my|the|bound)\s+){0,3}obsidian(?:\s+vault)?\b|"
     r"execute\s+(?:the\s+)?(?:(?:[\w.-]+\s+){0,2})?(?:tool|command)\b|"
-    r"call\s+(?:the\s+)?[\w.-]+\s+tool\b|"
-    r"invoke\s+(?:the\s+)?[\w.-]+\s+tool\b"
+    r"\buse\s+(?:the\s+)?(?:docker\s+)?mcp\b"
     r")",
 )
 

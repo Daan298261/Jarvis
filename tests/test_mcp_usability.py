@@ -266,6 +266,7 @@ async def test_mcp_list_includes_status(jarvis_env, monkeypatch):
 
 
 async def test_live_stdio_mcp_refresh_expose_and_call():
+    import asyncio
     import sys
     from pathlib import Path
 
@@ -282,17 +283,123 @@ async def test_live_stdio_mcp_refresh_expose_and_call():
         "enabled": True,
     }
     try:
-        status = await MCP.refresh([server])
+        status = await asyncio.create_task(MCP.refresh([server]))
+        owner = MCP._sessions["echo-live"].owner
         assert status["echo"].startswith("1 tool"), status
         names = [item["function"]["name"] for item in schemas_for("mixed")]
         assert "mcp_echo_ping" in names
         assert "mcp_call" in names
+        schema = next(item["function"]["parameters"] for item in MCP.openai_tools()
+                      if item["function"]["name"] == "mcp_echo_ping")
+        assert schema["required"] == ["text"]
+        assert schema["properties"]["text"]["type"] == "string"
         result = await MCP.call("mcp_echo_ping", {"text": "usable"})
         assert result.success, result.error
-        assert "pong:usable" in result.output
+        assert result.output == "pong:usable"
         proxy = await REGISTRY.execute("mcp_call", {"mcp_tool": "mcp_echo_ping", "arguments": {"text": "proxy"}})
         assert proxy.success
-        assert "pong:proxy" in proxy.output
+        assert proxy.output == "pong:proxy"
+        await asyncio.create_task(MCP.refresh([]))
+        assert owner.done()
+        assert not MCP.connected_keys()
     finally:
         await MCP.close_all()
         MCP.reset_for_tests()
+
+
+def test_explicit_multi_word_tool_requests_use_agent_path():
+    from app.agent.ingress_gate import heuristic_needs_tools
+    from app.agent.planning import classify_task, requests_agent_tools
+
+    prompts = {
+        "Use the native Obsidian vault_memory tool to search my vault.": "vault_memory",
+        "Search my bound Obsidian vault for the launch checklist.": "vault_memory",
+        "Call the connected Docker MCP get_current_time tool.": "mcp_call",
+        "Use REA to inspect C:/samples/example.exe.": "reverse_engineer",
+    }
+    for prompt, expected in prompts.items():
+        assert requests_agent_tools(prompt)
+        task_class = classify_task(prompt)
+        assert heuristic_needs_tools(prompt, task_class) is True
+        extras = ["mcp"] if expected == "mcp_call" else []
+        assert expected in tool_names_for(task_class, extras, prompt=prompt)
+    assert not requests_agent_tools("What is an MCP server?")
+
+
+def test_native_vault_lookup_is_observational():
+    from app.policy.reversibility import resolve_action_effect
+    for action in ("search", "read", "resolve", "neighborhood", "follow"):
+        effect = resolve_action_effect("vault_memory", arguments={"action": action, "query": "project"})
+        assert not effect.side_effecting
+        assert not effect.high_consequence
+    assert resolve_action_effect("vault_memory", arguments={"action": "edit"}).side_effecting
+
+
+def test_small_model_keeps_requested_connected_function():
+    from app.agent.turn_tools import select_turn_schemas
+    names = ("request_tools", "request_capability", "filesystem", "python", "docker", "mcp_call", "mcp_docker_catalog_get_current_time")
+    schemas = [{"type": "function", "function": {"name": name, "parameters": {"type": "object"}}} for name in names]
+    for request in ("Use the Docker MCP get_current_time tool.", "Get the current time using Docker MCP."):
+        chosen = select_turn_schemas(schemas, model_family="9b-abliterated", prompt=request)
+        assert "mcp_docker_catalog_get_current_time" in {item["function"]["name"] for item in chosen}
+
+
+def test_direct_mcp_read_has_proxy_policy_parity():
+    from app.policy.reversibility import resolve_action_effect
+    direct = resolve_action_effect("mcp_docker_catalog_get_current_time", arguments={"timezone": "UTC"})
+    proxy = resolve_action_effect("mcp_call", arguments={"mcp_tool": "mcp_docker_catalog_get_current_time", "arguments": {"timezone": "UTC"}})
+    assert not direct.side_effecting
+    assert direct.reversibility == proxy.reversibility
+    assert resolve_action_effect("mcp_service_delete_record", arguments={"id": "example"}).side_effecting
+
+
+async def test_tool_event_stream_uses_one_sse_envelope():
+    import asyncio
+    import json
+    from sse_starlette.sse import ServerSentEvent
+    from app.events import EventBus
+
+    bus = EventBus()
+    stream = bus.stream()
+    waiting = asyncio.create_task(anext(stream))
+    await asyncio.sleep(0)
+    await bus.publish("example", "tool", "Running connected tool", persist=False)
+    frame = await waiting
+    try:
+        wire = ServerSentEvent(**frame).encode().decode("utf-8")
+        assert wire.startswith("data: {")
+        payload = json.loads(wire.removeprefix("data: "))
+        assert payload["kind"] == "tool"
+        assert payload["task_id"] == "example"
+    finally:
+        await stream.aclose()
+
+
+async def test_rea_status_keeps_catalog_out_of_model_text(monkeypatch):
+    import json
+    from app.tools.reverse_engineer import ReverseEngineerTool
+    data = {
+        "status": "ready", "stage": "Static analysis engine installed",
+        "versions": {"rea": {"version": "3.2.1"}},
+        "capabilities": {"tools": [{"name": "operation", "description": "x" * 100000}]},
+    }
+    monkeypatch.setattr("app.reverse_engineering.provision.readiness", lambda: data)
+    result = await ReverseEngineerTool(lambda: {}).execute(action="status")
+    assert result.success
+    assert result.data is data
+    assert len(result.output) < 1000
+    assert json.loads(result.output)["status"] == "ready"
+    assert json.loads(result.output)["capabilities_available"]
+
+
+def test_model_report_failure_keeps_successful_tool_results():
+    from app.agent.loop import tool_results_fallback
+    from app.agent.planning import WorkingState
+
+    working = WorkingState()
+    working.note_tool("mcp_time", '{"datetime":"2026-11-11T00:00:00Z"}', True)
+    working.note_tool("filesystem", "ERROR: cancelled", False)
+    text = tool_results_fallback(working, "The model could not finish the final report.")
+    assert "2026-11-11T00:00:00Z" in text
+    assert "ERROR: cancelled" not in text
+    assert "The model could not finish" in text

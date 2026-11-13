@@ -331,6 +331,15 @@ def resolve_action_effect(
             risk = RiskLevel.IRREVERSIBLE
 
     # Read-only / non-side-effecting shortcuts
+    if name == "vault_memory" and act in {"search", "read", "resolve", "neighborhood", "follow"}:
+        return ActionEffectMeta(
+            tool_name=name,
+            action=act,
+            reversibility=ReversibilityClass.REVERSIBLE,
+            side_effecting=False,
+            target=str(args.get("rel_path") or args.get("query") or ""),
+            recovery_summary="read-only vault lookup; no undo required",
+        )
     if name == "filesystem" and act in _READ_ONLY_FS:
         return ActionEffectMeta(
             tool_name=name,
@@ -641,7 +650,8 @@ def resolve_action_effect(
         )
 
     if name == "mcp_call" or name.startswith("mcp_"):
-        if _mcp_tool_looks_observational(args, act):
+        mcp_args = args if name == "mcp_call" else {**args, "mcp_tool": name}
+        if _mcp_tool_looks_observational(mcp_args, act):
             return _observation_meta(
                 name,
                 act or str(args.get("mcp_tool") or "list"),

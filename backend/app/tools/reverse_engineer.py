@@ -101,7 +101,17 @@ class ReverseEngineerTool(Tool):
                     raise ValueError("Unknown reverse_engineer action")
             success = data.get("status") not in {"pending_approval", "denied", "analysis_failed"}
             view = data
-            if action == "prepare":
+            if action == "status":
+                view = {
+                    key: data[key] for key in ("status", "stage", "error") if key in data
+                }
+                view["versions"] = {
+                    name: spec["version"]
+                    for name, spec in data.get("versions", {}).items()
+                    if isinstance(spec, dict) and spec.get("version")
+                }
+                view["capabilities_available"] = bool(data.get("capabilities"))
+            elif action == "prepare":
                 view = {k: v for k, v in data.items() if k not in {"manifest", "evidence", "findings", "unknowns"}}
             elif action in {"call", "evidence"} and "result" in data:
                 result = data["result"]

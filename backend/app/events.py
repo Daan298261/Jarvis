@@ -79,7 +79,7 @@ class EventBus:
         """Notify subscribers without persisting a TaskEvent (no task FK)."""
         await self.publish(channel, kind, title, detail, stage, persist=False)
 
-    async def stream(self, task_id: str | None = None) -> AsyncIterator[str]:
+    async def stream(self, task_id: str | None = None) -> AsyncIterator[dict[str, str]]:
         queue = self.subscribe(task_id)
         try:
             if task_id:
@@ -99,10 +99,10 @@ class EventBus:
                             "source": row.source,
                             "created_at": _iso_utc(row.created_at),
                         }
-                        yield f"data: {json.dumps(payload)}\n\n"
+                        yield {"data": json.dumps(payload)}
             while True:
                 event = await queue.get()
-                yield f"data: {json.dumps(event)}\n\n"
+                yield {"data": json.dumps(event)}
         finally:
             self.unsubscribe(queue, task_id)
 
