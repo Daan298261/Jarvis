@@ -69,9 +69,26 @@ class LocalTurnBudget internal constructor(
     private val cancelled = AtomicBoolean(false)
     private val capped = AtomicReference<LocalStreamStallError?>(null)
 
+    private val cancelSignal = kotlinx.coroutines.CompletableDeferred<Unit>()
+
+    /** The model the turn last ran on; named in a cap error raised outside a pass (a phone-action approval wait). */
+    @Volatile internal var model: String = ""
+
     val isCancelled: Boolean get() = cancelled.get()
 
-    internal fun cancel() { cancelled.set(true) }
+    internal fun cancel() {
+        cancelled.set(true)
+        cancelSignal.complete(Unit)
+    }
+
+    /** Suspends until the turn is cancelled; resumes at once when [cancel] runs (no polling). */
+    suspend fun awaitCancel() = cancelSignal.await()
+
+    /** Milliseconds left of the turn's [LocalStallDeadlines.turnMs] cap (0 once it has passed). */
+    fun remainingMs(): Long = (deadlines.turnMs - (deadlines.clockMs() - startedAtMs)).coerceAtLeast(0)
+
+    /** The typed turn-cap error once the cap has passed, else null. */
+    fun capError(): LocalStreamStallError? = overCap(model)
 
     /** The turn-cap error once [LocalStallDeadlines.turnMs] has passed since [startedAtMs]; the first one is kept. */
     internal fun overCap(model: String): LocalStreamStallError? {

@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
@@ -68,7 +69,49 @@ object PhoneTools {
         return categories
     }
 
-    suspend fun execute(context: Context, command: JSONObject, expectedEpoch: Long = epoch()): JSONObject = withContext(Dispatchers.Main.immediate) {
+    /** Longest wait for the owner to allow or decline one phone action. */
+    const val APPROVAL_WAIT_MS = 60_000L
+
+    /**
+     * Waits for the owner's answer for at most [APPROVAL_WAIT_MS] and, inside a reply [turn], at most
+     * what is left of the turn's shared 300 s cap (RFC-0235). A cancel of the turn wakes the wait at
+     * once ([LocalTurnBudget.awaitCancel]) and ends it with a cancellation; the cap is re-checked on the
+     * turn's clock at least every [APPROVAL_CHECK_MS] and ends it with the typed turn-cap error.
+     * Returns false when the owner declined or the 60 s window closed.
+     */
+    internal suspend fun awaitApproval(answer: kotlinx.coroutines.Deferred<Boolean>, turn: LocalTurnBudget?, maxWaitMs: Long = APPROVAL_WAIT_MS): Boolean =
+        kotlinx.coroutines.coroutineScope {
+            // Completes the moment the turn is cancelled, so a stop never waits for the next check.
+            val cancelled = turn?.let { t -> async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { t.awaitCancel() } }
+            try {
+                val started = System.nanoTime()
+                var granted: Boolean? = null
+                while (granted == null) {
+                    if (answer.isCompleted) { granted = answer.await(); break }
+                    turn?.let { t ->
+                        if (t.isCancelled) throw kotlinx.coroutines.CancellationException("phone action approval cancelled")
+                        t.capError()?.let { throw it }
+                    }
+                    val waited = (System.nanoTime() - started) / 1_000_000
+                    if (waited >= maxWaitMs) { granted = false; break }
+                    var slice = minOf(APPROVAL_CHECK_MS, maxWaitMs - waited)
+                    if (turn != null) slice = minOf(slice, turn.remainingMs()).coerceAtLeast(1)
+                    withTimeoutOrNull(slice) {
+                        kotlinx.coroutines.selects.select<Unit> {
+                            answer.onAwait { }
+                            cancelled?.onAwait { }
+                        }
+                    }
+                }
+                granted == true
+            } finally {
+                cancelled?.cancel()
+            }
+        }
+
+    private const val APPROVAL_CHECK_MS = 100L
+
+    suspend fun execute(context: Context, command: JSONObject, expectedEpoch: Long = epoch(), turn: LocalTurnBudget? = null): JSONObject = withContext(Dispatchers.Main.immediate) {
         try {
             checkAccess(context)
             check(expectedEpoch == epoch()) { "Task stopped" }
@@ -91,7 +134,7 @@ object PhoneTools {
                 decision = answer
                 pendingState.value = approval
                 activity.value = "Waiting for permission: $action in $pkg"
-                val granted = try { withTimeoutOrNull(60_000) { answer.await() } == true }
+                val granted = try { awaitApproval(answer, turn) }
                     finally { decision = null; pendingState.value = null }
                 check(granted) { "Action permission declined or timed out" }
             }
@@ -135,6 +178,8 @@ object PhoneTools {
             JSONObject().put("ok", true).put("result", result)
         } catch (error: Exception) {
             if (error is kotlinx.coroutines.CancellationException) throw error
+            // The turn's 300 s cap fails the turn with its typed error, never a phone-action result.
+            if (error is LocalStreamStallError) throw error
             activity.value = error.message ?: "Phone action failed"
             JSONObject().put("ok", false).put("error", activity.value)
         }

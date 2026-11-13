@@ -1065,7 +1065,7 @@ class CompanionModel(app: Application) : AndroidViewModel(app) {
             val command = runCatching { JSONObject(json).optJSONObject("phone_tool") }.getOrNull()
             if (command == null) return reply.ifBlank { error("On-device model returned no tokens") }
             progress("Running phone action ${step + 1}/10")
-            val result = PhoneTools.execute(context, command, epoch)
+            val result = PhoneTools.execute(context, command, epoch, turn)
             toolContext = result.toString()
             if (!result.optBoolean("ok")) return "Phone action stopped: ${result.optString("error")}"
             delay(350)
