@@ -20,7 +20,9 @@ class PostResponseJob(Base):
     __tablename__ = "post_response_jobs"
 
     task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True)
+    completion_id: Mapped[str] = mapped_column(String(36), primary_key=True, default="")
     kind: Mapped[str] = mapped_column(String(32), primary_key=True)
+    released: Mapped[bool] = mapped_column(Boolean, default=False)
     payload: Mapped[str] = mapped_column(Text, default="{}")
     status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
@@ -209,6 +211,7 @@ class Trajectory(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     task_id: Mapped[str] = mapped_column(String(36), default="")
+    completion_id: Mapped[str] = mapped_column(String(36), default="")
     task_class: Mapped[str] = mapped_column(String(64), default="")
     goal: Mapped[str] = mapped_column(Text, default="")
     outcome: Mapped[str] = mapped_column(String(32), default="")
@@ -269,6 +272,8 @@ class CodingUsageSample(Base):
     """Paid/local coding-worker cost and outcome for routing decisions."""
 
     __tablename__ = "coding_usage"
+
+    completion_id: Mapped[str] = mapped_column(String(36), default="")
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     task_id: Mapped[str] = mapped_column(String(36), default="")

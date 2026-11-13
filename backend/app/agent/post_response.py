@@ -11,11 +11,12 @@ import json
 import logging
 import time
 from datetime import timedelta
+from types import SimpleNamespace
 
 from sqlalchemy import exists, or_, select
 from sqlalchemy.orm import aliased
 
-from ..db.models import PostResponseJob, Task, TaskEvent, utcnow
+from ..db.models import PostResponseJob, Task, utcnow
 from ..db.session import SessionLocal
 from ..events import BUS
 from .planning import CONVERSATION_CLASS, MANAGED_TASK, WorkingState
@@ -28,26 +29,40 @@ MAX_ATTEMPTS = 3
 JOB_TIMEOUT = 60.0
 
 
-def stage_jobs(session, task_id: str, working: WorkingState | None, verified: bool) -> None:
+def task_snapshot(task: Task) -> dict:
+    fields = ("title", "prompt", "task_class", "response_route", "result", "verification", "duration_seconds", "retries")
+    snapshot = {name: getattr(task, name) for name in fields}
+    snapshot["finished_at"] = task.finished_at.isoformat() if task.finished_at else None
+    return snapshot
+
+
+def stage_jobs(session, task_id: str, working: WorkingState | None, verified: bool, *,
+               completion_id: str = "", snapshot: dict | None = None) -> None:
     """Called inside the result transaction; no extra foreground commit."""
     payloads = {"speech": {}}
     if working is not None:
         payloads.update(trajectory={"working": working.dumps()}, usage={"verified": verified}, promotion={})
     for kind, payload in payloads.items():
-        session.add(PostResponseJob(task_id=task_id, kind=kind, payload=json.dumps(payload)))
+        payload["snapshot"] = snapshot
+        session.add(PostResponseJob(task_id=task_id, completion_id=completion_id,
+                                    kind=kind, payload=json.dumps(payload)))
 
 
 async def execute(job: PostResponseJob) -> None:
     payload = json.loads(job.payload)
+    snapshot = payload.get("snapshot")
     if job.kind == "speech":
         from ..persona.narrator import speak_outcome, forget_task
 
-        async with SessionLocal() as session:
-            task = await session.get(Task, job.task_id)
-            if task is None:
-                return
-            speak = task.response_route == MANAGED_TASK or bool(task.task_class and task.task_class != CONVERSATION_CLASS)
-            result = task.result or ""
+        if snapshot is not None:
+            task = SimpleNamespace(**snapshot)
+        else:
+            async with SessionLocal() as session:
+                task = await session.get(Task, job.task_id)
+        if task is None:
+            return
+        speak = task.response_route == MANAGED_TASK or bool(task.task_class and task.task_class != CONVERSATION_CLASS)
+        result = task.result or ""
         if speak:
             await speak_outcome(job.task_id, success=True, result=result, error="")
         else:
@@ -55,17 +70,19 @@ async def execute(job: PostResponseJob) -> None:
     elif job.kind == "trajectory":
         from .trajectory import record_trajectory
 
-        await record_trajectory(job.task_id, WorkingState.loads(payload["working"]), "completed", idempotent=True)
+        await record_trajectory(job.task_id, WorkingState.loads(payload["working"]), "completed",
+                                idempotent=True, completion_id=job.completion_id, snapshot=snapshot)
     elif job.kind == "usage":
         from ..coding.usage import record_task_usage
 
-        await record_task_usage(job.task_id, "completed", verified=payload["verified"], idempotent=True)
+        await record_task_usage(job.task_id, "completed", verified=payload["verified"], idempotent=True,
+                                completion_id=job.completion_id, snapshot=snapshot)
     elif job.kind == "promotion":
         from .skills import promote_from_trajectories
 
         # Wait until this task's trajectory has actually been written.
         async with SessionLocal() as session:
-            trajectory = await session.get(PostResponseJob, (job.task_id, "trajectory"))
+            trajectory = await session.get(PostResponseJob, (job.task_id, job.completion_id, "trajectory"))
             if trajectory and trajectory.status != "done":
                 raise RuntimeError("trajectory enrichment is not ready")
         for skill in await promote_from_trajectories():
@@ -79,15 +96,15 @@ async def _drain(lane: str) -> None:
     while not _stopping:
         wake = _wake[lane]
         wake.clear()
-        delivered = exists().where(TaskEvent.task_id == PostResponseJob.task_id, TaskEvent.kind == "completed")
         dependency = aliased(PostResponseJob)
         pending_trajectory = exists().where(
             dependency.task_id == PostResponseJob.task_id, dependency.kind == "trajectory",
+            dependency.completion_id == PostResponseJob.completion_id,
             dependency.status == "pending",
         )
         async with SessionLocal() as session:
             job = await session.scalar(select(PostResponseJob).where(
-                PostResponseJob.status == "pending", delivered,
+                PostResponseJob.status == "pending", PostResponseJob.released.is_(True),
                 or_(PostResponseJob.kind != "promotion", ~pending_trajectory),
                 (PostResponseJob.kind == "speech") if lane == "delivery" else (PostResponseJob.kind != "speech"),
             ).order_by(PostResponseJob.available_at, PostResponseJob.task_id, PostResponseJob.kind).limit(1))
@@ -141,19 +158,23 @@ def _finished(task: asyncio.Task) -> None:
 async def recover() -> None:
     """Close the crash window between result commit and completion publication."""
     async with SessionLocal() as session:
-        ids = (await session.scalars(select(PostResponseJob.task_id).where(
-            PostResponseJob.status == "pending",
-        ).distinct())).all()
-    for task_id in ids:
+        jobs = (await session.scalars(select(PostResponseJob).where(
+            PostResponseJob.status == "pending", PostResponseJob.released.is_(False),
+        ).order_by(PostResponseJob.available_at))).all()
+    seen = set()
+    for job in jobs:
+        key = (job.task_id, job.completion_id)
+        if key in seen:
+            continue
+        seen.add(key)
         async with SessionLocal() as session:
-            task = await session.get(Task, task_id)
-            event = await session.scalar(select(TaskEvent.id).where(
-                TaskEvent.task_id == task_id, TaskEvent.kind == "completed",
-            ).limit(1))
-            if task is None or task.status != "completed" or event is not None:
+            task = await session.get(Task, job.task_id)
+            if task is None or task.status != "completed":
                 continue
-            result = task.result or ""
-        await BUS.publish(task_id, "completed", "Task completed", result[:2000], stage="completed")
+            snapshot = json.loads(job.payload).get("snapshot")
+            result = (snapshot.get("result") if snapshot is not None else task.result) or ""
+        await BUS.publish(job.task_id, "completed", "Task completed", result[:2000], stage="completed",
+                          completion_id=job.completion_id)
     start()
 
 

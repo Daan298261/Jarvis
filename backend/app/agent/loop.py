@@ -750,7 +750,8 @@ class AgentRuntime:
             return
 
     async def _update(self, task_id: str, *, defer_followups: bool = False,
-                      post_response_working: WorkingState | None = None, **fields: Any) -> None:
+                      post_response_working: WorkingState | None = None,
+                      post_response_id: str = "", **fields: Any) -> None:
         incoming_status = fields.get("status")
         async with SessionLocal() as session:
             task = await session.get(Task, task_id)
@@ -775,10 +776,7 @@ class AgentRuntime:
                 )
                 await session.commit()
                 return
-            if incoming_status == "completed" and task.status != "completed" and defer_followups:
-                from .post_response import stage_jobs
-
-                stage_jobs(session, task_id, post_response_working, bool(fields.get("verification")))
+            needs_followups = incoming_status == "completed" and task.status != "completed" and defer_followups
             for key, value in fields.items():
                 setattr(task, key, value)
             from ..db.models import TaskPromptStep
@@ -804,6 +802,11 @@ class AgentRuntime:
                 started = _as_utc(task.started_at)
                 if started:
                     task.duration_seconds = (finished - started).total_seconds()
+            if needs_followups:
+                from .post_response import stage_jobs, task_snapshot
+
+                stage_jobs(session, task_id, post_response_working, bool(fields.get("verification")),
+                           completion_id=post_response_id, snapshot=task_snapshot(task))
             await session.commit()
             if terminal_status in {"completed", "failed", "cancelled"}:
                 from ..reverse_engineering.runtime import SERVICE as investigations
@@ -944,10 +947,13 @@ class AgentRuntime:
         }
         if metrics is not None:
             fields.update(metrics.as_fields())
-        await self._update(task_id, defer_followups=True, post_response_working=working, **fields)
+        completion_id = str(uuid.uuid4())
+        await self._update(task_id, defer_followups=True, post_response_working=working,
+                           post_response_id=completion_id, **fields)
         await complete_coding_route(task_id, "completed", verification)
         await self._release_lazy_vision()
-        await BUS.publish(task_id, "completed", "Task completed", content[:2000], stage="completed")
+        await BUS.publish(task_id, "completed", "Task completed", content[:2000], stage="completed",
+                          completion_id=completion_id)
         from .post_response import start as start_followups
 
         start_followups()

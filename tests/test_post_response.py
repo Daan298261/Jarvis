@@ -20,7 +20,7 @@ async def seed(task_id="response", working=None, publish=True, task_class="mixed
         post_response.stage_jobs(session, task_id, working, True)
         await session.commit()
     if publish:
-        await BUS.publish(task_id, "completed", "Task completed", "The time is 12:00")
+        await BUS.publish(task_id, "completed", "Task completed", "The time is 12:00", completion_id="")
 
 
 async def wait_done():
@@ -68,7 +68,7 @@ async def test_completion_is_published_while_memory_is_blocked(jarvis_env, monke
         assert not release.is_set()
         async with SessionLocal() as session:
             assert (await session.get(Task, "response")).status == "completed"
-            assert (await session.get(PostResponseJob, ("response", "trajectory"))).status == "pending"
+            assert (await session.scalar(select(PostResponseJob).where(PostResponseJob.task_id == "response", PostResponseJob.kind == "trajectory"))).status == "pending"
         release.set()
         await wait_done()
     finally:
@@ -107,7 +107,7 @@ async def test_shutdown_leaves_interrupted_work_recoverable(jarvis_env, monkeypa
     await asyncio.wait_for(entered.wait(), 2)
     await post_response.stop()
     async with SessionLocal() as session:
-        assert (await session.get(PostResponseJob, ("response", "speech"))).status == "pending"
+        assert (await session.get(PostResponseJob, ("response", "", "speech"))).status == "pending"
     handler = AsyncMock()
     monkeypatch.setattr(post_response, "execute", handler)
     await post_response.recover()
@@ -127,10 +127,10 @@ async def test_failed_job_does_not_block_other_jobs_or_change_answer(jarvis_env,
     post_response.start()
     await wait_done()
     async with SessionLocal() as session:
-        failed = await session.get(PostResponseJob, ("broken", "speech"))
+        failed = await session.get(PostResponseJob, ("broken", "", "speech"))
         assert failed.status == "failed" and failed.attempts == 1
         assert failed.last_error == "RuntimeError"
-        assert (await session.get(PostResponseJob, ("healthy", "speech"))).status == "done"
+        assert (await session.get(PostResponseJob, ("healthy", "", "speech"))).status == "done"
         assert (await session.get(Task, "broken")).result == "The time is 12:00"
 
 
@@ -143,7 +143,7 @@ async def test_transient_failure_retries_and_clears_snapshot(jarvis_env, monkeyp
     await wait_done()
     assert handler.await_count == 2
     async with SessionLocal() as session:
-        job = await session.get(PostResponseJob, ("response", "speech"))
+        job = await session.get(PostResponseJob, ("response", "", "speech"))
         assert job.status == "done" and job.attempts == 1
         assert job.last_error == "" and job.payload == "{}"
 
@@ -189,7 +189,7 @@ async def test_timed_out_optional_work_is_retained_as_failed(jarvis_env, monkeyp
     post_response.start()
     await wait_done()
     async with SessionLocal() as session:
-        job = await session.get(PostResponseJob, ("response", "speech"))
+        job = await session.get(PostResponseJob, ("response", "", "speech"))
         assert job.status == "failed" and job.last_error == "TimeoutError"
 
 
@@ -204,14 +204,109 @@ async def test_promotion_waits_for_trajectory_without_spending_retries(jarvis_en
     monkeypatch.setattr(post_response, "execute", handler)
     await seed(working=WorkingState(goal="Read clock"))
     async with SessionLocal() as session:
-        promotion = await session.get(PostResponseJob, ("response", "promotion"))
+        promotion = await session.get(PostResponseJob, ("response", "", "promotion"))
         promotion.available_at = utcnow() - timedelta(seconds=10)
         await session.commit()
     post_response.start()
     await wait_done()
     assert order.index("trajectory") < order.index("promotion")
     async with SessionLocal() as session:
-        assert (await session.get(PostResponseJob, ("response", "promotion"))).attempts == 0
+        assert (await session.get(PostResponseJob, ("response", "", "promotion"))).attempts == 0
+
+
+async def stage_followup(completion_id, result):
+    async with SessionLocal() as session:
+        task = await session.get(Task, "followups")
+        if task is None:
+            task = Task(id="followups", title="Test", prompt="First request", status="completed",
+                        task_class="software engineering", response_route="managed_task")
+            session.add(task)
+            await session.flush()
+        task.result = result
+        task.verification = result + " checked"
+        post_response.stage_jobs(session, task.id, WorkingState(goal=result), True,
+                                  completion_id=completion_id, snapshot=post_response.task_snapshot(task))
+        await session.commit()
+
+
+async def test_followup_jobs_wait_for_their_own_delivery_and_keep_result_snapshot(jarvis_env, monkeypatch):
+    await stage_followup("first", "First answer")
+    await BUS.publish("followups", "completed", "Task completed", completion_id="first")
+    await stage_followup("second", "Second answer")
+    # A previous completion must not release the new reply's jobs.
+    async with SessionLocal() as session:
+        assert not (await session.get(PostResponseJob, ("followups", "second", "speech"))).released
+    seen = []
+    async def handler(job):
+        seen.append(job.completion_id)
+    monkeypatch.setattr(post_response, "execute", handler)
+    post_response.start()
+    async with asyncio.timeout(3):
+        while len(seen) < 4:
+            await asyncio.sleep(0.01)
+    assert set(seen) == {"first"}
+    await BUS.publish("followups", "completed", "Task completed", completion_id="second")
+    await post_response.recover()
+    await wait_done()
+    assert seen.count("first") == 4 and seen.count("second") == 4
+
+
+async def test_followup_receipts_are_idempotent_per_reply_not_per_task(jarvis_env, monkeypatch):
+    monkeypatch.setattr("app.trajectories.store.save_trajectory", lambda row: row)
+    monkeypatch.setattr("app.trajectories.consumer.enqueue_trajectory", lambda row: None)
+    speech = AsyncMock()
+    monkeypatch.setattr("app.persona.narrator.speak_outcome", speech)
+    await stage_followup("first", "First answer")
+    await stage_followup("second", "Second answer")
+    async with SessionLocal() as session:
+        jobs = (await session.scalars(select(PostResponseJob).where(
+            PostResponseJob.kind.in_(("trajectory", "usage", "speech")),
+        ).order_by(PostResponseJob.completion_id, PostResponseJob.kind))).all()
+    for job in jobs:
+        await post_response.execute(job)
+        if job.kind != "speech":
+            await post_response.execute(job)  # Replay after an interrupted acknowledgement.
+    assert [call.kwargs["result"] for call in speech.await_args_list] == ["First answer", "Second answer"]
+    async with SessionLocal() as session:
+        rows = (await session.scalars(select(Trajectory).order_by(Trajectory.completion_id))).all()
+        assert [(row.completion_id, row.goal, row.verification) for row in rows] == [
+            ("first", "First answer", "First answer checked"),
+            ("second", "Second answer", "Second answer checked"),
+        ]
+        assert await session.scalar(select(func.count()).select_from(CodingUsageSample)) == 2
+
+
+async def test_legacy_outbox_upgrade_preserves_every_job_and_allows_followups(jarvis_env):
+    from sqlalchemy import text
+    from app.db import session as db
+
+    async with SessionLocal() as session:
+        session.add(Task(id="legacy", title="Legacy", prompt="Legacy", status="completed"))
+        session.add(TaskEvent(task_id="legacy", kind="completed", title="Task completed"))
+        await session.commit()
+    async with db.ENGINE.begin() as conn:
+        await conn.execute(text("DROP TABLE post_response_jobs"))
+        await conn.execute(text("""CREATE TABLE post_response_jobs (
+            task_id VARCHAR(36), kind VARCHAR(32), payload TEXT, status VARCHAR(16),
+            attempts INTEGER, available_at DATETIME, last_error VARCHAR(400),
+            PRIMARY KEY (task_id, kind))"""))
+        for kind, status in (("speech", "done"), ("trajectory", "pending"), ("usage", "failed")):
+            await conn.execute(text("INSERT INTO post_response_jobs VALUES (:task, :kind, '{}', :status, 1, '2026-11-01', '')"),
+                               {"task": "legacy", "kind": kind, "status": status})
+        await conn.execute(text("ALTER TABLE trajectories DROP COLUMN completion_id"))
+        await conn.execute(text("ALTER TABLE coding_usage DROP COLUMN completion_id"))
+    await db.init_db()
+    async with SessionLocal() as session:
+        rows = (await session.scalars(select(PostResponseJob).order_by(PostResponseJob.kind))).all()
+        assert [(row.kind, row.status) for row in rows] == [("speech", "done"), ("trajectory", "pending"), ("usage", "failed")]
+        assert all(row.completion_id == "" and row.released for row in rows)
+        assert await session.scalar(text("SELECT count(*) FROM post_response_jobs_0247_backup")) == 3
+        post_response.stage_jobs(session, "legacy", None, False, completion_id="followup")
+        await session.commit()
+    await db.init_db()  # Repeated startup must not reset the migrated jobs.
+    async with SessionLocal() as session:
+        assert await session.scalar(select(func.count()).select_from(PostResponseJob)) == 4
+        assert (await session.get(PostResponseJob, ("legacy", "", "trajectory"))).attempts == 1
 
 
 async def test_replaying_handlers_does_not_duplicate_memory_or_usage(jarvis_env, monkeypatch):

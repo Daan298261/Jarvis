@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+from types import SimpleNamespace
 
 from sqlalchemy import select
 
@@ -56,6 +57,7 @@ async def record_usage(
     first_attempt_success: bool = False,
     retries: int = 0,
     estimated_cost_usd: float | None = None,
+    completion_id: str = "",
 ) -> CodingUsageSample:
     cost = (
         estimate_cost_usd(model, input_tokens, cached_tokens, output_tokens)
@@ -64,6 +66,7 @@ async def record_usage(
     )
     row = CodingUsageSample(
         task_id=task_id or "",
+        completion_id=completion_id,
         worker=worker,
         model=model,
         task_class=task_class or "",
@@ -85,17 +88,19 @@ async def record_usage(
 
 
 async def record_task_usage(task_id: str, outcome: str, verified: bool, *,
-                            idempotent: bool = False) -> CodingUsageSample | None:
+                            idempotent: bool = False, completion_id: str = "",
+                            snapshot: dict | None = None) -> CodingUsageSample | None:
     """Record local-supervisor usage when a software-engineering task finishes."""
     async with SessionLocal() as session:
         if idempotent:
             existing = await session.scalar(select(CodingUsageSample).where(
                 CodingUsageSample.task_id == task_id, CodingUsageSample.worker == "local",
                 CodingUsageSample.model == "local-qwen",
+                CodingUsageSample.completion_id == completion_id,
             ).limit(1))
             if existing is not None:
                 return existing
-        task = await session.get(Task, task_id)
+        task = SimpleNamespace(**snapshot) if snapshot is not None else await session.get(Task, task_id)
         if not task:
             return None
         task_class = task.task_class or ""
@@ -118,6 +123,7 @@ async def record_task_usage(task_id: str, outcome: str, verified: bool, *,
         first_attempt_success=success and retries == 0,
         retries=retries,
         estimated_cost_usd=0.0,
+        completion_id=completion_id,
     )
 
 

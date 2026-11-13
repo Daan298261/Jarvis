@@ -17,6 +17,7 @@ Persist optional follow-up jobs atomically with task completion. Publish the com
 
 - Blocked memory, accounting, promotion or speech cannot delay the completed event.
 - Follow-up jobs survive restart, retry independently and do not duplicate persisted trajectory or usage rows on replay.
+- Consecutive replies on one task have separate completion identities and immutable result snapshots. Publishing one reply releases only its own jobs; existing outbox rows survive the schema upgrade.
 - Shutdown cancels the worker cleanly and leaves unfinished work recoverable.
 - Explicit memory-write requests still require a successful write before confirmation.
 - Durable crash/replay and lease tests continue to pass if transactions change.
@@ -25,7 +26,7 @@ Persist optional follow-up jobs atomically with task completion. Publish the com
 
 ## Likely files
 
-Backend: agent/loop.py, agent/post_response.py, agent/trajectory.py, agent/metrics.py, coding/usage.py, db/models.py, main.py and agent/durable_execution/{runner,repository}.py. Tests: tests/test_post_response.py and existing durable, memory and task-flow tests.
+Backend: agent/loop.py, agent/post_response.py, agent/trajectory.py, agent/metrics.py, coding/usage.py, db/{models,session}.py, events.py, main.py and agent/durable_execution/{runner,repository}.py. Tests: tests/test_post_response.py and existing durable, memory and task-flow tests.
 
 ## Out of scope
 

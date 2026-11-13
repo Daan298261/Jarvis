@@ -62,6 +62,9 @@ def _add_missing_columns(sync_conn) -> None:
         return
     columns = {col["name"] for col in inspector.get_columns("tasks")}
     statements = []
+    for table in ("trajectories", "coding_usage"):
+        if table in inspector.get_table_names() and "completion_id" not in {c["name"] for c in inspector.get_columns(table)}:
+            statements.append(f"ALTER TABLE {table} ADD COLUMN completion_id VARCHAR(36) DEFAULT ''")
     if "execution_mode" not in columns:
         statements.append("ALTER TABLE tasks ADD COLUMN execution_mode VARCHAR(32) DEFAULT 'balanced'")
     if "task_class" not in columns:
@@ -111,10 +114,39 @@ def _add_missing_columns(sync_conn) -> None:
         sync_conn.execute(text(statement))
 
 
+def _prepare_outbox_upgrade(sync_conn) -> None:
+    inspector = inspect(sync_conn)
+    if "post_response_jobs" not in inspector.get_table_names():
+        return
+    if "completion_id" in {c["name"] for c in inspector.get_columns("post_response_jobs")}:
+        return
+    # Keep every legacy row in a backup table, including pending and failed jobs.
+    # The new primary key adds a completion ID so follow-ups can coexist.
+    if "post_response_jobs_0247_backup" in inspector.get_table_names():
+        raise RuntimeError("Outbox migration backup already exists; refusing to overwrite it")
+    sync_conn.execute(text("ALTER TABLE post_response_jobs RENAME TO post_response_jobs_0247_backup"))
+    sync_conn.execute(text("DROP INDEX IF EXISTS ix_post_response_jobs_status"))
+
+
+def _copy_legacy_outbox(sync_conn) -> None:
+    if "post_response_jobs_0247_backup" not in inspect(sync_conn).get_table_names():
+        return
+    sync_conn.execute(text("""
+        INSERT OR IGNORE INTO post_response_jobs
+            (task_id, completion_id, kind, released, payload, status, attempts, available_at, last_error)
+        SELECT old.task_id, '', old.kind,
+            EXISTS(SELECT 1 FROM task_events e WHERE e.task_id=old.task_id AND e.kind='completed'),
+            old.payload, old.status, old.attempts, old.available_at, old.last_error
+        FROM post_response_jobs_0247_backup old
+    """))
+
+
 async def init_db() -> None:
     async with ENGINE.begin() as conn:
+        await conn.run_sync(_prepare_outbox_upgrade)
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_add_missing_columns)
+        await conn.run_sync(_copy_legacy_outbox)
         # create_all does not add indexes to pre-existing tables during upgrades.
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_task_events_task_kind ON task_events (task_id, kind)"))
         await conn.execute(text("PRAGMA journal_mode=WAL"))
