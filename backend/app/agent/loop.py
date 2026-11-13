@@ -18,9 +18,8 @@ log = logging.getLogger("jarvis.agent.loop")
 
 from openai import APIConnectionError, APIStatusError
 
-from ..coding.usage import record_task_usage
 from ..config import AppSettings, load_settings
-from sqlalchemy import func, select, update
+from sqlalchemy import case, func, select, update
 
 from ..db.models import Checkpoint, Task, ToolCallRecord, utcnow
 from ..db.session import SessionLocal
@@ -66,7 +65,7 @@ from .compaction import (
     SUMMARY_MARKER,
 )
 from .context_policy import initial_context_size, next_context_size, profile_cap
-from .metrics import LiveTaskMetrics
+from .metrics import LiveTaskMetrics, timed_model_request
 from .model_policy import select_context_size, task_needs_vision
 from .coding_workers import (
     complete_coding_route,
@@ -185,7 +184,6 @@ from .skills import (
     bind_parameters,
     has_secret_parameters,
     instantiate_steps,
-    promote_from_trajectories,
     relevant_skills,
     steps_are_executable,
 )
@@ -394,6 +392,11 @@ def _side_effect_decision(
         task_id=task_id,
         park_if_needed=park_if_needed,
     )
+
+
+def tool_results_fallback(working: WorkingState, reason: str) -> str:
+    observations = "\n\n".join(working.observations[-3:])
+    return f"Recorded tool results\n\n{observations}\n\n{reason}" if observations else reason
 
 
 _TERMINAL_TASK_STATUSES = frozenset({"completed", "failed", "cancelled"})
@@ -746,31 +749,33 @@ class AgentRuntime:
         except (TimeoutError, asyncio.CancelledError, Exception):
             return
 
-    async def _update(self, task_id: str, **fields: Any) -> None:
+    async def _update(self, task_id: str, *, defer_followups: bool = False,
+                      post_response_working: WorkingState | None = None,
+                      post_response_id: str = "", **fields: Any) -> None:
         incoming_status = fields.get("status")
         async with SessionLocal() as session:
-            task = await session.get(Task, task_id)
-            if not task:
-                return
-            session.expire(task)
-            await session.refresh(task)
-            if task.status in _TERMINAL_TASK_STATUSES and incoming_status not in _TERMINAL_TASK_STATUSES:
-                return
             if incoming_status not in _TERMINAL_TASK_STATUSES:
                 values = dict(fields)
                 values["updated_at"] = utcnow()
-                if incoming_status == "running" and not task.started_at:
-                    values["started_at"] = utcnow()
+                if incoming_status == "running":
+                    values["started_at"] = case(
+                        (Task.started_at.is_(None), utcnow()),
+                        else_=values.get("started_at", Task.started_at),
+                    )
+                # The conditional write is the concurrency guard. A fresh
+                # session does not need two preceding reads of the same row.
                 await session.execute(
-                    update(Task)
-                    .where(
+                    update(Task).where(
                         Task.id == task_id,
                         Task.status.in_(("queued", "running", "waiting")),
-                    )
-                    .values(**values)
+                    ).values(**values)
                 )
                 await session.commit()
                 return
+            task = await session.get(Task, task_id)
+            if not task:
+                return
+            needs_followups = incoming_status == "completed" and task.status != "completed" and defer_followups
             for key, value in fields.items():
                 setattr(task, key, value)
             from ..db.models import TaskPromptStep
@@ -796,6 +801,11 @@ class AgentRuntime:
                 started = _as_utc(task.started_at)
                 if started:
                     task.duration_seconds = (finished - started).total_seconds()
+            if needs_followups:
+                from .post_response import stage_jobs, task_snapshot
+
+                stage_jobs(session, task_id, post_response_working, bool(fields.get("verification")),
+                           completion_id=post_response_id, snapshot=task_snapshot(task))
             await session.commit()
             if terminal_status in {"completed", "failed", "cancelled"}:
                 from ..reverse_engineering.runtime import SERVICE as investigations
@@ -815,7 +825,9 @@ class AgentRuntime:
                 task_class = str(getattr(task, "task_class", "") or "")
                 # Conversation replies are already spoken; managed tasks need a
                 # natural outcome, and every failure/cancel is spoken in plain language.
-                if terminal_status in {"failed", "cancelled"} or route == MANAGED_TASK or (
+                if terminal_status == "completed" and defer_followups:
+                    pass  # Speech is persisted in the outbox and runs after completion delivery.
+                elif terminal_status in {"failed", "cancelled"} or route == MANAGED_TASK or (
                     task_class and task_class != CONVERSATION_CLASS
                 ):
                     await speak_outcome(
@@ -934,15 +946,16 @@ class AgentRuntime:
         }
         if metrics is not None:
             fields.update(metrics.as_fields())
-        await self._update(task_id, **fields)
-        if working is not None:
-            await record_trajectory(task_id, working, "completed")
-            await record_task_usage(task_id, "completed", verified=bool(verification))
-            for skill in await promote_from_trajectories():
-                await BUS.publish(task_id, "progress", f"Promoted reusable skill: {skill.name}", skill.description[:800])
+        completion_id = str(uuid.uuid4())
+        await self._update(task_id, defer_followups=True, post_response_working=working,
+                           post_response_id=completion_id, **fields)
         await complete_coding_route(task_id, "completed", verification)
         await self._release_lazy_vision()
-        await BUS.publish(task_id, "completed", "Task completed", content[:2000], stage="completed")
+        await BUS.publish(task_id, "completed", "Task completed", content[:2000], stage="completed",
+                          completion_id=completion_id)
+        from .post_response import start as start_followups
+
+        start_followups()
         return True
 
     async def _fail_task(
@@ -3088,7 +3101,7 @@ class AgentRuntime:
                     turn_max_tokens = 400 if force_final else 1024
 
                     async def _model_turn_inner() -> ChatResult:
-                        return await asyncio.wait_for(
+                        return await timed_model_request(
                             MANAGER.chat(
                                 messages,
                                 tools=turn_tools,
@@ -3101,6 +3114,7 @@ class AgentRuntime:
                                 working_state_block=working.as_prompt_block(),
                             ),
                             timeout=90 if force_final else 180,
+                            metrics=metrics,
                         )
 
                     async def _model_turn() -> ChatResult:
@@ -3123,7 +3137,7 @@ class AgentRuntime:
                             usage = chat.usage or {}
                             timings = chat.timings or {}
                             tokens = int(usage.get("total_tokens") or usage.get("completion_tokens") or 0)
-                            ms = float(timings.get("total_ms") or timings.get("generation_ms") or 0.0)
+                            ms = float(timings.get("provider_wall_ms") or timings.get("total_ms") or timings.get("generation_ms") or 0.0)
                             return tokens, ms, 0.0
 
                         return await run_model_step(
@@ -3222,7 +3236,8 @@ class AgentRuntime:
                             continue
                         if tools_used and work_wrap_retries < 1:
                             work_wrap_retries += 1
-                            wrap = "The requested work already ran on disk."
+                            log.warning("Model report failed for task %s with HTTP %s", task_id, exc.status_code)
+                            wrap = tool_results_fallback(working, "The model could not finish the final report.")
                             if await self._complete(
                                 task_id,
                                 messages,
@@ -3253,10 +3268,7 @@ class AgentRuntime:
                 except TimeoutError:
                     await self._release_lazy_vision()
                     if tools_used and verifying:
-                        content = (
-                            "The model timed out while writing the final report. "
-                            "Actions already executed are in the activity log; verify files from that log."
-                        )
+                        content = tool_results_fallback(working, "The model timed out while writing the final report.")
                         if await self._complete(task_id, messages, content, "Timed out after verification tools ran.", working, metrics):
                             return
                         continue
@@ -3695,6 +3707,7 @@ class AgentRuntime:
             await self._release_lazy_vision()
             raise
         except Exception as exc:
+            log.exception("Agent task %s failed", task_id)
             await self._fail_task(task_id, str(exc), working, metrics)
         finally:
             if progress_watch is not None:

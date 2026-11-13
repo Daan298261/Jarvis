@@ -1,7 +1,30 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+import time
+from collections.abc import Awaitable
 from dataclasses import asdict, dataclass
 from typing import Any
+
+
+async def timed_model_request(request: Awaitable[Any], *, metrics: "LiveTaskMetrics", timeout: float) -> Any:
+    """Measure provider work separately from durable preparation/commit time.
+
+    Successful calls are counted by the caller after durable replay handling.
+    Failed and cancelled attempts have no ChatResult, so count their time here.
+    """
+    started = time.perf_counter()
+    try:
+        result = await asyncio.wait_for(request, timeout=timeout)
+    except BaseException as exc:
+        elapsed = (time.perf_counter() - started) * 1000
+        metrics.note_model_elapsed(elapsed)
+        logging.getLogger(__name__).info("Model request %s after %.1f ms", type(exc).__name__, elapsed)
+        raise
+    result.timings = dict(result.timings or {})
+    result.timings["provider_wall_ms"] = (time.perf_counter() - started) * 1000
+    return result
 
 
 @dataclass
@@ -20,7 +43,9 @@ class LiveTaskMetrics:
         payload = timings or {}
         prompt_ms = float(payload.get("prompt_ms") or 0)
         predicted_ms = float(payload.get("predicted_ms") or 0)
-        self.model_ms += prompt_ms + predicted_ms
+        self.model_ms += max(0.0, float(payload.get("provider_wall_ms") or
+                                       (prompt_ms + predicted_ms) or
+                                       payload.get("total_ms") or payload.get("generation_ms") or 0))
 
     def note_model_elapsed(self, duration_ms: float) -> None:
         """Record a streamed model call when the provider exposes no timing payload."""

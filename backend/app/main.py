@@ -204,6 +204,9 @@ async def startup() -> None:
     app.state.startup_id = str(uuid.uuid4())
     startup_health.reset()
     await startup_health.run_step("database", init_db, critical=True)
+    from .agent.post_response import recover as recover_followups
+
+    _start_optional_step("post_response", recover_followups)
     try:
         from .recovery.hooks import startup_recovery
 
@@ -453,6 +456,9 @@ async def shutdown() -> None:
     for task in tasks:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
+    from .agent.post_response import stop as stop_followups
+
+    await stop_followups()
     try:
         from .inference.front_runtime import FRONT_RUNTIME
 

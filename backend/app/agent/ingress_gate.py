@@ -17,7 +17,7 @@ from ..memory.ingress_spill import (
     maybe_mirror_to_vault,
 )
 from ..providers.base import ChatMessage
-from .planning import is_plain_conversation
+from .planning import is_plain_conversation, requests_agent_tools
 
 # Hard ceilings — 50 KB pastes must never wait on a model to notice.
 HEURISTIC_BIG_CHARS = 12_000
@@ -90,8 +90,7 @@ def heuristic_size_class(text: str) -> str | None:
 
 
 def heuristic_needs_tools(text: str, task_class: str) -> bool | None:
-    from ..reverse_engineering.skill import requested
-    if task_class == "reverse engineering" or requested(text):
+    if task_class == "reverse engineering" or requests_agent_tools(text):
         return True
     if _ACTION_TOOL_RE.search(text or ""):
         return True

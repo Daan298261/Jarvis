@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+from datetime import datetime
+from types import SimpleNamespace
 from typing import Any, Iterable
 
 from sqlalchemy import select
@@ -79,15 +82,27 @@ def _denylist_reason(row: Trajectory) -> str | None:
     return None
 
 
-async def record_trajectory(task_id: str, working: WorkingState, outcome: str) -> Trajectory | None:
+async def record_trajectory(task_id: str, working: WorkingState, outcome: str, *,
+                            idempotent: bool = False, completion_id: str = "",
+                            snapshot: dict | None = None) -> Trajectory | None:
     """Persist an actionable summary of a finished task."""
     async with SessionLocal() as session:
-        task = await session.get(Task, task_id)
+        if idempotent:
+            existing = await session.scalar(select(Trajectory).where(
+                Trajectory.task_id == task_id, Trajectory.outcome == outcome,
+                Trajectory.completion_id == completion_id,
+            ).limit(1))
+            if existing is not None:
+                return existing
+        task = SimpleNamespace(**snapshot) if snapshot is not None else await session.get(Task, task_id)
         if not task:
             return None
+        call_query = select(ToolCallRecord).where(ToolCallRecord.task_id == task_id)
+        if snapshot and snapshot.get("finished_at"):
+            call_query = call_query.where(ToolCallRecord.created_at <= datetime.fromisoformat(snapshot["finished_at"]))
         calls = (
             await session.execute(
-                select(ToolCallRecord).where(ToolCallRecord.task_id == task_id).order_by(ToolCallRecord.id)
+                call_query.order_by(ToolCallRecord.id)
             )
         ).scalars().all()
 
@@ -122,6 +137,7 @@ async def record_trajectory(task_id: str, working: WorkingState, outcome: str) -
 
         row = Trajectory(
             task_id=task_id,
+            completion_id=completion_id,
             task_class=task.task_class or working.task_class,
             goal=(working.goal or task.title)[:400],
             outcome=outcome,
@@ -139,7 +155,11 @@ async def record_trajectory(task_id: str, working: WorkingState, outcome: str) -
             from ..trajectories.consumer import enqueue_trajectory
             from ..trajectories.store import save_trajectory
 
-            enqueue_trajectory(save_trajectory(from_native_trajectory(row)))
+            # Redaction, JSON encoding and file/index writes are synchronous.
+            # Keep them off the event loop so enrichment cannot stall the next prompt.
+            normalized = from_native_trajectory(row)
+            saved = await asyncio.to_thread(save_trajectory, normalized)
+            enqueue_trajectory(saved)
         except Exception:
             pass
         return row

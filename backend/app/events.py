@@ -6,9 +6,9 @@ from collections import defaultdict
 from datetime import timezone
 from typing import Any, AsyncIterator
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
-from .db.models import TaskEvent, utcnow
+from .db.models import PostResponseJob, TaskEvent, utcnow
 from .db.session import SessionLocal
 
 
@@ -49,6 +49,7 @@ class EventBus:
         *,
         source: str = "jarvis-agent",
         persist: bool = True,
+        completion_id: str | None = None,
     ) -> None:
         event = {
             "task_id": task_id,
@@ -61,6 +62,12 @@ class EventBus:
         }
         if persist:
             async with SessionLocal() as session:
+                if kind == "completed" and completion_id is not None:
+                    # Release exactly this reply's jobs in the event transaction.
+                    await session.execute(update(PostResponseJob).where(
+                        PostResponseJob.task_id == task_id,
+                        PostResponseJob.completion_id == completion_id,
+                    ).values(released=True))
                 session.add(
                     TaskEvent(
                         task_id=task_id,
@@ -79,7 +86,7 @@ class EventBus:
         """Notify subscribers without persisting a TaskEvent (no task FK)."""
         await self.publish(channel, kind, title, detail, stage, persist=False)
 
-    async def stream(self, task_id: str | None = None) -> AsyncIterator[str]:
+    async def stream(self, task_id: str | None = None) -> AsyncIterator[dict[str, str]]:
         queue = self.subscribe(task_id)
         try:
             if task_id:
@@ -99,10 +106,10 @@ class EventBus:
                             "source": row.source,
                             "created_at": _iso_utc(row.created_at),
                         }
-                        yield f"data: {json.dumps(payload)}\n\n"
+                        yield {"data": json.dumps(payload)}
             while True:
                 event = await queue.get()
-                yield f"data: {json.dumps(event)}\n\n"
+                yield {"data": json.dumps(event)}
         finally:
             self.unsubscribe(queue, task_id)
 
