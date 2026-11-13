@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 
 from app.agent import post_response
 from app.agent.loop import AGENT
-from app.agent.metrics import LiveTaskMetrics
+from app.agent.metrics import LiveTaskMetrics, timed_model_request
 from app.agent.planning import WorkingState
 from app.db.models import CodingUsageSample, ExecutionAttempt, ExecutionStep, PostResponseJob, Task, TaskEvent, Trajectory
 from app.db.session import SessionLocal
@@ -309,6 +309,45 @@ async def test_legacy_outbox_upgrade_preserves_every_job_and_allows_followups(ja
         assert (await session.get(PostResponseJob, ("legacy", "", "trajectory"))).attempts == 1
 
 
+async def test_progress_update_uses_one_write_and_preserves_first_start_time(jarvis_env):
+    from sqlalchemy import event
+    from app.db import session as db
+
+    async with SessionLocal() as session:
+        session.add(Task(id="progress", title="test", prompt="test", status="queued"))
+        await session.commit()
+    statements = []
+    def executed(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement.lstrip().split()[0].upper())
+
+    event.listen(db.ENGINE.sync_engine, "before_cursor_execute", executed)
+    try:
+        await AGENT._update("progress", status="running", current_action="Working")
+    finally:
+        event.remove(db.ENGINE.sync_engine, "before_cursor_execute", executed)
+    assert statements == ["UPDATE"]
+    async with SessionLocal() as session:
+        first_started = (await session.get(Task, "progress")).started_at
+        assert first_started is not None
+    await AGENT._update("progress", status="running", current_action="Still working")
+    async with SessionLocal() as session:
+        assert (await session.get(Task, "progress")).started_at == first_started
+
+
+async def test_late_progress_cannot_overwrite_terminal_task(jarvis_env):
+    async with SessionLocal() as session:
+        session.add(Task(id="finished", title="test", prompt="test", status="completed",
+                         stage="completed", result="Final answer", current_action="Completed"))
+        await session.commit()
+    await AGENT._update("finished", status="running", stage="act", current_action="Stale progress",
+                        result="Stale answer")
+    await AGENT._update("finished", current_action="Stale background update")
+    async with SessionLocal() as session:
+        task = await session.get(Task, "finished")
+        assert task.status == task.stage == "completed"
+        assert task.result == "Final answer" and task.current_action == "Completed"
+
+
 async def test_replaying_handlers_does_not_duplicate_memory_or_usage(jarvis_env, monkeypatch):
     monkeypatch.setattr("app.trajectories.store.save_trajectory", lambda row: row)
     monkeypatch.setattr("app.trajectories.consumer.enqueue_trajectory", lambda row: None)
@@ -337,6 +376,37 @@ def test_model_wall_time_is_accounted_without_provider_timings():
     assert metrics.model_calls == 1 and metrics.model_ms == 1234
     metrics.note_model({"prompt_ms": 20, "predicted_ms": 30})
     assert metrics.model_ms == 1284
+
+
+async def test_failed_model_request_time_is_not_lost():
+    metrics = LiveTaskMetrics()
+    async def fail():
+        await asyncio.sleep(0.01)
+        raise RuntimeError("failed generation")
+    with pytest.raises(RuntimeError):
+        await timed_model_request(fail(), metrics=metrics, timeout=1)
+    assert metrics.model_calls == 1 and metrics.model_ms > 0
+
+
+async def test_timed_out_model_request_time_is_counted():
+    metrics = LiveTaskMetrics()
+    with pytest.raises(TimeoutError):
+        await timed_model_request(asyncio.Event().wait(), metrics=metrics, timeout=0.01)
+    assert metrics.model_calls == 1 and metrics.model_ms > 0
+
+
+async def test_successful_model_request_is_counted_once():
+    from app.providers.base import ChatResult
+
+    metrics = LiveTaskMetrics()
+    async def reply():
+        await asyncio.sleep(0.001)
+        return ChatResult(content="Done")
+    result = await timed_model_request(reply(), metrics=metrics, timeout=1)
+    assert metrics.model_calls == 0
+    assert result.timings["provider_wall_ms"] > 0
+    metrics.note_model(result.timings)
+    assert metrics.model_calls == 1 and metrics.model_ms == result.timings["provider_wall_ms"]
 
 
 async def test_durable_result_and_attempt_commit_together_and_replay_once(jarvis_env):

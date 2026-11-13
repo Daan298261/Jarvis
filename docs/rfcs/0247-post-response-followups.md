@@ -22,6 +22,7 @@ Persist optional follow-up jobs atomically with task completion. Publish the com
 - Explicit memory-write requests still require a successful write before confirmation.
 - Durable crash/replay and lease tests continue to pass if transactions change.
 - Ollama calls without provider timing metadata produce nonzero model duration.
+- Failed and timed-out model attempts contribute to elapsed model time. Nonterminal progress writes preserve terminal-state guards without pre-reading the task.
 - Focused tests and available broader pytest checks run; record limitations.
 
 ## Likely files

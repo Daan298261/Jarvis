@@ -19,7 +19,7 @@ log = logging.getLogger("jarvis.agent.loop")
 from openai import APIConnectionError, APIStatusError
 
 from ..config import AppSettings, load_settings
-from sqlalchemy import func, select, update
+from sqlalchemy import case, func, select, update
 
 from ..db.models import Checkpoint, Task, ToolCallRecord, utcnow
 from ..db.session import SessionLocal
@@ -65,7 +65,7 @@ from .compaction import (
     SUMMARY_MARKER,
 )
 from .context_policy import initial_context_size, next_context_size, profile_cap
-from .metrics import LiveTaskMetrics
+from .metrics import LiveTaskMetrics, timed_model_request
 from .model_policy import select_context_size, task_needs_vision
 from .coding_workers import (
     complete_coding_route,
@@ -754,27 +754,26 @@ class AgentRuntime:
                       post_response_id: str = "", **fields: Any) -> None:
         incoming_status = fields.get("status")
         async with SessionLocal() as session:
-            task = await session.get(Task, task_id)
-            if not task:
-                return
-            session.expire(task)
-            await session.refresh(task)
-            if task.status in _TERMINAL_TASK_STATUSES and incoming_status not in _TERMINAL_TASK_STATUSES:
-                return
             if incoming_status not in _TERMINAL_TASK_STATUSES:
                 values = dict(fields)
                 values["updated_at"] = utcnow()
-                if incoming_status == "running" and not task.started_at:
-                    values["started_at"] = utcnow()
+                if incoming_status == "running":
+                    values["started_at"] = case(
+                        (Task.started_at.is_(None), utcnow()),
+                        else_=values.get("started_at", Task.started_at),
+                    )
+                # The conditional write is the concurrency guard. A fresh
+                # session does not need two preceding reads of the same row.
                 await session.execute(
-                    update(Task)
-                    .where(
+                    update(Task).where(
                         Task.id == task_id,
                         Task.status.in_(("queued", "running", "waiting")),
-                    )
-                    .values(**values)
+                    ).values(**values)
                 )
                 await session.commit()
+                return
+            task = await session.get(Task, task_id)
+            if not task:
                 return
             needs_followups = incoming_status == "completed" and task.status != "completed" and defer_followups
             for key, value in fields.items():
@@ -3102,8 +3101,7 @@ class AgentRuntime:
                     turn_max_tokens = 400 if force_final else 1024
 
                     async def _model_turn_inner() -> ChatResult:
-                        provider_started = time.perf_counter()
-                        chat = await asyncio.wait_for(
+                        return await timed_model_request(
                             MANAGER.chat(
                                 messages,
                                 tools=turn_tools,
@@ -3116,10 +3114,8 @@ class AgentRuntime:
                                 working_state_block=working.as_prompt_block(),
                             ),
                             timeout=90 if force_final else 180,
+                            metrics=metrics,
                         )
-                        chat.timings = dict(chat.timings or {})
-                        chat.timings["provider_wall_ms"] = (time.perf_counter() - provider_started) * 1000
-                        return chat
 
                     async def _model_turn() -> ChatResult:
                         nonlocal model_turn_index
