@@ -31,6 +31,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -84,6 +85,8 @@ class DownloadedContentController(
 /** More → Downloaded content: one entry point showing the total, opening the full page. */
 @Composable
 fun DownloadedContentSection(model: CompanionModel, offGrid: OffGridViewModel = viewModel()) {
+    val state by model.state.collectAsStateWithLifecycle()
+    val transfers = state.modelDownloads.values.filter { it.stage != ModelDownloadStage.READY }
     val controller = remember(model, offGrid) {
         DownloadedContentController(
             DownloadedContentManager.forManagers(model.packManager, model.voicePackManager, offGrid.manager),
@@ -97,6 +100,10 @@ fun DownloadedContentSection(model: CompanionModel, offGrid: OffGridViewModel = 
     var open by remember { mutableStateOf(false) }
     LaunchedEffect(controller) { controller.reload() }
     Text("Downloaded content", fontSize = 20.sp, modifier = Modifier.padding(top = 18.dp))
+    transfers.forEach { transfer ->
+        Text(transfer.label, style = MaterialTheme.typography.titleSmall)
+        ModelTransferFeedback(transfer, { model.cancelModelDownload(transfer.packId) }, { model.downloadModelPack(transfer.packId) })
+    }
     Card(Modifier.fillMaxWidth()) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -118,7 +125,8 @@ fun DownloadedContentSection(model: CompanionModel, offGrid: OffGridViewModel = 
         Dialog(onDismissRequest = { open = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
             Surface(Modifier.fillMaxSize()) {
                 DownloadedContentPage(controller.inventory, controller.busyKey, controller.message,
-                    onUpdate = controller::update, onDelete = controller::delete, onClose = { open = false })
+                    onUpdate = controller::update, onDelete = controller::delete, onClose = { open = false },
+                    modelDownloads = transfers, onCancelModel = model::cancelModelDownload, onResumeModel = { model.downloadModelPack(it) })
             }
         }
     }
@@ -133,6 +141,9 @@ fun DownloadedContentPage(
     onUpdate: (DownloadedEntry) -> Unit,
     onDelete: (DownloadedEntry) -> Unit,
     onClose: () -> Unit,
+    modelDownloads: List<ModelDownloadState> = emptyList(),
+    onCancelModel: (String) -> Unit = {},
+    onResumeModel: (String) -> Unit = {},
 ) {
     var confirmDelete by remember { mutableStateOf<DownloadedEntry?>(null) }
     var confirmUpdate by remember { mutableStateOf<DownloadedEntry?>(null) }
@@ -150,6 +161,10 @@ fun DownloadedContentPage(
         message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         inventory.errors.forEach { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
         LazyColumn(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            items(modelDownloads, key = { "transfer-${it.packId}" }) { transfer ->
+                Text(transfer.label, style = MaterialTheme.typography.titleSmall)
+                ModelTransferFeedback(transfer, { onCancelModel(transfer.packId) }, { onResumeModel(transfer.packId) })
+            }
             ContentKind.entries.forEach { kind ->
                 val rows = inventory.entries.filter { it.kind == kind }
                 item(key = "h-${kind.name}") {
