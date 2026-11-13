@@ -40,6 +40,7 @@ from .vault_memory import VaultMemoryTool
 from .intelligence import IntelligenceTool
 from .blackgrid_studio import BlackGridStudioTool
 from .dcc_tools import BlenderTool, FreecadTool, OpenScadTool
+from .self_development import SelfDevelopmentTool
 
 
 class ToolRegistry:
@@ -93,6 +94,7 @@ class ToolRegistry:
             ChatProjectsTool(),
             VaultMemoryTool(),
             IntelligenceTool(),
+            SelfDevelopmentTool(),
             BlenderTool(getter),
             OpenScadTool(getter),
             FreecadTool(getter),
@@ -193,6 +195,9 @@ class ToolRegistry:
                         )
                     elif name == "read_ingress":
                         result = await tool.execute(**arguments, _task_id=task_id)
+                    elif name == "self_development":
+                        # Away Mode / owner reorder verify the owner's own message in this task.
+                        result = await tool.execute(**arguments, _task_id=task_id or self._context.get("task_id"))
                     else:
                         result = await tool.execute(**arguments)
         except Exception as exc:
