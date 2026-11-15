@@ -292,3 +292,26 @@ async def test_ollama_probe_reads_each_loaded_models_context_from_api_ps(monkeyp
     result = await backends.probe_remote_server("127.0.0.1", 11434, retry=False)
     assert result["ok"]
     assert result["loaded_model_contexts"] == {"front-model": 2048, "owner-model": 4096}
+
+
+async def test_ollama_probe_logs_and_reports_an_api_ps_failure(monkeypatch, caplog):
+    """A failed /api/ps read is logged and reported, so the fallback to the generic n_ctx is visible."""
+    import logging
+    from app.inference import backends
+
+    def handler(request):
+        if request.url.path == "/v1/models":
+            return httpx.Response(200, json={"data": [{"id": "owner-model"}]})
+        if request.url.path == "/api/ps":
+            return httpx.Response(500, text="boom")
+        return httpx.Response(404, json={})
+
+    client_type = httpx.AsyncClient
+    monkeypatch.setattr(backends.httpx, "AsyncClient",
+                        lambda **kw: client_type(transport=httpx.MockTransport(handler), **kw))
+    caplog.set_level(logging.DEBUG, logger="jarvis")
+    result = await backends.probe_remote_server("127.0.0.1", 11434, retry=False)
+    assert result["ok"]
+    assert result["loaded_model_contexts"] == {}
+    assert "/api/ps" in result["loaded_model_contexts_error"] and "500" in result["loaded_model_contexts_error"]
+    assert any("/api/ps" in record.getMessage() for record in caplog.records)

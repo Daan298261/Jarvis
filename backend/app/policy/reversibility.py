@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
@@ -181,12 +182,15 @@ _WEB_FETCH_OBSERVE = frozenset({"", "get", "fetch", "head", "read", "retrieve"})
 _OFFICE_OBSERVE = frozenset({"read", "info", "list", "status", "stat"})
 _OFFICE_MUTATE = frozenset({"create", "append", "save", "save_as", "write", "edit", "delete"})
 _MOBILE_OBSERVE = frozenset({"", "devices", "list", "status", "read"})
-# MCP tools count as reads only by the server's own annotation (readOnlyHint=true, no destructiveHint)
-# or by an exact (server, tool) pair here; never by words in the name, which the server controls.
-# Everything else fails closed as an external state change (ApprovalGrant, Laya veto).
+# MCP tools count as reads only by an identity-pinned allowlist entry: the tool must come from a server the
+# backend registered (uuid id from api/mcp.add_mcp) that launches this exact image digest with `docker run`.
+# Never by words in the name, the name the owner typed, or the server's own readOnlyHint (an unverified
+# claim the server can change on any refresh). Everything else fails closed as an external state change
+# (ApprovalGrant, Laya veto); a destructiveHint gates even an allowlisted tool.
 MCP_READ_ONLY_TOOLS = frozenset(
     {
-        ("docker_catalog", "get_current_time"),  # pinned Docker MCP Time server (docs/mcp-tool-path.md)
+        # Docker MCP Time server pinned in docs/mcp-tool-path.md
+        ("mcp/time@sha256:9c46a918633fb474bf8035e3ee90ebac6bcf2b18ccb00679ac4c179cba0ebfcf", "get_current_time"),
     }
 )
 
@@ -247,6 +251,36 @@ def _target_from_args(arguments: dict[str, Any]) -> str:
     return ""
 
 
+# Vault files that hold keys or secrets by name: always gated, whatever the action.
+_VAULT_CREDENTIAL_NAME = re.compile(
+    r"(?i)^(?:api[-_]?key.*|id_[a-z0-9_]+.*|.*\.pem|\.env.*|.*\.key|.*password.*|.*passwd.*)$"
+)
+
+
+def _vault_path_is_credential(rel_path: str) -> bool:
+    parts = [part for part in rel_path.replace("\\", "/").split("/") if part]
+    if any(part.lower() == "secrets" for part in parts[:-1]):
+        return True
+    return bool(parts) and bool(_VAULT_CREDENTIAL_NAME.match(parts[-1]))
+
+
+def _vault_path_is_ordinary_note(rel_path: str) -> bool:
+    """An ungated vault read covers only an ordinary Markdown note inside the bound vault: relative, no
+    `..`, not a credential file, and still inside the vault once symlinks are followed."""
+    from pathlib import PurePosixPath, PureWindowsPath
+
+    from ..memory.obsidian_vault import inside_vault, vault_root
+
+    text = rel_path.replace("\\", "/")
+    if not text or PurePosixPath(text).is_absolute() or PureWindowsPath(rel_path).is_absolute() or PureWindowsPath(rel_path).drive:
+        return False
+    parts = text.split("/")
+    if ".." in parts or not parts[-1].lower().endswith((".md", ".markdown")) or _vault_path_is_credential(text):
+        return False
+    root = vault_root()
+    return root is not None and inside_vault(root, root / text)
+
+
 def _args_suggest_credential(arguments: dict[str, Any]) -> bool:
     blob = " ".join(f"{k}={v}" for k, v in arguments.items()).lower()
     return any(hint in blob for hint in _CREDENTIAL_HINTS)
@@ -281,11 +315,12 @@ def resolve_action_effect(
         )
     command = str(args.get("command") or "") if args else ""
     destructive = is_destructive_operation(name, args, command or None)
-    credential = _args_suggest_credential(args) or name in {"vault_memory"} and act in {
-        "reveal",
-        "export_secret",
-        "set_secret",
-    }
+    vault_rel = str(args.get("rel_path") or "").strip() if name == "vault_memory" else ""
+    credential = (
+        _args_suggest_credential(args)
+        or (name == "vault_memory" and act in {"reveal", "export_secret", "set_secret"})
+        or (bool(vault_rel) and _vault_path_is_credential(vault_rel))
+    )
     financial = _args_suggest_financial(args)
     external = name in _EXTERNAL_TOOLS or name.startswith("mcp_")
 
@@ -515,7 +550,11 @@ def resolve_action_effect(
         )
 
     # Ordinary vault lookups skip approval; credential-bearing ones were gated just above.
-    if name == "vault_memory" and act in {"search", "read", "resolve", "neighborhood", "follow"}:
+    if (
+        name == "vault_memory"
+        and act in {"search", "read", "resolve", "neighborhood", "follow"}
+        and (not vault_rel or _vault_path_is_ordinary_note(vault_rel))
+    ):
         return ActionEffectMeta(
             tool_name=name,
             action=act,

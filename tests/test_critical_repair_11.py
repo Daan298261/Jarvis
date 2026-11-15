@@ -84,13 +84,21 @@ def test_item1_observations_auto_permit(monkeypatch, tool, action, arguments):
 
 
 @pytest.mark.parametrize("remote", ["list_resources", "server_status"])
-def test_item1_mcp_reads_auto_permit_only_when_the_server_marks_them_read_only(monkeypatch, connected_mcp, remote):
-    """#692 review B1: an MCP tool is a read by its readOnlyHint annotation, never by its name."""
+def test_item1_mcp_reads_auto_permit_only_for_an_identity_pinned_allowlist_entry(monkeypatch, connected_mcp_server, remote):
+    """#692 review B1/R3: an MCP tool is a read only by an identity-pinned allowlist entry; a server's own
+    readOnlyHint is not enough."""
     monkeypatch.setattr("app.policy.reversibility_gate.authorize", _allow_auth)
-    key = connected_mcp("docs", remote, {"readOnlyHint": True})
-    decision = evaluate_side_effect("mcp_call", arguments={"mcp_tool": key}, park_if_needed=True)
+    monkeypatch.setattr("app.policy.reversibility.MCP_READ_ONLY_TOOLS", frozenset({("mcp/docs@sha256:" + "0" * 64, remote)}))
+    server = {"id": "6f0c2b8e-2a43-4e4b-9b7e-3c1d5a9e0f21", "name": "docs", "transport": "stdio", "command": "docker",
+              "args": ["run", "-i", "--rm", "mcp/docs@sha256:" + "0" * 64], "enabled": True}
+    pinned = connected_mcp_server(server, remote)
+    decision = evaluate_side_effect("mcp_call", arguments={"mcp_tool": pinned}, park_if_needed=True)
     assert decision.allowed is True and decision.requires_approval is False
     assert decision.effect.side_effecting is False and decision.effect.high_consequence is False
+    hinted = connected_mcp_server({**server, "id": "6f0c2b8e-2a43-4e4b-9b7e-3c1d5a9e0f22", "name": "docs_hint",
+                                   "args": ["run", "-i", "--rm", "mcp/other"]}, remote, {"readOnlyHint": True})
+    gated = evaluate_side_effect("mcp_call", arguments={"mcp_tool": hinted}, park_if_needed=True)
+    assert gated.requires_approval is True or gated.allowed is False
 
 
 @pytest.mark.parametrize(

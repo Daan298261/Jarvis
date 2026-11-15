@@ -389,11 +389,11 @@ def test_small_model_keeps_requested_connected_function():
         assert "mcp_docker_catalog_get_current_time" in {item["function"]["name"] for item in chosen}
 
 
-def test_direct_mcp_read_has_proxy_policy_parity(connected_mcp):
+def test_direct_mcp_read_has_proxy_policy_parity(connected_mcp_server):
     from app.policy.reversibility import resolve_action_effect
-    connected_mcp("docker_catalog", "get_current_time")
-    direct = resolve_action_effect("mcp_docker_catalog_get_current_time", arguments={"timezone": "UTC"})
-    proxy = resolve_action_effect("mcp_call", arguments={"mcp_tool": "mcp_docker_catalog_get_current_time", "arguments": {"timezone": "UTC"}})
+    key = connected_mcp_server(_pinned_time_server(), "get_current_time")
+    direct = resolve_action_effect(key, arguments={"timezone": "UTC"})
+    proxy = resolve_action_effect("mcp_call", arguments={"mcp_tool": key, "arguments": {"timezone": "UTC"}})
     assert not direct.side_effecting
     assert direct.reversibility == proxy.reversibility
     assert resolve_action_effect("mcp_service_delete_record", arguments={"id": "example"}).side_effecting
@@ -559,18 +559,18 @@ def test_connected_unannotated_mcp_tools_fail_closed_direct_and_proxy(connected_
         assert effect.side_effecting and effect.external_side_effect, (name, effect.recovery_summary)
 
 
-def test_mcp_read_only_needs_the_servers_annotation_or_an_exact_allowlisted_pair(connected_mcp):
-    read = connected_mcp("notes", "lookup_page", {"readOnlyHint": True})
+def test_mcp_read_only_needs_an_identity_pinned_allowlist_entry(connected_mcp, connected_mcp_server):
+    """Server annotations never make a tool a read (CoS R3); only the pinned (server, image, tool) entry does."""
+    hinted = connected_mcp("notes", "lookup_page", {"readOnlyHint": True})
     flagged = connected_mcp("notes", "purge_pages", {"readOnlyHint": True, "destructiveHint": True})
     explicit_write = connected_mcp("notes", "list_and_archive", {"readOnlyHint": False})
-    allowlisted = connected_mcp("docker_catalog", "get_current_time")
-    impostor = connected_mcp("other_server", "get_current_time")
-    for key, side_effecting in ((read, False), (flagged, True), (explicit_write, True), (allowlisted, False),
-                                (impostor, True)):
+    named_like_the_old_entry = connected_mcp("docker_catalog", "get_current_time")
+    pinned = connected_mcp_server(_pinned_time_server(), "get_current_time")
+    for key, side_effecting in ((hinted, True), (flagged, True), (explicit_write, True),
+                                (named_like_the_old_entry, True), (pinned, False)):
         assert resolve_action_effect(key, arguments={}).side_effecting is side_effecting, key
         proxied = resolve_action_effect("mcp_call", arguments={"mcp_tool": key, "arguments": {}})
         assert proxied.side_effecting is side_effecting, key
-    assert resolve_action_effect("mcp_docker_catalog_get_current_time", arguments={}).side_effecting is False
     assert resolve_action_effect("mcp_call", arguments={"mcp_tool": "mcp_not_connected_get_x"}).side_effecting
 
 
@@ -592,10 +592,10 @@ def test_misclassified_mcp_write_is_not_auto_allowed_past_the_veto(monkeypatch, 
     assert not proxied.allowed, proxied.reason
 
 
-def test_laya_veto_still_skips_annotated_mcp_reads(monkeypatch, connected_mcp):
+def test_laya_veto_still_skips_pinned_mcp_reads(monkeypatch, connected_mcp, connected_mcp_server):
     from app.policy.action_gate import gate_side_effect
     _gate_allows_and_laya_cancels(monkeypatch)
-    read = connected_mcp("notes", "lookup_page", {"readOnlyHint": True})
+    read = connected_mcp_server(_pinned_time_server(), "get_current_time")
     write = connected_mcp("notes", "reply_to_thread")
     assert gate_side_effect(read, arguments={}, park_if_needed=False).allowed
     assert not gate_side_effect(write, arguments={}, park_if_needed=False).allowed
@@ -629,5 +629,163 @@ def test_conversation_about_tools_is_not_routed_to_agent_tools(prompt):
     "Can you call the docker get_current_time tool?",
 ])
 def test_explicit_instruction_to_use_a_named_tool_or_mcp_uses_agent_tools(prompt):
+    from app.agent.planning import requests_agent_tools
+    assert requests_agent_tools(prompt)
+
+
+# --- #692 re-review (e474a2d1): vault containment, pinned allowlist, server hints, question routing ---
+
+import os  # noqa: E402
+
+PINNED_TIME_IMAGE = "mcp/time@sha256:9c46a918633fb474bf8035e3ee90ebac6bcf2b18ccb00679ac4c179cba0ebfcf"
+
+
+def _pinned_time_server(**overrides):
+    return {"id": "0b9f3c52-6a1e-4d55-9c1f-1d2f8f3e7a10", "name": "time", "transport": "stdio", "command": "docker",
+            "args": ["run", "-i", "--rm", PINNED_TIME_IMAGE], "enabled": True, **overrides}
+
+
+@pytest.fixture
+def vault(tmp_path, monkeypatch):
+    from app.memory.obsidian_vault import bind_vault, reset_vault_store, stop_watch, unbind_vault
+    meta, root, outside = tmp_path / "meta", tmp_path / "vault", tmp_path / "outside"
+    for folder in (meta, root, outside):
+        folder.mkdir()
+    monkeypatch.setattr("app.memory.obsidian_vault.data_dir", lambda: meta)
+    reset_vault_store()
+    bind_vault(str(root), init_layout=True)
+    stop_watch()
+    (outside / "id_ed25519").write_text("-----BEGIN OPENSSH PRIVATE KEY----- OUTSIDE-SECRET-91\n")
+    (root / "Daily").mkdir(exist_ok=True)
+    (root / "Daily" / "plan.md").write_text("# Plan\nOrdinary note body.\n")
+    os.symlink(outside / "id_ed25519", root / "Daily" / "today.md")
+    yield root, outside
+    unbind_vault()
+    reset_vault_store()
+
+
+def _gated(effect):
+    return effect.side_effecting or effect.credential_effect or effect.high_consequence
+
+
+@pytest.mark.parametrize("rel", [
+    "Secrets/API_TOKEN.md", "notes/Private/secrets/bank.md", "keys/api-key.md", "../outside/id_ed25519",
+    "Daily/today.md", "ssh/id_ed25519", "ssh/id_rsa.md", "certs/server.pem", ".env", "Projects/.env.local",
+    "Daily/plan.txt",
+])
+def test_vault_reads_outside_ordinary_notes_are_gated(vault, rel):
+    effect = resolve_action_effect("vault_memory", arguments={"action": "read", "rel_path": rel})
+    assert _gated(effect), (rel, effect.recovery_summary)
+
+
+def test_vault_absolute_path_is_gated(vault):
+    _, outside = vault
+    effect = resolve_action_effect("vault_memory", arguments={"action": "read", "rel_path": str(outside / "id_ed25519")})
+    assert _gated(effect), effect.recovery_summary
+
+
+def test_an_ordinary_vault_note_read_stays_ungated(vault):
+    effect = resolve_action_effect("vault_memory", arguments={"action": "read", "rel_path": "Daily/plan.md"})
+    assert not _gated(effect), effect.recovery_summary
+
+
+@pytest.mark.parametrize("which", ["dotdot", "symlink", "absolute"])
+async def test_a_vault_read_never_returns_a_file_outside_the_vault(vault, which):
+    from app.tools.vault_memory import VaultMemoryTool
+    _, outside = vault
+    rel = {"dotdot": "../outside/id_ed25519", "symlink": "Daily/today.md", "absolute": str(outside / "id_ed25519")}[which]
+    effect = resolve_action_effect("vault_memory", arguments={"action": "read", "rel_path": rel})
+    result = await VaultMemoryTool().execute(action="read", rel_path=rel)
+    assert _gated(effect), which
+    assert "OUTSIDE-SECRET-91" not in (result.output or ""), (which, result.output[:80])
+    assert not result.success
+
+
+def test_the_vault_index_skips_notes_that_link_outside_the_vault(vault):
+    from app.memory.obsidian_vault import index_all_vault, index_file, search_vault
+    index_all_vault()
+    assert index_file("Daily/today.md") is None
+    assert all("OUTSIDE-SECRET-91" not in hit.excerpt for hit in search_vault("OPENSSH PRIVATE KEY"))
+
+
+def test_allowlist_is_bound_to_the_pinned_server_not_its_display_name(connected_mcp_server):
+    impostor = connected_mcp_server({"id": "a1", "name": "docker_catalog", "transport": "stdio", "command": "node",
+                                     "args": ["./some-community-server.js"], "enabled": True}, "get_current_time")
+    gateway = connected_mcp_server({"id": "a2", "name": "docker_gateway", "transport": "stdio", "command": "docker",
+                                    "args": ["mcp", "gateway", "run", "--profile", "anzu-catalog"], "enabled": True},
+                                   "get_current_time")
+    unpinned = connected_mcp_server(_pinned_time_server(id="a3", name="time_latest", args=["run", "-i", "--rm", "mcp/time"]),
+                                    "get_current_time")
+    no_backend_id = connected_mcp_server(_pinned_time_server(id="", name="time_noid"), "get_current_time")
+    for key in (impostor, gateway, unpinned, no_backend_id):
+        for name, args in ((key, {}), ("mcp_call", {"mcp_tool": key, "arguments": {}})):
+            assert resolve_action_effect(name, arguments=args).side_effecting, key
+    pinned = connected_mcp_server(_pinned_time_server(), "get_current_time")
+    other_tool = connected_mcp_server(_pinned_time_server(id="0b9f3c52-6a1e-4d55-9c1f-1d2f8f3e7a11", name="time2"), "convert_time_and_reset")
+    assert not resolve_action_effect(pinned, arguments={}).side_effecting
+    assert not resolve_action_effect("mcp_call", arguments={"mcp_tool": pinned, "arguments": {}}).side_effecting
+    assert resolve_action_effect(other_tool, arguments={}).side_effecting
+
+
+def test_add_mcp_rejects_a_duplicate_server_name(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.config import AppSettings
+    from app.main import app
+    settings = AppSettings()
+    settings.mcp_servers = [_pinned_time_server(name="docker_catalog")]
+    monkeypatch.setattr("app.api.mcp.load_settings", lambda: settings)
+    saved = []
+    monkeypatch.setattr("app.api.mcp.save_settings", lambda value: saved.append(value))
+
+    async def no_refresh(_servers):
+        return {}
+
+    monkeypatch.setattr("app.api.mcp.MCP.refresh", no_refresh)
+    client = TestClient(app)
+    for name in ("docker_catalog", " Docker_Catalog "):
+        response = client.post("/api/mcp", json={"name": name, "command": "node", "args": ["evil.js"]})
+        assert response.status_code == 409, response.text
+        assert "already" in response.json()["detail"].lower()
+    assert not saved and len(settings.mcp_servers) == 1
+
+
+@pytest.mark.parametrize("annotations", [{"readOnlyHint": True}, {"readOnlyHint": True, "destructiveHint": False}])
+def test_a_servers_own_read_only_hint_does_not_skip_approval_or_the_veto(monkeypatch, connected_mcp, annotations):
+    """CoS (R3): readOnlyHint is the server's unverified claim; only identity-pinned allowlist entries skip."""
+    from app.policy.action_gate import gate_side_effect
+    _gate_allows_and_laya_cancels(monkeypatch)
+    key = connected_mcp("community_notes", "delete_all_pages", annotations)
+    assert resolve_action_effect(key, arguments={}).side_effecting
+    assert not gate_side_effect(key, arguments={}, park_if_needed=False).allowed
+    assert not gate_side_effect("mcp_call", arguments={"mcp_tool": key, "arguments": {}}, park_if_needed=False).allowed
+
+
+def test_a_destructive_hint_gates_even_a_pinned_allowlisted_tool(connected_mcp_server):
+    key = connected_mcp_server(_pinned_time_server(), "get_current_time", {"destructiveHint": True})
+    assert resolve_action_effect(key, arguments={}).side_effecting
+
+
+@pytest.mark.parametrize("prompt", [
+    "Would you use MCP for a hobby project?",
+    "Can you use a hammer as a tool?",
+    "Use the right tool for the job: is that good advice?",
+    "Could you call that a tool, or is it more of a framework?",
+    "Would you read the Obsidian docs first, or just start?",
+])
+def test_yes_no_questions_about_tools_do_not_force_tools(prompt):
+    from app.agent.planning import requests_agent_tools
+    assert not requests_agent_tools(prompt)
+
+
+@pytest.mark.parametrize("prompt", [
+    "Use the native Obsidian vault_memory tool to search my vault.",
+    "Please call the connected Docker MCP get_current_time tool.",
+    "Search my bound Obsidian vault for the launch checklist.",
+    "Jarvis, use Docker MCP to get the current time.",
+    "Run the nmap tool against my router.",
+    "Can you use the Docker MCP get_current_time tool?",
+    "Use REA to inspect C:/samples/example.exe.",
+])
+def test_legitimate_tool_requests_still_route_to_tools(prompt):
     from app.agent.planning import requests_agent_tools
     assert requests_agent_tools(prompt)

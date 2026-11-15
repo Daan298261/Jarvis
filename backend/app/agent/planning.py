@@ -449,7 +449,7 @@ _TOOL_REQUEST = re.compile(
     r"(?i)\b("
     r"run\s+(?:the\s+)?(?:(?:[\w.-]+\s+){0,4})?tool\b|"
     r"run\s+(?:the\s+)?(?:command|harness)\b|"
-    r"use\s+(?:the\s+)?[\w.-]+\s+tool\b|"
+    r"use\s+(?!(?:the\s+)?right\s+tool\b)(?:the\s+)?[\w.-]+\s+tool\b|"
     r"execute\s+(?:the\s+)?(?:(?:[\w.-]+\s+){0,2})?(?:tool|command)\b|"
     r"call\s+(?:the\s+)?[\w.-]+\s+tool\b|"
     r"invoke\s+(?:the\s+)?[\w.-]+\s+tool\b"
@@ -457,15 +457,17 @@ _TOOL_REQUEST = re.compile(
 )
 
 # Asking the agent to use a named tool, MCP or the Obsidian vault counts only as an instruction: at the
-# start of a sentence, optionally after "please" / "can you". "Should I use MCP ...?" stays conversation.
+# start of a sentence, optionally after "please" / "Jarvis,". Questions ("Can you use a hammer as a tool?",
+# "Would you use MCP ...?") stay conversation. A tool named by its identifier (get_current_time,
+# vault_memory) is an explicit request wherever it appears.
 _NAMED_TOOL_INSTRUCTION = re.compile(
-    r"(?i)(?:^|[.!?;\n]\s*)(?:(?:hey\s+)?jarvis[,:]?\s+)?"
-    r"(?:please\s+|(?:can|could|would|will)\s+you\s+(?:please\s+)?)?"
+    r"(?i)(?:^|[.!?;\n]\s*)(?:(?:hey\s+)?jarvis[,:]?\s+)?(?:please\s+)?"
     r"(?:"
-    r"(?:use|call|invoke)\s+(?:the\s+)?(?:[\w.-]+\s+){1,5}tool\b|"
+    r"(?:use|call|invoke)\s+(?!(?:the\s+)?right\s+tool\b)(?:the\s+)?(?:[\w.-]+\s+){1,5}tool\b|"
     r"use\s+(?:the\s+)?(?:docker\s+)?mcp\b|"
     r"(?:search|read|look\s+up)\s+(?:(?:my|the|bound)\s+){1,3}obsidian(?:\s+vault)?\b"
-    r")",
+    r")"
+    r"|\b(?:use|call|invoke)\s+(?:the\s+)?(?:[\w.-]+\s+){0,4}[a-z0-9]+_[\w.-]+\s+tool\b",
 )
 
 

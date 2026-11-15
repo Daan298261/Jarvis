@@ -5,6 +5,7 @@ import inspect
 import logging
 import os
 import re
+import uuid
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from pathlib import Path
@@ -367,17 +368,25 @@ class MCPRuntime:
         return None
 
     def is_read_only(self, tool_key: str, allowlist: frozenset[tuple[str, str]] = frozenset()) -> bool:
-        """True only for a connected tool the server annotates readOnlyHint=true (and not destructiveHint),
-        or whose exact (server name, tool name) pair is allowlisted. Unknown or unannotated tools are not."""
+        """True only for a connected tool whose (pinned image, tool name) pair is allowlisted and whose server
+        is a backend-registered one (uuid id) launching exactly that image with `docker run`. The server's
+        own annotations never make a tool a read; a destructiveHint makes any tool a write."""
         spec = self._lookup(tool_key)
         if not spec:
             return False
-        annotations = spec["tool"].get("annotations") or {}
-        if annotations.get("destructiveHint") is True:
+        if (spec["tool"].get("annotations") or {}).get("destructiveHint") is True:
             return False
-        if annotations.get("readOnlyHint") is True:
-            return True
-        return (str(spec["server"].get("name") or ""), str(spec.get("remote_name") or "")) in allowlist
+        server = spec["server"]
+        try:
+            uuid.UUID(str(server.get("id") or ""))
+        except ValueError:
+            return False
+        command = Path(str(server.get("command") or "")).name.lower().removesuffix(".exe")
+        args = [str(arg) for arg in server.get("args") or []]
+        if str(server.get("transport") or "stdio") != "stdio" or command != "docker" or args[:1] != ["run"]:
+            return False
+        remote = str(spec.get("remote_name") or "")
+        return any((image, remote) in allowlist for image in args[1:])
 
     async def call(self, tool_key: str, arguments: dict[str, Any]) -> ToolResult:
         spec = self._lookup(tool_key)
