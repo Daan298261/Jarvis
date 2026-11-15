@@ -350,8 +350,9 @@ async def test_a_model_anzu_pinned_with_keep_warm_is_not_an_owner_pin():
     from app.inference import keep_alive
 
     LOADED.record(OLLAMA, MODEL)  # ANZU loaded it; Keep warm ON made /api/ps show it pinned
+    assert keep_alive.ollama_body(MODEL, {"prompt": ""}, settings=settings_with(True))["keep_alive"] == "-1"
     keep_alive.note_ollama_ps(11434, [{"name": MODEL, "expires_at": PINNED_AT}])
-    assert not keep_alive.owner_pinned(MODEL)
+    assert not keep_alive.owner_pinned(MODEL, port=11434)
     assert request_extras("http://127.0.0.1:11434/v1", MODEL) == {"keep_alive": "300s"}  # Keep warm now off
 
 
@@ -382,3 +383,97 @@ async def test_the_v1_touch_restates_an_owner_pin_and_the_idle_timer_never_relea
     for entry in LOADED.entries():
         entry.last_use -= 10_000
     assert (await timer.tick())["reason"] == "active" and released == []
+
+
+
+# --- D1 B1 / CoS ruling: ANZU's own "-1" is never an owner pin; the record of it survives a core restart ----------
+
+OLLAMA_BASE = "http://127.0.0.1:11434/v1"
+
+
+def core_restart(monkeypatch) -> None:
+    """What a core restart loses: every in-memory record (the ledger, owner pins, any cache). Files survive."""
+    from app.inference import keep_alive
+
+    LOADED.clear()
+    keep_alive.clear_owner_pins()
+    monkeypatch.setattr(keep_alive, "_ANZU_PINS", None, raising=False)
+
+
+async def idle_release(settings) -> list:
+    released: list = []
+
+    async def release(source, targets=None):
+        released.append([model for _backend, model in targets or []])
+        return {"ok": True, "refused": False, "results": []}
+    timer = IdleUnload(registry=LOADED, settings=lambda: settings, release=release,
+                       busy=lambda: False, leased=lambda: False)
+    for entry in LOADED.entries():
+        entry.last_use -= 10_000
+    await timer.tick()
+    return released
+
+
+async def test_keep_warm_on_then_off_with_an_attached_model_goes_back_to_300s():
+    """Keep warm ON pins every Ollama model ANZU serves, attached or not; /api/ps then shows ANZU's own "-1"."""
+    from app.inference import keep_alive
+
+    on, off = settings_with(True), settings_with(False)
+    assert request_extras(OLLAMA_BASE, MODEL, on) == {"keep_alive": "-1"}  # attached: not in LOADED
+    keep_alive.note_ollama_ps(11434, [{"name": MODEL, "expires_at": PINNED_AT}])
+    assert request_extras(OLLAMA_BASE, MODEL, off) == {"keep_alive": "300s"}, "ANZU's own pin is not the owner's"
+    keep_alive.note_ollama_ps(11434, [{"name": MODEL, "expires_at": NORMAL_AT}])  # Ollama now holds ANZU's 300s
+    assert request_extras(OLLAMA_BASE, MODEL, off) == {"keep_alive": "300s"}
+    assert not keep_alive.owner_pinned(MODEL, port=11434)
+
+
+async def test_anzus_pin_record_survives_a_core_restart_and_keep_warm_off_goes_back_to_300s(monkeypatch, tmp_path):
+    from app.inference import keep_alive
+
+    on, off = settings_with(True), settings_with(False)
+    LOADED.record(OLLAMA, MODEL)  # an explicit Load with Keep warm ON
+    assert keep_alive.ollama_body(MODEL, {"prompt": ""}, settings=on)["keep_alive"] == "-1"
+    saved = json.loads((tmp_path / "ollama_keep_alive_pins.json").read_text(encoding="utf-8"))
+    assert saved == {"pins": [[11434, MODEL]]}, "ANZU's own pin is on disk next to settings.json"
+    core_restart(monkeypatch)  # the ledger is gone; Ollama still shows ANZU's pin
+    keep_alive.note_ollama_ps(11434, [{"name": MODEL, "expires_at": PINNED_AT}])  # first discovery scan
+    assert request_extras(OLLAMA_BASE, MODEL, off) == {"keep_alive": "300s"}, "Keep warm OFF after a restart: 300s"
+    assert not keep_alive.owner_pinned(MODEL, port=11434)
+    assert json.loads((tmp_path / "ollama_keep_alive_pins.json").read_text(encoding="utf-8")) == {"pins": []}
+
+
+async def test_an_explicit_load_after_a_restart_brings_back_the_300s_idle_unload(monkeypatch):
+    from app.inference import keep_alive
+
+    on, off = settings_with(True), settings_with(False)
+    assert request_extras(OLLAMA_BASE, MODEL, on) == {"keep_alive": "-1"}
+    core_restart(monkeypatch)
+    keep_alive.note_ollama_ps(11434, [{"name": MODEL, "expires_at": PINNED_AT}])
+    LOADED.record(OLLAMA, MODEL, port=11434)  # the owner's explicit Load, Keep warm now OFF
+    assert keep_alive.ollama_body(MODEL, {"prompt": ""}, settings=off)["keep_alive"] == "300s"
+    assert await idle_release(off) == [[MODEL]], "the idle timer releases it after 300s"
+
+
+async def test_a_pin_on_port_11500_never_leaks_to_the_same_model_on_11434():
+    off = settings_with(False)
+    from app.inference import keep_alive
+
+    keep_alive.note_ollama_ps(11500, [{"name": MODEL, "expires_at": PINNED_AT}])  # the owner's pin, port 11500 only
+    assert request_extras(OLLAMA_BASE, MODEL, off) == {"keep_alive": "300s"}
+    second = settings_with(False, backend="ollama", host="127.0.0.1", port=11500)
+    assert request_extras("http://127.0.0.1:11500/v1", MODEL, second) == {"keep_alive": "-1"}  # still the owner's there
+    LOADED.record(OLLAMA, MODEL, port=11434)
+    assert await idle_release(off) == [[MODEL]]
+
+
+async def test_a_genuine_owner_pin_still_gets_minus_one_after_keep_warm_toggles_and_a_restart(monkeypatch):
+    """CoS owner-pin ruling stays: a pin ANZU never sent is restated, whatever Keep warm says."""
+    from app.inference import keep_alive
+
+    on, off = settings_with(True), settings_with(False)
+    keep_alive.note_ollama_ps(11434, [{"name": "owner-pinned:9b", "expires_at": PINNED_AT}])
+    assert request_extras(OLLAMA_BASE, "owner-pinned:9b", on) == {"keep_alive": "-1"}  # restating the owner's pin
+    assert request_extras(OLLAMA_BASE, "owner-pinned:9b", off) == {"keep_alive": "-1"}
+    core_restart(monkeypatch)
+    keep_alive.note_ollama_ps(11434, [{"name": "owner-pinned:9b", "expires_at": PINNED_AT}])
+    assert request_extras(OLLAMA_BASE, "owner-pinned:9b", off) == {"keep_alive": "-1"}

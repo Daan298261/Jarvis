@@ -7,6 +7,7 @@ Only models ANZU itself loaded (``LoadedModels``) ever receive these values.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -60,10 +61,17 @@ def idle_unload_seconds(settings: AppSettings | None = None) -> int:
     return int((settings or current_settings()).inference.idle_unload_seconds)
 
 
-# Owner pins (CoS ruling): Ollama models the owner pinned (keep_alive -1 / OLLAMA_KEEP_ALIVE=-1) while ANZU had not
-# loaded them, as seen on /api/ps: canonical model -> port. ANZU restates the pin ("-1") on every request instead of
-# resetting it to its idle policy, and never idle-unloads them. Refreshed from each full /api/ps listing.
-_OWNER_PINS: set[tuple[int, str]] = set()  # (port, canonical model)
+# Owner pins (CoS ruling, D1 B1): an Ollama model is the owner's pin only when /api/ps shows it pinned on that port AND
+# ANZU never sent that (port, model) a "-1" itself. ANZU restates an owner pin ("-1") on every request instead of
+# resetting it to its idle policy, and never idle-unloads it.
+#   _PS_PINS   (port, canonical model) seen pinned in the latest /api/ps listing of that port (in memory; rebuilt by
+#              the next scan after a restart).
+#   _ANZU_PINS (port, canonical model) ANZU itself sent "-1" (Keep warm ON). Persisted next to settings.json, so a
+#              core restart, which loses the ledger, never turns ANZU's own pin into an "owner" pin.
+_PS_PINS: set[tuple[int, str]] = set()
+_ANZU_PINS: set[tuple[int, str]] | None = None  # loaded lazily from _anzu_pins_path()
+_ANZU_PINS_FROM: str = ""
+ANZU_PINS_FILE = "ollama_keep_alive_pins.json"
 
 
 def ollama_pinned(expires_at: Any) -> bool:
@@ -73,12 +81,55 @@ def ollama_pinned(expires_at: Any) -> bool:
     return int(expires_at[:4]) - time.gmtime().tm_year >= 5
 
 
-def note_ollama_ps(port: int, models: list[Any]) -> None:
-    """Record owner pins from one complete Ollama ``/api/ps`` listing on ``port``.
+def _anzu_pins_path():
+    return _config.settings_path().parent / ANZU_PINS_FILE
 
-    A pinned model ANZU did not load (not in ``LOADED``) is the owner's pin; it stays one until it leaves
-    ``/api/ps`` or shows a normal expiry. A model ANZU loaded is never an owner pin (Keep warm ON pins it too).
-    """
+
+def _anzu_pins() -> set[tuple[int, str]]:
+    """ANZU's own "-1" record, read once per settings location. An unreadable file reads as empty."""
+    global _ANZU_PINS, _ANZU_PINS_FROM
+    path = _anzu_pins_path()
+    if _ANZU_PINS is None or _ANZU_PINS_FROM != str(path):
+        pins: set[tuple[int, str]] = set()
+        try:
+            for port, name in json.loads(path.read_text(encoding="utf-8")).get("pins", []):
+                pins.add((int(port), canonical(str(name))))
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError, TypeError, AttributeError) as exc:
+            log.warning("Ignoring unreadable %s: %s", path, exc)
+        _ANZU_PINS, _ANZU_PINS_FROM = pins, str(path)
+    return _ANZU_PINS
+
+
+def _save_anzu_pins(pins: set[tuple[int, str]]) -> None:
+    path = _anzu_pins_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp = path.with_suffix(".tmp")
+        temp.write_text(json.dumps({"pins": sorted([port, name] for port, name in pins)}), encoding="utf-8")
+        os.replace(temp, path)
+    except OSError as exc:
+        log.warning("Could not persist ANZU's keep-alive pins to %s: %s", path, exc)
+
+
+def note_anzu_keep_alive(port: int, model: str, value: Any) -> None:
+    """Record what ANZU just sent ``model`` on ``port``: ``"-1"`` adds ANZU's pin; any other value (the idle
+    window or an unload's ``0``) replaces whatever pin the model had, so it is no longer pinned at all."""
+    key, pins = (int(port), canonical(model)), _anzu_pins()
+    if value == OLLAMA_PINNED_KEEP_ALIVE:
+        if key not in pins:
+            pins.add(key)
+            _save_anzu_pins(pins)
+        return
+    _PS_PINS.discard(key)  # Ollama now holds ANZU's value, not a pin
+    if key in pins:
+        pins.discard(key)
+        _save_anzu_pins(pins)
+
+
+def note_ollama_ps(port: int, models: list[Any]) -> None:
+    """Refresh which models one complete Ollama ``/api/ps`` listing on ``port`` shows pinned."""
     port = int(port)
     seen: set[str] = set()
     for item in models:
@@ -88,20 +139,39 @@ def note_ollama_ps(port: int, models: list[Any]) -> None:
         if not name:
             continue
         seen.add(name)
-        if not ollama_pinned(item.get("expires_at")):
-            _OWNER_PINS.discard((port, name))
-        elif (port, name) not in _OWNER_PINS and LOADED.match(OLLAMA, [name]) is None:
-            _OWNER_PINS.add((port, name))
-    _OWNER_PINS.difference_update({(p, n) for p, n in _OWNER_PINS if p == port and n not in seen})
+        if ollama_pinned(item.get("expires_at")):
+            _PS_PINS.add((port, name))
+        else:
+            _PS_PINS.discard((port, name))
+    _PS_PINS.difference_update({(p, n) for p, n in _PS_PINS if p == port and n not in seen})
+    pins = _anzu_pins()  # a model that left /api/ps lost ANZU's pin with it
+    gone = {(p, n) for p, n in pins if p == port and n not in seen}
+    if gone:
+        pins.difference_update(gone)
+        _save_anzu_pins(pins)
 
 
-def owner_pinned(model: str) -> bool:
-    name = canonical(model)
-    return any(n == name for _p, n in _OWNER_PINS)
+def owner_pinned(model: str, *, port: int) -> bool:
+    """Pinned on ``port`` (per /api/ps) by someone other than ANZU."""
+    key = (int(port), canonical(model))
+    return key in _PS_PINS and key not in _anzu_pins()
+
+
+def ollama_entry_port(port: int | None, settings: AppSettings | None = None) -> int:
+    """The Ollama port of a ledger entry: its own (a Model Manager Start), else the configured loopback Ollama."""
+    if port is not None:
+        return int(port)
+    inference = (settings or current_settings()).inference
+    if (inference.backend or "").strip().lower() in OLLAMA_ALIASES and (inference.host or "").lower() in LOOPBACK:
+        return int(inference.port)
+    return 11434
 
 
 def clear_owner_pins() -> None:
-    _OWNER_PINS.clear()
+    """Forget what /api/ps showed (tests, restart). ANZU's own persisted record is untouched."""
+    global _ANZU_PINS
+    _PS_PINS.clear()
+    _ANZU_PINS = None
 
 
 def ollama_keep_alive(settings: AppSettings | None = None) -> str:
@@ -134,9 +204,14 @@ def backend_family(base_url: str, settings: AppSettings | None = None) -> str | 
     return _DEFAULT_PORTS.get(port)
 
 
-def ollama_keep_alive_for(model: str, settings: AppSettings | None = None) -> str:
-    """The policy value for ``model``, except an owner pin, which is restated (``"-1"``), never reset to 300s."""
-    return OLLAMA_PINNED_KEEP_ALIVE if owner_pinned(model) else ollama_keep_alive(settings)
+def ollama_keep_alive_for(model: str, port: int, settings: AppSettings | None = None) -> str:
+    """The value ANZU sends ``model`` on ``port``: an owner pin is restated (``"-1"``), never reset to 300s;
+    otherwise the Keep warm policy, recorded as ANZU's own (so a later "-1" on /api/ps is known to be ANZU's)."""
+    if owner_pinned(model, port=port):
+        return OLLAMA_PINNED_KEEP_ALIVE
+    value = ollama_keep_alive(settings)
+    note_anzu_keep_alive(port, model, value)
+    return value
 
 
 def request_extras(base_url: str, model: str, settings: AppSettings | None = None) -> dict[str, Any]:
@@ -152,7 +227,7 @@ def request_extras(base_url: str, model: str, settings: AppSettings | None = Non
     if family is None or is_denied(model):
         return {}
     if family == OLLAMA:
-        return {"keep_alive": ollama_keep_alive_for(model, settings)}
+        return {"keep_alive": ollama_keep_alive_for(model, int(urlparse(base_url).port), settings)}
     if LOADED.match(family, [model]) is None:
         return {}
     ttl = lmstudio_ttl_seconds(settings, model)
@@ -170,7 +245,7 @@ class DeniedModelError(ValueError):
 
 
 def ollama_body(model: str, body: dict[str, Any] | None = None, *, release: bool = False,
-                settings: AppSettings | None = None) -> dict[str, Any]:
+                settings: AppSettings | None = None, port: int = 11434) -> dict[str, Any]:
     """The one place an Ollama request body gets its ``keep_alive``.
 
     ``"300s"`` (idle window) with Keep warm off, ``"-1"`` with it on, ``0`` for an explicit
@@ -179,7 +254,10 @@ def ollama_body(model: str, body: dict[str, Any] | None = None, *, release: bool
     """
     if is_denied(model):
         raise DeniedModelError(f"{model} is not an ANZU model; ANZU never sends it a request.")
-    return {**(body or {}), "model": model, "keep_alive": 0 if release else ollama_keep_alive_for(model, settings)}
+    if release:
+        note_anzu_keep_alive(port, model, 0)
+        return {**(body or {}), "model": model, "keep_alive": 0}
+    return {**(body or {}), "model": model, "keep_alive": ollama_keep_alive_for(model, port, settings)}
 
 
 async def ollama_request(client: httpx.AsyncClient, host: str, port: int, path: str, model: str,
@@ -187,7 +265,7 @@ async def ollama_request(client: httpx.AsyncClient, host: str, port: int, path: 
                          settings: AppSettings | None = None) -> httpx.Response:
     """POST a native Ollama generate or chat request with the policy keep_alive (the only sender)."""
     address = f"[{host}]" if ":" in host and not host.startswith("[") else host
-    return await client.post(f"http://{address}:{int(port)}{path}", json=ollama_body(model, body, release=release, settings=settings))
+    return await client.post(f"http://{address}:{int(port)}{path}", json=ollama_body(model, body, release=release, settings=settings, port=port))
 
 
 async def touch_ollama_if_resident(base_url: str, model: str, api_key: str = "",
