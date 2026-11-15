@@ -68,7 +68,17 @@ data class PhoneMemorySnapshot(
         Text("Memory & speed", style = MaterialTheme.typography.titleLarge)
         PhoneAnswerOptions(model)
         Text("Quick prefers the smallest installed Abliterated/Heretic model and shorter answers. Detailed keeps your model selection.", color = Muted)
+        val fastId = CompanionPackCatalog.ABLITERATED_06B_ID
+        val fastTransfer = state.modelDownloads[fastId]
+        // Pack files are stat'ed on IO (packFileSnapshot), never during composition.
+        var fastInstalled by remember { mutableStateOf(false) }
+        LaunchedEffect(state.modelDownloads, state.localPackStatus) {
+            fastInstalled = model.packManager.packFileSnapshot().installed[fastId] == true
+        }
         OutlinedButton(onClick = model::installFastPhoneModel, enabled = !state.busy) { Text("Download fast 0.6B model · 397 MB") }
+        if (fastTransfer != null && fastTransfer.stage != ModelDownloadStage.READY) ModelTransferFeedback(fastTransfer,
+            { model.cancelModelDownload(fastId) }, { model.installFastPhoneModel() })
+        if (fastInstalled) Text("Fast 0.6B model is ready · Quick answers can use it", color = MaterialTheme.colorScheme.primary)
         Row { Text("Keep phone model warm for 30 seconds", Modifier.weight(1f)); Switch(warm, model::keepModelWarm) }
         Text("Uses more RAM between replies. Released when ANZU goes into the background or Android reports memory pressure.", color = Muted)
         Text("Optional decision routing", style = MaterialTheme.typography.titleMedium)
