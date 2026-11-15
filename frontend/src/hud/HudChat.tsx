@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react"
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { api, ensureDesktopSession, type Task } from "../api"
 import { OwnerChatTranscript } from "../chat/OwnerChatTranscript"
@@ -34,6 +34,25 @@ function isConnectionFailure(error: unknown): boolean {
   return message.includes("failed to fetch") || message.includes("network") || message.includes("aborted")
 }
 
+/**
+ * The HUD chat root and its tools row: the root class follows Compact chat (chatRootClassName), the
+ * data attributes carry Compact chat and Chat background, and the tools row holds the appearance
+ * toggles. HudChat renders its whole body inside this frame.
+ */
+export function HudChatFrame({ children }: { children?: ReactNode }) {
+  const [chatBackground] = useChatBackground()
+  const [chatCompact] = useChatCompact()
+  return (
+    <div className={chatRootClassName(chatCompact)} data-chat-background={chatBackground ? "on" : "off"}
+      data-chat-compact={chatCompact ? "on" : "off"}>
+      <div className="hud-chat-tools">
+        <ChatAppearanceToggles />
+      </div>
+      {children}
+    </div>
+  )
+}
+
 export function HudChat({ onMoodChange }: HudChatProps) {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -46,8 +65,6 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   const [backendUnavailable, setBackendUnavailable] = useState(false)
   const [connectionMessage, setConnectionMessage] = useState("")
   const [speaking, setSpeaking] = useState(false)
-  const [chatBackground] = useChatBackground()
-  const [chatCompact] = useChatCompact()
   const [speakChatReplies, setSpeakChatReplies] = useSpeakChatReplies()
   const threadRef = useRef<HTMLDivElement | null>(null)
   const { active: hexStrikeActive } = useHexStrikeSuiteActive()
@@ -235,11 +252,7 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   const showThread = !!id
 
   return (
-    <div className={chatRootClassName(chatCompact)} data-chat-background={chatBackground ? "on" : "off"}
-      data-chat-compact={chatCompact ? "on" : "off"}>
-      <div className="hud-chat-tools">
-        <ChatAppearanceToggles />
-      </div>
+    <HudChatFrame>
       {showSetupProblem && (
         <div className="hud-auth-card" role="status">
           <strong>Setup problem</strong>
@@ -352,6 +365,6 @@ export function HudChat({ onMoodChange }: HudChatProps) {
           </button>
         </div>
       </div>
-    </div>
+    </HudChatFrame>
   )
 }

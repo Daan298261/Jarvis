@@ -1,29 +1,28 @@
 import assert from "node:assert/strict"
-import { test } from "node:test"
+import { after, test } from "node:test"
 import { JSDOM } from "jsdom"
 import React, { act } from "react"
 import { createRoot } from "react-dom/client"
 
 const dom = new JSDOM("<!doctype html><body><div id='hud'></div><div id='settings'></div></body>", { url: "http://127.0.0.1:4780/" })
 const { window } = dom
-for (const key of ["window", "document", "localStorage", "HTMLElement", "Node", "Event", "MouseEvent"]) {
+for (const key of ["window", "document", "localStorage", "HTMLElement", "Node", "Event", "MouseEvent", "customElements"]) {
   Object.defineProperty(globalThis, key, { value: key === "window" ? window : window[key], configurable: true, writable: true })
 }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
+// HudChat probes the backend on mount; answer every request with an empty JSON body instead of the network.
+globalThis.fetch = async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } })
+// Closing the window clears any jsdom timer a mounted component scheduled, so the test process exits.
+after(() => window.close())
 
 const appearance = await import("./src/chat/chatAppearance.ts")
-const { ChatAppearanceToggles, ChatAppearanceSettingsSection } = await import("./src/chat/ChatAppearanceToggles.tsx")
-
-/** The HUD chat root exactly as HudChat builds it: class from chatRootClassName, data attributes, tools row. */
-function HudChatRoot() {
-  const [compact] = appearance.useChatCompact()
-  const [background] = appearance.useChatBackground()
-  return React.createElement("div", {
-    className: appearance.chatRootClassName(compact),
-    "data-chat-background": background ? "on" : "off",
-    "data-chat-compact": compact ? "on" : "off",
-  }, React.createElement("div", { className: "hud-chat-tools" }, React.createElement(ChatAppearanceToggles)))
-}
+// The real HUD chat root (HudChat renders its whole body inside HudChatFrame) and the real Settings
+// Appearance pane, so the tests fail if either drops the Compact chat / Chat background wiring.
+const { HudChat, HudChatFrame } = await import("./src/hud/HudChat.tsx")
+const { PendingApprovalsProvider } = await import("./src/chat/pendingApprovals.tsx")
+const { MemoryRouter } = await import("react-router-dom")
+const { AppearanceSettingsPane } = await import("./src/settings/AppearanceSettingsPane.tsx")
+const { DEFAULT_PRESENTATION_SETTINGS } = await import("./src/presence/presenceTypes.ts")
 
 const click = (button) => act(async () => { button.dispatchEvent(new window.MouseEvent("click", { bubbles: true })) })
 const compactButton = (surface) => surface.querySelector(".hud-chat-compact-toggle")
@@ -39,8 +38,8 @@ async function mountBoth(check) {
   const settingsRoot = createRoot(settings)
   try {
     await act(async () => {
-      hudRoot.render(React.createElement(HudChatRoot))
-      settingsRoot.render(React.createElement(ChatAppearanceSettingsSection))
+      hudRoot.render(React.createElement(HudChatFrame))
+      settingsRoot.render(React.createElement(AppearanceSettingsPane, { settings: DEFAULT_PRESENTATION_SETTINGS, showPersona: false }))
     })
     // The Settings "Chat" section is a collapsed CollapsibleSection; open it like the owner does.
     const disclosure = [...settings.querySelectorAll(".collapsible-section-toggle")].find((button) => button.textContent.includes("Chat"))
@@ -111,3 +110,31 @@ test("a storage event from another tab updates the compact toggle", () =>
     assert.equal(compactButton(settings).textContent, "Compact chat: On")
     assert.equal(root().className, "hud-chat chat-compact")
   }))
+
+test("HudChat renders its body inside HudChatFrame, so the live HUD carries the Compact chat wiring", async () => {
+  localStorage.clear()
+  appearance.setChatCompact(true)
+  appearance.setChatBackground(true)
+  const hud = document.getElementById("hud")
+  const hudRoot = createRoot(hud)
+  try {
+    await act(async () => {
+      hudRoot.render(React.createElement(MemoryRouter, null,
+        React.createElement(PendingApprovalsProvider, null, React.createElement(HudChat))))
+    })
+    const root = hud.firstElementChild
+    assert.equal(root.className, "hud-chat chat-compact")
+    assert.equal(root.getAttribute("data-chat-compact"), "on")
+    assert.equal(root.getAttribute("data-chat-background"), "on")
+    assert.equal(root.firstElementChild.className, "hud-chat-tools", "the tools row stays the first child of the chat root")
+    assert.ok(root.firstElementChild.querySelector(".hud-chat-compact-toggle"))
+    assert.ok(root.querySelector(":scope > .hud-composer"), "the composer still renders directly under the chat root")
+    await click(compactButton(hud))
+    assert.equal(hud.firstElementChild.className, "hud-chat")
+    assert.equal(hud.firstElementChild.getAttribute("data-chat-compact"), "off")
+  } finally {
+    await act(async () => { hudRoot.unmount() })
+    appearance.setChatCompact(true)
+    appearance.setChatBackground(true)
+  }
+})
