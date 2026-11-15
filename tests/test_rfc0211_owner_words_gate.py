@@ -274,9 +274,10 @@ async def test_negated_on_off_request_is_refused_both_ways(sched, monkeypatch, t
 
 
 @pytest.mark.asyncio
-async def test_a_negation_in_another_clause_does_not_block_a_plain_request(sched, monkeypatch):
+async def test_a_negation_in_another_clause_also_refuses_under_fail_closed(sched, monkeypatch):
+    # Was allowed after F1 (clause-scoped); CoS's fail-closed ruling refuses any negation anywhere.
     owner_says(monkeypatch, "don't wait for me, enable the self-development scheduler")
-    assert (await configure({"enabled": True})).success
+    assert not (await configure({"enabled": True})).success
 
 
 @pytest.mark.asyncio
@@ -373,3 +374,93 @@ async def test_run_with_the_full_id_plus_extra_characters_is_refused(sched, monk
     assert not (await run()).success and calls == []
     owner_says(monkeypatch, "start (charlie) now")
     assert (await run()).success and calls == [{"expected": "charlie"}]
+
+
+# --- Final review 2 at 7b35d39e (G1–G3) and CoS's fail-closed ruling for configure ---------------
+# Any negation or retraction word anywhere in the owner's own words refuses every setting change.
+
+G1_REFUSED = [
+    "don't enable the scheduler", "dont enable the scheduler", "don’t enable the scheduler", "do not enable the scheduler",
+    "never enable the scheduler", "no need to enable the scheduler", "I wouldn't enable the scheduler",
+    "I would not enable the scheduler", "please don't ever turn on the scheduler",
+    "Don't, under any circumstances, enable the scheduler", "Never, ever enable the scheduler",
+    "Do not, for now, enable the scheduler", "enable the scheduler? no, don't", "enable the scheduler. Actually no, don't.",
+    "enable the scheduler and don't enable the scheduler", "enable the scheduler, then disable the scheduler",
+    "I'd rather you didn't enable the scheduler", "hold off: don't enable the scheduler yet",
+    "enable the scheduler — just kidding, don't",
+    # Under the fail-closed ruling these are refused too (they were the reviewer's "plain" cases).
+    "enable the scheduler, don't wait", "never mind, enable the scheduler", "I don't want it off, enable the scheduler",
+    "no, enable the scheduler", "enable the scheduler, don't disable the scheduler",
+    # Every word on CoS's list, alone next to a plain request.
+    "nope, enable the scheduler", "enable the scheduler jk", "cancel that, enable the scheduler",
+    "stop, enable the scheduler", "nevermind, enable the scheduler", "scratch that, enable the scheduler",
+    "forget it, enable the scheduler", "wait, enable the scheduler", "enable the scheduler, or undo it",
+    "enable the scheduler instead", "ENABLE THE SCHEDULER, NOT!", "enable the scheduler (isn’t it off?)",
+    "you can't keep it off, enable the scheduler", "enable the scheduler, it shouldn't stay off",
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", G1_REFUSED)
+async def test_any_negation_or_retraction_refuses_enable(sched, monkeypatch, text):
+    owner_says(monkeypatch, text)
+    r = await configure({"enabled": True})
+    assert not r.success and sched.state()["config"]["enabled"] is False, text
+    if text != "enable the scheduler, then disable the scheduler":  # no retraction word: refused as both directions
+        assert "plain request" in r.error and "Self-development page" in r.error
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["enable the scheduler", "please turn on the scheduler",
+                                  "> don't enable the scheduler\nenable the scheduler",
+                                  'he said "don\'t enable the scheduler" but enable the scheduler'])
+async def test_plain_enable_is_allowed_and_quoted_negations_do_not_count(sched, monkeypatch, text):
+    owner_says(monkeypatch, text)
+    r = await configure({"enabled": True})
+    assert r.success, (text, r.error)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text, config", [
+    ("don't set the interval to 15 minutes", {"interval_minutes": 15}),
+    ("never change the interval to 15 minutes", {"interval_minutes": 15}),
+    ("don't use qwen3-coder:30b for the coder", {"coder_model": "qwen3-coder:30b"}),
+    ("do not switch the coder model to qwen3-coder:30b", {"coder_model": "qwen3-coder:30b"}),
+    ("set the interval to 15 minutes? no, don't", {"interval_minutes": 15}),
+    ("use qwen2.5vl:7b as the vision model instead", {"vision_model": "qwen2.5vl:7b"}),
+    ("actually, set the vision model to qwen2.5vl:7b", {"vision_model": "qwen2.5vl:7b"}),
+    ("please disable the scheduler, not now though", {"enabled": False}),
+])
+async def test_negation_refuses_every_chat_setting(sched, monkeypatch, text, config):
+    # G2: the same fail-closed check applies to all four chat settings.
+    if config.get("enabled") is False:
+        state = sched.state(); state["config"]["enabled"] = True; sched.save(state)
+    before = dict(sched.state()["config"])
+    owner_says(monkeypatch, text)
+    r = await configure(config)
+    assert not r.success and sched.state()["config"] == before, text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["set the interval to 15m", "set the interval to 15 min", "set the interval to 15 mins",
+                                  "set the interval to 15 minutes", "every 15 min", "make the interval 15"])
+async def test_interval_unit_forms_are_accepted(sched, monkeypatch, text):
+    # G3: the unit forms _INTERVAL_VALUE accepts are counted as the message's one number.
+    owner_says(monkeypatch, text)
+    r = await configure({"interval_minutes": 15})
+    assert r.success, (text, r.error)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["set the interval to 15m, back in 5m", "set the interval to 15 min, I'll check in 2 hours"])
+async def test_unit_suffixed_second_number_is_still_ambiguous(sched, monkeypatch, text):
+    owner_says(monkeypatch, text)
+    assert not (await configure({"interval_minutes": 15})).success
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["set the interval to 15 hours", "set the interval to 15h", "make the interval 15 days",
+                                  "every 15 hours"])
+async def test_interval_in_other_units_is_not_read_as_minutes(sched, monkeypatch, text):
+    owner_says(monkeypatch, text)
+    assert not (await configure({"interval_minutes": 15})).success

@@ -61,17 +61,24 @@ _CHAT_SETTINGS = ("enabled", "interval_minutes", "coder_model", "vision_model")
 _SCHEDULER = r"(?:self[- ]?dev\w*|(?:the\s+)?(?:development|dev)\s+scheduler|scheduler|self[- ]?development)"
 _ENABLE = re.compile(rf"\b(?:enable|turn\s+on|switch\s+on|activate|resume|start)\s+(?:the\s+|my\s+|your\s+)?{_SCHEDULER}", re.I)
 _DISABLE = re.compile(rf"\b(?:disable|turn\s+off|switch\s+off|deactivate|pause|stop)\s+(?:the\s+|my\s+|your\s+)?{_SCHEDULER}", re.I)
-# A negation earlier in the same clause ("don't enable…", "I don't want you to turn on…",
-# "never switch off…") means the owner did not ask for that change, in either direction.
-_NEGATION = re.compile(r"\b(?:don'?t|do\s+not|does\s+not|doesn'?t|never|not|no\s+need\s+to|no|shouldn'?t|should\s+not|"
-                       r"won'?t|will\s+not|can'?t|cannot|mustn'?t|must\s+not|stop\s+trying\s+to|without)\b", re.I)
-_CLAUSE_BREAK = re.compile(r"[.;:!?,\n]|\b(?:and|but|then|so)\b", re.I)
+# Configure fails closed (CoS ruling): any negation or retraction word anywhere in the owner's own
+# words refuses every setting change in that message. Matched on normalized text (lower case,
+# apostrophes dropped so "don't"/"don’t"/"dont" are one word, other punctuation as spaces).
+_RETRACTION = re.compile(
+    r"\b(?:not|never|no|nope|cannot|"
+    r"dont|doesnt|didnt|wont|wouldnt|cant|couldnt|shouldnt|isnt|arent|wasnt|werent|havent|hasnt|hadnt|"
+    r"mustnt|neednt|mightnt|shant|aint|"
+    r"actually|kidding|jk|cancel\w*|stop\w*|nevermind|never\s+mind|scratch\s+that|forget\s+it|wait\w*|"
+    r"hold\s+off|undo\w*|instead|rather)\b")
 # The interval number must be the object of the interval phrase: "interval to 15", "interval of
 # 15 minutes", "interval: 15 min", "make the interval 15", "every 15 minutes".
 _INTERVAL_VALUE = re.compile(
-    r"\binterval\s*(?:(?:to|of|at|is|=|:)\s*|be\s+|should\s+be\s+)?(?<![\w.,])(\d+)(?![\w]|[.,]\d)\s*(?:minutes?|mins?|m)?\b"
-    r"|\bevery\s+(?<![\w.,])(\d+)(?![\w]|[.,]\d)\s*(?:minutes?|mins?)\b", re.I)
-_NUMBER = re.compile(r"(?<![\w.,])\d+(?:[.,]\d+)?(?![\w])")
+    r"\binterval\s*(?:(?:to|of|at|is|=|:)\s*|be\s+|should\s+be\s+)?(?<![\w.,])(\d+)"
+    r"(?:\s*(?:minutes?|mins?|m)\b|(?![\w]|[.,]\d|\s*(?:hours?|hrs?|h|days?|d|seconds?|secs?|s)\b))"
+    r"|\bevery\s+(?<![\w.,])(\d+)\s*(?:minutes?|mins?|m)\b", re.I)
+# Every number in the request, with an optional unit ("15m", "15 min", "2 hours") so the unit
+# forms _INTERVAL_VALUE accepts count as that one number.
+_NUMBER = re.compile(r"(?<![\w.,])(\d+(?:[.,]\d+)?)(?:\s*(?:minutes?|mins?|m|hours?|hrs?|h)\b)?(?![\w])", re.I)
 _ROLE = {"coder_model": re.compile(r"\bcod(?:er|ing)\b", re.I), "vision_model": re.compile(r"\bvision\b", re.I)}
 # A model name ends at whitespace or sentence punctuation; tags, versions and quant suffixes are part of it.
 _NAME_EDGE = r"[\w.:/@+-]"
@@ -87,15 +94,15 @@ def asked_setting(own: str, key: str, value: Any) -> bool:
         if not isinstance(value, bool):
             return False
         matches = [(True, m) for m in _ENABLE.finditer(own)] + [(False, m) for m in _DISABLE.finditer(own)]
-        if not matches or any(negated(own, m.start()) for _, m in matches):
-            return False  # a negated on/off request is never read as consent, either way
+        if not matches:
+            return False
         directions = {direction for direction, _ in matches}
         return directions == {value}
     if key == "interval_minutes":
         if isinstance(value, bool) or not isinstance(value, int):
             return False
         bound = {int(next(g for g in m.groups() if g)) for m in _INTERVAL_VALUE.finditer(own)}
-        numbers = {n.group(0) for n in _NUMBER.finditer(own)}
+        numbers = {n.group(1) for n in _NUMBER.finditer(own)}
         # Exactly one number in the request, and it is the interval's: two numbers or a number
         # tied to something else ("run for 30 minutes, keep the interval") is ambiguous.
         return bound == {int(value)} and len(numbers) == 1
@@ -119,10 +126,11 @@ def undo_target(own: str, moved: list[dict[str, Any]]) -> bool:
                 or re.search(r"\bupcoming\s+(?:list|order|tasks)\b", own, re.I))
 
 
-def negated(own: str, at: int) -> bool:
-    """A negation word earlier in the clause that ends at ``at``."""
-    clause = _CLAUSE_BREAK.split(own[:at])[-1]
-    return bool(_NEGATION.search(clause))
+def retraction(own: str) -> str:
+    """The first negation or retraction word in the owner's own words, or ''."""
+    normalized = re.sub(r"[^a-z0-9\s]", " ", own.lower().replace("'", ""))
+    found = _RETRACTION.search(re.sub(r"\s+", " ", normalized))
+    return found.group(0) if found else ""
 
 
 def mentions_item(own: str, item: dict[str, Any] | None, *, hash_number: bool = True) -> bool:
@@ -179,6 +187,10 @@ def owner_asked(text: str, action: str, *, item: dict[str, Any] | None = None, c
             return "Nothing to change"
         if not _CONFIGURE.search(own):
             return "Changing the scheduler settings needs your own request, or the Self-development page"
+        word = retraction(own)
+        if word:
+            return (f"Your message includes \"{word}\", so I won't change scheduler settings from it. Send the change as a "
+                    "plain request (for example \"enable the self-development scheduler\"), or use the Self-development page")
         for key, value in changes.items():
             if not asked_setting(own, key, value):
                 return f"Your message does not ask for {key} = {json.dumps(value)}"
