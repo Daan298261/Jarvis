@@ -15,13 +15,15 @@ import subprocess
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from ..config import data_dir, runtime_dir
 from .keep_alive import is_denied
 
 
 class ModelStart(BaseModel):
+    # No keep-alive choice (CoS ruling #690 x #691): a legacy ``keep_alive`` field is ignored (pydantic's default
+    # ``extra="ignore"``); every Ollama request takes the Keep warm value from keep_alive.py.
     profile_id: str
     context_size: int | None = Field(default=None, ge=512, le=262144)
     kv_cache: Literal["server", "f16", "q8_0", "q4_0"] = "server"
@@ -29,15 +31,6 @@ class ModelStart(BaseModel):
     n_cpu_moe: int | None = Field(default=None, ge=0, le=256)
     confirm: bool = False
     confirm_over_budget: bool = False
-
-    @model_validator(mode="before")
-    @classmethod
-    def _drop_keep_alive_choice(cls, data):
-        """CoS ruling (#690 x #691): Start has no keep-alive choice. A saved or cached ``keep_alive`` (``idle`` or
-        the removed ``server``) is dropped, so the value always derives from Keep warm (keep_alive.py)."""
-        if isinstance(data, dict) and "keep_alive" in data:
-            data = {k: v for k, v in data.items() if k != "keep_alive"}
-        return data
 
 
 BUILTIN_LAUNCH_PROFILES = [

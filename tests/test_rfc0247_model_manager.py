@@ -707,6 +707,23 @@ async def test_a_saved_server_keep_alive_choice_migrates_to_the_keep_warm_policy
     assert "keep_alive" not in migrated and "keep_alive_options" not in migrated
 
 
+def test_a_start_request_still_carrying_the_old_keep_alive_field_works(monkeypatch):
+    """D1 B2: no validator needed; ``ModelStart`` ignores the removed ``keep_alive`` field (pydantic's default)."""
+    from app.api import model
+    app = FastAPI()
+    app.include_router(model.router)
+    start = AsyncMock(return_value={"ok": True})
+    monkeypatch.setattr(model.RUNNING_MODELS, "start_model", start)
+    with TestClient(app) as client:
+        for path, body in (("/api/model/running/start", {"profile_id": "small", "confirm": True, "keep_alive": "server"}),
+                           ("/api/model/running/start/preview", {"profile_id": "small", "keep_alive": "idle"})):
+            assert client.post(path, json=body).status_code == 200, path
+    for call in start.await_args_list:
+        sent = call.args[0]
+        assert sent.profile_id == "small" and "keep_alive" not in sent.model_dump()
+    assert ml.ModelStart.model_config.get("extra", "ignore") == "ignore"
+
+
 async def test_unload_of_pinned_ollama_model_sends_keep_alive_zero(monkeypatch, runtime):
     posts = []
     def handle(request):
