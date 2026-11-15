@@ -5,6 +5,8 @@
 **Date:** 2026-10-28
 **Amended 2026-11-10 (Jarvis Architect, CoS ticket answering UX blocker 4 on #683):** adds *Compact chat toggle*, its acceptance criteria and named tests. Records the CoS add-only ruling behind the PR fixer's Compact chat commit `6b095724`. The bounded column becomes the Compact layout, default on. Off restores development's classic HUD chat exactly.
 
+**Amended 2026-11-15 (Jarvis Architect):** the four open Compact chat criteria (persisted round-trip, two toggles in sync, Off matches classic, role bubble colours) are ticked, each checked against the code and tests at #683's live head (PR fixer's commit `874136fb` and its parent `544c06da`); the two *Open* notes are closed.
+
 ## Problem
 
 The humanoid stage stretches chat across the viewport, leaving opposite-side bubbles far apart and text over a busy canvas. Follow-ups can overlap their previous runner, and the live event stream replays old replies as if they belong to the new question.
@@ -74,22 +76,24 @@ The bounded column is a **Compact chat** mode. It is added alongside the classic
 - [ ] Non-streaming deadlines include the requested output budget, and overflow recovery respects a smaller explicitly reported server context.
 - [ ] Targeted regressions, full backend CI, frontend build/lint and browser layout/interaction checks run. Installed-app verification is reported separately.
 
-### Compact chat acceptance (checked at #683 head `38929ae2` on 2026-11-10)
+### Compact chat acceptance (checked at #683 head `38929ae2` on 2026-11-10; the remaining four rechecked at #683's live head on 2026-11-15)
 
 Tests run in CI's `frontend-build` job: it runs `npm run build` and the step "Chat appearance compact/classic tests (RFC-0243)" (`npm run test:chat-appearance`). That script runs `frontend/chat-appearance.test.mjs` and the new JSDOM render file `frontend/chat-appearance-render.test.mjs`, set up the way `frontend/hud-model-selector-render.test.mjs` is.
 
 - [x] **Default on.** With nothing stored, Compact chat is on and the root is `hud-chat chat-compact`. *Met:* `useChatCompact`/`readChatCompact` (only `"off"` disables). Tested by `frontend/chat-appearance.test.mjs` "compact chat defaults on and persists like the background toggle" and "compact on adds the chat-compact class and its rules carry the RFC-0243 caps".
-- [ ] **Persisted round-trip.** Turning the toggle off through the exported setter writes `"off"` to `jarvis.chat.compact.v1`, a fresh read (reload) returns off, and turning it on writes `"on"`.
+- [x] **Persisted round-trip.** Turning the toggle off through the exported setter writes `"off"` to `jarvis.chat.compact.v1`, a fresh read (reload) returns off, and turning it on writes `"on"`.
   - Test: `frontend/chat-appearance.test.mjs` "compact toggle writes off and a reload reads off".
+  - *Met:* `setChatCompact` goes through `writeOnOff`, which writes `"on"`/`"off"` to `CHAT_COMPACT_KEY`; `readOnByDefault` reads it back.
   - *Open:* the head never exercises the write path. `writeOnOff` is private and the existing test only reads values it seeded into storage.
-- [ ] **One state, two toggles in sync.** The Settings "Chat" section and the HUD `.hud-chat-compact-toggle` read one store. Clicking either flips the other and the HUD root class live, and a `storage` event from another tab updates both.
+- [x] **One state, two toggles in sync.** The Settings "Chat" section and the HUD `.hud-chat-compact-toggle` read one store. Clicking either flips the other and the HUD root class live, and a `storage` event from another tab updates both.
   - Tests in `frontend/chat-appearance-render.test.mjs`:
     - "settings and HUD compact toggles stay in sync";
     - "a storage event from another tab updates the compact toggle";
     - "clicking Compact chat flips the HUD root class and persists".
   - The third replaces the source-text grep "HudChat surfaces the Compact chat toggle beside the background toggle".
+  - *Met:* `useChatCompact` and `useChatBackground` are `useSyncExternalStore` hooks over one module store (`subscribeChatAppearance`) with a `storage` listener; `HudChat`'s tools row and Settings' `ChatAppearanceSettingsSection` (a "Chat" `CollapsibleSection` in `AppearanceSettingsPane`) render the same `ChatAppearanceToggles`. All three tests are in `frontend/chat-appearance-render.test.mjs`, and the source-text grep is gone.
   - *Open:* at the head, `chatAppearance` is imported only by `HudChat`, and `AppearanceSettingsPane` has no Chat section. `usePersistedToggle` is a per-component `useState` with no shared store and no `storage` subscription.
-- [ ] **Off matches the classic DOM, classes and mask.**
+- [x] **Off matches the classic DOM, classes and mask.**
   - With Compact off, the HUD chat root's class is exactly `hud-chat`.
   - No rule outside `.chat-compact` sets the compact caps, `mask-image: none`, or a `background`, `box-shadow` or `border-color` on `.hud-thread`. `.hud-thread` keeps `max-height: min(30vh, 285px)`, `background: transparent` and the fade mask, and `.hud-chat` keeps `min(1000px, calc(100% - 64px))`.
   - Both Chat background toggles are disabled with the explanatory title.
@@ -97,10 +101,10 @@ Tests run in CI's `frontend-build` job: it runs `npm run build` and the step "Ch
     - `frontend/chat-appearance.test.mjs` "compact off restores the classic layout and fade mask" (exists; layout and mask);
     - `frontend/chat-appearance.test.mjs` "classic mode has no chat background panel" (new);
     - `frontend/chat-appearance-render.test.mjs` "compact off renders the classic chat root and disables Chat background" (new).
-  - *Open:* `hud-v2.css` has `.hud-chat[data-chat-background="on"] .hud-thread`, which is not scoped to `.chat-compact`. With Chat background on by default, it puts an 82 % dark panel and a shadow under the classic fade mask. The existing test doesn't catch it.
-- [ ] **Compact keeps the role bubble colours.** No `.chat-compact` rule sets `background` or `border-color` on `.hud-bubble` or a role variant. In compact, user, thought and internal bubbles still differ from the plain assistant bubble with their classic colours.
+  - *Met (formerly open):* the reading panel rule is now `.hud-chat.chat-compact[data-chat-background="on"] .hud-thread`, so classic mode gets no panel or shadow; `chatRootClassName(false)` is `hud-chat`; `ChatAppearanceToggles` disables the Chat background button with the title "Chat background applies in Compact chat" when Compact is off. All three tests exist.
+- [x] **Compact keeps the role bubble colours.** No `.chat-compact` rule sets `background` or `border-color` on `.hud-bubble` or a role variant. In compact, user, thought and internal bubbles still differ from the plain assistant bubble with their classic colours.
   - Test: `frontend/chat-appearance.test.mjs` "compact keeps the role bubble colours".
-  - *Open:* `.hud-chat.chat-compact .hud-bubble { background: rgba(7, 14, 22, 0.65) }` overrides the assistant, user, thought and internal backgrounds alike, because specificity 0,3,0 beats the 0,1,0 role rules.
+  - *Met (formerly open):* `.hud-chat.chat-compact .hud-bubble` now sets only margin, padding, font size and line height, so the classic role backgrounds and borders apply in compact too.
 - [x] **CI step.** `.github/workflows/pr-tests.yml` job `frontend-build` runs "Chat appearance compact/classic tests (RFC-0243)" (`npm run test:chat-appearance`) after "Build frontend". *Met* at the head. The new render file must join the same script.
 - [x] **Add-only CSS and Astra boundary.**
   - The `hud-v2.css` diff against development is append-only: no existing selector or value is changed.
