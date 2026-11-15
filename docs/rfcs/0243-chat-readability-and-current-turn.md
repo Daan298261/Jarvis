@@ -76,7 +76,7 @@ The bounded column is a **Compact chat** mode. It is added alongside the classic
 - [ ] Non-streaming deadlines include the requested output budget, and overflow recovery respects a smaller explicitly reported server context.
 - [ ] Targeted regressions, full backend CI, frontend build/lint and browser layout/interaction checks run. Installed-app verification is reported separately.
 
-### Compact chat acceptance (checked at #683 head `38929ae2` on 2026-11-10; the remaining four rechecked at #683's live head on 2026-11-15)
+### Compact chat acceptance (checked at #683 head `874136fb` on 2026-11-15)
 
 Tests run in CI's `frontend-build` job: it runs `npm run build` and the step "Chat appearance compact/classic tests (RFC-0243)" (`npm run test:chat-appearance`). That script runs `frontend/chat-appearance.test.mjs` and the new JSDOM render file `frontend/chat-appearance-render.test.mjs`, set up the way `frontend/hud-model-selector-render.test.mjs` is.
 
@@ -92,6 +92,7 @@ Tests run in CI's `frontend-build` job: it runs `npm run build` and the step "Ch
     - "clicking Compact chat flips the HUD root class and persists".
   - The third replaces the source-text grep "HudChat surfaces the Compact chat toggle beside the background toggle".
   - *Met:* `useChatCompact` and `useChatBackground` are `useSyncExternalStore` hooks over one module store (`subscribeChatAppearance`) with a `storage` listener; `HudChat`'s tools row and Settings' `ChatAppearanceSettingsSection` (a "Chat" `CollapsibleSection` in `AppearanceSettingsPane`) render the same `ChatAppearanceToggles`. All three tests are in `frontend/chat-appearance-render.test.mjs`, and the source-text grep is gone.
+  - *HUD harness fix (in progress by the PR fixer, not yet on the branch; UX round 2 blocker 1):* the render test's HUD side is the hand-written `HudChatRoot` copy of `HudChat`'s root. The fix exports one frame component from `frontend/src/hud/HudChat.tsx` (for example `HudChatFrame`: `chatRootClassName`, both data attributes and the `.hud-chat-tools` row with `ChatAppearanceToggles`) that `HudChat` renders through, imports it in `frontend/chat-appearance-render.test.mjs` in place of `HudChatRoot`, and asserts that `AppearanceSettingsPane` renders `ChatAppearanceSettingsSection`. No behaviour change.
   - *Open:* at the head, `chatAppearance` is imported only by `HudChat`, and `AppearanceSettingsPane` has no Chat section. `usePersistedToggle` is a per-component `useState` with no shared store and no `storage` subscription.
 - [x] **Off matches the classic DOM, classes and mask.**
   - With Compact off, the HUD chat root's class is exactly `hud-chat`.
