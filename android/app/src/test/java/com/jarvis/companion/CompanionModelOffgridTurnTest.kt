@@ -195,4 +195,46 @@ class CompanionModelPhoneToolTurnCapTest : CompanionModelHarness() {
         assertFalse("CompanionModel.sendLock is released", sendLock().isLocked)
         PhoneToolPermissions(context).enable(false)
     }
+
+    /** One tool step that needs the owner's approval (no saved permission for the app). */
+    private fun startTurnWaitingForApproval(stepMs: Long) {
+        val pkg = context.packageName
+        PhoneToolPermissions(context).apply { enable(true); save(pkg, emptySet()) }
+        context.getSharedPreferences("phone_tools", android.content.Context.MODE_PRIVATE).edit().putBoolean("enabled", true).commit()
+        engine.toolReply = """{"phone_tool":{"action":"launch","package":"$pkg","category":"navigate"}}"""
+        engine.onToolPass = { now.addAndGet(stepMs) }
+        engine.mode = "tool"
+        model.send("open my own app")
+        pump { PhoneTools.pending.value != null }
+    }
+
+    @Test fun approvalWaitOutlastingTheTurnBudgetFailsAtTheBudget() {
+        startTurnWaitingForApproval(stepMs = 250_000) // 50 s of the 300 s cap left when the approval starts
+        settle(300)
+        assertTrue("still waiting while budget is left", PhoneTools.pending.value != null && model.state.value.error == null)
+        now.addAndGet(50_001) // the turn's clock passes 300 s during the wait (well inside the 60 s window)
+        pump(timeoutMs = 5_000) { model.state.value.error != null && !model.state.value.offlineAnswering && !sendLock().isLocked }
+        val error = model.state.value.error!!
+        assertTrue(error, error.contains("stalled (turn)"))
+        assertEquals("the wait ended; no further pass ran", 1, engine.generateCalls)
+        assertEquals(null, PhoneTools.pending.value)
+        assertEquals("error bubble kept per the ruling", listOf("open my own app", error), texts())
+        assertEquals("", model.state.value.liveLocalReply)
+        assertFalse(sendLock().isLocked)
+        PhoneToolPermissions(context).enable(false)
+    }
+
+    @Test fun cancelDuringTheApprovalWaitEndsItPromptlyWithNoFurtherPass() {
+        startTurnWaitingForApproval(stepMs = 1_000)
+        val cancelledAt = System.nanoTime()
+        model.packManager.requestCancel()
+        pump(timeoutMs = 5_000) { PhoneTools.pending.value == null && !model.state.value.offlineAnswering && !sendLock().isLocked }
+        val tookMs = (System.nanoTime() - cancelledAt) / 1_000_000
+        assertTrue("the wait ended promptly (${tookMs} ms), not at the 60 s approval timeout", tookMs < 2_000)
+        assertEquals("no pass after the cancel", 1, engine.generateCalls)
+        assertEquals("a cancel leaves no reply and no error bubble", listOf("open my own app"), texts())
+        assertNull(model.state.value.error)
+        assertFalse(sendLock().isLocked)
+        PhoneToolPermissions(context).enable(false)
+    }
 }

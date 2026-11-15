@@ -573,6 +573,7 @@ class CompanionPackManager(
             DeviceInferenceGuard.blockReason(app, pack)?.let { error(it) }
             val path = packFile(pack)
             if (!path.isFile) error("Install the companion model pack first")
+            budget.model = pack.id
             val turn = TurnGuard(stallDeadlines, pack.id, budget)
             // A cancel or the turn cap may already have landed between this turn's earlier calls.
             turn.throwIfExpired()
