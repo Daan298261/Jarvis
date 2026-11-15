@@ -366,6 +366,17 @@ def _patch_model_disk(monkeypatch, extra: Path) -> None:
     )
 
 
+def _fresh_hf_home(monkeypatch, tmp_path: Path) -> Path:
+    """No HF env vars and an empty home: ``~/.cache/huggingface/hub`` on the machine running the tests (any dev box
+    that ever used Hugging Face) would otherwise be kept as the local cache and hide the extra-drive choice."""
+    monkeypatch.delenv("HF_HOME", raising=False)
+    monkeypatch.delenv("HF_HUB_CACHE", raising=False)
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    return home
+
+
 def test_companion_pack_cache_uses_extra_when_data_volume_is_full(tmp_path, monkeypatch):
     from app.mobile import companion_offline
 
@@ -477,8 +488,7 @@ def test_huggingface_home_uses_extra_when_os_volume_is_full(tmp_path, monkeypatc
 
     extra = tmp_path / "USB"
     extra.mkdir()
-    monkeypatch.delenv("HF_HOME", raising=False)
-    monkeypatch.delenv("HF_HUB_CACHE", raising=False)
+    _fresh_hf_home(monkeypatch, tmp_path)
     _patch_model_disk(monkeypatch, extra)
     dest = resolved_huggingface_home()
     assert dest == extra / "Jarvis" / "models" / "huggingface"
@@ -494,11 +504,23 @@ def test_huggingface_home_discovers_existing_extra_hub(tmp_path, monkeypatch):
     extra = tmp_path / "USB"
     found = extra / "Jarvis" / "models" / "huggingface"
     (found / "hub").mkdir(parents=True)
-    monkeypatch.delenv("HF_HOME", raising=False)
-    monkeypatch.delenv("HF_HUB_CACHE", raising=False)
+    _fresh_hf_home(monkeypatch, tmp_path)
     monkeypatch.setattr(config, "extra_volume_roots", lambda: [extra])
     monkeypatch.setattr("app.inference.lmstudio_catalog.shutil.disk_usage", _plenty_usage)
     assert resolved_huggingface_home() == found
+
+
+def test_huggingface_home_keeps_an_existing_local_hub_even_when_the_os_volume_is_full(tmp_path, monkeypatch):
+    """Intended: blobs already in ``~/.cache/huggingface/hub`` stay where they are. This is why the extra-drive
+    tests above need an isolated home."""
+    from app.inference.lmstudio_catalog import resolved_huggingface_home
+
+    extra = tmp_path / "USB"
+    extra.mkdir()
+    home = _fresh_hf_home(monkeypatch, tmp_path)
+    (home / ".cache" / "huggingface" / "hub").mkdir(parents=True)
+    _patch_model_disk(monkeypatch, extra)
+    assert resolved_huggingface_home() == home / ".cache" / "huggingface"
 
 
 def test_huggingface_home_honors_existing_hf_home(tmp_path, monkeypatch):
@@ -520,8 +542,7 @@ def test_ensure_chatterbox_weights_use_extra_hf_cache(tmp_path, monkeypatch):
 
     extra = tmp_path / "USB"
     extra.mkdir()
-    monkeypatch.delenv("HF_HOME", raising=False)
-    monkeypatch.delenv("HF_HUB_CACHE", raising=False)
+    _fresh_hf_home(monkeypatch, tmp_path)
     _patch_model_disk(monkeypatch, extra)
     seen: dict[str, str] = {}
 
@@ -792,8 +813,7 @@ def test_hf_download_uses_extra_hub_cache_when_os_volume_is_full(tmp_path, monke
     extra.mkdir()
     dest = extra / "Jarvis" / "models" / "Qwen"
     dest.mkdir(parents=True)
-    monkeypatch.delenv("HF_HOME", raising=False)
-    monkeypatch.delenv("HF_HUB_CACHE", raising=False)
+    _fresh_hf_home(monkeypatch, tmp_path)
     _patch_model_disk(monkeypatch, extra)
     seen: dict[str, str] = {}
 
