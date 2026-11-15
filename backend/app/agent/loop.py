@@ -429,10 +429,20 @@ _OWNER_TURN_CACHE_MAX = 64
 
 
 def _is_phone_submission(task_id: str) -> bool:
+    """Read-only check for the phone's submission record: never creates companion.db, runs no DDL and
+    takes no write lock (a phone-store writer holding it doesn't block this read)."""
+    import sqlite3
+
     from ..mobile import store
 
-    with store.database() as db:
-        return store.get(db, "submission", task_id) is not None
+    path = store.data_dir() / "mobile" / "companion.db"
+    if not path.is_file():
+        return False
+    conn = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=2)
+    try:
+        return store.get(conn, "submission", task_id) is not None
+    finally:
+        conn.close()
 
 
 async def model_inputs_changed_reasons(task_id: str) -> tuple[str, str]:
@@ -441,7 +451,12 @@ async def model_inputs_changed_reasons(task_id: str) -> tuple[str, str]:
     desktop's New task. ``task.result`` is the reply text in the task's chat; for a phone submission
     (mobile/service.submit journals one per task) that chat is the phone's, whose action is a new chat."""
     desktop = f"{MODEL_INPUTS_CHANGED} Click New task and ask again."
-    if await asyncio.to_thread(_is_phone_submission, task_id):
+    try:
+        phone = await asyncio.to_thread(_is_phone_submission, task_id)
+    except Exception:
+        log.warning("task %s: phone-submission lookup failed; using the desktop wording", task_id, exc_info=True)
+        phone = False
+    if phone:
         return desktop, f"{MODEL_INPUTS_CHANGED} Start a new chat and ask again."
     return desktop, desktop
 

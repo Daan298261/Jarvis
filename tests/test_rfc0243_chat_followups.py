@@ -816,3 +816,263 @@ async def test_a_late_commit_after_a_takeover_is_superseded_and_keeps_the_new_an
     assert statuses == {"worker-A": "superseded", "worker-B": "completed"}, statuses
     step = await get_step_by_key(run_id, "model:1:0:0")
     assert step.input_hash == _hash_payload({"messages": "v2"}) and "answer to v2" in step.result_json
+
+
+def _flaky_heartbeat(monkeypatch, calls):
+    """heartbeat_attempt whose first call fails like a lock wait that ran out ('database is locked')."""
+    import sqlite3
+    from app.agent.durable_execution import runner
+    real = runner.heartbeat_attempt
+
+    async def flaky(attempt_id, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return await real(attempt_id, *args, **kwargs)
+
+    monkeypatch.setattr(runner, "heartbeat_attempt", flaky)
+    monkeypatch.setattr(runner, "HEARTBEAT_INTERVAL_S", 0.02)
+
+
+@pytest.mark.asyncio
+async def test_one_failed_heartbeat_does_not_discard_a_finished_model_answer(jarvis_env, monkeypatch):
+    """rr3 probe: a failed heartbeat must never be re-raised over the operation's finished result."""
+    import uuid
+    from app.agent.durable_execution.accounting import reset_ledgers
+    from app.agent.durable_execution.repository import get_step_by_key
+    from app.agent.durable_execution.runner import run_durable_step
+    reset_ledgers()
+    calls = {"n": 0}
+    _flaky_heartbeat(monkeypatch, calls)
+    run_id = str(uuid.uuid4())
+    await _seed_running_task(run_id)
+
+    async def op():
+        await asyncio.sleep(0.2)
+        return {"content": "answer"}
+
+    value, meta = await run_durable_step(**_model_step_args(run_id), input_fingerprint={"m": 1}, operation=op,
+                                         worker_id="wf")
+    assert value["content"] == "answer" and not meta["reused"]
+    assert calls["n"] >= 2
+    assert (await get_step_by_key(run_id, "model:1:0:0")).status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_one_failed_heartbeat_does_not_stop_renewals(jarvis_env, monkeypatch):
+    """rr3 probe: after one heartbeat error the lease keeps being renewed for the rest of the call."""
+    import uuid
+    from sqlalchemy import select
+    from app.agent.durable_execution.accounting import reset_ledgers
+    from app.agent.durable_execution.runner import run_durable_step
+    from app.db.models import ExecutionAttempt
+    reset_ledgers()
+    calls = {"n": 0}
+    _flaky_heartbeat(monkeypatch, calls)
+    run_id = str(uuid.uuid4())
+    await _seed_running_task(run_id)
+    seen = {}
+
+    async def op():
+        async with SessionLocal() as session:
+            first = (await session.scalars(select(ExecutionAttempt).where(ExecutionAttempt.worker_id == "wg"))).one()
+        await asyncio.sleep(0.3)
+        async with SessionLocal() as session:
+            later = (await session.scalars(select(ExecutionAttempt).where(ExecutionAttempt.worker_id == "wg"))).one()
+        seen.update(calls=calls["n"], renewed=later.heartbeat_at > first.heartbeat_at)
+        return {"content": "x"}
+
+    await run_durable_step(**_model_step_args(run_id), input_fingerprint={"m": 1}, operation=op, worker_id="wg")
+    assert seen["calls"] > 3 and seen["renewed"], seen
+
+
+@pytest.mark.asyncio
+async def test_a_heartbeat_stuck_on_a_held_lock_gives_up_well_inside_the_lease(jarvis_env, monkeypatch):
+    """One heartbeat waiting on another connection's write lock gives up after HEARTBEAT_BUSY_TIMEOUT_MS
+    instead of the engine's 30 s, so two missed renewals (interval + wait each) still fit inside the lease,
+    and the connection goes back to the pool with its normal busy timeout."""
+    import sqlite3
+    import time
+    import uuid
+    from app.agent.durable_execution import repository as repo, runner
+    from app.db import session as db_session
+    assert 2 * (runner.HEARTBEAT_INTERVAL_S + runner.HEARTBEAT_BUSY_TIMEOUT_MS / 1000) < repo.DEFAULT_LEASE_SECONDS
+    run_id = str(uuid.uuid4())
+    await _seed_running_task(run_id)
+    step = await _seed_step(run_id, "h-v1")
+    attempt = await repo.claim_attempt(step.id, "worker-A", input_hash="h-v1")
+    holder = sqlite3.connect(db_session.ENGINE.url.database, timeout=5)
+    holder.execute("BEGIN IMMEDIATE")
+    try:
+        started = time.monotonic()
+        with pytest.raises(sqlite3.OperationalError, match="locked"):
+            try:
+                await repo.heartbeat_attempt(attempt.id, busy_timeout_ms=300)
+            except Exception as exc:  # SQLAlchemy wraps the driver error
+                raise getattr(exc, "orig", exc)
+        assert time.monotonic() - started < 3
+    finally:
+        holder.rollback()
+        holder.close()
+    assert await repo.heartbeat_attempt(attempt.id) is True
+    async with db_session.ENGINE.connect() as conn:  # pooled connections keep the engine's busy timeout
+        for _ in range(3):
+            assert (await conn.exec_driver_sql("PRAGMA busy_timeout")).scalar() == 30000
+
+
+@pytest.mark.asyncio
+async def test_surface_lookup_error_still_leaves_the_task_failed_with_desktop_wording(jarvis_env, monkeypatch):
+    """rr3 probe: if the phone-submission lookup raises, the task still fails (never stays 'running')."""
+    import sqlite3
+
+    def boom(_task_id):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr("app.agent.loop._is_phone_submission", boom)
+    task = await _restart_over_completed_mismatch(jarvis_env, monkeypatch, "desktop-lookup-fails")
+    assert "Click New task and ask again" in task.error and "Click New task and ask again" in task.result
+
+
+@pytest.mark.asyncio
+async def test_surface_lookup_never_creates_the_phone_database(jarvis_env, monkeypatch):
+    """On an install that never paired a phone the lookup reads nothing and creates no companion.db."""
+    from app.mobile import store
+    monkeypatch.setattr(store, "data_dir", lambda: jarvis_env["tmp"])
+    task = await _restart_over_completed_mismatch(jarvis_env, monkeypatch, "desktop-no-phone")
+    assert "Click New task and ask again" in task.result
+    assert not (jarvis_env["tmp"] / "mobile").exists()
+
+
+@pytest.mark.asyncio
+async def test_surface_lookup_reads_the_phone_record_while_the_phone_store_is_write_locked(jarvis_env, monkeypatch):
+    """The lookup only reads (read-only connection, no BEGIN IMMEDIATE, no DDL), so a phone-store writer
+    holding the lock doesn't block it and the phone still gets its wording."""
+    import time
+    import uuid
+    from app.mobile import store
+    monkeypatch.setattr(store, "data_dir", lambda: jarvis_env["tmp"])
+    task_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "jarvis-mobile:phone-1:req-locked"))
+    with store.database() as db:
+        store.put(db, "submission", task_id, {"fingerprint": "f", "conversation_id": "c", "task_prompt": "p", "profile": "fast"})
+    with store.database():  # another writer holds companion.db's write lock for the whole restart
+        started = time.monotonic()
+        task = await _restart_over_completed_mismatch(jarvis_env, monkeypatch, task_id)
+        assert time.monotonic() - started < 9
+    assert "Start a new chat and ask again" in task.result, task.result
+
+
+def _spawn_worker(*argv):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    script = Path(__file__).resolve().parent / "fixtures" / "durable_worker.py"
+    return subprocess.Popen([sys.executable, str(script), *map(str, argv)], stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True, env={**os.environ, "JARVIS_SKIP_MODEL": "1"})
+
+
+@pytest.mark.asyncio
+async def test_claims_from_separate_processes_never_both_win(jarvis_env):
+    """rr3 probe: the claim lock is SQLite's, not Python's: 4 OS processes claim one step at the same instant."""
+    import time
+    import uuid
+    from sqlalchemy import select
+    from app.db import session as db_session
+    from app.db.models import ExecutionAttempt
+    for round_ in range(3):
+        run_id = str(uuid.uuid4())
+        await _seed_running_task(run_id)
+        step = await _seed_step(run_id, "h-v0")
+        start_at = time.time() + 1.5
+        procs = [_spawn_worker("claim", db_session.ENGINE.url.database, step.id, f"w{i}", start_at) for i in range(4)]
+        outs = []
+        for proc in procs:
+            stdout, stderr = await asyncio.to_thread(proc.communicate, timeout=60)
+            assert stdout.strip(), stderr
+            outs.append(json.loads(stdout.strip().splitlines()[-1]))
+        assert len([o for o in outs if "ok" in o]) == 1, (round_, outs)
+        assert all(o.get("err") in (None, "StepBlocked") for o in outs), (round_, outs)
+        async with SessionLocal() as session:
+            active = (await session.scalars(select(ExecutionAttempt).where(
+                ExecutionAttempt.step_id == step.id, ExecutionAttempt.status == "active"))).all()
+        assert len(active) == 1, (round_, [a.worker_id for a in active])
+
+
+@pytest.mark.asyncio
+async def test_a_killed_workers_lease_lapses_within_one_lease(jarvis_env):
+    """rr3 probe: SIGKILL a worker mid-call. Its heartbeat dies with it, the lease is never extended past
+    the last heartbeat + lease (2 s here), and another worker then takes the step."""
+    import os
+    import signal
+    import uuid
+    from datetime import timedelta
+    from sqlalchemy import select
+    from app.agent.durable_execution.repository import StepBlocked, _utc, claim_attempt
+    from app.db import session as db_session
+    from app.db.models import ExecutionAttempt, ExecutionStep, utcnow
+    if not hasattr(signal, "SIGKILL"):
+        pytest.skip("needs SIGKILL")
+    run_id = str(uuid.uuid4())
+    await _seed_running_task(run_id)
+    proc = _spawn_worker("hold", db_session.ENGINE.url.database, 0, "worker-A", 0, run_id)
+    try:
+        assert (await asyncio.to_thread(proc.stdout.readline)).strip() == "STARTED", proc.stderr.read()
+
+        async def attempt():
+            async with SessionLocal() as session:
+                return (await session.scalars(select(ExecutionAttempt).where(ExecutionAttempt.worker_id == "worker-A"))).one()
+
+        first = (await attempt()).heartbeat_at
+        await asyncio.sleep(1.0)
+        assert (await attempt()).heartbeat_at > first, "the live worker's heartbeat did not renew"
+        async with SessionLocal() as session:
+            step = (await session.scalars(select(ExecutionStep).where(ExecutionStep.run_id == run_id))).one()
+        with pytest.raises(StepBlocked):
+            await claim_attempt(step.id, "worker-B", input_hash="h-other", idempotency_key="kb")
+    finally:
+        os.kill(proc.pid, signal.SIGKILL)
+        await asyncio.to_thread(proc.wait, 10)
+    killed_at = utcnow()
+    dead = await attempt()
+    await asyncio.sleep(1.0)
+    after = await attempt()
+    assert after.heartbeat_at == dead.heartbeat_at, "the lease was renewed after the worker died"
+    assert _utc(after.lease_expires_at) <= _utc(dead.heartbeat_at) + timedelta(seconds=2.01)
+    await asyncio.sleep(max(0.0, (_utc(after.lease_expires_at) - utcnow()).total_seconds()) + 0.2)
+    taken = await claim_attempt(step.id, "worker-B", input_hash="h-other", idempotency_key="kb")
+    assert taken.worker_id == "worker-B"
+    assert (utcnow() - killed_at).total_seconds() < 4.0
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_runner_leaves_no_heartbeat_behind(jarvis_env, monkeypatch):
+    """rr3 probe: cancelling the runner mid-call stops its heartbeat; the lease is not renewed afterwards."""
+    import uuid
+    from sqlalchemy import select
+    from app.agent.durable_execution import runner
+    from app.db.models import ExecutionAttempt
+    monkeypatch.setattr(runner, "HEARTBEAT_INTERVAL_S", 0.05)
+    run_id = str(uuid.uuid4())
+    await _seed_running_task(run_id)
+    started = asyncio.Event()
+
+    async def op():
+        started.set()
+        await asyncio.sleep(3600)
+
+    task = asyncio.create_task(runner.run_durable_step(**_model_step_args(run_id), input_fingerprint={"m": 1},
+                                                       operation=op, worker_id="wc"))
+    await started.wait()
+    await asyncio.sleep(0.2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert not [t for t in asyncio.all_tasks() if "_keep_lease" in repr(t.get_coro())]
+
+    async def beat():
+        async with SessionLocal() as session:
+            return (await session.scalars(select(ExecutionAttempt).where(ExecutionAttempt.worker_id == "wc"))).one().heartbeat_at
+
+    before = await beat()
+    await asyncio.sleep(0.3)
+    assert await beat() == before

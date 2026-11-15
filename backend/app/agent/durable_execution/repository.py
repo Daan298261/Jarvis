@@ -309,18 +309,33 @@ async def claim_attempt(
         return attempt
 
 
-async def heartbeat_attempt(attempt_id: int, lease_seconds: int | None = None) -> bool:
-    """Extend a still-active attempt's lease. Returns False once the attempt no longer holds the step."""
+async def heartbeat_attempt(
+    attempt_id: int, lease_seconds: int | None = None, *, busy_timeout_ms: int | None = None
+) -> bool:
+    """Extend a still-active attempt's lease. Returns False once the attempt no longer holds the step.
+    ``busy_timeout_ms`` bounds this one write's wait for another connection's lock (the engine's default
+    is 30 s); the connection's own timeout is restored before it goes back to the pool."""
     now = utcnow()
     lease_until = now + timedelta(seconds=DEFAULT_LEASE_SECONDS if lease_seconds is None else lease_seconds)
     async with SessionLocal() as session:
-        renewed = await session.execute(
-            update(ExecutionAttempt)
-            .where(ExecutionAttempt.id == attempt_id, ExecutionAttempt.status == AttemptStatus.ACTIVE.value)
-            .values(heartbeat_at=now, lease_expires_at=lease_until)
-        )
-        await session.commit()
-        return renewed.rowcount > 0
+        conn = await session.connection()
+        restore = None
+        if busy_timeout_ms is not None:
+            restore = (await conn.exec_driver_sql("PRAGMA busy_timeout")).scalar()
+            await conn.exec_driver_sql(f"PRAGMA busy_timeout = {int(busy_timeout_ms)}")
+        try:
+            renewed = await session.execute(
+                update(ExecutionAttempt)
+                .where(ExecutionAttempt.id == attempt_id, ExecutionAttempt.status == AttemptStatus.ACTIVE.value)
+                .values(heartbeat_at=now, lease_expires_at=lease_until)
+            )
+            await session.commit()
+            return renewed.rowcount > 0
+        finally:
+            if restore is not None:
+                await session.rollback()
+                await (await session.connection()).exec_driver_sql(f"PRAGMA busy_timeout = {int(restore)}")
+                await session.commit()
 
 
 async def finish_attempt(attempt_id: int, status: AttemptStatus) -> None:

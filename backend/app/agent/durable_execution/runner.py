@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import hashlib
 import json
+import logging
 import os
 import uuid
 from collections.abc import Awaitable, Callable
@@ -39,6 +39,8 @@ from .repository import (
 from .types import AttemptStatus, CrashBoundary, EffectClass, OperationType, ReplayPolicy, StepStatus
 
 T = TypeVar("T")
+
+log = logging.getLogger("jarvis.durable.runner")
 
 _worker_id = f"jarvis-worker-{os.getpid()}"
 
@@ -78,15 +80,23 @@ MODEL_INPUTS_CHANGED = (
 )
 
 # How often a running step renews its lease (DEFAULT_LEASE_SECONDS = 45), so a model call that runs for
-# minutes (chat_call_max_ms) keeps the step and a second runner cannot take it over mid-call.
+# minutes (chat_call_max_ms) keeps the step and a second runner cannot take it over mid-call. Each renewal
+# waits at most HEARTBEAT_BUSY_TIMEOUT_MS for another writer's lock: two failed renewals in a row
+# (2 x (15 s + 5 s) = 40 s) still end inside the lease.
 HEARTBEAT_INTERVAL_S = 15.0
+HEARTBEAT_BUSY_TIMEOUT_MS = 5000
 
 
 async def _keep_lease(attempt_id: int) -> None:
+    """Renew until the attempt loses the step. A failed renewal (lock wait ran out, disk error) is logged
+    and retried on the next tick; it never ends the heartbeat or reaches the step's result."""
     while True:
         await asyncio.sleep(HEARTBEAT_INTERVAL_S)
-        if not await heartbeat_attempt(attempt_id):
-            return
+        try:
+            if not await heartbeat_attempt(attempt_id, busy_timeout_ms=HEARTBEAT_BUSY_TIMEOUT_MS):
+                return
+        except Exception:
+            log.warning("lease heartbeat for attempt %s failed; retrying next interval", attempt_id, exc_info=True)
 
 
 async def run_durable_step(
@@ -192,8 +202,11 @@ async def run_durable_step(
         raise
     finally:
         lease.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await lease
+        # Wait for the heartbeat to stop without taking on its outcome: nothing it does may replace the
+        # operation's result or exception (the commit's attempt check decides who owns the step).
+        await asyncio.wait([lease])
+        if not lease.cancelled() and lease.exception() is not None:
+            log.warning("lease heartbeat for attempt %s ended with an error", attempt.id, exc_info=lease.exception())
 
     tokens, ms, usd = (0, 0.0, 0.0)
     if cost_extractor and executed_value is not None:
