@@ -268,3 +268,27 @@ def test_ollama_probe_uses_selected_loaded_model_context():
     }, settings)
     assert mgr.live_context_size() == 4096
     assert mgr.state.remote_model == "owner-model"
+
+
+async def test_ollama_probe_reads_each_loaded_models_context_from_api_ps(monkeypatch):
+    """Two Ollama models loaded: the probe reports each one's own context from /api/ps."""
+    from app.inference import backends
+
+    def handler(request):
+        path = request.url.path
+        if path == "/v1/models":
+            return httpx.Response(200, json={"data": [{"id": "front-model"}, {"id": "owner-model"}]})
+        if path == "/api/ps":
+            return httpx.Response(200, json={"models": [
+                {"name": "front-model", "context_length": 2048},
+                {"name": "owner-model", "context_length": 4096},
+                {"name": "no-context"},
+            ]})
+        return httpx.Response(404, json={})
+
+    client_type = httpx.AsyncClient
+    monkeypatch.setattr(backends.httpx, "AsyncClient",
+                        lambda **kw: client_type(transport=httpx.MockTransport(handler), **kw))
+    result = await backends.probe_remote_server("127.0.0.1", 11434, retry=False)
+    assert result["ok"]
+    assert result["loaded_model_contexts"] == {"front-model": 2048, "owner-model": 4096}

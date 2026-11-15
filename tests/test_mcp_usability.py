@@ -403,3 +403,14 @@ def test_model_report_failure_keeps_successful_tool_results():
     assert "2026-11-11T00:00:00Z" in text
     assert "ERROR: cancelled" not in text
     assert "The model could not finish" in text
+
+
+def test_rea_capability_requests_resolve_to_the_reverse_engineer_adapter():
+    """RFC-0201: chat requests use reverse_engineer; asking for it by name must not hand out rea_investigate."""
+    from app.agent.tool_exposure import normalize_capabilities
+    for requested in ("reverse_engineer", "rea", "reverse-engineer"):
+        assert normalize_capabilities([requested]) == ["reverse_engineer"], requested
+    assert normalize_capabilities(["rea_investigate"]) == ["rea_investigate"]
+    suggested = suggest_tools_for_prompt("Use REA to inspect C:/samples/example.exe")
+    assert "reverse_engineer" in suggested
+    assert "rea_investigate" not in suggested
