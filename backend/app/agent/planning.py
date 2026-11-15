@@ -449,10 +449,22 @@ _TOOL_REQUEST = re.compile(
     r"(?i)\b("
     r"run\s+(?:the\s+)?(?:(?:[\w.-]+\s+){0,4})?tool\b|"
     r"run\s+(?:the\s+)?(?:command|harness)\b|"
-    r"(?:use|call|invoke)\s+(?:the\s+)?(?:[\w.-]+\s+){1,5}tool\b|"
-    r"(?:search|read|look\s+up)\s+(?:(?:my|the|bound)\s+){0,3}obsidian(?:\s+vault)?\b|"
+    r"use\s+(?:the\s+)?[\w.-]+\s+tool\b|"
     r"execute\s+(?:the\s+)?(?:(?:[\w.-]+\s+){0,2})?(?:tool|command)\b|"
-    r"\buse\s+(?:the\s+)?(?:docker\s+)?mcp\b"
+    r"call\s+(?:the\s+)?[\w.-]+\s+tool\b|"
+    r"invoke\s+(?:the\s+)?[\w.-]+\s+tool\b"
+    r")",
+)
+
+# Asking the agent to use a named tool, MCP or the Obsidian vault counts only as an instruction: at the
+# start of a sentence, optionally after "please" / "can you". "Should I use MCP ...?" stays conversation.
+_NAMED_TOOL_INSTRUCTION = re.compile(
+    r"(?i)(?:^|[.!?;\n]\s*)(?:(?:hey\s+)?jarvis[,:]?\s+)?"
+    r"(?:please\s+|(?:can|could|would|will)\s+you\s+(?:please\s+)?)?"
+    r"(?:"
+    r"(?:use|call|invoke)\s+(?:the\s+)?(?:[\w.-]+\s+){1,5}tool\b|"
+    r"use\s+(?:the\s+)?(?:docker\s+)?mcp\b|"
+    r"(?:search|read|look\s+up)\s+(?:(?:my|the|bound)\s+){1,3}obsidian(?:\s+vault)?\b"
     r")",
 )
 
@@ -462,7 +474,7 @@ def requests_agent_tools(prompt: str) -> bool:
     if not text:
         return False
     from ..reverse_engineering.skill import requested
-    return requested(text) or bool(_TOOL_REQUEST.search(text))
+    return requested(text) or bool(_TOOL_REQUEST.search(text) or _NAMED_TOOL_INSTRUCTION.search(text))
 
 
 def split_long_owner_prompt(prompt: str, *, max_chars: int = 2200) -> list[str]:

@@ -366,6 +366,19 @@ class MCPRuntime:
                 return row
         return None
 
+    def is_read_only(self, tool_key: str, allowlist: frozenset[tuple[str, str]] = frozenset()) -> bool:
+        """True only for a connected tool the server annotates readOnlyHint=true (and not destructiveHint),
+        or whose exact (server name, tool name) pair is allowlisted. Unknown or unannotated tools are not."""
+        spec = self._lookup(tool_key)
+        if not spec:
+            return False
+        annotations = spec["tool"].get("annotations") or {}
+        if annotations.get("destructiveHint") is True:
+            return False
+        if annotations.get("readOnlyHint") is True:
+            return True
+        return (str(spec["server"].get("name") or ""), str(spec.get("remote_name") or "")) in allowlist
+
     async def call(self, tool_key: str, arguments: dict[str, Any]) -> ToolResult:
         spec = self._lookup(tool_key)
         if not spec:

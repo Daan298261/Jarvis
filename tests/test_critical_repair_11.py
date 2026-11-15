@@ -72,8 +72,6 @@ def _allow_auth(*_a, **_k) -> AuthorizationResult:
         ("office", "read", {"path": "/tmp/doc.docx"}),
         ("office", "info", {"path": "/tmp/doc.docx"}),
         ("mobile_call", "devices", {}),
-        ("mcp_call", "list", {"mcp_tool": "list_resources"}),
-        ("mcp_call", "status", {"mcp_tool": "server_status"}),
     ],
 )
 def test_item1_observations_auto_permit(monkeypatch, tool, action, arguments):
@@ -85,6 +83,16 @@ def test_item1_observations_auto_permit(monkeypatch, tool, action, arguments):
     assert decision.effect.high_consequence is False
 
 
+@pytest.mark.parametrize("remote", ["list_resources", "server_status"])
+def test_item1_mcp_reads_auto_permit_only_when_the_server_marks_them_read_only(monkeypatch, connected_mcp, remote):
+    """#692 review B1: an MCP tool is a read by its readOnlyHint annotation, never by its name."""
+    monkeypatch.setattr("app.policy.reversibility_gate.authorize", _allow_auth)
+    key = connected_mcp("docs", remote, {"readOnlyHint": True})
+    decision = evaluate_side_effect("mcp_call", arguments={"mcp_tool": key}, park_if_needed=True)
+    assert decision.allowed is True and decision.requires_approval is False
+    assert decision.effect.side_effecting is False and decision.effect.high_consequence is False
+
+
 @pytest.mark.parametrize(
     "tool,action,arguments",
     [
@@ -94,6 +102,8 @@ def test_item1_observations_auto_permit(monkeypatch, tool, action, arguments):
         ("office", "delete", {"path": "/tmp/out.docx"}),
         ("mobile_call", "call", {"device_id": "d1", "incident_id": "i1"}),
         ("mcp_call", "invoke", {"mcp_tool": "email_send"}),
+        ("mcp_call", "list", {"mcp_tool": "list_resources"}),  # unannotated MCP tools fail closed (#692 B1)
+        ("mcp_call", "status", {"mcp_tool": "server_status"}),
         ("web_fetch", "get", {"url": "https://example.com/checkout"}),
     ],
 )

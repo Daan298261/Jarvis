@@ -262,9 +262,11 @@ def test_elevation_snapshot_has_pid():
         assert "nothing to type" in str(snap["logon_task_hint"]).lower() or "allow full pc control" in str(snap["logon_task_hint"]).lower()
 
 
-def test_learned_veto_respects_observational_mcp_effect(monkeypatch):
+def test_learned_veto_respects_observational_mcp_effect(monkeypatch, connected_mcp):
     from app.policy.action_gate import gate_side_effect
     from app.decision.types import DecisionResult
+
+    connected_mcp("docker_catalog", "get_current_time")
 
     monkeypatch.setattr("app.policy.reversibility_gate.authorize", lambda *a, **k: _allow())
     monkeypatch.setattr(

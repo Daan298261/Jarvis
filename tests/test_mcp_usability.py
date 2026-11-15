@@ -265,26 +265,36 @@ async def test_mcp_list_includes_status(jarvis_env, monkeypatch):
     assert "supermemory" in hub.json()
 
 
+def _processes_with(marker: str) -> list[int]:
+    import os
+    found = []
+    for pid in os.listdir("/proc") if os.path.isdir("/proc") else []:
+        if not pid.isdigit():
+            continue
+        try:
+            cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="ignore")
+        except OSError:
+            continue
+        if marker in cmdline and "echo_mcp_stdio.py" in cmdline:
+            found.append(int(pid))
+    return found
+
+
+def _echo_server(server_id: str, marker: str = "") -> dict:
+    import sys
+    script = Path(__file__).resolve().parent / "fixtures" / "echo_mcp_stdio.py"
+    return {"id": server_id, "name": "echo", "transport": "stdio", "command": sys.executable,
+            "args": ["-u", str(script), *([marker] if marker else [])], "enabled": True}
+
+
 async def test_live_stdio_mcp_refresh_expose_and_call():
     import asyncio
-    import sys
-    from pathlib import Path
 
     from app.agent.tool_exposure import schemas_for
     from app.tools.mcp_runtime import MCP
 
-    script = Path(__file__).resolve().parent / "fixtures" / "echo_mcp_stdio.py"
-    server = {
-        "id": "echo-live",
-        "name": "echo",
-        "transport": "stdio",
-        "command": sys.executable,
-        "args": ["-u", str(script)],
-        "enabled": True,
-    }
     try:
-        status = await asyncio.create_task(MCP.refresh([server]))
-        owner = MCP._sessions["echo-live"].owner
+        status = await asyncio.create_task(MCP.refresh([_echo_server("echo-live")]))
         assert status["echo"].startswith("1 tool"), status
         names = [item["function"]["name"] for item in schemas_for("mixed")]
         assert "mcp_echo_ping" in names
@@ -293,15 +303,50 @@ async def test_live_stdio_mcp_refresh_expose_and_call():
                       if item["function"]["name"] == "mcp_echo_ping")
         assert schema["required"] == ["text"]
         assert schema["properties"]["text"]["type"] == "string"
-        result = await MCP.call("mcp_echo_ping", {"text": "usable"})
+        result = await asyncio.create_task(MCP.call("mcp_echo_ping", {"text": "usable"}))
         assert result.success, result.error
         assert result.output == "pong:usable"
-        proxy = await REGISTRY.execute("mcp_call", {"mcp_tool": "mcp_echo_ping", "arguments": {"text": "proxy"}})
+        proxy = await asyncio.create_task(
+            REGISTRY.execute("mcp_call", {"mcp_tool": "mcp_echo_ping", "arguments": {"text": "proxy"}}))
         assert proxy.success
         assert proxy.output == "pong:proxy"
         await asyncio.create_task(MCP.refresh([]))
-        assert owner.done()
         assert not MCP.connected_keys()
+    finally:
+        await MCP.close_all()
+        MCP.reset_for_tests()
+
+
+async def test_stdio_session_closed_from_another_task_exits_cleanly(caplog):
+    """The session is opened, used and closed from three different tasks, as API requests do. Closing
+    must not hit AnyIO's "exit cancel scope in a different task" error, and the server process must exit."""
+    import asyncio
+    import logging
+    import sys
+    import uuid
+
+    from app.tools.mcp_runtime import MCP
+
+    caplog.set_level(logging.DEBUG)
+    marker = f"stdio-{uuid.uuid4().hex[:8]}"
+    try:
+        await asyncio.create_task(MCP.refresh([_echo_server("echo-close", marker)]))
+        result = await asyncio.create_task(MCP.call("mcp_echo_ping", {"text": "x"}))
+        assert result.success, result.error
+        if sys.platform.startswith("linux"):
+            assert _processes_with(marker), "the stdio server should be running while connected"
+        await asyncio.create_task(MCP.refresh([]))  # closed from a third task
+        cross_task = [record for record in caplog.records
+                      if "cancel scope in a different task" in (record.getMessage() + repr(record.exc_info))]
+        assert not cross_task, cross_task[0].exc_info
+        if sys.platform.startswith("linux"):
+            for _ in range(50):
+                if not _processes_with(marker):
+                    break
+                await asyncio.sleep(0.1)
+            assert not _processes_with(marker), "the stdio server process must exit when its session closes"
+        after = await asyncio.create_task(MCP.call("mcp_echo_ping", {"text": "y"}))
+        assert not after.success
     finally:
         await MCP.close_all()
         MCP.reset_for_tests()
@@ -344,8 +389,9 @@ def test_small_model_keeps_requested_connected_function():
         assert "mcp_docker_catalog_get_current_time" in {item["function"]["name"] for item in chosen}
 
 
-def test_direct_mcp_read_has_proxy_policy_parity():
+def test_direct_mcp_read_has_proxy_policy_parity(connected_mcp):
     from app.policy.reversibility import resolve_action_effect
+    connected_mcp("docker_catalog", "get_current_time")
     direct = resolve_action_effect("mcp_docker_catalog_get_current_time", arguments={"timezone": "UTC"})
     proxy = resolve_action_effect("mcp_call", arguments={"mcp_tool": "mcp_docker_catalog_get_current_time", "arguments": {"timezone": "UTC"}})
     assert not direct.side_effecting
@@ -354,9 +400,11 @@ def test_direct_mcp_read_has_proxy_policy_parity():
 
 
 async def test_tool_event_stream_uses_one_sse_envelope():
+    """api/tasks streams BUS.stream() through EventSourceResponse, which encodes every frame with
+    ensure_bytes. The bytes on the wire must hold one `data:` envelope, never `data: data: {...}`."""
     import asyncio
     import json
-    from sse_starlette.sse import ServerSentEvent
+    from sse_starlette.sse import EventSourceResponse, ensure_bytes
     from app.events import EventBus
 
     bus = EventBus()
@@ -366,9 +414,10 @@ async def test_tool_event_stream_uses_one_sse_envelope():
     await bus.publish("example", "tool", "Running connected tool", persist=False)
     frame = await waiting
     try:
-        wire = ServerSentEvent(**frame).encode().decode("utf-8")
-        assert wire.startswith("data: {")
-        payload = json.loads(wire.removeprefix("data: "))
+        wire = ensure_bytes(frame, EventSourceResponse(iter(())).sep).decode("utf-8")
+        assert "data: data:" not in wire, wire
+        assert wire.startswith("data: {"), wire
+        payload = json.loads(wire.removeprefix("data: ").strip())
         assert payload["kind"] == "tool"
         assert payload["task_id"] == "example"
     finally:
@@ -392,17 +441,77 @@ async def test_rea_status_keeps_catalog_out_of_model_text(monkeypatch):
     assert json.loads(result.output)["capabilities_available"]
 
 
-def test_model_report_failure_keeps_successful_tool_results():
-    from app.agent.loop import tool_results_fallback
-    from app.agent.planning import WorkingState
+async def _report_failure_after_a_tool_call(jarvis_env, monkeypatch, task_id, fail):
+    """A read tool call succeeds, then the model fails while reporting. The stored answer keeps the result."""
+    import asyncio
+    import json
+    from unittest.mock import AsyncMock
+    from app.agent.loop import AgentRuntime
+    from app.db.models import Task
+    from app.db.session import SessionLocal
+    from app.providers.base import ChatResult
 
-    working = WorkingState()
-    working.note_tool("mcp_time", '{"datetime":"2026-11-11T00:00:00Z"}', True)
-    working.note_tool("filesystem", "ERROR: cancelled", False)
-    text = tool_results_fallback(working, "The model could not finish the final report.")
-    assert "2026-11-11T00:00:00Z" in text
-    assert "ERROR: cancelled" not in text
-    assert "The model could not finish" in text
+    target = jarvis_env["tmp"] / f"{task_id}.txt"
+    target.write_text("REPORT-MARKER-7731")
+    async with SessionLocal() as session:
+        session.add(Task(id=task_id, title="Report", prompt=f"Read {target} and report its contents.", status="running",
+                         task_class="filesystem", profile="fast", autonomy="autonomous", response_route="managed_task"))
+        await session.commit()
+    monkeypatch.setattr("app.agent.loop.record_trajectory", AsyncMock())
+    monkeypatch.setattr("app.agent.loop.publish_owner_text", AsyncMock(return_value={}))
+    jarvis_env["settings"].front_responder.enabled = False
+
+    class Provider:
+        name = "scripted"
+        model = "scripted-model"
+
+        def __init__(self):
+            self.calls = 0
+
+        async def health(self):
+            return True
+
+        async def chat(self, messages, tools=None, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return ChatResult(tool_calls=[{"id": "read-1", "type": "function", "function": {
+                    "name": "filesystem", "arguments": json.dumps({"action": "read", "path": str(target)})}}])
+            return await fail(self.calls)
+
+    provider = Provider()
+    jarvis_env["manager"].provider = provider
+    await asyncio.wait_for(AgentRuntime()._run(task_id, continue_existing=False), 40)
+    async with SessionLocal() as session:
+        return await session.get(Task, task_id), provider
+
+
+async def test_model_report_http_error_keeps_successful_tool_results(jarvis_env, monkeypatch):
+    import httpx
+    from openai import APIStatusError
+
+    async def fail(_call):
+        response = httpx.Response(500, request=httpx.Request("POST", "http://127.0.0.1/v1/chat/completions"))
+        raise APIStatusError("server error", response=response, body=None)
+
+    task, _ = await _report_failure_after_a_tool_call(jarvis_env, monkeypatch, "report-http-500", fail)
+    assert task.status == "completed", (task.status, task.error)
+    assert "REPORT-MARKER-7731" in task.result, task.result
+    assert "The model could not finish the final report." in task.result
+
+
+async def test_model_report_timeout_keeps_successful_tool_results(jarvis_env, monkeypatch):
+    from app.providers.base import ChatResult
+
+    async def fail(call):
+        if call == 2:  # the first report moves the task into verification
+            return ChatResult(content="The file was read.")
+        raise TimeoutError("report timed out")
+
+    task, provider = await _report_failure_after_a_tool_call(jarvis_env, monkeypatch, "report-timeout", fail)
+    assert provider.calls >= 3, provider.calls
+    assert task.status == "completed", (task.status, task.error)
+    assert "REPORT-MARKER-7731" in task.result, task.result
+    assert "The model timed out while writing the final report." in task.result
 
 
 def test_rea_capability_requests_resolve_to_the_reverse_engineer_adapter():
@@ -414,3 +523,111 @@ def test_rea_capability_requests_resolve_to_the_reverse_engineer_adapter():
     suggested = suggest_tools_for_prompt("Use REA to inspect C:/samples/example.exe")
     assert "reverse_engineer" in suggested
     assert "rea_investigate" not in suggested
+
+
+# --- #692 review: MCP reads by annotation or exact allowlist only; vault credentials; chat routing ---
+
+import pytest  # noqa: E402
+
+from app.decision.types import Answer, DecisionResult  # noqa: E402
+from app.policy.authorize import AuthorizationResult  # noqa: E402
+from app.policy.levels import AutonomyLevel  # noqa: E402
+from app.policy.reversibility import resolve_action_effect  # noqa: E402
+
+# Real-world MCP writes whose key only contains a read word ("thread", "playlist", "budget_", "status_page").
+MCP_WRITES = [
+    ("mcp_slack_reply_to_thread", {"channel": "C1", "text": "hi"}),
+    ("mcp_spotify_add_to_playlist", {"playlist_id": "p", "uri": "u"}),
+    ("mcp_budget_tracker_delete_entry", {"id": "42"}),
+    ("mcp_status_page_delete_incident", {"id": "7"}),
+    ("mcp_gmail_archive_thread", {"id": "t"}),
+]
+
+
+@pytest.mark.parametrize("name,args", MCP_WRITES)
+def test_direct_mcp_write_with_a_read_word_in_its_name_stays_side_effecting(name, args):
+    effect = resolve_action_effect(name, arguments=args)
+    assert effect.side_effecting, f"{name} classified observational: {effect.recovery_summary}"
+
+
+@pytest.mark.parametrize("server,tool", [("slack", "reply_to_thread"), ("budget_tracker", "delete_entry"),
+                                         ("status_page", "delete_incident"), ("evil", "get_and_delete_all")])
+def test_connected_unannotated_mcp_tools_fail_closed_direct_and_proxy(connected_mcp, server, tool):
+    key = connected_mcp(server, tool)
+    for name, args in ((key, {}), ("mcp_call", {"mcp_tool": key, "arguments": {}})):
+        effect = resolve_action_effect(name, arguments=args)
+        assert effect.side_effecting and effect.external_side_effect, (name, effect.recovery_summary)
+
+
+def test_mcp_read_only_needs_the_servers_annotation_or_an_exact_allowlisted_pair(connected_mcp):
+    read = connected_mcp("notes", "lookup_page", {"readOnlyHint": True})
+    flagged = connected_mcp("notes", "purge_pages", {"readOnlyHint": True, "destructiveHint": True})
+    explicit_write = connected_mcp("notes", "list_and_archive", {"readOnlyHint": False})
+    allowlisted = connected_mcp("docker_catalog", "get_current_time")
+    impostor = connected_mcp("other_server", "get_current_time")
+    for key, side_effecting in ((read, False), (flagged, True), (explicit_write, True), (allowlisted, False),
+                                (impostor, True)):
+        assert resolve_action_effect(key, arguments={}).side_effecting is side_effecting, key
+        proxied = resolve_action_effect("mcp_call", arguments={"mcp_tool": key, "arguments": {}})
+        assert proxied.side_effecting is side_effecting, key
+    assert resolve_action_effect("mcp_docker_catalog_get_current_time", arguments={}).side_effecting is False
+    assert resolve_action_effect("mcp_call", arguments={"mcp_tool": "mcp_not_connected_get_x"}).side_effecting
+
+
+def _gate_allows_and_laya_cancels(monkeypatch):
+    monkeypatch.setattr("app.policy.reversibility_gate.authorize", lambda *a, **k: AuthorizationResult(
+        True, False, "ok", AutonomyLevel.L3_EXECUTE_WITH_GATES, "mcp"))
+    monkeypatch.setattr("app.policy.action_gate.decide", lambda *a, **k: DecisionResult(
+        answers={"cancel": Answer("cancel", "choice", "cancel", 0.99)},
+        source="laya", decision_class="harm_veto", provider="laya"))
+
+
+@pytest.mark.parametrize("name,args", MCP_WRITES[2:4])
+def test_misclassified_mcp_write_is_not_auto_allowed_past_the_veto(monkeypatch, name, args):
+    from app.policy.action_gate import gate_side_effect
+    _gate_allows_and_laya_cancels(monkeypatch)
+    decision = gate_side_effect(name, arguments=args, park_if_needed=False)
+    assert not decision.allowed, decision.reason
+    proxied = gate_side_effect("mcp_call", arguments={"mcp_tool": name, "arguments": args}, park_if_needed=False)
+    assert not proxied.allowed, proxied.reason
+
+
+def test_laya_veto_still_skips_annotated_mcp_reads(monkeypatch, connected_mcp):
+    from app.policy.action_gate import gate_side_effect
+    _gate_allows_and_laya_cancels(monkeypatch)
+    read = connected_mcp("notes", "lookup_page", {"readOnlyHint": True})
+    write = connected_mcp("notes", "reply_to_thread")
+    assert gate_side_effect(read, arguments={}, park_if_needed=False).allowed
+    assert not gate_side_effect(write, arguments={}, park_if_needed=False).allowed
+
+
+@pytest.mark.parametrize("args", [
+    {"action": "read", "rel_path": "secrets/api_token.md"},
+    {"action": "search", "query": "password for the router"},
+    {"action": "resolve", "query": "github token"},
+])
+def test_vault_credential_lookup_keeps_the_credential_gate(args):
+    effect = resolve_action_effect("vault_memory", arguments=args)
+    assert effect.credential_effect and effect.side_effecting, effect.recovery_summary
+
+
+@pytest.mark.parametrize("prompt", [
+    "How do people use AI as a learning tool?",
+    "Should I use MCP or a plain REST API for my app?",
+    "Should I read Obsidian's docs before switching from Notion?",
+])
+def test_conversation_about_tools_is_not_routed_to_agent_tools(prompt):
+    from app.agent.ingress_gate import heuristic_needs_tools
+    from app.agent.planning import classify_task, requests_agent_tools
+    assert not requests_agent_tools(prompt)
+    # The tool-request check no longer forces tools; the topic classifier decides as it did before #692.
+    assert heuristic_needs_tools(prompt, classify_task(prompt)) is not True
+
+
+@pytest.mark.parametrize("prompt", [
+    "Please use the Docker MCP to get the current time.",
+    "Can you call the docker get_current_time tool?",
+])
+def test_explicit_instruction_to_use_a_named_tool_or_mcp_uses_agent_tools(prompt):
+    from app.agent.planning import requests_agent_tools
+    assert requests_agent_tools(prompt)

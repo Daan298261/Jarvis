@@ -181,35 +181,13 @@ _WEB_FETCH_OBSERVE = frozenset({"", "get", "fetch", "head", "read", "retrieve"})
 _OFFICE_OBSERVE = frozenset({"read", "info", "list", "status", "stat"})
 _OFFICE_MUTATE = frozenset({"create", "append", "save", "save_as", "write", "edit", "delete"})
 _MOBILE_OBSERVE = frozenset({"", "devices", "list", "status", "read"})
-_MCP_OBSERVE_HINTS = (
-    "list",
-    "status",
-    "read",
-    "get",
-    "fetch",
-    "search",
-    "find",
-    "query",
-    "describe",
-    "schema",
-    "health",
-    "ping",
-)
-_MCP_MUTATE_HINTS = (
-    "send",
-    "write",
-    "create",
-    "delete",
-    "update",
-    "post",
-    "put",
-    "patch",
-    "execute",
-    "run",
-    "call",
-    "invoke",
-    "transfer",
-    "pay",
+# MCP tools count as reads only by the server's own annotation (readOnlyHint=true, no destructiveHint)
+# or by an exact (server, tool) pair here; never by words in the name, which the server controls.
+# Everything else fails closed as an external state change (ApprovalGrant, Laya veto).
+MCP_READ_ONLY_TOOLS = frozenset(
+    {
+        ("docker_catalog", "get_current_time"),  # pinned Docker MCP Time server (docs/mcp-tool-path.md)
+    }
 )
 
 _CREDENTIAL_HINTS = (
@@ -253,23 +231,11 @@ def _observation_meta(tool_name: str, action: str, target: str, summary: str) ->
     )
 
 
-def _mcp_tool_looks_observational(args: dict[str, Any], action: str) -> bool:
-    blob = " ".join(
-        str(args.get(key) or "")
-        for key in ("mcp_tool", "name", "tool", "action", "method")
-    ).lower()
-    if action:
-        blob = f"{blob} {action}".strip()
-    if any(hint in blob for hint in _MCP_MUTATE_HINTS):
-        # Explicit mutate tokens win over observe heuristics.
-        if any(hint in blob for hint in ("list_", "list-", "get_", "get-", "read_", "status")):
-            # e.g. list_messages is still observational despite "send" elsewhere
-            pass
-        else:
-            return False
-    if action in {"list", "status", "read", "get", "search", "describe", "health", "ping"}:
-        return True
-    return any(hint in blob for hint in _MCP_OBSERVE_HINTS)
+def _mcp_tool_is_read_only(name: str, args: dict[str, Any]) -> bool:
+    from ..tools.mcp_runtime import MCP
+
+    key = str(args.get("mcp_tool") or args.get("name") or "") if name == "mcp_call" else name
+    return bool(key) and MCP.is_read_only(key, MCP_READ_ONLY_TOOLS)
 
 
 def _target_from_args(arguments: dict[str, Any]) -> str:
@@ -331,15 +297,6 @@ def resolve_action_effect(
             risk = RiskLevel.IRREVERSIBLE
 
     # Read-only / non-side-effecting shortcuts
-    if name == "vault_memory" and act in {"search", "read", "resolve", "neighborhood", "follow"}:
-        return ActionEffectMeta(
-            tool_name=name,
-            action=act,
-            reversibility=ReversibilityClass.REVERSIBLE,
-            side_effecting=False,
-            target=str(args.get("rel_path") or args.get("query") or ""),
-            recovery_summary="read-only vault lookup; no undo required",
-        )
     if name == "filesystem" and act in _READ_ONLY_FS:
         return ActionEffectMeta(
             tool_name=name,
@@ -557,6 +514,17 @@ def resolve_action_effect(
             recovery_summary="financial effects require an ApprovalGrant",
         )
 
+    # Ordinary vault lookups skip approval; credential-bearing ones were gated just above.
+    if name == "vault_memory" and act in {"search", "read", "resolve", "neighborhood", "follow"}:
+        return ActionEffectMeta(
+            tool_name=name,
+            action=act,
+            reversibility=ReversibilityClass.REVERSIBLE,
+            side_effecting=False,
+            target=str(args.get("rel_path") or args.get("query") or ""),
+            recovery_summary="read-only vault lookup; no undo required",
+        )
+
     if name in {"settings", "config"} or (name == "chat_projects" and act in {"update", "write", "delete"}):
         if act in {"delete", "reset"}:
             return ActionEffectMeta(
@@ -650,8 +618,7 @@ def resolve_action_effect(
         )
 
     if name == "mcp_call" or name.startswith("mcp_"):
-        mcp_args = args if name == "mcp_call" else {**args, "mcp_tool": name}
-        if _mcp_tool_looks_observational(mcp_args, act):
+        if _mcp_tool_is_read_only(name, args):
             return _observation_meta(
                 name,
                 act or str(args.get("mcp_tool") or "list"),
