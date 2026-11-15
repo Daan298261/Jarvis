@@ -8,6 +8,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
@@ -85,5 +86,91 @@ class VoicePackCreditTest {
             assertEquals(Intent.ACTION_VIEW, started.action)
             assertEquals(url, started.dataString)
         }
+    }
+
+    @Test fun licenseNoticesFallBackToPinnedPocketCreditAndKeepOtherText() {
+        val notices = VoicePackCredit.licenseNotices()
+        val pocketNotice = notices.first { it.packId == pocket }
+        assertNull(pocketNotice.attribution)
+        assertEquals(
+            CompanionVoicePackCatalog.POCKET_VOICE_ATTRIBUTION,
+            VoicePackCredit.creditText(pocketNotice.packId, pocketNotice.attribution),
+        )
+        val others = notices.filter { it.packId != pocket }
+        assertTrue(others.isNotEmpty())
+        others.forEach { notice ->
+            assertEquals(notice.attribution?.trim(), VoicePackCredit.creditText(notice.packId, notice.attribution))
+            assertTrue(notice.attribution!!.contains("https://"))
+        }
+    }
+
+    @Test fun licenseScreenStaysClosedUntilOpenedThenShowsPocketCredit() {
+        compose.setContent {
+            PhoneSettingsSection(title = "Licenses", summary = "Third-party notices, including Pocket TTS") {
+                LicenseScreen(color = Color.Gray, errorColor = Color.Red)
+            }
+        }
+        val sentence = VoicePackCredit.sentence(CompanionVoicePackCatalog.POCKET_VOICE_ATTRIBUTION)
+        compose.onNodeWithText("Licenses").assertIsDisplayed()
+        assertTrue(compose.onAllNodesWithText(sentence).fetchSemanticsNodes().isEmpty())
+        compose.onNodeWithText("Open").performClick()
+        compose.onNodeWithText("Pocket TTS").assertIsDisplayed()
+        compose.onNodeWithText(sentence).assertIsDisplayed()
+        val url = pocketUrls.first()
+        val label = app.getString(VoicePackCredit.linkLabel(url))
+        compose.onNodeWithText("$label: $url").assertIsDisplayed().performClick()
+        val started = shadowOf(app).nextStartedActivity
+        assertEquals(Intent.ACTION_VIEW, started.action)
+        assertEquals(url, started.dataString)
+    }
+
+    @Test fun pocketTtsIsTheOnlySynthesizableOnDeviceVoice() {
+        val tts = CompanionVoicePackCatalog.builtIn.filter { it.role == "tts" }
+        assertEquals(listOf(pocket), tts.map { it.id })
+        assertEquals(CompanionVoicePackCatalog.POCKET_TTS_ENGINE, tts.single().engine)
+        assertTrue(CompanionVoicePackCatalog.canSynthesize(tts.single()))
+        assertFalse(tts.single().attribution.isBlank())
+    }
+
+    // ---- Third-party notices match what the APK actually ships (UX r1 on #673) ----
+
+    /** Unit tests run in android/app. */
+    private fun androidFile(path: String): java.io.File =
+        java.io.File(path).also { check(it.isFile) { "missing $path from ${java.io.File(".").absolutePath}" } }
+
+    @Test fun nativeLibraryNoticesMatchTheCMakeBuild() {
+        val notices = VoicePackCredit.licenseNotices().associateBy { it.title }
+        val llamaTag = Regex("""GIT_TAG (v[0-9.]+)""").find(androidFile("src/main/cpp/CMakeLists.txt").readText())!!.groupValues[1]
+        val voice = androidFile("src/main/cpp/voice_native/CMakeLists.txt").readText()
+        val whisperTag = Regex("""GIT_TAG (v[0-9.]+)""").find(voice)!!.groupValues[1]
+        val ortVersion = Regex("""set\(ORT_VERSION "([0-9.]+)"\)""").find(voice)!!.groupValues[1]
+        notices.getValue("llama.cpp").attribution!!.let { assertTrue(it, it.contains(llamaTag) && it.contains("License: MIT")) }
+        notices.getValue("whisper.cpp").attribution!!.let { assertTrue(it, it.contains(whisperTag) && it.contains("License: MIT")) }
+        notices.getValue("ONNX Runtime").attribution!!.let { assertTrue(it, it.contains(ortVersion)) }
+    }
+
+    @Test fun everyDeclaredGradleRuntimeLibraryHasALicenseRow() {
+        val gradle = androidFile("build.gradle.kts").readText()
+        val declared = Regex("""^\s*implementation\("([^:"]+):([^:"]+)(?::([^"]+))?"\)""", RegexOption.MULTILINE)
+            .findAll(gradle).map { Triple(it.groupValues[1], it.groupValues[2], it.groupValues[3]) }.toList()
+        assertTrue(declared.size > 10)
+        val listed = RuntimeLicenses.libraries.associateBy { it.coordinate }
+        declared.forEach { (group, artifact, version) ->
+            val row = listed["$group:$artifact"] ?: error("$group:$artifact has no license row")
+            if (version.isNotEmpty()) assertEquals("$group:$artifact", version, row.version)
+            assertTrue(row.license in RuntimeLicenses.licenseUrls)
+        }
+        val texts = RuntimeLicenses.notices().joinToString("\n") { it.attribution!! }
+        RuntimeLicenses.libraries.forEach { assertTrue(it.coordinate, texts.contains("${it.coordinate} ${it.version}")) }
+        RuntimeLicenses.notices().forEach { assertTrue(VoicePackCredit.urls(it.attribution!!).isNotEmpty()) }
+    }
+
+    @Test fun everyNoticeFileSectionHasAMatchingRow() {
+        val lines = androidFile("../NOTICE").readLines()
+        val sections = lines.indices.drop(1).filter { i -> lines[i].matches(Regex("-{3,}")) && lines[i - 1].isNotBlank() }
+            .map { lines[it - 1].trim() }
+        assertTrue(sections.containsAll(listOf("ONNX Runtime", "llama.cpp", "whisper.cpp", "Keyword spotting", "Gradle runtime libraries")))
+        val titles = VoicePackCredit.licenseNotices().map { it.title }
+        sections.forEach { section -> assertTrue(section, titles.any { section.startsWith(it) || it.startsWith(section) }) }
     }
 }
