@@ -139,7 +139,9 @@ def owner_asked(text: str, action: str, *, item: dict[str, Any] | None = None, c
     if action == "unqueue":
         return "" if _UNQUEUE.search(own) and mentions_item(own, item) else "Removing a queued ticket needs your own request naming it, or the Self-development page"
     if action == "run":
-        return "" if _RUN.search(own) and _RUN_OBJECT.search(own) else "Starting a development mission needs your own request, or Run in Self-development"
+        # The owner names the exact task that would start (id, RFC number or title), like N2's undo.
+        ok = bool(_RUN.search(own)) and mentions_item(own, item)
+        return "" if ok else "Starting a development mission needs your own request naming that task (for example \"start RFC-0211\"), or Run in Self-development"
     if action == "configure":
         changes = changes or {}
         for key, label in _PAGE_ONLY.items():
@@ -183,7 +185,8 @@ class SelfDevelopmentTool(Tool):
         "\"do this next\" use actor=owner; your own re-prioritisation uses actor=anzu with a reason); undo reverts the "
         "latest reorder. scan/queue/unqueue/run/stop/configure manage individual RFC revisions. Acting as the owner "
         "(actor=owner, queue, unqueue, run, configure) works only when the owner's own latest message asks for that "
-        "exact change; the reservation and repository can only be changed on the Self-development page."
+        "exact change; run starts the next queued task (or item_id) only when the owner's message names that task by "
+        "id, RFC number or title. The reservation and repository can only be changed on the Self-development page."
     )
     risk = RiskLevel.MEDIUM
     parameters = {"type": "object", "properties": {
@@ -200,7 +203,7 @@ class SelfDevelopmentTool(Tool):
     async def execute(self, action: str, item_id: str = "", revision: str = "", config: dict[str, Any] | None = None,
                       position: int | None = None, actor: str = "anzu", reason: str = "", history_id: str = "",
                       expected_revision: int | None = None, _task_id: str | None = None, **_: Any):
-        from ..agent.development_queue import moved_items as q_moved
+        from ..agent.development_queue import moved_items as q_moved, next_eligible
         from ..agent.development_scheduler import DEVELOPMENT, DevelopmentConfig
         # A worker cannot recursively schedule more workers from an RFC/tool result.
         if os.environ.get("ANZU_DEVELOPMENT_MISSION"):
@@ -221,8 +224,11 @@ class SelfDevelopmentTool(Tool):
             elif needs_owner:
                 current = DEVELOPMENT.state()
                 item = current["items"].get(item_id) if item_id else None
-                if action in {"queue", "unqueue", "move"} and item_id and item is None:
+                if action in {"queue", "unqueue", "move", "run"} and item_id and item is None:
                     raise ValueError("Unknown task")
+                if action == "run" and not item_id:
+                    # The task Run would start: the next owner-queued, eligible one.
+                    item = next_eligible(current, automatic=False)[0]
                 changes = None
                 if action == "configure":
                     unknown = sorted(set(config or {}) - set(_CHAT_SETTINGS) - set(_PAGE_ONLY))
@@ -244,7 +250,8 @@ class SelfDevelopmentTool(Tool):
             elif action in {"queue", "unqueue"}: result = await DEVELOPMENT.select(item_id, revision, action == "queue")
             elif action == "run":
                 await DEVELOPMENT.scan()
-                result = await DEVELOPMENT.launch()
+                # Bound to the task the owner named; launch refuses if the queue moved in between.
+                result = await DEVELOPMENT.launch(expected=item["id"])
             elif action == "stop": result = await DEVELOPMENT.stop()
             elif action == "configure":
                 # A chat change never clears the failure breaker; that is the page's explicit resume.

@@ -124,8 +124,8 @@ async def test_model_cannot_queue_or_run_without_the_owner(sched, monkeypatch):
     async def select(*args):
         calls.append(("select", args))
         return {}
-    async def launch():
-        calls.append(("launch",))
+    async def launch(**kwargs):
+        calls.append(("launch", kwargs))
         return {}
     async def scan():
         return {}
@@ -140,8 +140,11 @@ async def test_model_cannot_queue_or_run_without_the_owner(sched, monkeypatch):
     assert calls == []
     owner_says(monkeypatch, "queue RFC-9011 and start the development mission")
     assert (await tool.execute("queue", item_id="bravo", revision="rbravo", _task_id="t")).success
-    assert (await tool.execute("run", _task_id="t")).success
-    assert [c[0] for c in calls] == ["select", "launch"]
+    assert (await tool.execute("run", item_id="bravo", _task_id="t")).success
+    # N4: a later bare "start the development mission" does not name the task, so it is refused.
+    owner_says(monkeypatch, "start the development mission")
+    assert not (await tool.execute("run", item_id="bravo", _task_id="t")).success
+    assert calls[0][0] == "select" and calls[-1] == ("launch", {"expected": "bravo"}) and len(calls) == 2
 
 
 # --- blocker 3: only the owner's Publish or Away Mode publishes ----------------------------

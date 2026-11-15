@@ -507,7 +507,9 @@ async def test_chat_tool_run_returns_tool_error_when_models_unavailable(schedule
     monkeypatch.setattr(ds, "DEVELOPMENT", scheduler)
     monkeypatch.delenv("ANZU_DEVELOPMENT_MISSION", raising=False)
     import app.tools.self_development as tool_module
-    async def owner(_task): return "start the development mission"
+    target = scheduler.public()["items"][0]["id"]
+    # N4: the owner names the task to start; a bare "start the development mission" is refused.
+    async def owner(_task): return f"start the development mission for {target}"
     monkeypatch.setattr(tool_module, "latest_owner_message", owner)
     result = await SelfDevelopmentTool().execute(action="run", _task_id="task")
     assert result.success is False

@@ -504,11 +504,14 @@ class DevelopmentScheduler:
             self.lease.unlink(missing_ok=True)
             self.lease = None
 
-    async def launch(self):
+    async def launch(self, expected: str = ""):
+        """Start the next owner-queued task; ``expected`` (chat runs) must be that task."""
         async with self.lock:
             state = self.state()
             config = DevelopmentConfig.model_validate(state["config"])
             item, _ = queue.next_eligible(state, automatic=False)
+            if expected and (not item or item["id"] != expected):
+                raise ValueError(f"{expected} is not the next runnable task; queue it or check the Upcoming list")
             if not item:
                 # Preserve the slot rules even when nothing is queued.
                 self.check_slot(state, config)

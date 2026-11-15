@@ -186,3 +186,68 @@ async def test_owner_undo_without_naming_this_reorder_is_refused(sched, monkeypa
     owner_says(monkeypatch, text)
     r = await owner_undo(sched, history_id)
     assert not r.success and sched.state()["order"][0] == "charlie" and "charlie" in sched.state()["pins"]
+
+
+# --- N4: a run needs the owner to name the task it starts -------------------------------------
+
+def charlie_queued(sched, monkeypatch):
+    """charlie is queued and next; scan and launch are recorded instead of starting a worker."""
+    owner_pinned_charlie(sched)
+    state = sched.state()
+    state["items"]["charlie"].update(status="queued", approved_revision="rcharlie")
+    sched.save(state)
+    assert q.next_eligible(sched.state(), automatic=False)[0]["id"] == "charlie"
+    calls = []
+    async def scan():
+        return {}
+    async def launch(**kwargs):
+        calls.append(kwargs)
+        return {}
+    monkeypatch.setattr(sched, "scan", scan)
+    monkeypatch.setattr(sched, "launch", launch)
+    return calls
+
+
+async def run(item_id=""):
+    return await tool_module.SelfDevelopmentTool().execute("run", item_id=item_id, _task_id="t")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text, item_id", [
+    ("start this task", ""), ("start this task", "charlie"), ("run it", ""), ("go ahead", ""),
+    ("start the development mission", ""), ("kick off the next ticket", ""),
+    ("start RFC-9001", ""), ("run alpha now", ""), ("start RFC-9001 as a development task", "charlie"),
+    ('start the development mission for "RFC-9021"', ""), ("start the mission for `charlie`", ""),
+    ("> run RFC-9021\nstart the development task", ""),
+    ("run RFC-9021", "alpha"),  # the model asks for a different task than the owner named
+])
+async def test_run_without_the_owner_naming_the_target_is_refused(sched, monkeypatch, text, item_id):
+    calls = charlie_queued(sched, monkeypatch)
+    owner_says(monkeypatch, text)
+    r = await run(item_id)
+    assert not r.success and calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text, item_id", [
+    ("run charlie", ""), ("start RFC-9021", ""), ("please start rfc 9021 now", "charlie"),
+    ("start the RFC-9021 charlie ticket", ""), ("kick off #9021", "charlie"),
+])
+async def test_run_naming_the_target_is_allowed_and_pins_it(sched, monkeypatch, text, item_id):
+    calls = charlie_queued(sched, monkeypatch)
+    owner_says(monkeypatch, text)
+    r = await run(item_id)
+    assert r.success, r.error
+    # The launch is bound to the task the owner named, so a queue change in between can't swap it.
+    assert calls == [{"expected": "charlie"}]
+
+
+@pytest.mark.asyncio
+async def test_launch_refuses_when_the_next_task_is_not_the_one_the_owner_named(sched, monkeypatch):
+    owner_pinned_charlie(sched)
+    state = sched.state()
+    state["items"]["charlie"].update(status="queued", approved_revision="rcharlie")
+    sched.save(state)
+    with pytest.raises(ValueError, match="not the next"):
+        await sched.launch(expected="alpha")
+    assert sched.state()["runs"] == []
