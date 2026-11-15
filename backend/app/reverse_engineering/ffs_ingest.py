@@ -46,6 +46,7 @@ import zlib
 
 from . import store
 from .tab_analyzer import TabProfiler, is_tab_path, parse_tab_header, summarize as summarize_tab_profiles
+from .tab_recovery import TableRecovery
 
 CHUNK_SIZE = 1024 * 1024  # RFC-0208: every member is hashed in 1 MiB blocks
 HEADER_MAX_BYTES = 65536  # Header inspection window for magic detection
@@ -65,6 +66,8 @@ DEFAULT_QUESTION = "Forensic image ingest and file index"
 DEFAULT_CHECKPOINT_INTERVAL = 256  # files between durable checkpoints
 CHECKPOINT_SECONDS = 5.0  # ...or this many seconds, whichever comes first
 MAX_EVIDENCE_TAB_FILES = 2000  # per-file .tab rows inlined in evidence; the rest stay in tab_profile.json
+RECOVERY_FILE = "tab_recovery.json"  # known-plaintext recovery report (index/)
+DECODED_DIR = "decoded_tables"  # hash-named decoded bodies (index/)
 MAX_TYPE_GROUPS = 50
 MAX_LISTED_PATHS = 20  # sample paths kept per unknown class
 MAX_QUERY_LIMIT = 500
@@ -706,6 +709,24 @@ class FFSIngest:
             return self._interrupt(row, checkpoint_path, source_path, files, total_bytes, current,
                                    total_files_hint, total_bytes_hint, resumed, unknowns, outcome)
 
+        # ----- table recovery: re-reads the dump, so it runs before the source is verified ---
+        tab = self._tab_profile(ident, index_path)
+        try:
+            recovery = TableRecovery(tab["files"]).run(
+                lambda: iter_source_entries(source_path, source_type), idx / DECODED_DIR,
+                lambda: check_cancel(b""), source_path.exists,
+            )
+        except IngestCancelled:
+            self._finish_session(custody_path, custody, session, session_files, "cancelled")
+            return self._interrupt(row, checkpoint_path, source_path, files, total_bytes, None,
+                                   total_files_hint, total_bytes_hint, resumed, unknowns, "cancelled")
+        except BaseException as exc:
+            row["last_error"] = f"Table recovery: {type(exc).__name__}: {exc}"[:2000]
+            self._finish_session(custody_path, custody, session, session_files, "interrupted")
+            self._interrupt(row, checkpoint_path, source_path, files, total_bytes, None,
+                            total_files_hint, total_bytes_hint, resumed, unknowns, "interrupted")
+            raise
+
         # ----- completed: declare gaps, verify the source, seal the manifest ----------------
         if source_type == "raw" and RAW_IMAGE_UNKNOWN not in unknowns:
             unknowns.append(RAW_IMAGE_UNKNOWN)
@@ -736,8 +757,29 @@ class FFSIngest:
             if not source_unchanged:
                 unknowns.append("The source's size or modification time changed during ingest; "
                                 "hashes reflect the bytes read at the time and the dump should be re-verified.")
+        integrity = recovery["integrity"]
+        _declare(unknowns, sorted({c["path"] for c in integrity["changed"]}),
+                 "indexed member(s) no longer matched their index size/SHA-256 when re-read for table "
+                 "recovery; the dump changed during ingest and should be re-verified")
+        _declare(unknowns, sorted({u["path"] for u in integrity["unreadable"]}),
+                 f"indexed member(s) could not be re-read for table recovery (see {INDEX_DIR}/{RECOVERY_FILE})")
+        custody["recovery_reread"] = {"changed": len(integrity["changed"]), "unreadable": len(integrity["unreadable"])}
+        change_detection += "; table-recovery re-reads verified against index size and SHA-256"
+        if integrity["changed"]:
+            source_unchanged = False
         manifest_sha = file_sha256(index_path)
-        tab = self._tab_profile(ident, index_path)
+        store.atomic_json(idx / RECOVERY_FILE, recovery)
+        tab["summary"]["known_plaintext_recovery"] = {
+            "report": f"{INDEX_DIR}/{RECOVERY_FILE}",
+            "candidate_pairs_tested": recovery["candidate_pairs_tested"],
+            "matched_pairs": len(recovery["pairs"]),
+            "solved_key_ids": [g["key_id"] for g in recovery["key_ids"] if g["solved"]],
+            "decoded_files": len(recovery["decoded"]),
+            "decoded_plaintext_verified": recovery["decoded_plaintext_verified"],
+            "decoded_hypothesis_only": recovery["decoded_hypothesis_only"],
+            "gaps": recovery["gaps"],
+        }
+        store.atomic_json(idx / TAB_PROFILE_FILE, tab)
         custody["manifest"] = {"index": f"{INDEX_DIR}/{INDEX_FILE}", "files": files, "bytes": total_bytes,
                                "sha256": manifest_sha}
         custody["source_sha256"] = manifest_sha
@@ -782,8 +824,24 @@ class FFSIngest:
                 "with encryption or compression and does not by itself prove either.",
             ],
         }, source_path, manifest_sha)
+        recovery_id = self._evidence(row, "ffs_tab_recovery", {
+            "derived_from": tab_id, "report": f"{INDEX_DIR}/{RECOVERY_FILE}",
+            "report_sha256": file_sha256(idx / RECOVERY_FILE),
+            "derivatives": f"{INDEX_DIR}/{DECODED_DIR}/", **tab["summary"]["known_plaintext_recovery"],
+            "key_ids": recovery["key_ids"],
+            "pairs": recovery["pairs"][:MAX_EVIDENCE_TAB_FILES],
+            "pairs_truncated": len(recovery["pairs"]) > MAX_EVIDENCE_TAB_FILES,
+            "rejected_pairs": recovery["rejected_pairs"][:MAX_EVIDENCE_TAB_FILES],
+            "rejected_pairs_truncated": len(recovery["rejected_pairs"]) > MAX_EVIDENCE_TAB_FILES,
+            "decoded": recovery["decoded"][:MAX_EVIDENCE_TAB_FILES],
+            "decoded_truncated": len(recovery["decoded"]) > MAX_EVIDENCE_TAB_FILES,
+            "integrity": {kind: recovery["integrity"][kind][:MAX_EVIDENCE_TAB_FILES] for kind in ("changed", "unreadable")},
+            "integrity_counts": {kind: len(items) for kind, items in recovery["integrity"].items()},
+            "limitations": recovery["limitations"],
+        }, source_path, manifest_sha)
         chain.append(make_chain_of_custody_entry(
-            "evidence_recorded", source_path, f"Recorded {ingest_id} (index) and {tab_id} (.tab profile).",
+            "evidence_recorded", source_path,
+            f"Recorded {ingest_id} (index), {tab_id} (.tab profile) and {recovery_id} (table recovery).",
             entry_index=len(chain) + 1,
         ))
         row["unknowns"] = list(dict.fromkeys([*row.get("unknowns", []), *unknowns]))

@@ -370,7 +370,7 @@ def test_api_ingest_status_files_and_tab_profile(ffs_env, allow_loopback_api):
     data = resp.json()
     ident = data["id"]
     assert data["status"] == "completed" and data["kind"] == "ffs"
-    assert [e["operation"] for e in data["evidence"]] == ["ffs_ingest", "ffs_tab_profile"]
+    assert [e["operation"] for e in data["evidence"]] == ["ffs_ingest", "ffs_tab_profile", "ffs_tab_recovery"]
 
     detail = client.get(f"/api/investigations/{ident}").json()
     assert detail["progress"]["phase"] == "completed" and detail["ffs"]["files_indexed"] == 2
