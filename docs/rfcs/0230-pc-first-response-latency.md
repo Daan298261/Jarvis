@@ -281,12 +281,12 @@ Acceptance (CI: `pytest` job, step "RFC-0230 latency contract tests", then "Run 
 
 | ID | Title | Model | Lane | Depends |
 |---|---|---|---|---|
-| 0230-S0 | Per-turn latency trace + PC repro | Grok 4.6 | D1 | — (`main.py` after 0225-S3) |
-| 0230-S1 | STT resident, off the loop | Grok 4.5 | D2 | S0 (first on `workers/voice.py`) |
-| 0230-S2 | Front streamed first sentence + keep-warm | Grok 4.6 | D1 | S0 |
-| 0230-S3 | Worker load off the first-word path | Grok 4.6 | D1 | S0, 0225-S3 (idle row: 0228-S2) |
+| 0230-S0 | Per-turn latency trace + PC repro | Grok 4.6 | D1 | 0225-S2 (merge order only: `main.py` after 0225-S2; Route 3, 2026-11-15) |
+| 0230-S1 | STT resident, off the loop | Grok 4.5 | D2 | S0, 0225-S2 (after it on `workers/voice.py`; Route 3, 2026-11-15) |
+| 0230-S2 | Front streamed first sentence + keep-warm | Grok 4.6 | D1 | S0, 0225-S2 (`backends.py`), #690 (`loop.py`, `front_runtime.py`, `front_responder.py`) |
+| 0230-S3 | Worker load off the first-word path | Grok 4.6 | D1 | S0, S2 (`loop.py`), 0225-S3 (idle row: 0228-S2) |
 | 0230-S4 | TTS first sentence, inline verify after 0226 | Grok 4.5 | D2 | S0, **0226-S1**, **0226-S2** (hard; the only 0230 slice that waits on the #652 chain) |
-| 0230-S5 | Reflex ≤ 50 ms every turn | Grok 4.5 | D2 | S0 |
+| 0230-S5 | Reflex ≤ 50 ms every turn | Grok 4.5 | D2 | S0, 0225-S3 (`main.py` merge order) |
 
 All run with fast mode off.
 
