@@ -134,7 +134,8 @@ def mentions_item(own: str, item: dict[str, Any] | None, *, hash_number: bool = 
     if not item:
         return False
     lowered = own.lower()
-    if item.get("id") and item["id"].lower() in lowered:
+    # The id is a whole token: "charlie2" or "<id>ff" never names "charlie" or "<id>".
+    if item.get("id") and re.search(rf"(?<![a-z0-9]){re.escape(item['id'].lower())}(?![a-z0-9])", lowered):
         return True
     number = item.get("rfc") or ""
     if not number:

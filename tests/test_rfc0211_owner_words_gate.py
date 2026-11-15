@@ -326,3 +326,50 @@ async def test_both_directions_in_one_request_is_ambiguous(sched, monkeypatch, v
     state = sched.state(); state["config"]["enabled"] = not value; sched.save(state)
     owner_says(monkeypatch, "enable the self-development scheduler, actually no, disable the scheduler")
     assert not (await configure({"enabled": value})).success
+
+
+# --- F4: task ids match as whole tokens, never as substrings; RFC numbers by whole number --------
+
+HEX = "b9e2d47c1a0f3e29bb11cd13"
+HEX_ITEM = {"id": HEX, "title": "RFC-9011 Self-development scheduler", "rfc": "9011"}
+CHARLIE = {"id": "charlie", "title": "RFC-9021 charlie ticket", "rfc": "9021"}
+
+
+def gate_says(text, action, item):
+    """'' when the gate accepts ``text`` as naming ``item`` for ``action``."""
+    if action == "undo":
+        return "" if tool_module.owner_asked(text, "undo", moved=[item]) == "" else "refused"
+    verb = {"run": "start", "move": "move", "queue": "queue"}[action]
+    suffix = " to the top" if action == "move" else ""
+    return tool_module.owner_asked(f"{verb} {text}{suffix}", action, item=item)
+
+
+@pytest.mark.parametrize("action", ["run", "move", "queue", "undo"])
+@pytest.mark.parametrize("text, item", [
+    (HEX + "ff", HEX_ITEM), (HEX + "x", HEX_ITEM), ("x" + HEX, HEX_ITEM), ("9" + HEX, HEX_ITEM),
+    ("charlie2", CHARLIE), ("charlies", CHARLIE), ("xcharlie", CHARLIE),
+    ("RFC-90111", HEX_ITEM), ("RFC 90110", HEX_ITEM), ("RFC-19011", HEX_ITEM),
+])
+def test_ids_and_rfc_numbers_never_match_as_substrings(action, text, item):
+    words = f"undo moving {text}" if action == "undo" else text
+    assert gate_says(words, action, item) != ""
+
+
+@pytest.mark.parametrize("action", ["run", "move", "queue", "undo"])
+@pytest.mark.parametrize("text, item", [
+    (HEX, HEX_ITEM), (f"({HEX})", HEX_ITEM), (f"{HEX}.", HEX_ITEM), (f"[{HEX}],", HEX_ITEM), (f"id={HEX}!", HEX_ITEM),
+    ("charlie", CHARLIE), ("charlie, please", CHARLIE), ("(charlie)", CHARLIE), ("charlie?", CHARLIE),
+    ("RFC-9011", HEX_ITEM), ("RFC-09011.", HEX_ITEM),
+])
+def test_exact_ids_and_rfc_numbers_with_punctuation_are_allowed(action, text, item):
+    words = f"undo moving {text}" if action == "undo" else text
+    assert gate_says(words, action, item) == ""
+
+
+@pytest.mark.asyncio
+async def test_run_with_the_full_id_plus_extra_characters_is_refused(sched, monkeypatch):
+    calls = charlie_queued(sched, monkeypatch)
+    owner_says(monkeypatch, "start charlie2 now")
+    assert not (await run()).success and calls == []
+    owner_says(monkeypatch, "start (charlie) now")
+    assert (await run()).success and calls == [{"expected": "charlie"}]
