@@ -1,9 +1,12 @@
 """Synthetic, dump-free known-plaintext recovery and ingest acceptance checks."""
 import hashlib
+import inspect
 import io
 import json
 from pathlib import Path
 import random
+import textwrap
+import types
 
 import pytest
 
@@ -118,6 +121,53 @@ def test_metadata_collision_records_negative_evidence(tmp_path):
     assert r["rejected_pairs"][0]["outcome"] == "rejected"
     assert {o["result"] for o in r["rejected_pairs"][0]["model_outcomes"].values()} == {"inconsistent"}
     assert r["key_ids"][0]["files_without_plaintext_verification"] == 1
+    assert list(r["rejected_pairs"][0]["model_outcomes"]) == list(MODELS)
+
+
+def test_accepted_pair_model_outcomes_stop_at_first_accepted(tmp_path):
+    """Accepted pairs list models tried up to the accepted one, in MODELS order.
+
+    This pair is accepted by the second model (cipher-xor-offset) so earlier
+    models are recorded as rejected and nothing after the accepted model appears.
+    Removing the early stop in TableRecovery.run makes the same assertions fail.
+    """
+    # Position-dependent XOR makes a fixed substitution inconsistent, while
+    # cipher-xor-offset recovers a complete bijection.
+    plain = random.Random(10).randbytes(8192)
+    cipher = bytes(((b * 197 + 37) & 255) ^ (i & 255) for i, b in enumerate(plain))
+    files = {"PubTab/en_text.tab": table(plain), "make/en_text.tab": table(cipher, 42)}
+    report = recover(tmp_path / "early-stop", files)
+    _assert_outcomes_stop_at_second_model(report)
+
+    mutated = _recover_without_early_stop(tmp_path / "no-stop", files)
+    with pytest.raises(AssertionError):
+        _assert_outcomes_stop_at_second_model(mutated)
+    assert list(mutated["pairs"][0]["model_outcomes"]) == list(MODELS)
+
+
+def _assert_outcomes_stop_at_second_model(report):
+    accepted = "cipher-xor-offset"
+    expected = list(MODELS[: MODELS.index(accepted) + 1])
+    assert expected == ["substitution", "cipher-xor-offset"]
+    assert report["pairs"] and report["pairs"][0]["model"] == accepted
+    outcomes = report["pairs"][0]["model_outcomes"]
+    assert list(outcomes) == expected
+    assert outcomes["substitution"]["result"] == "inconsistent"
+    assert outcomes[accepted]["result"] == "accepted"
+    assert "plain-xor-offset" not in outcomes
+    assert "cipher-minus-offset" not in outcomes
+
+
+def _recover_without_early_stop(tmp_path, files):
+    source = textwrap.dedent(inspect.getsource(TableRecovery.run))
+    if source.count("break") != 1:
+        raise AssertionError(f"expected exactly one break in TableRecovery.run, found {source.count('break')}")
+    namespace = {}
+    exec(source.replace("break", "pass", 1), vars(tab_recovery), namespace)
+    profiles = [profile(path, data) for path, data in files.items()]
+    recovery = TableRecovery(profiles)
+    recovery.run = types.MethodType(namespace["run"], recovery)
+    return recovery.run(entries_for(files), tmp_path / "decoded")
 
 
 def test_merge_partial_pairs_and_apply_to_unpaired_file(tmp_path):

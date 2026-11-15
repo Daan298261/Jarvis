@@ -231,9 +231,15 @@ Specifically:
 - `gaps.keyed_without_key_id` (also in `corpus`) counts keyed tables indexed before
   the container parser. Their key id is unknown, so they are neither paired nor
   decoded.
-- Every tested pair carries `model_outcomes`, giving the result per model:
-  `inconsistent`, `below_minimum_body_bytes`, `below_minimum_symbols` or `accepted`,
-  with observed-input and distinct-output counts when the mapping is consistent.
+- Models are tried in this order: `substitution`, `cipher-xor-offset`,
+  `plain-xor-offset`, `cipher-minus-offset`. Evaluation stops at the first
+  accepted model. Every tested pair carries `model_outcomes` for the models
+  actually tried. Each recorded model is one of `inconsistent`,
+  `below_minimum_body_bytes`, `below_minimum_symbols` or `accepted`, with
+  observed-input and distinct-output counts when the mapping is consistent.
+  A rejected or skipped pair lists all four models. An accepted pair lists
+  only the models tried up to and including the accepted one, in that order;
+  later models are not evaluated and do not appear.
 - A pair with no accepted model is recorded in `rejected_pairs` with
   `outcome: "rejected"` when every model is inconsistent. It is recorded as
   `outcome: "skipped_below_minimum"` when some model fits but is under the 64-byte
@@ -311,9 +317,11 @@ The reusable recovery capability is implemented; actual Autel key recovery remai
 unexplained. Obtaining a demonstrably identical keyed/plain table, or locating the
 decoder in the APK (next step 2), is still necessary before claiming a solved key.
 
-Validation: `tests/test_tab_recovery.py` has 37 synthetic, dump-free test
-functions (46 collected cases with parametrisation). They cover the minimums at
-both boundaries, the guards on derivatives, integrity and cancellation, and
-ingest-level cancel/resume. The full repository suite in CI (pytest, Linux) for
-the head that introduced them (`5e77e33c`, run 42774271436) reported **3670 passed,
-0 failed, 9 skipped, 21 xfailed**. No path-admission policy was changed.
+Validation: `tests/test_tab_recovery.py` has 38 synthetic, dump-free test
+functions (47 collected cases with parametrisation). They cover the minimums at
+both boundaries, the guards on derivatives, integrity and cancellation,
+ingest-level cancel/resume, and that an accepted pair's `model_outcomes` lists
+only the models tried up to the first accepted one. The full repository suite
+in CI (pytest, Linux) for the head that introduced them (`5e77e33c`, run
+42774271436) reported **3670 passed, 0 failed, 9 skipped, 21 xfailed**. No
+path-admission policy was changed.
