@@ -264,6 +264,8 @@ def _dotdot_targets(layout) -> list[str]:
     _symlink(a / "dangling", a / "gone")
     _symlink(a / "root_link", layout.allowed)
     via = str(layout.allowed / "linkdir") + os.sep + ".." + os.sep
+    if Path(via).resolve() != a.resolve():
+        pytest.skip("filesystem normalizes '..' before traversing the symlink (Win32 semantics)")
     return [via + n for n in ("leaf_link", "link.apk", "real.apk", "existing.bin", "existing_dir", "missing",
                               "missing.apk", "missing_dir", "dangling", "root_link")] + [
         via + "..", via + "b" + os.sep + ".." + os.sep + "leaf_link"]
