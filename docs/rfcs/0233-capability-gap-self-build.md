@@ -956,7 +956,7 @@ Tests:
 
 ### S3: Proposals, owner approval gate, approval window, install guard, dependency gate, runtime trigger
 
-**Model:** Grok 4.6 · **Depends:** S1, S2, RFC-0225 S3 (`owner_line`), RFC-0245 S5 (the last prior `loop.py` owner; `loop.py` order #649 → 0218-S3b → 0230-S0 → 0230-S2 → 0230-S3 → 0232-S3 → 0232-S4 → 0232-S5 → 0245-S4 → 0245-S5 → 0233-S3)
+**Model:** Grok 4.6 · **Depends:** S1, S2, RFC-0225 S3 (`owner_line`), RFC-0245 S5 (the last prior `loop.py` owner; `loop.py` order up to this slice, a partial chain of the `backend/app/agent/loop.py` row in this RFC's ownership table: #649 → 0218-S3b → 0230-S0 → 0230-S2 → 0230-S3 → 0232-S3 → 0232-S4 → 0232-S5 → #690 (keep-warm; the `IDLE_UNLOAD` import and `AgentRuntime.cancel_running_for_owner_unload`) → 0245-S4 → 0245-S5 → 0233-S3; the same order as RFC-0245's `loop.py` row)
 
 | File | Change |
 | --- | --- |

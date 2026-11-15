@@ -292,7 +292,7 @@ All run with fast mode off.
 
 | File | Order |
 |---|---|
-| `backend/app/agent/loop.py` | #649 (landed `ee786dc`) → 0218-S3b → 0230-S0 → 0230-S2 → 0230-S3 → 0232-S3 → 0232-S4 → 0232-S5 → 0245-S4 → 0245-S5 → 0233-S3 → 0233-S4 (#668; #670, RFC-0211, does not edit `loop.py`). In `create_task`: 0230-S3's `prewarm_worker` and the route decision, then 0232's RE dispatch (S3 FFS, S5 APK; cancels the prewarm), then 0245's large branch |
+| `backend/app/agent/loop.py` | #649 (landed `ee786dc`) → 0218-S3b → 0230-S0 → 0230-S2 → 0230-S3 → 0232-S3 → 0232-S4 → 0232-S5 → #690 (keep-warm; the `IDLE_UNLOAD` import and `AgentRuntime.cancel_running_for_owner_unload`) → 0245-S4 → 0245-S5 → 0233-S3 → 0233-S4 (#668; #670, RFC-0211, does not edit `loop.py`). In `create_task`: 0230-S3's `prewarm_worker` and the route decision, then 0232's RE dispatch (S3 FFS, S5 APK; cancels the prewarm), then 0245's large branch |
 | `backend/app/decision/owner_turn.py` | #649 (landed) → 0218-S3b (not landed) → 0230-S5 → 0232-S2 (RE floor in `_apply_floors`) → 0245-S1 → 0233-S1 (#668) |
 | `backend/app/agent/front_responder.py` | #648/#649 (landed) → #690 (keep-warm) → 0230-S2 |
 | `backend/app/inference/front_runtime.py` | #648/#649 (landed) → #690 (keep-warm: `ensure_started` `background_blocked()`, `_warmup` `warm_blocked()`) → 0230-S2 (keeps #690's hunks) → 0246-S3 (studio guard only; RFC-0246, landed) |
