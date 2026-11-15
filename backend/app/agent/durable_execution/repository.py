@@ -141,19 +141,6 @@ async def upsert_step(
         return step
 
 
-async def rebind_step_inputs(step_id: int, *, input_hash: str, idempotency_key: str) -> None:
-    """Point a step that never committed at new inputs before it is re-run (a committed step keeps its inputs)."""
-    async with SessionLocal() as session:
-        step = await session.get(ExecutionStep, step_id)
-        if step is None:
-            return
-        if step.status == StepStatus.COMPLETED.value:
-            raise StepBlocked(f"Model step {step.step_key} already committed for other inputs")
-        step.input_hash = input_hash
-        step.idempotency_key = idempotency_key
-        await session.commit()
-
-
 async def commit_step_result(
     step_id: int,
     *,
@@ -163,6 +150,7 @@ async def commit_step_result(
     cost_ms: float = 0.0,
     cost_usd: float = 0.0,
     success: bool = True,
+    expected_input_hash: str | None = None,
 ) -> ExecutionStep:
     now = utcnow()
     status = StepStatus.COMPLETED.value if success else StepStatus.FAILED.value
@@ -170,6 +158,9 @@ async def commit_step_result(
         step = await session.get(ExecutionStep, step_id)
         if step is None:
             raise ValueError(f"step {step_id} missing")
+        if expected_input_hash is not None and step.input_hash != expected_input_hash:
+            # Another attempt claimed the step for other inputs after this one's lease lapsed.
+            raise StepBlocked(f"step {step.step_key} now belongs to other inputs; this result is discarded")
         step.status = status
         step.result_json = json.dumps(result, default=str)
         step.evidence_ref = evidence_ref
@@ -234,7 +225,16 @@ async def mark_step_running(step_id: int) -> None:
         await session.commit()
 
 
-async def claim_attempt(step_id: int, worker_id: str, lease_seconds: int = DEFAULT_LEASE_SECONDS) -> ExecutionAttempt:
+async def claim_attempt(
+    step_id: int,
+    worker_id: str,
+    lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    *,
+    input_hash: str | None = None,
+    idempotency_key: str | None = None,
+) -> ExecutionAttempt:
+    """Claim the step's lease. With ``input_hash``, an uncommitted step is re-pointed at those inputs
+    in the same transaction, only once no other live attempt holds it (a committed step never is)."""
     now = utcnow()
     lease_until = now + timedelta(seconds=lease_seconds)
     async with SessionLocal() as session:
@@ -251,13 +251,20 @@ async def claim_attempt(step_id: int, worker_id: str, lease_seconds: int = DEFAU
                 continue
             expires = _utc(attempt.lease_expires_at)
             if expires and expires > now:
-                if attempt.worker_id == worker_id:
+                if attempt.worker_id == worker_id and (input_hash is None or step.input_hash == input_hash):
                     attempt.heartbeat_at = now
                     attempt.lease_expires_at = lease_until
                     await session.commit()
                     await session.refresh(attempt)
                     return attempt
-                raise StepBlocked("another worker holds an active lease")
+                raise StepBlocked("another attempt holds an active lease")
+
+        if input_hash is not None and step.input_hash != input_hash:
+            if step.status == StepStatus.COMPLETED.value:
+                raise StepBlocked(f"step {step.step_key} already committed for other inputs")
+            step.input_hash = input_hash
+            if idempotency_key is not None:
+                step.idempotency_key = idempotency_key
 
         for attempt in step.attempts:
             if attempt.status == AttemptStatus.ACTIVE.value:

@@ -29,7 +29,6 @@ from .repository import (
     mark_ambiguous_effect,
     mark_step_running,
     park_step,
-    rebind_step_inputs,
     resume_parked_step,
     upsert_step,
 )
@@ -67,6 +66,14 @@ async def _emit_step_event(
     )
 
 
+# Owner-facing reason when a restarted task finds an answer it already saved for an earlier version
+# of its context: say why it stopped and what the owner can do.
+MODEL_INPUTS_CHANGED = (
+    "This task was interrupted, and its conversation changed before it restarted, so it can't safely resume "
+    "from the answer it saved earlier. Re-run it as a new task to get a fresh answer."
+)
+
+
 async def run_durable_step(
     *,
     run_id: str,
@@ -89,15 +96,13 @@ async def run_durable_step(
 
     await assert_run_recoverable(run_id)
 
-    if operation_type == OperationType.MODEL_CALL:
+    model_call = operation_type == OperationType.MODEL_CALL
+    if model_call:
         existing = await get_step_by_key(run_id, step_key)
-        if existing is not None and existing.input_hash != input_hash:
-            if existing.status == StepStatus.COMPLETED.value:
-                # A committed answer for other inputs must never be reused for these ones (RFC-0243).
-                raise StepBlocked(f"Model step {step_key} belongs to different inputs; start a new model step")
-            # The step never committed (failed or interrupted), so there is no answer to mis-reuse:
-            # re-run it under the new inputs, as before RFC-0243, and record their hash.
-            await rebind_step_inputs(existing.id, input_hash=input_hash, idempotency_key=idempotency_key)
+        if existing is not None and existing.input_hash != input_hash and existing.status == StepStatus.COMPLETED.value:
+            # A committed answer for other inputs must never be reused for these ones (RFC-0243). A step
+            # that never committed is re-pointed at the new inputs under its lease (claim_attempt) and re-run.
+            raise StepBlocked(MODEL_INPUTS_CHANGED)
 
     reused = await reuse_if_completed(run_id, step_key)
     if reused is not None:
@@ -134,7 +139,12 @@ async def run_durable_step(
     if step.status == StepStatus.AMBIGUOUS_EFFECT.value:
         raise AmbiguousEffectError(step_key)
 
-    attempt = await claim_attempt(step.id, worker)
+    attempt = await claim_attempt(
+        step.id,
+        worker,
+        input_hash=input_hash if model_call else None,
+        idempotency_key=idempotency_key if model_call else None,
+    )
     await mark_step_running(step.id)
     check_crash_boundary(step_key, CrashBoundary.BEFORE_EXECUTE)
 
@@ -178,6 +188,7 @@ async def run_durable_step(
         cost_ms=ms,
         cost_usd=usd,
         success=True,
+        expected_input_hash=input_hash if model_call else None,
     )
     check_crash_boundary(step_key, CrashBoundary.AFTER_COMMIT)
     await finish_attempt(attempt.id, AttemptStatus.COMPLETED)
