@@ -86,7 +86,11 @@ def compute_chat_call_deadline_ms(
     if rate <= 0:
         rate = settings.generation_tps_fallback
     generation_ms = max(0, int(max_tokens or 0)) / rate * 1000.0
-    return min(float(settings.chat_call_max_ms), first_ms + generation_ms + idle_ms)
+    # The prompt-only budget (first token plus idle) is the floor: it already honours the owner's
+    # stream_first_token_max_ms. chat_call_max_ms bounds only the generation allowance added on top,
+    # so a large prompt or a raised first-token cap never gets less time than it had before.
+    prompt_only_ms = first_ms + idle_ms
+    return max(prompt_only_ms, min(float(settings.chat_call_max_ms), prompt_only_ms + generation_ms))
 
 
 def record_stream_stall(

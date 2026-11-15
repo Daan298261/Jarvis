@@ -287,3 +287,127 @@ async def test_generation_budget_uses_rate_rather_than_output_token_count(monkey
     assert manager.state.generation_tps == 10
     await manager.record_timings({"predicted_per_second": 20, "predicted_n": 640, "predicted_ms": 64000})
     assert manager.state.generation_tps == 20
+
+
+def test_nonstream_deadline_is_never_below_the_prompt_only_budget():
+    """A 20k-token prompt at 50 tok/s hits the 180 s first-token cap; its generation budget adds to, never cuts, it."""
+    from app.config import InferenceSettings
+    from app.inference.stream_deadlines import compute_chat_call_deadline_ms, compute_chat_stream_deadlines
+    settings = InferenceSettings()
+    first, idle = compute_chat_stream_deadlines(settings, prompt_tokens=20000, prompt_tps=50.0)
+    prompt_only = first + idle  # development's non-stream budget (192 s here)
+    for max_tokens in (0, 128, 1024, 100000):
+        budget = compute_chat_call_deadline_ms(settings, prompt_tokens=20000, prompt_tps=50.0,
+                                               max_tokens=max_tokens, generation_tps=10.0)
+        assert budget >= prompt_only, (max_tokens, budget, prompt_only)
+    assert compute_chat_call_deadline_ms(settings, prompt_tokens=20000, prompt_tps=50.0,
+                                         max_tokens=1024, generation_tps=10.0) > prompt_only
+
+
+def test_nonstream_deadline_honours_an_owner_raised_first_token_cap():
+    from app.config import InferenceSettings
+    from app.inference.stream_deadlines import compute_chat_call_deadline_ms, compute_chat_stream_deadlines
+    settings = InferenceSettings(stream_first_token_max_ms=600000)
+    first, idle = compute_chat_stream_deadlines(settings, prompt_tokens=100000, prompt_tps=50.0)
+    assert first == 600000
+    budget = compute_chat_call_deadline_ms(settings, prompt_tokens=100000, prompt_tps=50.0,
+                                           max_tokens=0, generation_tps=10.0)
+    assert budget >= first + idle > settings.chat_call_max_ms
+
+
+@pytest.mark.asyncio
+async def test_uncommitted_model_step_with_new_inputs_reruns_and_a_committed_one_stays_blocked(jarvis_env):
+    import uuid
+    from app.agent.durable_execution.accounting import reset_ledgers
+    from app.agent.durable_execution.repository import StepBlocked
+    from app.agent.durable_execution.runner import run_model_step
+    from app.providers.base import ChatResult
+    reset_ledgers()
+    run_id = str(uuid.uuid4())
+    async with SessionLocal() as session:
+        session.add(Task(id=run_id, title="p", prompt="p", status="running", stage="act"))
+        await session.commit()
+
+    async def dropped():
+        raise RuntimeError("server dropped the connection")  # the attempt never committed
+
+    with pytest.raises(RuntimeError):
+        await run_model_step(run_id, "model:1:0:0", predecessor_keys=[], input_fingerprint={"messages": "v1"},
+                             operation=dropped)
+    calls = []
+
+    async def answer():
+        calls.append(1)
+        return ChatResult(content="fresh answer")
+
+    # The prompt was rebuilt (fresh retrieval); nothing was committed, so the step runs on the new inputs.
+    result = await run_model_step(run_id, "model:1:0:0", predecessor_keys=[], input_fingerprint={"messages": "v2"},
+                                  operation=answer)
+    assert result.content == "fresh answer" and calls == [1]
+    # The re-run recorded the new inputs: the same inputs reuse the committed answer ...
+    again = await run_model_step(run_id, "model:1:0:0", predecessor_keys=[], input_fingerprint={"messages": "v2"},
+                                 operation=answer)
+    assert again.content == "fresh answer" and calls == [1]
+    # ... and other inputs never reuse it.
+    with pytest.raises(StepBlocked):
+        await run_model_step(run_id, "model:1:0:0", predecessor_keys=[], input_fingerprint={"messages": "v3"},
+                             operation=answer)
+    assert calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_restarted_queued_task_reruns_a_model_step_its_crashed_attempt_never_committed(jarvis_env, monkeypatch):
+    """AgentRuntime restarts a queued stable-request_id task with continue_existing=False (model:1 again)."""
+    from app.agent.durable_execution.accounting import reset_ledgers
+    from app.agent.durable_execution.repository import get_step_by_key
+    from app.agent.durable_execution.runner import run_model_step
+    from app.agent.durable_execution.types import StepStatus
+    from app.agent.loop import AGENT
+    from app.providers.base import ChatResult
+    reset_ledgers()
+    task_id = "restart-uncommitted-model-step"
+    target = jarvis_env["tmp"] / "restart-report.txt"
+    target.write_text("FOUR")
+    async with SessionLocal() as session:
+        session.add(Task(id=task_id, title="Restart", prompt=f"Read {target} and report its contents.", status="running",
+                         task_class="filesystem", profile="fast", autonomy="autonomous", response_route="managed_task"))
+        await session.commit()
+
+    async def crashed():
+        raise RuntimeError("worker restarted mid-call")
+
+    # The crashed attempt left model:1:0:0 uncommitted, keyed to inputs the restart rebuilds differently.
+    with pytest.raises(RuntimeError):
+        await run_model_step(task_id, "model:1:0:0", predecessor_keys=[],
+                             input_fingerprint={"messages": "context before the restart"}, operation=crashed)
+    monkeypatch.setattr("app.agent.loop.record_trajectory", AsyncMock())
+    monkeypatch.setattr("app.agent.loop.publish_owner_text", AsyncMock(return_value={}))
+
+    class Provider:
+        name = "scripted"
+        model = "scripted-model"
+
+        def __init__(self):
+            self.calls = 0
+
+        async def health(self):
+            return True
+
+        async def chat(self, messages, tools=None, **kwargs):
+            self.calls += 1
+            if self.calls in (1, 3) and tools:  # act, then verify, with a real read of the file
+                return ChatResult(tool_calls=[{"id": f"restart-read-{self.calls}", "type": "function", "function": {
+                    "name": "filesystem", "arguments": json.dumps({"action": "read", "path": str(target)})}}])
+            return ChatResult(content="The file says FOUR; read and verified.")
+
+    provider = Provider()
+    jarvis_env["manager"].provider = provider
+    jarvis_env["settings"].front_responder.enabled = False
+    await asyncio.wait_for(AGENT._run(task_id, continue_existing=False), 40)
+    async with SessionLocal() as session:
+        task = await session.get(Task, task_id)
+    assert task.status == "completed", (task.status, task.error)
+    assert provider.calls >= 1
+    assert "start a new model step" not in (task.error or "")
+    step = await get_step_by_key(task_id, "model:1:0:0")
+    assert step.status == StepStatus.COMPLETED.value

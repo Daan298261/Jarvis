@@ -29,6 +29,7 @@ from .repository import (
     mark_ambiguous_effect,
     mark_step_running,
     park_step,
+    rebind_step_inputs,
     resume_parked_step,
     upsert_step,
 )
@@ -91,7 +92,12 @@ async def run_durable_step(
     if operation_type == OperationType.MODEL_CALL:
         existing = await get_step_by_key(run_id, step_key)
         if existing is not None and existing.input_hash != input_hash:
-            raise StepBlocked(f"Model step {step_key} belongs to different inputs; start a new model step")
+            if existing.status == StepStatus.COMPLETED.value:
+                # A committed answer for other inputs must never be reused for these ones (RFC-0243).
+                raise StepBlocked(f"Model step {step_key} belongs to different inputs; start a new model step")
+            # The step never committed (failed or interrupted), so there is no answer to mis-reuse:
+            # re-run it under the new inputs, as before RFC-0243, and record their hash.
+            await rebind_step_inputs(existing.id, input_hash=input_hash, idempotency_key=idempotency_key)
 
     reused = await reuse_if_completed(run_id, step_key)
     if reused is not None:

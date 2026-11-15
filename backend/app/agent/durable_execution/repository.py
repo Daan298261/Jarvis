@@ -141,6 +141,19 @@ async def upsert_step(
         return step
 
 
+async def rebind_step_inputs(step_id: int, *, input_hash: str, idempotency_key: str) -> None:
+    """Point a step that never committed at new inputs before it is re-run (a committed step keeps its inputs)."""
+    async with SessionLocal() as session:
+        step = await session.get(ExecutionStep, step_id)
+        if step is None:
+            return
+        if step.status == StepStatus.COMPLETED.value:
+            raise StepBlocked(f"Model step {step.step_key} already committed for other inputs")
+        step.input_hash = input_hash
+        step.idempotency_key = idempotency_key
+        await session.commit()
+
+
 async def commit_step_result(
     step_id: int,
     *,
