@@ -39,8 +39,14 @@ from ..inference.prompt_budget import (
     recover_context_after_overflow,
 )
 from ..inference.vision import messages_need_vision, should_load_vision
-from .durable_execution.repository import get_task_status, last_committed_step_key
-from .durable_execution.runner import run_model_step, run_tool_step
+from .durable_execution.repository import (
+    InputsChanged,
+    RunNotRecoverable,
+    StepSuperseded,
+    get_task_status,
+    last_committed_step_key,
+)
+from .durable_execution.runner import MODEL_INPUTS_CHANGED, run_model_step, run_tool_step
 from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments, tool_arguments_valid
 from ..providers.openai_compat import OpenAICompatProvider
 from ..providers.tool_call_compat import validate_turn_calls
@@ -420,6 +426,24 @@ def _permission_denied_observation(tool_name: str | None, arguments: dict[str, A
 
 
 _OWNER_TURN_CACHE_MAX = 64
+
+
+def _is_phone_submission(task_id: str) -> bool:
+    from ..mobile import store
+
+    with store.database() as db:
+        return store.get(db, "submission", task_id) is not None
+
+
+async def model_inputs_changed_reasons(task_id: str) -> tuple[str, str]:
+    """(error, result) for MODEL_INPUTS_CHANGED, each naming the action on the surface that shows it.
+    ``task.error`` is read only by the desktop (api/tasks: the HUD task card and chat), so it names the
+    desktop's New task. ``task.result`` is the reply text in the task's chat; for a phone submission
+    (mobile/service.submit journals one per task) that chat is the phone's, whose action is a new chat."""
+    desktop = f"{MODEL_INPUTS_CHANGED} Click New task and ask again."
+    if await asyncio.to_thread(_is_phone_submission, task_id):
+        return desktop, f"{MODEL_INPUTS_CHANGED} Start a new chat and ask again."
+    return desktop, desktop
 
 
 class AgentRuntime:
@@ -998,8 +1022,9 @@ class AgentRuntime:
         *,
         current_action: str = "Failed",
         stage: str = "failed",
+        spoken: str | None = None,
     ) -> None:
-        spoken = plain_failure(error)
+        spoken = spoken or plain_failure(error)
         await self._await_managed_front(task_id)
         fields: dict[str, Any] = {
             "status": "failed",
@@ -3750,6 +3775,14 @@ class AgentRuntime:
             await complete_coding_route(task_id, "cancelled")
             await self._release_lazy_vision()
             raise
+        except (StepSuperseded, RunNotRecoverable) as exc:
+            # Another runner took this task's step over (or already finished the task): its outcome stands,
+            # so this runner stops without writing a terminal state over it.
+            log.warning("task %s: runner stopped, superseded: %s", task_id, exc)
+            await self._release_lazy_vision()
+        except InputsChanged:
+            error, reply = await model_inputs_changed_reasons(task_id)
+            await self._fail_task(task_id, error, working, metrics, spoken=reply)
         except Exception as exc:
             await self._fail_task(task_id, str(exc), working, metrics)
         finally:

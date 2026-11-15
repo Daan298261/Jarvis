@@ -504,18 +504,14 @@ async def test_a_commit_for_inputs_the_step_no_longer_carries_is_rejected(jarvis
     assert (await load_committed_result(step))["_value"]["content"] == "answer to v2"
 
 
-@pytest.mark.asyncio
-async def test_restart_over_a_completed_mismatched_model_step_blocks_the_task(jarvis_env, monkeypatch):
-    """CoS ruling: a crashed attempt COMPLETED model:1 for other inputs; the restart (continue_existing=False)
-    stops instead of reusing that answer or skipping to model:2, and tells the owner what to do."""
+async def _restart_over_completed_mismatch(jarvis_env, monkeypatch, task_id):
     from app.agent.durable_execution.accounting import reset_ledgers
     from app.agent.durable_execution.repository import get_step_by_key
     from app.agent.durable_execution.runner import run_model_step
     from app.agent.loop import AGENT
     from app.providers.base import ChatResult
     reset_ledgers()
-    task_id = "restart-completed-mismatch"
-    target = jarvis_env["tmp"] / "restart-report2.txt"
+    target = jarvis_env["tmp"] / f"{task_id}.txt"
     target.write_text("FOUR")
     async with SessionLocal() as session:
         session.add(Task(id=task_id, title="Restart", prompt=f"Read {target} and report its contents.", status="running",
@@ -552,7 +548,271 @@ async def test_restart_over_a_completed_mismatched_model_step_blocks_the_task(ja
         task = await session.get(Task, task_id)
     error = task.error or ""
     assert task.status == "failed", (task.status, error)
-    assert "can't safely resume" in error and "new task" in error, error
     assert "model step" not in error.lower(), error
     assert provider.calls == 0
     assert await get_step_by_key(task_id, "model:2:0:0") is None
+    return task
+
+
+@pytest.mark.asyncio
+async def test_restart_over_a_completed_mismatched_model_step_blocks_the_task(jarvis_env, monkeypatch):
+    """CoS ruling: a crashed attempt COMPLETED model:1 for other inputs; the restart (continue_existing=False)
+    stops instead of reusing that answer or skipping to model:2. A desktop task (intake chain part, the
+    desktop's stable-request_id path) names the desktop's New task action."""
+    task = await _restart_over_completed_mismatch(jarvis_env, monkeypatch, "desktop-restart")
+    for shown in (task.error, task.result):  # HUD task card (error) and the chat reply (result || error)
+        assert "can't safely resume" in shown and "Click New task and ask again" in shown, shown
+        assert "new chat" not in shown.lower(), shown
+
+
+@pytest.mark.asyncio
+async def test_restart_over_a_completed_mismatched_model_step_on_the_phone_says_start_a_new_chat(jarvis_env, monkeypatch):
+    """The same block on a phone submission (mobile/service.submit retry) names the phone's action."""
+    import uuid
+    from app.mobile import store
+    monkeypatch.setattr(store, "data_dir", lambda: jarvis_env["tmp"])
+    task_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "jarvis-mobile:phone-1:req-1"))
+    with store.database() as db:
+        store.put(db, "submission", task_id, {"fingerprint": "f", "conversation_id": "c", "task_prompt": "p", "profile": "fast"})
+    task = await _restart_over_completed_mismatch(jarvis_env, monkeypatch, task_id)
+    from app.db.models import Conversation
+    from app.mobile.service import conversation_detail
+    async with SessionLocal() as session:
+        session.add(Conversation(id="phone-chat", task_id=task_id, title="Restart",
+                                 messages_json=json.dumps([{"id": "u1", "role": "user", "text": "p", "task_id": task_id}])))
+        await session.commit()
+    shown = (await conversation_detail("phone-chat"))["messages"][-1]["text"]  # what the phone chat renders
+    assert "can't safely resume" in shown and "Start a new chat and ask again" in shown, shown
+    assert "New task" not in shown, shown
+    # task.error only reaches the desktop (api/tasks), so it keeps the desktop's action.
+    assert "Click New task and ask again" in task.error, task.error
+
+
+async def _seed_step(run_id, input_hash):
+    from app.agent.durable_execution.repository import upsert_step
+    return await upsert_step(run_id=run_id, step_key="model:1:0:0", predecessor_keys=[], operation_type="model_call",
+                             effect_class="none", replay_policy="IDEMPOTENT", input_hash=input_hash, idempotency_key="k0")
+
+
+@pytest.mark.asyncio
+async def test_concurrent_claims_on_one_step_never_both_hold_a_live_lease(jarvis_env):
+    """Two claimers for different inputs race on separate pooled connections (aiosqlite threads)."""
+    import uuid
+    from sqlalchemy import select
+    from app.agent.durable_execution.repository import StepBlocked, claim_attempt
+    from app.db.models import ExecutionAttempt, ExecutionStep
+    for round_ in range(8):
+        run_id = str(uuid.uuid4())
+        await _seed_running_task(run_id)
+        step = await _seed_step(run_id, "h-v0")
+        results = await asyncio.gather(
+            claim_attempt(step.id, "worker-A", input_hash="h-v1", idempotency_key="k1"),
+            claim_attempt(step.id, "worker-B", input_hash="h-v2", idempotency_key="k2"),
+            return_exceptions=True)
+        winners = [r for r in results if isinstance(r, ExecutionAttempt)]
+        assert len(winners) == 1, (round_, results)
+        assert all(isinstance(r, (ExecutionAttempt, StepBlocked)) for r in results), results
+        async with SessionLocal() as session:
+            active = (await session.scalars(select(ExecutionAttempt).where(
+                ExecutionAttempt.step_id == step.id, ExecutionAttempt.status == "active"))).all()
+            final = await session.get(ExecutionStep, step.id)
+        assert [a.worker_id for a in active] == [winners[0].worker_id], (round_, [a.worker_id for a in active])
+        assert final.input_hash == {"worker-A": "h-v1", "worker-B": "h-v2"}[winners[0].worker_id]
+
+
+@pytest.mark.asyncio
+async def test_a_claim_racing_a_commit_never_leaves_an_old_answer_under_new_inputs(jarvis_env, monkeypatch):
+    """A commits its v1 answer while B claims the step for v2 in the middle of A's commit. Either A wins and B
+    is refused, or B wins and A is refused; never a completed step labelled v2 carrying v1's answer."""
+    import uuid
+    from app.agent.durable_execution import repository as repo
+    from app.db.models import ExecutionStep
+    run_id = str(uuid.uuid4())
+    await _seed_running_task(run_id)
+    step = await _seed_step(run_id, "h-v1")
+    real_session = repo.SessionLocal
+    claim = {}
+
+    class Hooked:
+        def __init__(self):
+            self._cm = real_session()
+
+        async def __aenter__(self):
+            session = await self._cm.__aenter__()
+            original_commit = session.commit
+
+            async def commit():
+                if "task" not in claim:  # B claims for v2 in the middle of A's commit
+                    claim["task"] = asyncio.create_task(
+                        repo.claim_attempt(step.id, "worker-B", input_hash="h-v2", idempotency_key="k2"))
+                    await asyncio.wait([claim["task"]], timeout=1.0)
+                return await original_commit()
+
+            session.commit = commit
+            return session
+
+        async def __aexit__(self, *exc):
+            return await self._cm.__aexit__(*exc)
+
+    monkeypatch.setattr(repo, "SessionLocal", Hooked)
+    a_result = await asyncio.gather(repo.commit_step_result(
+        step.id, result={"_value": {"content": "answer to v1"}}, expected_input_hash="h-v1"), return_exceptions=True)
+    monkeypatch.setattr(repo, "SessionLocal", real_session)
+    b_result = (await asyncio.gather(claim["task"], return_exceptions=True))[0]
+    async with real_session() as session:
+        final = await session.get(ExecutionStep, step.id)
+    assert not (final.status == "completed" and final.input_hash == "h-v2"), (final.input_hash, final.result_json)
+    if final.status == "completed":
+        assert final.input_hash == "h-v1" and "answer to v1" in final.result_json
+        assert isinstance(b_result, repo.StepBlocked), b_result
+    else:
+        assert isinstance(a_result[0], repo.StepBlocked), a_result
+
+
+@pytest.mark.asyncio
+async def test_a_long_model_call_keeps_its_lease_alive(jarvis_env, monkeypatch):
+    """A model call outlives its first lease (here: forced to lapse right after the claim). The runner's
+    heartbeat renews it, so worker B with other inputs is still refused mid-call."""
+    import uuid
+    from datetime import timedelta
+    from sqlalchemy import update
+    from app.agent.durable_execution.accounting import reset_ledgers
+    from app.agent.durable_execution.repository import StepBlocked, get_step_by_key
+    from app.agent.durable_execution.runner import _hash_payload, run_durable_step
+    from app.db.models import ExecutionAttempt, utcnow
+    monkeypatch.setattr("app.agent.durable_execution.runner.HEARTBEAT_INTERVAL_S", 0.05, raising=False)
+    reset_ledgers()
+    run_id = str(uuid.uuid4())
+    await _seed_running_task(run_id)
+    common = _model_step_args(run_id)
+    gate, started = asyncio.Event(), asyncio.Event()
+
+    async def a_op():
+        async with SessionLocal() as session:  # the first 45 s lease has run out
+            await session.execute(update(ExecutionAttempt).where(ExecutionAttempt.worker_id == "worker-A")
+                                  .values(lease_expires_at=utcnow() - timedelta(seconds=1)))
+            await session.commit()
+        started.set()
+        await gate.wait()
+        return {"content": "answer to v1"}
+
+    async def b_op():
+        return {"content": "answer to v2"}
+
+    a = asyncio.create_task(run_durable_step(**common, input_fingerprint={"messages": "v1"}, operation=a_op,
+                                             worker_id="worker-A"))
+    await started.wait()
+    await asyncio.sleep(0.4)  # several heartbeat intervals
+    with pytest.raises(StepBlocked):
+        await run_durable_step(**common, input_fingerprint={"messages": "v2"}, operation=b_op, worker_id="worker-B")
+    assert (await get_step_by_key(run_id, "model:1:0:0")).input_hash == _hash_payload({"messages": "v1"})
+    gate.set()
+    value, meta = await a
+    assert value["content"] == "answer to v1" and not meta["reused"]
+
+
+@pytest.mark.asyncio
+async def test_a_superseded_runner_never_overwrites_a_task_another_runner_completed(jarvis_env, monkeypatch):
+    """Runner A's model call outlives its lease; runner B claims the same step, commits it and completes the
+    task. A's late commit is refused, and A stops without failing the task or replacing B's answer."""
+    from datetime import timedelta
+    from sqlalchemy import update
+    from app.agent.durable_execution.accounting import reset_ledgers
+    from app.agent.durable_execution.repository import claim_attempt, commit_step_result, get_step_by_key
+    from app.agent.loop import AGENT
+    from app.db.models import ExecutionAttempt, utcnow
+    from app.providers.base import ChatResult
+    reset_ledgers()
+    task_id = "superseded-runner"
+    target = jarvis_env["tmp"] / "superseded.txt"
+    target.write_text("FOUR")
+    async with SessionLocal() as session:
+        session.add(Task(id=task_id, title="Superseded", prompt=f"Read {target} and report its contents.", status="running",
+                         task_class="filesystem", profile="fast", autonomy="autonomous", response_route="managed_task"))
+        await session.commit()
+    monkeypatch.setattr("app.agent.loop.record_trajectory", AsyncMock())
+    monkeypatch.setattr("app.agent.loop.publish_owner_text", AsyncMock(return_value={}))
+
+    class Provider:
+        name = "scripted"
+        model = "scripted-model"
+
+        def __init__(self):
+            self.calls = 0
+
+        async def health(self):
+            return True
+
+        async def chat(self, messages, tools=None, **kwargs):
+            self.calls += 1
+            if self.calls == 1:  # A's lease lapses mid-call; B takes the step over and finishes the task
+                step = await get_step_by_key(task_id, "model:1:0:0")
+                async with SessionLocal() as session:
+                    await session.execute(update(ExecutionAttempt).where(ExecutionAttempt.step_id == step.id)
+                                          .values(lease_expires_at=utcnow() - timedelta(seconds=1)))
+                    await session.commit()
+                await claim_attempt(step.id, "worker-B", input_hash=step.input_hash)
+                await commit_step_result(step.id, result={"_value": {"content": "answer from B"}},
+                                         expected_input_hash=step.input_hash)
+                async with SessionLocal() as session:
+                    row = await session.get(Task, task_id)
+                    row.status, row.stage, row.result = "completed", "done", "answer from B"
+                    await session.commit()
+            return ChatResult(content="answer from A")
+
+    provider = Provider()
+    jarvis_env["manager"].provider = provider
+    jarvis_env["settings"].front_responder.enabled = False
+    await asyncio.wait_for(AGENT._run(task_id, continue_existing=False), 40)
+    async with SessionLocal() as session:
+        task = await session.get(Task, task_id)
+    assert task.status == "completed", (task.status, task.error)
+    assert task.result == "answer from B"
+    assert not task.error
+    assert provider.calls == 1, "A stopped after its commit was refused"
+    step = await get_step_by_key(task_id, "model:1:0:0")
+    assert "answer from B" in step.result_json
+
+
+@pytest.mark.asyncio
+async def test_a_late_commit_after_a_takeover_is_superseded_and_keeps_the_new_answer(jarvis_env):
+    """rr2 probe 3, as a runner-level test: A's lease lapses mid-call, B re-points the step to v2 and commits;
+    A's late v1 commit is refused as superseded, A's attempt ends SUPERSEDED, and B's answer stays."""
+    import uuid
+    from datetime import timedelta
+    from sqlalchemy import update
+    from app.agent.durable_execution.accounting import reset_ledgers
+    from app.agent.durable_execution.repository import StepSuperseded, get_step_by_key
+    from app.agent.durable_execution.runner import _hash_payload, run_durable_step
+    from app.db.models import ExecutionAttempt, utcnow
+    reset_ledgers()
+    run_id = str(uuid.uuid4())
+    await _seed_running_task(run_id)
+    common = _model_step_args(run_id)
+    gate, started = asyncio.Event(), asyncio.Event()
+
+    async def a_op():
+        started.set()
+        await gate.wait()
+        return {"content": "answer to v1"}
+
+    async def b_op():
+        return {"content": "answer to v2"}
+
+    a = asyncio.create_task(run_durable_step(**common, input_fingerprint={"messages": "v1"}, operation=a_op,
+                                             worker_id="worker-A"))
+    await started.wait()
+    async with SessionLocal() as session:
+        await session.execute(update(ExecutionAttempt).where(ExecutionAttempt.worker_id == "worker-A")
+                              .values(lease_expires_at=utcnow() - timedelta(seconds=1)))
+        await session.commit()
+    await run_durable_step(**common, input_fingerprint={"messages": "v2"}, operation=b_op, worker_id="worker-B")
+    gate.set()
+    with pytest.raises(StepSuperseded):
+        await a
+    async with SessionLocal() as session:
+        statuses = {x.worker_id: x.status for x in (await session.scalars(select(ExecutionAttempt))).all()
+                    if x.worker_id in {"worker-A", "worker-B"}}
+    assert statuses == {"worker-A": "superseded", "worker-B": "completed"}, statuses
+    step = await get_step_by_key(run_id, "model:1:0:0")
+    assert step.input_hash == _hash_payload({"messages": "v2"}) and "answer to v2" in step.result_json

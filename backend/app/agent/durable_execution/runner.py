@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hashlib
 import json
 import os
@@ -20,12 +22,14 @@ from .replay import (
 )
 from .repository import (
     AmbiguousEffectError,
-    StepBlocked,
+    InputsChanged,
+    StepSuperseded,
     assert_run_recoverable,
     claim_attempt,
     commit_step_result,
     finish_attempt,
     get_step_by_key,
+    heartbeat_attempt,
     mark_ambiguous_effect,
     mark_step_running,
     park_step,
@@ -66,12 +70,23 @@ async def _emit_step_event(
     )
 
 
-# Owner-facing reason when a restarted task finds an answer it already saved for an earlier version
-# of its context: say why it stopped and what the owner can do.
+# Why a restarted task stopped when it finds an answer it already saved for an earlier version of its
+# context. The loop adds the action for the surface the owner reads it on (model_inputs_changed_reason).
 MODEL_INPUTS_CHANGED = (
     "This task was interrupted, and its conversation changed before it restarted, so it can't safely resume "
-    "from the answer it saved earlier. Re-run it as a new task to get a fresh answer."
+    "from the answer it saved earlier."
 )
+
+# How often a running step renews its lease (DEFAULT_LEASE_SECONDS = 45), so a model call that runs for
+# minutes (chat_call_max_ms) keeps the step and a second runner cannot take it over mid-call.
+HEARTBEAT_INTERVAL_S = 15.0
+
+
+async def _keep_lease(attempt_id: int) -> None:
+    while True:
+        await asyncio.sleep(HEARTBEAT_INTERVAL_S)
+        if not await heartbeat_attempt(attempt_id):
+            return
 
 
 async def run_durable_step(
@@ -102,7 +117,7 @@ async def run_durable_step(
         if existing is not None and existing.input_hash != input_hash and existing.status == StepStatus.COMPLETED.value:
             # A committed answer for other inputs must never be reused for these ones (RFC-0243). A step
             # that never committed is re-pointed at the new inputs under its lease (claim_attempt) and re-run.
-            raise StepBlocked(MODEL_INPUTS_CHANGED)
+            raise InputsChanged(MODEL_INPUTS_CHANGED)
 
     reused = await reuse_if_completed(run_id, step_key)
     if reused is not None:
@@ -139,17 +154,21 @@ async def run_durable_step(
     if step.status == StepStatus.AMBIGUOUS_EFFECT.value:
         raise AmbiguousEffectError(step_key)
 
-    attempt = await claim_attempt(
-        step.id,
-        worker,
-        input_hash=input_hash if model_call else None,
-        idempotency_key=idempotency_key if model_call else None,
-    )
+    try:
+        attempt = await claim_attempt(
+            step.id,
+            worker,
+            input_hash=input_hash if model_call else None,
+            idempotency_key=idempotency_key if model_call else None,
+        )
+    except InputsChanged as exc:
+        raise InputsChanged(MODEL_INPUTS_CHANGED) from exc
     await mark_step_running(step.id)
     check_crash_boundary(step_key, CrashBoundary.BEFORE_EXECUTE)
 
     executed_value: T | None = None
     crash_before_commit = False
+    lease = asyncio.create_task(_keep_lease(attempt.id))
     try:
         executed_value = await operation()
         check_crash_boundary(step_key, CrashBoundary.AFTER_EXECUTE_BEFORE_COMMIT)
@@ -171,6 +190,10 @@ async def run_durable_step(
     except Exception:
         await finish_attempt(attempt.id, AttemptStatus.ABANDONED)
         raise
+    finally:
+        lease.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await lease
 
     tokens, ms, usd = (0, 0.0, 0.0)
     if cost_extractor and executed_value is not None:
@@ -181,15 +204,20 @@ async def run_durable_step(
     encoded["cost_ms"] = ms
     encoded["cost_usd"] = usd
 
-    committed = await commit_step_result(
-        step.id,
-        result=encoded,
-        cost_tokens=tokens,
-        cost_ms=ms,
-        cost_usd=usd,
-        success=True,
-        expected_input_hash=input_hash if model_call else None,
-    )
+    try:
+        committed = await commit_step_result(
+            step.id,
+            result=encoded,
+            cost_tokens=tokens,
+            cost_ms=ms,
+            cost_usd=usd,
+            success=True,
+            expected_input_hash=input_hash if model_call else None,
+            attempt_id=attempt.id if model_call else None,
+        )
+    except StepSuperseded:
+        await finish_attempt(attempt.id, AttemptStatus.SUPERSEDED)
+        raise
     check_crash_boundary(step_key, CrashBoundary.AFTER_COMMIT)
     await finish_attempt(attempt.id, AttemptStatus.COMPLETED)
 
