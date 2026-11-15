@@ -186,7 +186,7 @@ Assign order: **S1 → S2; S3 independent.**
 
 ## Likely files
 
-See ownership tables. Sequential chains (the batch-wide order, as in RFC-0225 *Likely files*): `running_models.py` #691 (landed) → #690 → 0225-S3 → 0227-S1 → 0242-T3 → 0242-T6 → 0245-S5 → 0233-S3 → 0246-S3; `api/model.py` #690 → 0225-S3 → 0227-S1 → 0242-T3 → 0242-T6 → 0246-S3 (erratum: 0225-S1 and 0228-S2 no longer edit it). `RunningModels.tsx`, `runtime_profiles.py` (API), `modelSlots.ts`, `HudModelSelector.tsx`, `api.ts` are owned only here in the batch.
+See ownership tables. Sequential chains (the batch-wide order, as in RFC-0225 *Likely files*): `running_models.py` #691 (landed) → #690 → 0225-S3 → 0227-S1 → 0242-T6 → 0245-S5 → 0233-S3 → 0246-S3; `api/model.py` #690 → 0225-S3 → 0227-S1 → 0242-T3 → 0242-T6 → 0246-S3 (erratum: 0225-S1 and 0228-S2 no longer edit it). `RunningModels.tsx`, `runtime_profiles.py` (API), `modelSlots.ts`, `HudModelSelector.tsx`, `api.ts` are owned only here in the batch.
 
 `frontend/package.json` and `.github/workflows/pr-tests.yml` are shared by every frontend ticket in the 2026-10-17 batch: each ticket adds exactly one `test:*` script line and one `frontend-build` step (append-only hunks, trivial rebase) and touches nothing else in those files.
 
