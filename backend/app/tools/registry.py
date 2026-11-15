@@ -197,7 +197,8 @@ class ToolRegistry:
                         result = await tool.execute(**arguments, _task_id=task_id)
                     elif name == "self_development":
                         # Away Mode / owner reorder verify the owner's own message in this task.
-                        result = await tool.execute(**arguments, _task_id=task_id or self._context.get("task_id"))
+                        result = await tool.execute(**arguments, _task_id=task_id or self._context.get("task_id"),
+                                                    _grant_id=self._context.get("approval_grant_id"))
                     else:
                         result = await tool.execute(**arguments)
         except Exception as exc:

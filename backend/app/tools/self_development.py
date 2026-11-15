@@ -1,6 +1,7 @@
 """ANZU chat controls for the owner's local development scheduler (RFC-0211)."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -65,17 +66,23 @@ _DISABLE = re.compile(rf"\b(?:disable|turn\s+off|switch\s+off|deactivate|pause|s
 # words refuses every setting change in that message. Matched on normalized text (lower case,
 # apostrophes dropped so "don't"/"don’t"/"dont" are one word, other punctuation as spaces).
 _RETRACTION = re.compile(
-    r"\b(?:not|never|no|nope|cannot|"
+    r"\b(?:not|never|no|nope|nah|cannot|"
     r"dont|doesnt|didnt|wont|wouldnt|cant|couldnt|shouldnt|isnt|arent|wasnt|werent|havent|hasnt|hadnt|"
     r"mustnt|neednt|mightnt|shant|aint|"
-    r"actually|kidding|jk|cancel\w*|stop\w*|nevermind|never\s+mind|scratch\s+that|forget\s+it|wait\w*|"
-    r"hold\s+off|undo\w*|instead|rather)\b")
+    r"actually|kidding|jk|nvm|nm|cancel\w*|stop\w*|nevermind|never\s+mind|scratch\s+that|forget\s+it|wait\w*|"
+    r"hold\s+off|hold\s+on|hang\s+on|one\s+sec\w*|on\s+second\s+thoughts?|second\s+thoughts?|ignore\s+that|"
+    r"disregard\w*|belay\w*|leave\s+it|maybe\s+later|later|undo\w*|instead|rather)\b")
+# Apostrophe-like marks people type for "don't" (', ’, ‘, ´ on NL/DE keyboards, `, ′, ʹ, ʻ, ʼ, ＇).
+_APOSTROPHE_MARKS = "'\u2019\u2018\u00b4`\u2032\u02b9\u02bb\u02bc\uff07"
 # The interval number must be the object of the interval phrase: "interval to 15", "interval of
 # 15 minutes", "interval: 15 min", "make the interval 15", "every 15 minutes".
+_MINUTE_UNIT = r"(?:minutes?|minuten|minuut|mins?|m)"
 _INTERVAL_VALUE = re.compile(
-    r"\binterval\s*(?:(?:to|of|at|is|=|:)\s*|be\s+|should\s+be\s+)?(?<![\w.,])(\d+)"
-    r"(?:\s*(?:minutes?|mins?|m)\b|(?![\w]|[.,]\d|\s*(?:hours?|hrs?|h|days?|d|seconds?|secs?|s)\b))"
-    r"|\bevery\s+(?<![\w.,])(\d+)\s*(?:minutes?|mins?|m)\b", re.I)
+    r"\binterval\s*(?:(?:to|of|at|is|=|:)\s*|be\s+|should\s+be\s+)?(?<![\w.,])(\d+)(?![.,]\d)"
+    # H4: only a minute unit may follow the number (an allowlist); any other word after it
+    # ("15 weeks", "15 ms", "15 uur") is not read as minutes.
+    rf"(?:\s*{_MINUTE_UNIT}\b|(?!\s*[^\W\d_]|\d))"
+    rf"|\bevery\s+(?<![\w.,])(\d+)\s*{_MINUTE_UNIT}\b", re.I)
 # Every number in the request, with an optional unit ("15m", "15 min", "2 hours") so the unit
 # forms _INTERVAL_VALUE accepts count as that one number.
 _NUMBER = re.compile(r"(?<![\w.,])(\d+(?:[.,]\d+)?)(?:\s*(?:minutes?|mins?|m|hours?|hrs?|h)\b)?(?![\w])", re.I)
@@ -126,11 +133,127 @@ def undo_target(own: str, moved: list[dict[str, Any]]) -> bool:
                 or re.search(r"\bupcoming\s+(?:list|order|tasks)\b", own, re.I))
 
 
-def retraction(own: str) -> str:
-    """The first negation or retraction word in the owner's own words, or ''."""
-    normalized = re.sub(r"[^a-z0-9\s]", " ", own.lower().replace("'", ""))
-    found = _RETRACTION.search(re.sub(r"\s+", " ", normalized))
+def retraction(text: str) -> str:
+    """The first negation or retraction word anywhere in ``text``, or ''.
+
+    Run on the owner's RAW message (H1): quotes, code and ``>`` lines are not stripped, so a
+    "don't" the owner quoted or set in code still refuses. Every apostrophe variant is dropped
+    and "do n't" / "don t" are joined (H2) before matching.
+    """
+    lowered = (text or "").lower()
+    for mark in _APOSTROPHE_MARKS:
+        lowered = lowered.replace(mark, "")
+    lowered = re.sub(r"\b(\w+?)\s+nt\b", r"\1nt", lowered)   # "do nt" -> "dont"
+    lowered = re.sub(r"\b(\w+n)\s+t\b", r"\1t", lowered)     # "don t" -> "dont"
+    normalized = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", lowered))
+    found = _RETRACTION.search(normalized)
     return found.group(0) if found else ""
+
+
+def retraction_refusal(text: str) -> str:
+    word = retraction(text)
+    if not word:
+        return ""
+    return (f"Your message includes \"{word}\", so I won't change the scheduler from it. Send the change as a plain "
+            "request (for example \"enable the self-development scheduler\"), or use the Self-development page")
+
+
+# ---- Owner approval (CoS ruling): consent is the owner's tap on the ApprovalGrant card -----------
+# Every chat-initiated scheduler change parks an RFC-0031 approval whose target is the hash of the
+# exact change shown on the card; the tool acts only with a matching, unexpired, unused grant.
+APPROVAL_ACTIONS = frozenset({"configure", "run", "move", "queue", "unqueue", "undo"})
+
+
+def pending_change(arguments: dict[str, Any]) -> dict[str, Any] | None:
+    """The exact change a chat call would make, resolved against the current scheduler state.
+
+    ``None`` when the call is incomplete or not a chat-allowed change (the tool then refuses
+    with its own reason, and no approval card is shown).
+    """
+    from ..agent.development_queue import moved_items, next_eligible
+    from ..agent.development_scheduler import DEVELOPMENT
+
+    args = arguments if isinstance(arguments, dict) else {}
+    action = str(args.get("action") or "")
+    if action not in APPROVAL_ACTIONS:
+        return None
+    state = DEVELOPMENT.state()
+
+    def item_ref(item_id):
+        item = state["items"].get(item_id or "")
+        return {"item_id": item["id"], "title": item.get("title", "")} if item else None
+
+    if action == "configure":
+        config = args.get("config")
+        if not isinstance(config, dict) or not config or set(config) - set(_CHAT_SETTINGS):
+            return None
+        changes = {k: [state["config"].get(k), v] for k, v in sorted(config.items()) if state["config"].get(k) != v}
+        return {"action": action, "set": changes} if changes else None
+    if action == "run":
+        item = state["items"].get(args.get("item_id") or "") if args.get("item_id") else next_eligible(state, automatic=False)[0]
+        return {"action": action, **item_ref(item["id"]), "revision": item.get("revision", "")} if item else None
+    if action in {"queue", "unqueue"}:
+        ref = item_ref(args.get("item_id"))
+        return {"action": action, **ref, "revision": str(args.get("revision") or "")} if ref else None
+    expected = args.get("expected_revision")
+    if not isinstance(expected, int) or isinstance(expected, bool):
+        return None
+    actor = str(args.get("actor") or "anzu")
+    if action == "move":
+        ref, position = item_ref(args.get("item_id")), args.get("position")
+        if not ref or not isinstance(position, int) or isinstance(position, bool):
+            return None
+        return {"action": action, **ref, "to": position, "actor": actor, "queue_revision": expected}
+    entry = next((h for h in state.get("queue_history", []) if h.get("id") == args.get("history_id")), None)
+    if not entry:
+        return None
+    moved = entry.get("pinned") or sorted(moved_items(entry.get("before", []), entry.get("after", [])))
+    return {"action": action, "history_id": entry["id"], "actor": actor, "queue_revision": expected,
+            "moved": [{"item_id": i, "title": state["items"].get(i, {}).get("title", "")} for i in moved]}
+
+
+def approval_target(change: dict[str, Any]) -> str:
+    return hashlib.sha256(json.dumps(change, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
+
+
+def describe_change(change: dict[str, Any]) -> str:
+    """What the owner's tap approves, in words, for the existing approval card (desktop and phone)."""
+    action = change["action"]
+    task = f"{change.get('item_id', '')} \u2014 {change.get('title', '')}".strip(" \u2014")
+    if action == "configure":
+        parts = []
+        for key, (old, new) in change["set"].items():
+            if key == "enabled":
+                parts.append("turn the self-development scheduler " + ("on" if new else "off"))
+            else:
+                parts.append(f"change {key} from {json.dumps(old)} to {json.dumps(new)}")
+        return "Self-development: " + "; ".join(parts)
+    if action == "run":
+        return f"Self-development: start a development mission for {task} (revision {change.get('revision', '')})"
+    if action == "queue":
+        return f"Self-development: queue {task} (revision {change.get('revision', '')})"
+    if action == "unqueue":
+        return f"Self-development: remove {task} from the queue"
+    who = "as you" if change.get("actor") == "owner" else "as ANZU"
+    if action == "move":
+        return f"Self-development: move {task} to position {change['to'] + 1} of the upcoming list ({who})"
+    moved = ", ".join(f"{m['item_id']} \u2014 {m['title']}" for m in change.get("moved", [])) or "no tasks"
+    return f"Self-development: undo the upcoming-list change {change['history_id']} ({who}; it moved {moved})"
+
+
+async def spend_approval(change: dict[str, Any], task_id: str | None, grant_id: str | None) -> None:
+    """Raise unless ``grant_id`` is the owner's tap for exactly ``change`` in this task; then spend it."""
+    from ..agent.development_scheduler import DEVELOPMENT
+    from ..policy.approval_grant import action_id_for, consume_grant, validate_grant_for_action
+
+    target = approval_target(change)
+    action_id = action_id_for("self_development", change["action"], target, task_id=task_id)
+    grant = validate_grant_for_action(grant_id, action_id=action_id, tool_name="self_development", target=target)
+    if grant is None:
+        raise ValueError(f"This needs your approval: {describe_change(change)}. Approve it on the approval card on your PC "
+                         "or phone; nothing was changed")
+    await DEVELOPMENT.claim_grant(grant["id"])
+    consume_grant(grant["id"])
 
 
 def mentions_item(own: str, item: dict[str, Any] | None, *, hash_number: bool = True) -> bool:
@@ -164,6 +287,11 @@ def owner_asked(text: str, action: str, *, item: dict[str, Any] | None = None, c
     never from a model argument, an RFC, or tool output.
     """
     own = own_words(text)
+    if action in {"move", "queue", "unqueue", "run"}:
+        # H5: the fail-closed negation/retraction pre-filter applies to these too ("don't start RFC-0211").
+        refusal = retraction_refusal(text)
+        if refusal:
+            return refusal
     if action == "move":
         ok = bool(_REORDER.search(own)) and mentions_item(own, item)
         return "" if ok else "Reordering as you needs your own request naming that task (for example \"do RFC-0211 next\"), or a drag in the Upcoming list"
@@ -187,10 +315,9 @@ def owner_asked(text: str, action: str, *, item: dict[str, Any] | None = None, c
             return "Nothing to change"
         if not _CONFIGURE.search(own):
             return "Changing the scheduler settings needs your own request, or the Self-development page"
-        word = retraction(own)
-        if word:
-            return (f"Your message includes \"{word}\", so I won't change scheduler settings from it. Send the change as a "
-                    "plain request (for example \"enable the self-development scheduler\"), or use the Self-development page")
+        refusal = retraction_refusal(text)  # H1: on the raw message, quotes and code included
+        if refusal:
+            return refusal
         for key, value in changes.items():
             if not asked_setting(own, key, value):
                 return f"Your message does not ask for {key} = {json.dumps(value)}"
@@ -242,7 +369,7 @@ class SelfDevelopmentTool(Tool):
 
     async def execute(self, action: str, item_id: str = "", revision: str = "", config: dict[str, Any] | None = None,
                       position: int | None = None, actor: str = "anzu", reason: str = "", history_id: str = "",
-                      expected_revision: int | None = None, _task_id: str | None = None, **_: Any):
+                      expected_revision: int | None = None, _task_id: str | None = None, _grant_id: str | None = None, **_: Any):
         from ..agent.development_queue import moved_items as q_moved, next_eligible
         from ..agent.development_scheduler import DEVELOPMENT, DevelopmentConfig
         # A worker cannot recursively schedule more workers from an RFC/tool result.
@@ -285,6 +412,21 @@ class SelfDevelopmentTool(Tool):
                 refusal = owner_asked(owner_text, action, item=item, changes=changes, moved=moved)
                 if refusal:
                     raise ValueError(refusal)
+            if action in APPROVAL_ACTIONS:
+                if action in {"move", "undo"} and expected_revision is None:
+                    raise ValueError("Read the upcoming list first and pass its revision as expected_revision")
+                if action == "move" and position is None:
+                    raise ValueError("position is required to move a task")
+                change = pending_change({"action": action, "item_id": item_id, "revision": revision, "config": config,
+                                         "position": position, "actor": actor, "history_id": history_id,
+                                         "expected_revision": expected_revision})
+                if change is None:
+                    raise ValueError("That change is incomplete or can't be made from chat; check the task and arguments, "
+                                     "or use the Self-development page")
+                # The words above can only refuse; the owner's tap on the approval card is the consent.
+                await spend_approval(change, _task_id, _grant_id)
+                if action == "run":
+                    item = DEVELOPMENT.state()["items"].get(change["item_id"])
             if action == "status": result = DEVELOPMENT.public()
             elif action == "scan": result = await DEVELOPMENT.scan()
             elif action in {"queue", "unqueue"}: result = await DEVELOPMENT.select(item_id, revision, action == "queue")

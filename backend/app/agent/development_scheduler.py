@@ -89,7 +89,9 @@ def default_state():
     return {"config": DevelopmentConfig().model_dump(), "items": {}, "runs": [], "next_run": 0, "failures": 0, "error": "", "drive_status": "Not connected",
             "order": [], "pins": [], "queue_revision": 0, "queue_history": [], "deliveries": {}, "builds": {},
             "away": {"enabled": False, "activated_at": 0, "activated_by": "", "explained": False, "summary": None, "last_scan": 0},
-            "evidence": {"checked_at": 0, "error": "", "merged": {}, "open": {}}}
+            "evidence": {"checked_at": 0, "error": "", "merged": {}, "open": {}},
+            # ApprovalGrant ids already spent on a chat change; a replayed or "always" grant never acts twice.
+            "approval_grants_used": []}
 
 
 def with_defaults(state):
@@ -519,6 +521,17 @@ class DevelopmentScheduler:
             # Not a publish authorization: the result waits at "approved" for the owner's Publish.
             await self.launch_mission(state, config, item, authorized_by="")
             return self.public(state)
+
+    async def claim_grant(self, grant_id: str):
+        """Spend an ApprovalGrant on one chat change, exactly once (durable across restarts)."""
+        async with self.lock:
+            state = self.state()
+            used = state["approval_grants_used"]
+            if grant_id in used:
+                raise ValueError("That approval was already used; nothing was changed. Ask again for a new approval")
+            used.append(grant_id)
+            del used[:-500]
+            self.save(state)
 
     def check_slot(self, state, config: DevelopmentConfig):
         if kill_switch_active():

@@ -669,6 +669,12 @@ def confirmation_payload_for_tool(
         payload["kind"] = "destructive" if irreversible else "confirm"
         payload["title"] = "Approve this action"
         payload["detail"] = f"Jarvis wants to run {name}."
+        if name == "self_development":
+            from ..tools.self_development import describe_change, pending_change
+            change = pending_change(arguments or {})
+            if change:
+                payload["title"] = "Approve this self-development change"
+                payload["detail"] = describe_change(change)
         from ..tts.persona_speech import apply_leading_vocative
 
         if irreversible:

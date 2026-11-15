@@ -8,10 +8,12 @@ import pytest
 from app.agent import development_queue as q
 from app.agent import development_scheduler as ds
 from app.tools import self_development as tool_module
+from rfc0211_approval import isolate_grants, owner_tap
 
 
 @pytest.fixture
 def sched(tmp_path, monkeypatch):
+    isolate_grants(tmp_path, monkeypatch)
     monkeypatch.setattr(ds, "root", lambda: tmp_path)
     monkeypatch.setattr(ds, "kill_switch_active", lambda: False)
     s = ds.DevelopmentScheduler()
@@ -50,7 +52,8 @@ async def test_model_cannot_claim_owner_to_move_or_undo_without_the_owners_words
     assert not moved.success and "your own request" in moved.error
     assert sched.state()["order"] == before
     hist = sched.state()["queue_history"][-1]["id"]
-    undone = await tool.execute("undo", history_id=hist, actor="owner", expected_revision=sched.state()["queue_revision"], _task_id="t")
+    args = {"history_id": hist, "actor": "owner", "expected_revision": sched.state()["queue_revision"]}
+    undone = await tool.execute("undo", **args, _task_id="t", _grant_id=owner_tap("undo", **args))
     assert not undone.success
     assert sched.state()["order"] == before
     # ANZU acting as itself still cannot move the owner's pin.
@@ -63,12 +66,15 @@ async def test_owner_reorder_and_undo_from_chat_work_when_the_owner_asks(sched, 
     seed(sched)
     tool = tool_module.SelfDevelopmentTool()
     owner_says(monkeypatch, "Please do RFC-9011 next")
-    moved = await tool.execute("move", item_id="bravo", position=0, actor="owner", expected_revision=sched.state()["queue_revision"], _task_id="t")
+    args = {"item_id": "bravo", "position": 0, "actor": "owner", "expected_revision": sched.state()["queue_revision"]}
+    assert not (await tool.execute("move", **args, _task_id="t")).success  # no tap, no change
+    moved = await tool.execute("move", **args, _task_id="t", _grant_id=owner_tap("move", **args))
     assert moved.success and sched.state()["order"][0] == "bravo"
     # N2: a bare "undo that" no longer counts; the owner names the reorder or the task.
     owner_says(monkeypatch, "undo moving RFC-9011 next")
     hist = sched.state()["queue_history"][-1]["id"]
-    undone = await tool.execute("undo", history_id=hist, actor="owner", expected_revision=sched.state()["queue_revision"], _task_id="t")
+    args = {"history_id": hist, "actor": "owner", "expected_revision": sched.state()["queue_revision"]}
+    undone = await tool.execute("undo", **args, _task_id="t", _grant_id=owner_tap("undo", **args))
     assert undone.success and sched.state()["order"][0] == "charlie"
 
 
@@ -100,12 +106,14 @@ async def test_model_cannot_release_reservation_or_reset_breaker(sched, monkeypa
     assert st["config"]["resource_hold"] == "Grokbot RE" and st["failures"] == 9
     # A real owner request changes the named setting but never clears the breaker.
     owner_says(monkeypatch, "set the development interval to 45 minutes")
-    changed = await tool.execute("configure", config={"interval_minutes": 45}, _task_id="t")
+    changed = await tool.execute("configure", config={"interval_minutes": 45}, _task_id="t",
+                                 _grant_id=owner_tap("configure", config={"interval_minutes": 45}))
     assert changed.success
     st = sched.state()
     assert st["config"]["interval_minutes"] == 45 and st["failures"] == 9 and st["config"]["resource_hold"] == "Grokbot RE"
     # The model cannot slip in a value the owner did not ask for.
-    assert not (await tool.execute("configure", config={"interval_minutes": 1}, _task_id="t")).success
+    assert not (await tool.execute("configure", config={"interval_minutes": 1}, _task_id="t",
+                                   _grant_id=owner_tap("configure", config={"interval_minutes": 1}))).success
 
 
 @pytest.mark.asyncio
@@ -139,11 +147,12 @@ async def test_model_cannot_queue_or_run_without_the_owner(sched, monkeypatch):
     assert not (await tool.execute("run")).success
     assert calls == []
     owner_says(monkeypatch, "queue RFC-9011 and start the development mission")
-    assert (await tool.execute("queue", item_id="bravo", revision="rbravo", _task_id="t")).success
-    assert (await tool.execute("run", item_id="bravo", _task_id="t")).success
+    assert (await tool.execute("queue", item_id="bravo", revision="rbravo", _task_id="t",
+                               _grant_id=owner_tap("queue", item_id="bravo", revision="rbravo"))).success
+    assert (await tool.execute("run", item_id="bravo", _task_id="t", _grant_id=owner_tap("run", item_id="bravo"))).success
     # N4: a later bare "start the development mission" does not name the task, so it is refused.
     owner_says(monkeypatch, "start the development mission")
-    assert not (await tool.execute("run", item_id="bravo", _task_id="t")).success
+    assert not (await tool.execute("run", item_id="bravo", _task_id="t", _grant_id=owner_tap("run", item_id="bravo"))).success
     assert calls[0][0] == "select" and calls[-1] == ("launch", {"expected": "bravo"}) and len(calls) == 2
 
 

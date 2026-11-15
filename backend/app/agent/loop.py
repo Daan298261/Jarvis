@@ -3828,7 +3828,8 @@ class AgentRuntime:
             profile_id=profile_id,
             park_if_needed=False,
         )
-        if grant_id and name != "reverse_engineer":
+        # reverse_engineer and self_development validate the grant against the exact change and spend it themselves.
+        if grant_id and name not in {"reverse_engineer", "self_development"}:
             from ..policy.approval_grant import consume_grant
 
             try:

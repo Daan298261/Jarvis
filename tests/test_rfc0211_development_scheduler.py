@@ -499,7 +499,7 @@ async def test_run_endpoint_answers_409_with_reason_when_models_unavailable(sche
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("handler", "reason"), MODEL_CHECK_CASES)
-async def test_chat_tool_run_returns_tool_error_when_models_unavailable(scheduler, monkeypatch, handler, reason):
+async def test_chat_tool_run_returns_tool_error_when_models_unavailable(scheduler, monkeypatch, tmp_path, handler, reason):
     from app.tools.self_development import SelfDevelopmentTool
 
     _ollama(monkeypatch, handler)
@@ -511,7 +511,9 @@ async def test_chat_tool_run_returns_tool_error_when_models_unavailable(schedule
     # N4: the owner names the task to start; a bare "start the development mission" is refused.
     async def owner(_task): return f"start the development mission for {target}"
     monkeypatch.setattr(tool_module, "latest_owner_message", owner)
-    result = await SelfDevelopmentTool().execute(action="run", _task_id="task")
+    from rfc0211_approval import isolate_grants, owner_tap
+    isolate_grants(tmp_path, monkeypatch)
+    result = await SelfDevelopmentTool().execute(action="run", _task_id="task", _grant_id=owner_tap("run", task_id="task"))
     assert result.success is False
     assert reason in result.error
     assert scheduler.public()["runs"] == []
