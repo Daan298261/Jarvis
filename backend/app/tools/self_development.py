@@ -53,6 +53,57 @@ _CONFIGURE = re.compile(r"\b(?:set|change|switch|use|configure|enable|disable|tu
 _PAGE_ONLY = {"resource_hold": "the reservation", "repo": "the repository"}
 
 
+# Settings chat may change, each tied to the owner's words for that exact key and value. Every
+# other DevelopmentConfig field (failure_limit, max_repairs, base_ref, review_model, run and CI
+# limits, Ollama URL, Drive tools) belongs to the Self-development page; failure_limit and
+# max_repairs guard the failure breaker, so a chat request can never lift a tripped breaker.
+_CHAT_SETTINGS = ("enabled", "interval_minutes", "coder_model", "vision_model")
+_SCHEDULER = r"(?:self[- ]?dev\w*|(?:the\s+)?(?:development|dev)\s+scheduler|scheduler|self[- ]?development)"
+_ENABLE = re.compile(rf"\b(?:enable|turn\s+on|switch\s+on|activate|resume|start)\s+(?:the\s+|my\s+|your\s+)?{_SCHEDULER}", re.I)
+_DISABLE = re.compile(rf"\b(?:disable|turn\s+off|switch\s+off|deactivate|pause|stop)\s+(?:the\s+|my\s+|your\s+)?{_SCHEDULER}", re.I)
+_ROLE = {"coder_model": re.compile(r"\bcod(?:er|ing)\b", re.I), "vision_model": re.compile(r"\bvision\b", re.I)}
+# A model name ends at whitespace or sentence punctuation; tags, versions and quant suffixes are part of it.
+_NAME_EDGE = r"[\w.:/@+-]"
+
+
+def whole_number(own: str, number: int) -> bool:
+    return bool(re.search(rf"(?<![\w.,]){int(number)}(?![\w]|[.,]\d)", own))
+
+
+def asked_setting(own: str, key: str, value: Any) -> bool:
+    """True when the owner's own words ask for exactly ``key = value``."""
+    if key == "enabled":
+        if not isinstance(value, bool):
+            return False
+        on, off = bool(_ENABLE.search(own)), bool(_DISABLE.search(own))
+        return (on and not off) if value else (off and not on)
+    if key == "interval_minutes":
+        if isinstance(value, bool) or not isinstance(value, int):
+            return False
+        n = int(value)
+        near_interval = re.search(rf"\b(?:interval|every)\b[^.\n]{{0,30}}?(?<![\w.,]){n}(?![\w]|[.,]\d)\s*(?:minutes?|mins?|m)?\b", own, re.I)
+        as_minutes = re.search(rf"(?<![\w.,]){n}\s*(?:minutes?|mins?)\b", own, re.I)
+        return bool(near_interval or (as_minutes and re.search(r"\b(?:interval|every)\b", own, re.I)))
+    if key in _ROLE:
+        if not isinstance(value, str) or not value.strip():
+            return False
+        exact = re.compile(rf"(?<!{_NAME_EDGE}){re.escape(value.strip())}(?!{_NAME_EDGE})", re.I)
+        if not exact.search(own):
+            return False
+        rest = exact.sub(" ", own)  # "qwen3-coder" must not count as naming the coder role
+        other = "vision_model" if key == "coder_model" else "coder_model"
+        return bool(_ROLE[key].search(rest)) and not _ROLE[other].search(rest)
+    return False
+
+
+def undo_target(own: str, moved: list[dict[str, Any]]) -> bool:
+    """The owner's undo names this reorder: one of its moved tasks, or the upcoming list's last reorder."""
+    if any(mentions_item(own, item) for item in moved):
+        return True
+    return bool(re.search(r"\b(?:undo|revert)\s+(?:my|the|that|your)\s+(?:last\s+|latest\s+)?(?:reorder\w*|re-order\w*|move|pin)\b", own, re.I)
+                or re.search(r"\bupcoming\s+(?:list|order|tasks)\b", own, re.I))
+
+
 def mentions_item(own: str, item: dict[str, Any] | None) -> bool:
     if not item:
         return False
@@ -69,7 +120,8 @@ def mentions_item(own: str, item: dict[str, Any] | None) -> bool:
     return len(title) >= 4 and title in lowered
 
 
-def owner_asked(text: str, action: str, *, item: dict[str, Any] | None = None, changes: dict[str, Any] | None = None) -> str:
+def owner_asked(text: str, action: str, *, item: dict[str, Any] | None = None, changes: dict[str, Any] | None = None,
+                moved: list[dict[str, Any]] | None = None) -> str:
     """'' when the owner's own message asks for ``action``; otherwise why it does not count.
 
     Owner authority comes only from the owner's own words (or the Self-development page),
@@ -80,7 +132,8 @@ def owner_asked(text: str, action: str, *, item: dict[str, Any] | None = None, c
         ok = bool(_REORDER.search(own)) and mentions_item(own, item)
         return "" if ok else "Reordering as you needs your own request naming that task (for example \"do RFC-0211 next\"), or a drag in the Upcoming list"
     if action == "undo":
-        return "" if _UNDO.search(own) else "Undoing your order needs you to ask for it, or the Undo button in the Upcoming list"
+        ok = bool(_UNDO.search(own)) and undo_target(own, moved or [])
+        return "" if ok else "Undoing your order needs your own request naming that reorder or task (for example \"undo moving RFC-0211 to the top\"), or the Undo button in the Upcoming list"
     if action == "queue":
         return "" if _QUEUE.search(own) and mentions_item(own, item) else "Queueing a ticket needs your own request naming it, or the Self-development page"
     if action == "unqueue":
@@ -96,12 +149,9 @@ def owner_asked(text: str, action: str, *, item: dict[str, Any] | None = None, c
             return "Nothing to change"
         if not _CONFIGURE.search(own):
             return "Changing the scheduler settings needs your own request, or the Self-development page"
-        lowered = own.lower()
         for key, value in changes.items():
-            if isinstance(value, bool):
-                continue  # enable/disable is covered by the request verb
-            if str(value).lower() not in lowered:
-                return f"Your message does not ask for {key} = {value}"
+            if not asked_setting(own, key, value):
+                return f"Your message does not ask for {key} = {json.dumps(value)}"
         return ""
     return "Unknown control"
 
@@ -150,6 +200,7 @@ class SelfDevelopmentTool(Tool):
     async def execute(self, action: str, item_id: str = "", revision: str = "", config: dict[str, Any] | None = None,
                       position: int | None = None, actor: str = "anzu", reason: str = "", history_id: str = "",
                       expected_revision: int | None = None, _task_id: str | None = None, **_: Any):
+        from ..agent.development_queue import moved_items as q_moved
         from ..agent.development_scheduler import DEVELOPMENT, DevelopmentConfig
         # A worker cannot recursively schedule more workers from an RFC/tool result.
         if os.environ.get("ANZU_DEVELOPMENT_MISSION"):
@@ -172,8 +223,20 @@ class SelfDevelopmentTool(Tool):
                 item = current["items"].get(item_id) if item_id else None
                 if action in {"queue", "unqueue", "move"} and item_id and item is None:
                     raise ValueError("Unknown task")
-                changes = {k: v for k, v in (config or {}).items() if current["config"].get(k) != v} if action == "configure" else None
-                refusal = owner_asked(owner_text, action, item=item, changes=changes)
+                changes = None
+                if action == "configure":
+                    unknown = sorted(set(config or {}) - set(_CHAT_SETTINGS) - set(_PAGE_ONLY))
+                    if unknown:
+                        raise ValueError(f"{', '.join(unknown)} can only be changed on the Self-development page")
+                    changes = {k: v for k, v in (config or {}).items() if current["config"].get(k) != v}
+                moved = None
+                if action == "undo":
+                    entry = next((h for h in current.get("queue_history", []) if h.get("id") == history_id), None)
+                    if entry is None:
+                        raise ValueError("That change is no longer in the history")
+                    moved_ids = entry.get("pinned") or sorted(q_moved(entry.get("before", []), entry.get("after", [])))
+                    moved = [current["items"][i] for i in moved_ids if i in current["items"]]
+                refusal = owner_asked(owner_text, action, item=item, changes=changes, moved=moved)
                 if refusal:
                     raise ValueError(refusal)
             if action == "status": result = DEVELOPMENT.public()

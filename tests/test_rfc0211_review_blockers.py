@@ -65,7 +65,8 @@ async def test_owner_reorder_and_undo_from_chat_work_when_the_owner_asks(sched, 
     owner_says(monkeypatch, "Please do RFC-9011 next")
     moved = await tool.execute("move", item_id="bravo", position=0, actor="owner", expected_revision=sched.state()["queue_revision"], _task_id="t")
     assert moved.success and sched.state()["order"][0] == "bravo"
-    owner_says(monkeypatch, "undo that")
+    # N2: a bare "undo that" no longer counts; the owner names the reorder or the task.
+    owner_says(monkeypatch, "undo moving RFC-9011 next")
     hist = sched.state()["queue_history"][-1]["id"]
     undone = await tool.execute("undo", history_id=hist, actor="owner", expected_revision=sched.state()["queue_revision"], _task_id="t")
     assert undone.success and sched.state()["order"][0] == "charlie"
