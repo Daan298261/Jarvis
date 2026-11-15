@@ -61,6 +61,17 @@ _CHAT_SETTINGS = ("enabled", "interval_minutes", "coder_model", "vision_model")
 _SCHEDULER = r"(?:self[- ]?dev\w*|(?:the\s+)?(?:development|dev)\s+scheduler|scheduler|self[- ]?development)"
 _ENABLE = re.compile(rf"\b(?:enable|turn\s+on|switch\s+on|activate|resume|start)\s+(?:the\s+|my\s+|your\s+)?{_SCHEDULER}", re.I)
 _DISABLE = re.compile(rf"\b(?:disable|turn\s+off|switch\s+off|deactivate|pause|stop)\s+(?:the\s+|my\s+|your\s+)?{_SCHEDULER}", re.I)
+# A negation earlier in the same clause ("don't enable…", "I don't want you to turn on…",
+# "never switch off…") means the owner did not ask for that change, in either direction.
+_NEGATION = re.compile(r"\b(?:don'?t|do\s+not|does\s+not|doesn'?t|never|not|no\s+need\s+to|no|shouldn'?t|should\s+not|"
+                       r"won'?t|will\s+not|can'?t|cannot|mustn'?t|must\s+not|stop\s+trying\s+to|without)\b", re.I)
+_CLAUSE_BREAK = re.compile(r"[.;:!?,\n]|\b(?:and|but|then|so)\b", re.I)
+# The interval number must be the object of the interval phrase: "interval to 15", "interval of
+# 15 minutes", "interval: 15 min", "make the interval 15", "every 15 minutes".
+_INTERVAL_VALUE = re.compile(
+    r"\binterval\s*(?:(?:to|of|at|is|=|:)\s*|be\s+|should\s+be\s+)?(?<![\w.,])(\d+)(?![\w]|[.,]\d)\s*(?:minutes?|mins?|m)?\b"
+    r"|\bevery\s+(?<![\w.,])(\d+)(?![\w]|[.,]\d)\s*(?:minutes?|mins?)\b", re.I)
+_NUMBER = re.compile(r"(?<![\w.,])\d+(?:[.,]\d+)?(?![\w])")
 _ROLE = {"coder_model": re.compile(r"\bcod(?:er|ing)\b", re.I), "vision_model": re.compile(r"\bvision\b", re.I)}
 # A model name ends at whitespace or sentence punctuation; tags, versions and quant suffixes are part of it.
 _NAME_EDGE = r"[\w.:/@+-]"
@@ -75,15 +86,19 @@ def asked_setting(own: str, key: str, value: Any) -> bool:
     if key == "enabled":
         if not isinstance(value, bool):
             return False
-        on, off = bool(_ENABLE.search(own)), bool(_DISABLE.search(own))
-        return (on and not off) if value else (off and not on)
+        matches = [(True, m) for m in _ENABLE.finditer(own)] + [(False, m) for m in _DISABLE.finditer(own)]
+        if not matches or any(negated(own, m.start()) for _, m in matches):
+            return False  # a negated on/off request is never read as consent, either way
+        directions = {direction for direction, _ in matches}
+        return directions == {value}
     if key == "interval_minutes":
         if isinstance(value, bool) or not isinstance(value, int):
             return False
-        n = int(value)
-        near_interval = re.search(rf"\b(?:interval|every)\b[^.\n]{{0,30}}?(?<![\w.,]){n}(?![\w]|[.,]\d)\s*(?:minutes?|mins?|m)?\b", own, re.I)
-        as_minutes = re.search(rf"(?<![\w.,]){n}\s*(?:minutes?|mins?)\b", own, re.I)
-        return bool(near_interval or (as_minutes and re.search(r"\b(?:interval|every)\b", own, re.I)))
+        bound = {int(next(g for g in m.groups() if g)) for m in _INTERVAL_VALUE.finditer(own)}
+        numbers = {n.group(0) for n in _NUMBER.finditer(own)}
+        # Exactly one number in the request, and it is the interval's: two numbers or a number
+        # tied to something else ("run for 30 minutes, keep the interval") is ambiguous.
+        return bound == {int(value)} and len(numbers) == 1
     if key in _ROLE:
         if not isinstance(value, str) or not value.strip():
             return False
@@ -104,7 +119,18 @@ def undo_target(own: str, moved: list[dict[str, Any]]) -> bool:
                 or re.search(r"\bupcoming\s+(?:list|order|tasks)\b", own, re.I))
 
 
-def mentions_item(own: str, item: dict[str, Any] | None) -> bool:
+def negated(own: str, at: int) -> bool:
+    """A negation word earlier in the clause that ends at ``at``."""
+    clause = _CLAUSE_BREAK.split(own[:at])[-1]
+    return bool(_NEGATION.search(clause))
+
+
+def mentions_item(own: str, item: dict[str, Any] | None, *, hash_number: bool = True) -> bool:
+    """The owner's words name ``item`` by id, RFC number or full title.
+
+    ``hash_number=False`` (runs, per CoS) stops "#N" from naming an RFC, so "run the tests on
+    PR #9011" never names RFC-9011; move and queue keep accepting "#N".
+    """
     if not item:
         return False
     lowered = own.lower()
@@ -114,7 +140,8 @@ def mentions_item(own: str, item: dict[str, Any] | None) -> bool:
     if not number:
         found = re.search(r"\brfc[-_ ]?0*(\d{1,5})\b", f"{item.get('title', '')} {item.get('path', '')}", re.I)
         number = found.group(1) if found else ""
-    if number and re.search(rf"(?:\brfc[-_ ]?|#)0*{int(number)}\b", lowered):
+    prefix = r"(?:\brfc[-_ ]?|#)" if hash_number else r"\brfc[-_ ]?"
+    if number and re.search(rf"{prefix}0*{int(number)}\b", lowered):
         return True
     title = (item.get("title") or "").strip().lower()
     return len(title) >= 4 and title in lowered
@@ -140,7 +167,7 @@ def owner_asked(text: str, action: str, *, item: dict[str, Any] | None = None, c
         return "" if _UNQUEUE.search(own) and mentions_item(own, item) else "Removing a queued ticket needs your own request naming it, or the Self-development page"
     if action == "run":
         # The owner names the exact task that would start (id, RFC number or title), like N2's undo.
-        ok = bool(_RUN.search(own)) and mentions_item(own, item)
+        ok = bool(_RUN.search(own)) and mentions_item(own, item, hash_number=False)
         return "" if ok else "Starting a development mission needs your own request naming that task (for example \"start RFC-0211\"), or Run in Self-development"
     if action == "configure":
         changes = changes or {}

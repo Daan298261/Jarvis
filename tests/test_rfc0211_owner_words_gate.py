@@ -231,7 +231,7 @@ async def test_run_without_the_owner_naming_the_target_is_refused(sched, monkeyp
 @pytest.mark.asyncio
 @pytest.mark.parametrize("text, item_id", [
     ("run charlie", ""), ("start RFC-9021", ""), ("please start rfc 9021 now", "charlie"),
-    ("start the RFC-9021 charlie ticket", ""), ("kick off #9021", "charlie"),
+    ("start the RFC-9021 charlie ticket", ""), ("kick off RFC 9021", "charlie"),
 ])
 async def test_run_naming_the_target_is_allowed_and_pins_it(sched, monkeypatch, text, item_id):
     calls = charlie_queued(sched, monkeypatch)
@@ -251,3 +251,78 @@ async def test_launch_refuses_when_the_next_task_is_not_the_one_the_owner_named(
     with pytest.raises(ValueError, match="not the next"):
         await sched.launch(expected="alpha")
     assert sched.state()["runs"] == []
+
+
+# --- Final review at e1f8ff38: F1 negation, F2 interval binding, CoS ruling on "#N" for run ----
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text, value", [
+    ("don't enable the self-development scheduler", True),
+    ("never turn on the scheduler", True),
+    ("I don't want you to enable the scheduler", True),
+    ("no need to turn on self-development", True),
+    ("do not disable the scheduler", False),
+    ("please don't turn off the self-development scheduler", False),
+    ("never switch off the scheduler", False),
+])
+async def test_negated_on_off_request_is_refused_both_ways(sched, monkeypatch, text, value):
+    # F1: a negated request never authorizes a change; when unsure, refuse.
+    state = sched.state(); state["config"]["enabled"] = not value; sched.save(state)
+    owner_says(monkeypatch, text)
+    r = await configure({"enabled": value})
+    assert not r.success and sched.state()["config"]["enabled"] is (not value)
+
+
+@pytest.mark.asyncio
+async def test_a_negation_in_another_clause_does_not_block_a_plain_request(sched, monkeypatch):
+    owner_says(monkeypatch, "don't wait for me, enable the self-development scheduler")
+    assert (await configure({"enabled": True})).success
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text, value", [
+    ("set the interval to 30 minutes, I'll be back in 5 minutes", 5),
+    ("set the interval to 30 minutes, I'll be back in 5 minutes", 30),
+    ("run for 30 minutes, keep the interval", 30),
+    ("change the interval from 60 to 15", 15),
+    ("every 15 minutes check the build, set the interval to 30", 15),
+])
+async def test_interval_number_must_be_bound_to_the_interval_and_unambiguous(sched, monkeypatch, text, value):
+    # F2: the number must be the object of the interval phrase, and the only number in the request.
+    owner_says(monkeypatch, text)
+    r = await configure({"interval_minutes": value})
+    assert not r.success and sched.state()["config"]["interval_minutes"] == 60
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["set the interval of 15 minutes", "make the interval 15", "set interval: 15 min"])
+async def test_interval_phrasings_bound_to_the_number_are_allowed(sched, monkeypatch, text):
+    owner_says(monkeypatch, text)
+    r = await configure({"interval_minutes": 15})
+    assert r.success, r.error
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text, item_id", [("run the tests on PR #9021", ""), ("kick off #9021", "charlie"),
+                                           ("start #9021 now", "")])
+async def test_hash_number_does_not_name_an_rfc_for_a_run(sched, monkeypatch, text, item_id):
+    # CoS ruling: for a run only "RFC-N", "RFC N", the task id or the title name the task.
+    calls = charlie_queued(sched, monkeypatch)
+    owner_says(monkeypatch, text)
+    r = await run(item_id)
+    assert not r.success and calls == []
+
+
+def test_hash_number_still_names_the_task_for_move_and_queue():
+    item = {"id": "charlie", "title": "RFC-9021 charlie ticket", "rfc": "9021"}
+    assert tool_module.owner_asked("move #9021 to the top", "move", item=item) == ""
+    assert tool_module.owner_asked("queue #9021", "queue", item=item) == ""
+    assert tool_module.owner_asked("run #9021", "run", item=item) != ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", [True, False])
+async def test_both_directions_in_one_request_is_ambiguous(sched, monkeypatch, value):
+    state = sched.state(); state["config"]["enabled"] = not value; sched.save(state)
+    owner_says(monkeypatch, "enable the self-development scheduler, actually no, disable the scheduler")
+    assert not (await configure({"enabled": value})).success
