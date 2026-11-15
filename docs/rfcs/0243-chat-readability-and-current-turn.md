@@ -84,7 +84,7 @@ Tests run in CI's `frontend-build` job: it runs `npm run build` and the step "Ch
 - [x] **Persisted round-trip.** Turning the toggle off through the exported setter writes `"off"` to `jarvis.chat.compact.v1`, a fresh read (reload) returns off, and turning it on writes `"on"`.
   - Test: `frontend/chat-appearance.test.mjs` "compact toggle writes off and a reload reads off".
   - *Met:* `setChatCompact` goes through `writeOnOff`, which writes `"on"`/`"off"` to `CHAT_COMPACT_KEY`; `readOnByDefault` reads it back.
-  - *Open:* the head never exercises the write path. `writeOnOff` is private and the existing test only reads values it seeded into storage.
+  - *Formerly open (at `38929ae2`; closed, see *Met*):* that head never exercises the write path. `writeOnOff` is private and the existing test only reads values it seeded into storage.
 - [x] **One state, two toggles in sync.** The Settings "Chat" section and the HUD `.hud-chat-compact-toggle` read one store. Clicking either flips the other and the HUD root class live, and a `storage` event from another tab updates both.
   - Tests in `frontend/chat-appearance-render.test.mjs`:
     - "settings and HUD compact toggles stay in sync";
@@ -93,7 +93,7 @@ Tests run in CI's `frontend-build` job: it runs `npm run build` and the step "Ch
   - The third replaces the source-text grep "HudChat surfaces the Compact chat toggle beside the background toggle".
   - *Met:* `useChatCompact` and `useChatBackground` are `useSyncExternalStore` hooks over one module store (`subscribeChatAppearance`) with a `storage` listener; `HudChat`'s tools row and Settings' `ChatAppearanceSettingsSection` (a "Chat" `CollapsibleSection` in `AppearanceSettingsPane`) render the same `ChatAppearanceToggles`. All three tests are in `frontend/chat-appearance-render.test.mjs`, and the source-text grep is gone.
   - *HUD harness fix (UX round 2 blocker 1; PR fixer's commit `6dc9f219`, on the branch):* `HudChat` renders its body inside the exported `HudChatFrame` (`frontend/src/hud/HudChat.tsx`: `chatRootClassName`, the `data-chat-compact`/`data-chat-background` attributes and the `.hud-chat-tools` row with `ChatAppearanceToggles`), moved verbatim with no behaviour change. `frontend/chat-appearance-render.test.mjs` drops the hand-written `HudChatRoot` copy and mounts `HudChatFrame`, the full `HudChat` (test "HudChat renders its body inside HudChatFrame, so the live HUD carries the Compact chat wiring") and the real `AppearanceSettingsPane`, so removing the wiring from `HudChat`, the frame or the pane fails the suite.
-  - *Open:* at the head, `chatAppearance` is imported only by `HudChat`, and `AppearanceSettingsPane` has no Chat section. `usePersistedToggle` is a per-component `useState` with no shared store and no `storage` subscription.
+  - *Formerly open (at `38929ae2`; closed, see *Met*):* at that head, `chatAppearance` is imported only by `HudChat`, and `AppearanceSettingsPane` has no Chat section. `usePersistedToggle` is a per-component `useState` with no shared store and no `storage` subscription.
 - [x] **Off matches the classic DOM, classes and mask.**
   - With Compact off, the HUD chat root's class is exactly `hud-chat`.
   - No rule outside `.chat-compact` sets the compact caps, `mask-image: none`, or a `background`, `box-shadow` or `border-color` on `.hud-thread`. `.hud-thread` keeps `max-height: min(30vh, 285px)`, `background: transparent` and the fade mask, and `.hud-chat` keeps `min(1000px, calc(100% - 64px))`.
