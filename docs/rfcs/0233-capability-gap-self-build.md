@@ -1337,7 +1337,7 @@ The orders on `loop.py` and `owner_turn.py` are the CoS ruling (2026-10-20). The
 | `backend/app/api/settings.py` | #649 (landed) → #690 (keep-warm; the `inference_keep_warm` and `inference_idle_unload_seconds` keys) → 0245-S2 → 0233-S1 |
 | `backend/app/db/models.py` | #649 (landed) → 0245-S2 → 0233-S3 (0230 and 0232 do not edit it) |
 | `backend/app/api/tasks.py` | #649 (landed) → #690 (keep-warm; `IDLE_UNLOAD.touch()` at the owner entry points `create_task` route and `continue_task`) → 0245-S5 → 0233-S3 → 0233-S4 (0230 and 0232 do not edit it) |
-| `backend/app/main.py` | 0225-S2 → 0225-S3 → 0230-S0 → 0230-S5 → #690 (keep-warm; `model_unload_all` router include, `IDLE_UNLOAD.start()` / `stop()`) → 0245-S0 → 0245-S5 → 0233-S4 → #670 (RFC-0211, supersedes #585; lands last; 0232 never edits it) |
+| `backend/app/main.py` | 0225-S2 → 0225-S3 → 0230-S0 → 0230-S5 → #690 (keep-warm; `model_unload_all` router include, `IDLE_UNLOAD.start()` / `stop()`) → 0245-S0 → 0245-S5 → 0233-S4 → #670 (RFC-0211, supersedes #585; 0232 never edits it) → 0246-S3 (watcher start/stop only; RFC-0246, landed) |
 | `frontend/src/App.tsx` | 0225-S5 → 0225-S3 → #670 (0230-0233 do not edit it) |
 | `backend/app/agent/tool_exposure.py` | 0232-S2 → 0233-S4 → #670 (RFC-0211; adds three lines; lands last; 0230 and 0245 do not edit it) |
 | `backend/app/agent/task_workflow.py` | #649 (landed, created it) → 0245-S2. 0233 never edits it |
