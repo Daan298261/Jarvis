@@ -46,14 +46,15 @@ Rules:
 - Spend hidden reasoning on planning, recovery, and consequential verification. Do not narrate routine list/read/status calls.
 """
 
-PLAN_PROMPT = """First, without calling tools yet if you already understand the request, produce:
+PLAN_PROMPT = """In the same response, produce a short plan and start tool use immediately:
+
 END STATE:
 ACCEPTANCE CRITERIA:
 - ...
 PLAN:
 1. ...
 
-Then immediately start inspecting with tools. Do not wait for the user."""
+If the request needs tools, call the first tool in this same turn. Do not stop after the plan. Do not wait for the user."""
 
 VERIFY_PROMPT = """Perform a short independent verification pass.
 

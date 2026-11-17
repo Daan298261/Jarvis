@@ -65,9 +65,13 @@ def is_internal_instruction(text: str) -> bool:
 def owner_visible_user_text(text: str) -> str:
     """Drop agent instructions that were stored on a user-role turn."""
     raw = strip_continue_wrapper(text)
-    plan_mark = "\n\nFirst, without calling tools"
-    if plan_mark in raw:
-        raw = raw.split(plan_mark, 1)[0].strip()
+    for plan_mark in (
+        "\n\nFirst, without calling tools",
+        "\n\nIn the same response, produce a short plan",
+    ):
+        if plan_mark in raw:
+            raw = raw.split(plan_mark, 1)[0].strip()
+            break
     if is_internal_instruction(raw):
         return ""
     return raw

@@ -114,6 +114,19 @@ Worker bootstrap details: [`AGENTS.md`](../AGENTS.md).
 
 ---
 
+## Agent scans and vendored sidecars
+
+Unfinished-work hooks that grep the whole workspace will find thousands of upstream unfinished-work markers under:
+
+- `frontend/src-tauri/sidecars/jarvis-backend/` (Tauri PyInstaller output)
+- `installer/windows/payload/desktop/sidecars/` (installer-staged copy)
+
+Those files are **upstream library source** (e.g. sklearn’s libsvm shims, PyTorch). They are not Jarvis tickets. **Defer:** implement only in `backend/`, `frontend/src/`, `tests/`, and other first-party paths. Regenerate sidecars via the Windows build scripts instead of editing `_internal/`.
+
+Repo hygiene: `.gitignore` excludes these trees so agents and hooks focus on product code. Delete local sidecar extracts when a hook keeps scanning them; rebuild with the Windows installer/sidecar scripts.
+
+---
+
 ## Superseded pull requests
 
 | PR | Status | Action |

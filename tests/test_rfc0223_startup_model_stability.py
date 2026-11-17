@@ -142,7 +142,7 @@ async def test_lmstudio_autoload_loads_saved_download_only_when_needed(monkeypat
     monkeypatch.setattr(server, "_run_cli", cli)
     result = await server.ensure_local_lmstudio(host="127.0.0.1", port=1234, model="chosen", context_size=8192)
     assert result["ok"]
-    assert commands == ([] if already_loaded else [["lms", "load", "chosen", "-c", "8192", "-y"]])
+    assert commands == ([] if already_loaded else [["lms", "load", "chosen", "-c", "8192", "-y", "--ttl", "300"]])
 
 
 def test_repeated_discovery_uses_bounded_cache(tmp_path, monkeypatch):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import time
 from pathlib import Path
@@ -13,6 +14,8 @@ from ..config import AppSettings, logs_dir, runtime_dir
 from ..hardware import detect_hardware
 from ..providers.base import ChatMessage
 from .profiles import ModelProfile, profile_gguf, resolve_mmproj
+
+log = logging.getLogger("jarvis.inference.backends")
 
 LLAMA_CPP_ALIASES = {
     "llama.cpp",
@@ -176,6 +179,8 @@ async def probe_remote_server(
     last_error = ""
     deadline = time.time() + timeout
     n_ctx = 0
+    loaded_model_contexts: dict[str, int] = {}
+    loaded_model_contexts_error = ""
     async with httpx.AsyncClient(timeout=2, headers=headers) as client:
         while True:
             for path in PROBE_PATHS:
@@ -205,6 +210,18 @@ async def probe_remote_server(
             await asyncio.sleep(0.4)
         if health_path:
             n_ctx = await _probe_loaded_n_ctx(client, base, payloads)
+            try:
+                response = await client.get(base + "/api/ps")
+                response.raise_for_status()
+                for row in response.json().get("models", []):
+                    name = str(row.get("name") or row.get("model") or "")
+                    context = row.get("context_length")
+                    if name and isinstance(context, int) and context > 0:
+                        loaded_model_contexts[name] = context
+            except (httpx.HTTPError, ValueError, AttributeError, TypeError) as exc:
+                # Non-Ollama servers have no /api/ps; the generic n_ctx is used for every model then.
+                loaded_model_contexts_error = f"/api/ps unavailable: {exc}"[:300]
+                log.debug("%s %s; per-model contexts unknown, using n_ctx", base, loaded_model_contexts_error)
     return {
         "ok": health_path is not None,
         "host": host,
@@ -213,6 +230,8 @@ async def probe_remote_server(
         "health_path": health_path,
         "models": models,
         "n_ctx": n_ctx,
+        "loaded_model_contexts": loaded_model_contexts,
+        "loaded_model_contexts_error": loaded_model_contexts_error,
         "error": "" if health_path else (last_error or "no health endpoint answered"),
     }
 

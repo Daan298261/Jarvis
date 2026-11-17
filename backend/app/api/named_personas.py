@@ -7,6 +7,7 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
+from ..inference.idle_unload import IDLE_UNLOAD
 from ..inference.hotswap import activate_runtime_profile, parse_runtime_endpoint
 from ..inference.runtime_profiles import get_runtime_profile
 from ..persona.named_persona import (
@@ -70,6 +71,9 @@ async def _maybe_activate_persona_brain(raw_persona_id: str) -> None:
             runtime_name,
         )
         return
+    # A persona bind is an owner action, an explicit Load: lift the Unload hold *before* the prepare step,
+    # otherwise ensure_local_ollama answers "unloaded" and the bind would silently do nothing.
+    IDLE_UNLOAD.explicit_load()
     if (profile.provider or "").strip().lower() == "ollama":
         host, port = parse_runtime_endpoint(profile.endpoint)
         boot = await ensure_local_ollama(host=host, port=port, model=profile.model)
