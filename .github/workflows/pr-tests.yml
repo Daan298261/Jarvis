@@ -141,11 +141,16 @@ jobs:
       - name: Manager control feedback tests (RFC-0229 S1)
         run: npm run test:manager-controls
 
+<<<<<<< HEAD
+      - name: Running models contrast and dismiss tests
+        run: npm run test:running-models-contrast
+=======
       - name: Chat appearance compact/classic tests (RFC-0243)
         run: npm run test:chat-appearance
 
       - name: Keep warm HUD tests (keep-warm ticket)
         run: npm run test:keep-warm-hud
+>>>>>>> origin/development
 
   installer-compile:
     name: installer-compile
