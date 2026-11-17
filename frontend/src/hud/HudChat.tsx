@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react"
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { api, ensureDesktopSession, type Task } from "../api"
 import { OwnerChatTranscript } from "../chat/OwnerChatTranscript"
@@ -17,6 +17,8 @@ import { MediaComposerBar } from "../components/MediaComposerBar"
 import { TaskActivityPanel } from "../components/TaskActivity"
 import { TaskStatusMeta } from "../components/TaskStatusMeta"
 import { useMediaUploads } from "../chat/useMediaUploads"
+import { chatRootClassName, useChatBackground, useChatCompact } from "../chat/chatAppearance"
+import { ChatAppearanceToggles } from "../chat/ChatAppearanceToggles"
 
 type HudChatProps = {
   onMoodChange?: (opts: { recording: boolean; speaking: boolean; task: Task | null; backendUnavailable: boolean }) => void
@@ -30,6 +32,25 @@ function isConnectionFailure(error: unknown): boolean {
   if (error instanceof TypeError) return true
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
   return message.includes("failed to fetch") || message.includes("network") || message.includes("aborted")
+}
+
+/**
+ * The HUD chat root and its tools row: the root class follows Compact chat (chatRootClassName), the
+ * data attributes carry Compact chat and Chat background, and the tools row holds the appearance
+ * toggles. HudChat renders its whole body inside this frame.
+ */
+export function HudChatFrame({ children }: { children?: ReactNode }) {
+  const [chatBackground] = useChatBackground()
+  const [chatCompact] = useChatCompact()
+  return (
+    <div className={chatRootClassName(chatCompact)} data-chat-background={chatBackground ? "on" : "off"}
+      data-chat-compact={chatCompact ? "on" : "off"}>
+      <div className="hud-chat-tools">
+        <ChatAppearanceToggles />
+      </div>
+      {children}
+    </div>
+  )
 }
 
 export function HudChat({ onMoodChange }: HudChatProps) {
@@ -231,7 +252,7 @@ export function HudChat({ onMoodChange }: HudChatProps) {
   const showThread = !!id
 
   return (
-    <div className="hud-chat">
+    <HudChatFrame>
       {showSetupProblem && (
         <div className="hud-auth-card" role="status">
           <strong>Setup problem</strong>
@@ -344,6 +365,6 @@ export function HudChat({ onMoodChange }: HudChatProps) {
           </button>
         </div>
       </div>
-    </div>
+    </HudChatFrame>
   )
 }

@@ -13,6 +13,7 @@ import {
 import { PortalNav } from "../components/PortalNav"
 import { HudHealthRail } from "./HudHealthRail"
 import { HudLocalStatus } from "./HudLocalStatus"
+import { HudModelRelease } from "./HudModelRelease"
 import { HudModelSelector } from "./HudModelSelector"
 import { RunningModels } from "./RunningModels"
 import { HudOpsRail } from "./HudOpsRail"
@@ -171,6 +172,7 @@ export function HudTopChrome({
         >
           Classic
         </button>
+        <HudModelRelease />
         <HudModelSelector model={model} onOpenChange={onModelMenuOpenChange} />
       </div>
 

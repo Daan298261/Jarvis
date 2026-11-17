@@ -31,6 +31,7 @@ from .context_window import (
     n_keep_overflow_message,
     parse_n_keep_overflow,
 )
+from .loaded_models import LLAMA_SERVER, LMSTUDIO, LOADED, OLLAMA, WORKER
 from .inference_prompt import sanitize_messages_for_inference
 from .profiles import (
     PROFILES,
@@ -48,6 +49,7 @@ from .prompt_budget import (
     is_context_overflow,
     prepare_inference,
     recover_context_after_overflow,
+    server_context_limit,
 )
 from .request_lease import RequestLease
 from .stream_deadlines import compute_chat_call_deadline_ms, compute_chat_stream_deadlines
@@ -104,6 +106,21 @@ class InferenceState:
     health_path: str = ""
     remote_model: str = ""
     gguf_path: str = ""
+    # Set by the HUD Unload model button; only a user turn or an explicit Load lifts it.
+    manually_unloaded: bool = False
+
+
+def IDLE_UNLOAD_explicit_pending() -> bool:
+    from .idle_unload import IDLE_UNLOAD
+
+    return IDLE_UNLOAD.consume_explicit_load()
+
+
+class ModelManuallyUnloaded(RuntimeError):
+    """A background path tried to load a model after the owner pressed Unload model."""
+
+    def __init__(self) -> None:
+        super().__init__("Model was manually unloaded. Use Load to start a model again.")
 
 
 def _with_context(profile: ModelProfile, context_size: int) -> ModelProfile:
@@ -259,6 +276,7 @@ class InferenceManager:
         self.backend: InferenceBackend | None = None
         self._lock = asyncio.Lock()
         self._request_lease = RequestLease()
+        self._attach_ok = False  # set only inside load() for an explicit owner Load
         self.provider: OpenAICompatProvider | None = None
         self._loaded_profile: ModelProfile | None = None
 
@@ -413,18 +431,23 @@ class InferenceManager:
         if not self.provider:
             raise RuntimeError("Inference model is not loaded")
         async with self._request_lease.shared():
-            return await self._chat_holding_lease(
-                messages,
-                tools=tools,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                max_tokens=max_tokens,
-                thinking=thinking,
-                extra=extra,
-                settings=settings,
-                working_state_block=working_state_block,
-            )
+            self._mark_used()  # this model was just used: reset ITS idle clock only
+            try:
+                return await self._chat_holding_lease(
+                    messages,
+                    tools=tools,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    max_tokens=max_tokens,
+                    thinking=thinking,
+                    extra=extra,
+                    settings=settings,
+                    working_state_block=working_state_block,
+                )
+            finally:
+                self._mark_used()
+                await self._keep_alive_touch()
 
     async def _chat_holding_lease(
         self,
@@ -512,9 +535,13 @@ class InferenceManager:
                     max_tokens=max_tokens,
                     thinking=thinking,
                     extra=extra_payload,
-                    **self._chat_call_budget(app_settings, prepared),
+                    **self._chat_call_budget(app_settings, prepared, max_tokens),
                 )
             except APIStatusError as exc:
+                reported_limit = server_context_limit(exc)
+                if reported_limit:
+                    self.adopt_server_n_ctx(reported_limit)
+                    typed = self.prepare_chat_messages(typed, max_tokens=max_tokens)
                 if is_n_keep_overflow(getattr(exc, "body", None)) or is_n_keep_overflow(exc):
                     if not self._adopt_n_keep_overflow(exc):
                         raise
@@ -543,7 +570,7 @@ class InferenceManager:
                         max_tokens=max_tokens,
                         thinking=thinking,
                         extra=extra_payload,
-                        **self._chat_call_budget(app_settings, prepared),
+                        **self._chat_call_budget(app_settings, prepared, max_tokens),
                     )
                 if is_context_overflow(exc) and overflow_retries < 1:
                     overflow_retries += 1
@@ -560,7 +587,7 @@ class InferenceManager:
                         continue
                 raise
 
-    def _chat_call_budget(self, settings: AppSettings, messages: list[ChatMessage]) -> dict[str, Any]:
+    def _chat_call_budget(self, settings: AppSettings, messages: list[ChatMessage], max_tokens: int | None = None) -> dict[str, Any]:
         """Deadline for one non-streaming completion, scaled like the stream budgets."""
         prompt_tokens = estimate_prompt_tokens(messages)
         return {
@@ -568,6 +595,8 @@ class InferenceManager:
                 settings.inference,
                 prompt_tokens=prompt_tokens,
                 prompt_tps=self.state.prompt_tps,
+                max_tokens=max_tokens if max_tokens is not None else 1024,
+                generation_tps=self.state.generation_tps,
             ),
             "stream_lane": "worker",
             "prompt_token_estimate": prompt_tokens,
@@ -604,18 +633,23 @@ class InferenceManager:
         if not self.provider:
             raise RuntimeError("Inference model is not loaded")
         async with self._request_lease.shared():
-            async for delta in self._chat_stream_holding_lease(
-                messages,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                max_tokens=max_tokens,
-                thinking=thinking,
-                extra=extra,
-                settings=settings,
-                working_state_block=working_state_block,
-            ):
-                yield delta
+            self._mark_used()  # this model was just used: reset ITS idle clock only
+            try:
+                async for delta in self._chat_stream_holding_lease(
+                    messages,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    max_tokens=max_tokens,
+                    thinking=thinking,
+                    extra=extra,
+                    settings=settings,
+                    working_state_block=working_state_block,
+                ):
+                    yield delta
+            finally:
+                self._mark_used()
+                await self._keep_alive_touch()
 
     async def _chat_stream_holding_lease(
         self,
@@ -666,6 +700,10 @@ class InferenceManager:
                     yield delta
                 return
             except APIStatusError as exc:
+                reported_limit = server_context_limit(exc)
+                if reported_limit:
+                    self.adopt_server_n_ctx(reported_limit)
+                    typed = self.prepare_chat_messages(typed, max_tokens=max_tokens)
                 if is_n_keep_overflow(getattr(exc, "body", None)) or is_n_keep_overflow(exc):
                     if not self._adopt_n_keep_overflow(exc):
                         raise
@@ -715,40 +753,91 @@ class InferenceManager:
         gguf_path: str | None = None,
     ) -> InferenceState:
         require_model(settings)
+        self._guard_background_load()
         if profile_name is None:
             profile_name = settings.inference.profile
             if gguf_path is None:
                 gguf_path = settings.inference.gguf_path or None
         async with self._lock:
-            profile = await asyncio.to_thread(self._active_profile,
-                settings,
-                profile_name,
-                gguf_path=gguf_path,
-                context_size=context_size,
-            )
-            backend = resolve_backend(settings)
-            model = profile_gguf(profile)
-            same = (
-                not force
-                and self.backend
-                and self.state.loaded
-                and self.state.profile == profile.name
-                and self.state.model_path == (str(model) if backend.requires_local_files else "")
-                and self.backend.name == backend.name
-                and self._same_endpoint(settings)
-                and int((self.state.context_size if backend.manages_process else self.state.requested_context_size) or 0) >= int(profile.context_size or 0)
-                and (not vision or self.state.vision_loaded)
-            )
-            if same:
-                return self.state
-            return await self._load_locked(
-                settings,
-                profile.name,
-                context_size=context_size or profile.context_size,
-                vision=vision,
-                force=force,
-                gguf_path=gguf_path if gguf_path is not None else (profile.absolute_path or None),
-            )
+            # An explicit owner Load is consumed by the very next load call, whether or not it reaches the attach.
+            self._attach_ok = IDLE_UNLOAD_explicit_pending()
+            try:
+                profile = await asyncio.to_thread(self._active_profile,
+                    settings,
+                    profile_name,
+                    gguf_path=gguf_path,
+                    context_size=context_size,
+                )
+                backend = resolve_backend(settings)
+                model = profile_gguf(profile)
+                same = (
+                    not force
+                    and self.backend
+                    and self.state.loaded
+                    and self.state.profile == profile.name
+                    and self.state.model_path == (str(model) if backend.requires_local_files else "")
+                    and self.backend.name == backend.name
+                    and self._same_endpoint(settings)
+                    and int((self.state.context_size if backend.manages_process else self.state.requested_context_size) or 0) >= int(profile.context_size or 0)
+                    and (not vision or self.state.vision_loaded)
+                )
+                if same:
+                    return self.state
+                return await self._load_locked(
+                    settings,
+                    profile.name,
+                    context_size=context_size or profile.context_size,
+                    vision=vision,
+                    force=force,
+                    gguf_path=gguf_path if gguf_path is not None else (profile.absolute_path or None),
+                )
+            finally:
+                self._attach_ok = False
+
+    def _guard_background_load(self) -> None:
+        """After the owner pressed Unload model nothing reloads in the background.
+
+        A user turn or an explicit Load lifts ``manually_unloaded`` first
+        (``IdleUnload.touch`` / ``explicit_load``), so only background callers stop here.
+        """
+        if self.state.manually_unloaded:
+            raise ModelManuallyUnloaded()
+
+    async def _keep_alive_touch(self) -> None:
+        """After a turn: an Ollama model served over ``/v1`` gets a native keep-alive touch (never loads)."""
+        provider = self.provider
+        if provider is None or self.state.backend != "ollama":
+            return
+        from .keep_alive import touch_ollama_if_resident
+
+        await touch_ollama_if_resident(str(getattr(provider, "base_url", "")), str(getattr(provider, "model", "")),
+                                       str(getattr(provider, "api_key", "") or ""))
+
+    def _mark_used(self) -> None:
+        """A turn used this model: reset *its* idle clock. Never records a model (no ledger entry is created here)."""
+        if self.state.manages_process:
+            if self.state.loaded:
+                LOADED.touch(LLAMA_SERVER, WORKER)
+        elif self.state.backend in {OLLAMA, LMSTUDIO} and self.state.loaded:
+            model = self.state.remote_model or str(getattr(self.provider, "model", "") or "")
+            if model:
+                LOADED.touch(self.state.backend, model)
+
+    def _register_loaded(self, *, attach: bool = False) -> None:
+        """Record a model ANZU started.
+
+        A managed llama-server worker is always ANZU's own start. An Ollama / LM Studio model the owner
+        started and ANZU merely attached to is **not** ANZU-loaded (RFC-0225 / RFC-0228 managed-mode rule):
+        it is recorded only when ``attach`` says an explicit owner Load asked for it (its own warm / load
+        request records it as well), never from a chat, a poll or a background attach.
+        """
+        if self.state.manages_process:
+            if self.state.loaded:
+                LOADED.record(LLAMA_SERVER, WORKER)
+        elif attach and self.state.backend in {OLLAMA, LMSTUDIO} and self.state.loaded:
+            model = self.state.remote_model or str(getattr(self.provider, "model", "") or "")
+            if model:
+                LOADED.record(self.state.backend, model)
 
     def _same_endpoint(self, settings: AppSettings) -> bool:
         return bool(
@@ -769,6 +858,7 @@ class InferenceManager:
     ) -> InferenceState:
         """Reload only when context must grow or vision must be attached."""
         require_model(settings)
+        self._guard_background_load()
         async with self._lock:
             if not self.state.loaded or not self.provider:
                 return await self._load_locked(
@@ -796,6 +886,7 @@ class InferenceManager:
         """Attach mmproj for an in-flight vision request. Does not keep it at idle."""
         if self.state.vision_loaded:
             return self.state
+        self._guard_background_load()
         manages = bool(self.backend and getattr(self.backend, "manages_process", False))
         if not manages:
             profile = self._active_profile(settings)
@@ -851,6 +942,7 @@ class InferenceManager:
         force: bool = False,
         gguf_path: str | None = None,
     ) -> InferenceState:
+        self._guard_background_load()
         try:
             return await self._load_impl(
                 settings, profile_name, context_size=context_size, vision=vision,
@@ -876,6 +968,7 @@ class InferenceManager:
         gguf_path: str | None = None,
     ) -> InferenceState:
         require_model(settings)
+        self._guard_background_load()
         profile = await asyncio.to_thread(self._active_profile,
             settings,
             profile_name,
@@ -934,6 +1027,7 @@ class InferenceManager:
             self.state.loaded = True
             self.state.loading = False
             self.state.pid = backend.pid
+            self._register_loaded(attach=self._attach_ok)
             await self.refresh_resources()
             self._invalidate_status_cache()
             return self.state
@@ -987,6 +1081,7 @@ class InferenceManager:
         self.state.loading = False
         self.state.load_time_seconds = round(time.time() - started, 2)
         self.provider = self._make_provider(settings, advertised)
+        self._register_loaded(attach=self._attach_ok)
         await self.refresh_resources()
         self._invalidate_status_cache()
         return self.state
@@ -1025,7 +1120,8 @@ class InferenceManager:
         self.state.advertised_models = list(probe.get("models") or [])
         self.state.health_path = str(probe.get("health_path") or "")
         self.state.remote_model = self.provider_model(settings, self.state.advertised_models)
-        live = int(probe.get("n_ctx") or probe.get("context_size") or 0)
+        loaded_contexts = probe.get("loaded_model_contexts") or {}
+        live = int(loaded_contexts.get(self.state.remote_model) or probe.get("n_ctx") or probe.get("context_size") or 0)
         if live > 0:
             self.adopt_server_n_ctx(live)
 
@@ -1183,6 +1279,7 @@ class InferenceManager:
         return {
             "loaded": self.state.loaded,
             "loading": self.state.loading,
+            "manually_unloaded": self.state.manually_unloaded,
             "last_error": self.state.last_error,
             "profile": self.state.profile or profile.name,
             "pid": self.state.pid,
@@ -1228,6 +1325,7 @@ class InferenceManager:
         return {
             "loaded": self.state.loaded,
             "loading": self.state.loading,
+            "manually_unloaded": self.state.manually_unloaded,
             "healthy": bool(healthy),
             "active_model": (
                 (self.provider.model if self.provider else self.provider_model(settings, self.state.advertised_models))
@@ -1315,9 +1413,13 @@ class InferenceManager:
     async def record_timings(self, timings: dict[str, Any]) -> None:
         if not timings:
             return
-        predicted = timings.get("predicted_per_second") or timings.get("predicted_n")
+        predicted = timings.get("predicted_per_second")
+        if not predicted:
+            count, elapsed_ms = timings.get("predicted_n"), timings.get("predicted_ms")
+            if isinstance(count, (int, float)) and isinstance(elapsed_ms, (int, float)) and elapsed_ms > 0:
+                predicted = count * 1000.0 / elapsed_ms
         prompt = timings.get("prompt_per_second")
-        if isinstance(predicted, (int, float)):
+        if isinstance(predicted, (int, float)) and predicted > 0:
             self.state.generation_tps = round(float(predicted), 2)
         if isinstance(prompt, (int, float)):
             self.state.prompt_tps = round(float(prompt), 2)

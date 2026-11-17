@@ -82,6 +82,10 @@ class InferenceSettings(BaseModel):
     cache_type_v: str = "q8_0"
     threads: int = 0
     auto_load: bool = True
+    # Keep warm defaults OFF: every ANZU-loaded model unloads after idle_unload_seconds
+    # without use (inference/idle_unload.py). ON keeps today's always-warm behaviour.
+    keep_warm: bool = False
+    idle_unload_seconds: int = Field(default=300, ge=30, le=86400)
     vision: bool = False
     vision_mode: str = "lazy"
     remote_model: str = ""
@@ -94,6 +98,8 @@ class InferenceSettings(BaseModel):
     prompt_tps_fallback: float = Field(default=80.0, gt=0, le=20000)
     stream_first_token_min_ms: int = Field(default=3000, ge=0, le=300000)
     stream_first_token_max_ms: int = Field(default=180000, ge=1000, le=600000)
+    generation_tps_fallback: float = Field(default=10.0, gt=0, le=20000)
+    chat_call_max_ms: int = Field(default=300000, ge=1000, le=600000)
 
 
 class FrontResponderSettings(BaseModel):
@@ -1078,7 +1084,7 @@ def is_ephemeral_workspace_path(path: str) -> bool:
 def sanitize_allowed_directories(existing: list[str] | None) -> list[str]:
     cleaned: list[str] = []
     seen: set[str] = set()
-    testing = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+    testing = bool(os.environ.get("PYTEST_CURRENT_TEST")) or bool(os.environ.get("ANZU_DEVELOPMENT_MISSION"))
     for raw in existing or []:
         text = str(raw or "").strip()
         if not text:

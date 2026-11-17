@@ -74,7 +74,7 @@ def _restricted() -> frozenset[str]:
 _SEARCH_TERMS: dict[str, tuple[str, ...]] = {
     "mobile_apps": ("phone app", "android app", "on my phone", "phone screen", "mobile_apps"),
     "mobile_call": ("paired phone", "phone app", "on my phone"),
-    "reverse_engineer": ("reverse engineer", "reverse-engineer", "reverse engineering", "decompile", "disassemble"),
+    "reverse_engineer": ("reverse engineer", "reverse-engineer", "reverse engineering", "decompile", "disassemble", "rea", "morluto"),
     "office": ("excel", "spreadsheet", "powerpoint", "docx", "xlsx"),
     "browser": ("browse", "website", "webpage", "playwright"),
     "web_fetch": ("http", "https"),
@@ -94,7 +94,6 @@ _SEARCH_TERMS: dict[str, tuple[str, ...]] = {
     "ufo": ("ufo2",),
     "cua": ("computer use",),
     "hexstrike_operator": ("hexstrike", "daybreak"),
-    "rea_investigate": ("rea", "reverse engineer", "reverse-engineer", "morluto"),
     "mcp_call": ("mcp", "gmail", "email", "whatsapp", "imap", "smtp", "wappmcp", "rea-agents"),
     "vault_memory": (
         "obsidian",
@@ -125,6 +124,14 @@ def score_tool(prompt: str, name: str, description: str, extra_terms: Iterable[s
     tokens = _tokens(text)
     score = 0
     name_phrase = name.replace("_", " ")
+    if name.startswith("mcp_") and name != "mcp_call":
+        # Connected function keys include the server prefix. Match the requested
+        # function suffix too, so get_current_time survives the small-model cap.
+        words = name_phrase.split()[2:]
+        phrases = (" ".join(words[index:]) for index in range(max(0, len(words) - 1)))
+        normalized_prompt = text.replace("_", " ")
+        if any(phrase in normalized_prompt for phrase in phrases):
+            score += 16
     if name in tokens or (name_phrase != name and name_phrase in text):
         score += 8
     for term in extra_terms:

@@ -18,6 +18,7 @@ import {
   MYTHIC_LIVE_B_AVATAR_ID,
 } from "../presence/mythicPersonaVariant"
 import { PullLampThemeToggle } from "../vendor/shipnotes/PullLampThemeToggle"
+import { ChatAppearanceSettingsSection } from "../chat/ChatAppearanceToggles"
 
 type AppearanceSettingsPaneProps = {
   settings: PresentationSettings
@@ -257,6 +258,7 @@ export function AppearanceSettingsPane({ settings, showPersona = true }: Appeara
       </label>
 
       </CollapsibleSection>
+      <ChatAppearanceSettingsSection />
       <PullLampThemeToggle />
 
       {message && <p className="jarvis-presence-controls-message" role="status">{message}</p>}

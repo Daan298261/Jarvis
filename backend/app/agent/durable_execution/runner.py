@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import logging
 import os
 import uuid
 from collections.abc import Awaitable, Callable
@@ -20,11 +22,14 @@ from .replay import (
 )
 from .repository import (
     AmbiguousEffectError,
-    StepBlocked,
+    InputsChanged,
+    StepSuperseded,
     assert_run_recoverable,
     claim_attempt,
     commit_step_result,
     finish_attempt,
+    get_step_by_key,
+    heartbeat_attempt,
     mark_ambiguous_effect,
     mark_step_running,
     park_step,
@@ -34,6 +39,8 @@ from .repository import (
 from .types import AttemptStatus, CrashBoundary, EffectClass, OperationType, ReplayPolicy, StepStatus
 
 T = TypeVar("T")
+
+log = logging.getLogger("jarvis.durable.runner")
 
 _worker_id = f"jarvis-worker-{os.getpid()}"
 
@@ -65,6 +72,33 @@ async def _emit_step_event(
     )
 
 
+# Why a restarted task stopped when it finds an answer it already saved for an earlier version of its
+# context. The loop adds the action for the surface the owner reads it on (model_inputs_changed_reason).
+MODEL_INPUTS_CHANGED = (
+    "This task was interrupted, and its conversation changed before it restarted, so it can't safely resume "
+    "from the answer it saved earlier."
+)
+
+# How often a running step renews its lease (DEFAULT_LEASE_SECONDS = 45), so a model call that runs for
+# minutes (chat_call_max_ms) keeps the step and a second runner cannot take it over mid-call. Each renewal
+# waits at most HEARTBEAT_BUSY_TIMEOUT_MS for another writer's lock: two failed renewals in a row
+# (2 x (15 s + 5 s) = 40 s) still end inside the lease.
+HEARTBEAT_INTERVAL_S = 15.0
+HEARTBEAT_BUSY_TIMEOUT_MS = 5000
+
+
+async def _keep_lease(attempt_id: int) -> None:
+    """Renew until the attempt loses the step. A failed renewal (lock wait ran out, disk error) is logged
+    and retried on the next tick; it never ends the heartbeat or reaches the step's result."""
+    while True:
+        await asyncio.sleep(HEARTBEAT_INTERVAL_S)
+        try:
+            if not await heartbeat_attempt(attempt_id, busy_timeout_ms=HEARTBEAT_BUSY_TIMEOUT_MS):
+                return
+        except Exception:
+            log.warning("lease heartbeat for attempt %s failed; retrying next interval", attempt_id, exc_info=True)
+
+
 async def run_durable_step(
     *,
     run_id: str,
@@ -86,6 +120,14 @@ async def run_durable_step(
     idempotency_key = stable_idempotency_key(run_id, step_key, operation_type.value, {"hash": input_hash})
 
     await assert_run_recoverable(run_id)
+
+    model_call = operation_type == OperationType.MODEL_CALL
+    if model_call:
+        existing = await get_step_by_key(run_id, step_key)
+        if existing is not None and existing.input_hash != input_hash and existing.status == StepStatus.COMPLETED.value:
+            # A committed answer for other inputs must never be reused for these ones (RFC-0243). A step
+            # that never committed is re-pointed at the new inputs under its lease (claim_attempt) and re-run.
+            raise InputsChanged(MODEL_INPUTS_CHANGED)
 
     reused = await reuse_if_completed(run_id, step_key)
     if reused is not None:
@@ -122,12 +164,21 @@ async def run_durable_step(
     if step.status == StepStatus.AMBIGUOUS_EFFECT.value:
         raise AmbiguousEffectError(step_key)
 
-    attempt = await claim_attempt(step.id, worker)
+    try:
+        attempt = await claim_attempt(
+            step.id,
+            worker,
+            input_hash=input_hash if model_call else None,
+            idempotency_key=idempotency_key if model_call else None,
+        )
+    except InputsChanged as exc:
+        raise InputsChanged(MODEL_INPUTS_CHANGED) from exc
     await mark_step_running(step.id)
     check_crash_boundary(step_key, CrashBoundary.BEFORE_EXECUTE)
 
     executed_value: T | None = None
     crash_before_commit = False
+    lease = asyncio.create_task(_keep_lease(attempt.id))
     try:
         executed_value = await operation()
         check_crash_boundary(step_key, CrashBoundary.AFTER_EXECUTE_BEFORE_COMMIT)
@@ -149,6 +200,13 @@ async def run_durable_step(
     except Exception:
         await finish_attempt(attempt.id, AttemptStatus.ABANDONED)
         raise
+    finally:
+        lease.cancel()
+        # Wait for the heartbeat to stop without taking on its outcome: nothing it does may replace the
+        # operation's result or exception (the commit's attempt check decides who owns the step).
+        await asyncio.wait([lease])
+        if not lease.cancelled() and lease.exception() is not None:
+            log.warning("lease heartbeat for attempt %s ended with an error", attempt.id, exc_info=lease.exception())
 
     tokens, ms, usd = (0, 0.0, 0.0)
     if cost_extractor and executed_value is not None:
@@ -159,14 +217,20 @@ async def run_durable_step(
     encoded["cost_ms"] = ms
     encoded["cost_usd"] = usd
 
-    committed = await commit_step_result(
-        step.id,
-        result=encoded,
-        cost_tokens=tokens,
-        cost_ms=ms,
-        cost_usd=usd,
-        success=True,
-    )
+    try:
+        committed = await commit_step_result(
+            step.id,
+            result=encoded,
+            cost_tokens=tokens,
+            cost_ms=ms,
+            cost_usd=usd,
+            success=True,
+            expected_input_hash=input_hash if model_call else None,
+            attempt_id=attempt.id if model_call else None,
+        )
+    except StepSuperseded:
+        await finish_attempt(attempt.id, AttemptStatus.SUPERSEDED)
+        raise
     check_crash_boundary(step_key, CrashBoundary.AFTER_COMMIT)
     await finish_attempt(attempt.id, AttemptStatus.COMPLETED)
 

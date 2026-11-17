@@ -362,6 +362,15 @@ def _rel_markdown_path(root: Path, path: Path) -> str | None:
     return rel.as_posix()
 
 
+def inside_vault(root: Path, path: Path) -> bool:
+    """True when ``path`` (symlinks followed) stays under the vault root."""
+    try:
+        path.resolve().relative_to(root.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 def _iter_markdown_files(root: Path) -> list[Path]:
     files: list[Path] = []
     for child in root.rglob("*"):
@@ -372,7 +381,7 @@ def _iter_markdown_files(root: Path) -> list[Path]:
 
 def parse_note_file(root: Path, path: Path) -> NoteIndexEntry | None:
     rel = _rel_markdown_path(root, path)
-    if rel is None:
+    if rel is None or not inside_vault(root, path):
         return None
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -400,7 +409,7 @@ def index_file(rel_path: str) -> NoteIndexEntry | None:
     if root is None:
         return None
     path = (root / rel_path).resolve()
-    if not path.is_file():
+    if not path.is_file() or not inside_vault(root, path):
         with _lock:
             notes = _load_index()
             notes.pop(rel_path.replace("\\", "/"), None)
@@ -702,6 +711,8 @@ def read_note(rel_path: str) -> dict[str, Any]:
     if root is None:
         raise ValueError("Vault is not bound")
     path = (root / rel_path).resolve()
+    if not inside_vault(root, path):
+        raise ValueError(f"{rel_path} is outside the vault")
     if not path.is_file():
         raise FileNotFoundError(rel_path)
     text = path.read_text(encoding="utf-8", errors="replace")

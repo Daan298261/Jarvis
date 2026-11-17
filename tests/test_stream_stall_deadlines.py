@@ -465,6 +465,8 @@ async def test_manager_chat_passes_scaled_call_deadline():
         AppSettings().inference,
         prompt_tokens=int(captured["prompt_token_estimate"]),
         prompt_tps=50.0,
+        max_tokens=64,
+        generation_tps=mgr.state.generation_tps,
     )
     assert captured["call_deadline_ms"] == expected
     assert captured["stream_lane"] == "worker"
@@ -474,4 +476,4 @@ async def test_manager_chat_passes_scaled_call_deadline():
         prompt_tokens=int(captured["prompt_token_estimate"]),
         prompt_tps=50.0,
     )
-    assert expected == first_ms + idle_ms
+    assert expected > first_ms + idle_ms

@@ -10,6 +10,10 @@ from urllib.parse import quote
 
 import httpx
 
+from .idle_unload import UNLOADED_DETAIL, warm_blocked
+from .keep_alive import DeniedModelError, lmstudio_ttl_seconds, ollama_request
+from .loaded_models import LMSTUDIO, LOADED, OLLAMA
+
 _log = logging.getLogger(__name__)
 
 LMS_GPU_FLAG = "max"
@@ -61,7 +65,11 @@ def lmstudio_cli_load_args(model: str) -> list[str] | None:
     binary = shutil.which("lms")
     if not binary or not (model or "").strip():
         return None
-    return [binary, "load", model.strip(), "--gpu", LMS_GPU_FLAG, "-y"]
+    args = [binary, "load", model.strip(), "--gpu", LMS_GPU_FLAG, "-y"]
+    ttl = lmstudio_ttl_seconds(model=model)
+    if ttl is not None:
+        args.extend(["--ttl", str(ttl)])
+    return args
 
 
 async def ensure_lmstudio_gpu(*, host: str, port: int, model: str, timeout: float = 120.0) -> dict[str, Any]:
@@ -69,17 +77,21 @@ async def ensure_lmstudio_gpu(*, host: str, port: int, model: str, timeout: floa
     hint = (model or "").strip()
     if not hint:
         return {"ok": False, "method": "skipped", "detail": "no model id"}
+    if warm_blocked():
+        return {"ok": False, "method": "unloaded", "detail": UNLOADED_DETAIL}
     args = lmstudio_cli_load_args(hint)
     if args:
         try:
             completed = await _run_cli(args, timeout=timeout)
             if completed.returncode == 0:
+                LOADED.record(LMSTUDIO, hint)
                 return {"ok": True, "method": "lms-cli", "detail": (completed.stdout or "")[:400]}
             _log.warning("lms load --gpu max failed: %s", (completed.stderr or completed.stdout or "")[:400])
         except Exception as exc:
             _log.warning("lms CLI GPU load failed: %s", exc)
     rest = await _lmstudio_rest_load(host, port, hint, timeout=min(timeout, 30.0))
     if rest.get("ok"):
+        LOADED.record(LMSTUDIO, hint)
         return rest
     return {
         "ok": False,
@@ -107,11 +119,17 @@ async def _lmstudio_rest_load(host: str, port: int, model: str, timeout: float) 
         {"model_key": model, "config": {"offload_ratio": 1.0}},
     )
     paths = ("/api/v0/models/load", "/api/v1/models/load", f"/api/v0/models/{quote(model, safe='')}/load")
+    ttl = lmstudio_ttl_seconds(model=model)
     async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
         for path in paths:
             for body in payloads:
                 try:
-                    response = await client.post(root + path, json=body)
+                    response = await client.post(root + path, json={**body, "ttl": ttl} if ttl is not None else body)
+                    if ttl is not None and response.status_code in {400, 422}:
+                        # LM Studio's documented /api/v1/models/load body has no ``ttl`` (docs: lmstudio.ai/docs/
+                        # developer/rest/load); a build that rejects the key gets the load without it. ANZU's own
+                        # idle timer and verified unload still enforce the window; ``lms load --ttl`` is the primary.
+                        response = await client.post(root + path, json=body)
                 except Exception as exc:
                     return {"ok": False, "method": "rest", "detail": str(exc)[:240]}
                 if response.status_code < 400:
@@ -126,19 +144,17 @@ async def ensure_ollama_gpu(*, host: str, port: int, model: str, timeout: float 
     hint = (model or "").strip()
     if not hint or not nvidia_gpu_present():
         return {"ok": False, "method": "skipped", "detail": "no model or no NVIDIA GPU"}
-    url = f"http://{host}:{int(port)}/api/generate"
-    body = {
-        "model": hint,
-        "prompt": "",
-        "stream": False,
-        "keep_alive": "24h",
-        "options": ollama_gpu_options(),
-    }
+    if warm_blocked():
+        return {"ok": False, "method": "unloaded", "detail": UNLOADED_DETAIL}
+    body = {"prompt": "", "stream": False, "options": ollama_gpu_options()}
     try:
         async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-            response = await client.post(url, json=body)
+            response = await ollama_request(client, host, port, "/api/generate", hint, body)
         if response.status_code < 400:
+            LOADED.record(OLLAMA, hint)
             return {"ok": True, "method": "ollama-generate", "detail": hint}
         return {"ok": False, "method": "ollama-generate", "detail": f"HTTP {response.status_code}"}
+    except DeniedModelError as exc:
+        return {"ok": False, "method": "denied", "detail": str(exc)}
     except Exception as exc:
         return {"ok": False, "method": "ollama-generate", "detail": str(exc)[:240]}

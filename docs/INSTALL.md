@@ -260,6 +260,7 @@ On first boot Jarvis copies defaults from `config/default.json` into `data/setti
 | `inference.remote_model` | empty | Model id to send in `/v1/chat/completions`; blank uses the first advertised model |
 | `inference.profile` | `balanced` | Model Fast / Balanced / Quality |
 | `inference.auto_load` | `true` | Load GGUF on API startup |
+| `inference.keep_warm` | `false` | HUD **Keep warm** switch. Off: every ANZU-loaded model (Ollama `keep_alive=5m`, LM Studio `ttl` 300 s, llama-server, front responder) unloads after 5 idle minutes and reloads on the next turn. On: models stay loaded |
 | `autonomy` | `trusted` | Confirmation policy |
 | `execution_mode` | `balanced` | Agent loop depth / verification |
 | `mcp_servers` | `[]` | User-configured MCP servers |

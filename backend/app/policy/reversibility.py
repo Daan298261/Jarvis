@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
@@ -181,35 +182,16 @@ _WEB_FETCH_OBSERVE = frozenset({"", "get", "fetch", "head", "read", "retrieve"})
 _OFFICE_OBSERVE = frozenset({"read", "info", "list", "status", "stat"})
 _OFFICE_MUTATE = frozenset({"create", "append", "save", "save_as", "write", "edit", "delete"})
 _MOBILE_OBSERVE = frozenset({"", "devices", "list", "status", "read"})
-_MCP_OBSERVE_HINTS = (
-    "list",
-    "status",
-    "read",
-    "get",
-    "fetch",
-    "search",
-    "find",
-    "query",
-    "describe",
-    "schema",
-    "health",
-    "ping",
-)
-_MCP_MUTATE_HINTS = (
-    "send",
-    "write",
-    "create",
-    "delete",
-    "update",
-    "post",
-    "put",
-    "patch",
-    "execute",
-    "run",
-    "call",
-    "invoke",
-    "transfer",
-    "pay",
+# MCP tools count as reads only by an identity-pinned allowlist entry: the tool must come from a server the
+# backend registered (uuid id from api/mcp.add_mcp) that launches this exact image digest with `docker run`.
+# Never by words in the name, the name the owner typed, or the server's own readOnlyHint (an unverified
+# claim the server can change on any refresh). Everything else fails closed as an external state change
+# (ApprovalGrant, Laya veto); a destructiveHint gates even an allowlisted tool.
+MCP_READ_ONLY_TOOLS = frozenset(
+    {
+        # Docker MCP Time server pinned in docs/mcp-tool-path.md
+        ("mcp/time@sha256:9c46a918633fb474bf8035e3ee90ebac6bcf2b18ccb00679ac4c179cba0ebfcf", "get_current_time"),
+    }
 )
 
 _CREDENTIAL_HINTS = (
@@ -253,23 +235,11 @@ def _observation_meta(tool_name: str, action: str, target: str, summary: str) ->
     )
 
 
-def _mcp_tool_looks_observational(args: dict[str, Any], action: str) -> bool:
-    blob = " ".join(
-        str(args.get(key) or "")
-        for key in ("mcp_tool", "name", "tool", "action", "method")
-    ).lower()
-    if action:
-        blob = f"{blob} {action}".strip()
-    if any(hint in blob for hint in _MCP_MUTATE_HINTS):
-        # Explicit mutate tokens win over observe heuristics.
-        if any(hint in blob for hint in ("list_", "list-", "get_", "get-", "read_", "status")):
-            # e.g. list_messages is still observational despite "send" elsewhere
-            pass
-        else:
-            return False
-    if action in {"list", "status", "read", "get", "search", "describe", "health", "ping"}:
-        return True
-    return any(hint in blob for hint in _MCP_OBSERVE_HINTS)
+def _mcp_tool_is_read_only(name: str, args: dict[str, Any]) -> bool:
+    from ..tools.mcp_runtime import MCP
+
+    key = str(args.get("mcp_tool") or args.get("name") or "") if name == "mcp_call" else name
+    return bool(key) and MCP.is_read_only(key, MCP_READ_ONLY_TOOLS)
 
 
 def _target_from_args(arguments: dict[str, Any]) -> str:
@@ -279,6 +249,36 @@ def _target_from_args(arguments: dict[str, Any]) -> str:
             text = str(value).strip()
             return text[:500]
     return ""
+
+
+# Vault files that hold keys or secrets by name: always gated, whatever the action.
+_VAULT_CREDENTIAL_NAME = re.compile(
+    r"(?i)^(?:api[-_]?key.*|id_[a-z0-9_]+.*|.*\.pem|\.env.*|.*\.key|.*password.*|.*passwd.*)$"
+)
+
+
+def _vault_path_is_credential(rel_path: str) -> bool:
+    parts = [part for part in rel_path.replace("\\", "/").split("/") if part]
+    if any(part.lower() == "secrets" for part in parts[:-1]):
+        return True
+    return bool(parts) and bool(_VAULT_CREDENTIAL_NAME.match(parts[-1]))
+
+
+def _vault_path_is_ordinary_note(rel_path: str) -> bool:
+    """An ungated vault read covers only an ordinary Markdown note inside the bound vault: relative, no
+    `..`, not a credential file, and still inside the vault once symlinks are followed."""
+    from pathlib import PurePosixPath, PureWindowsPath
+
+    from ..memory.obsidian_vault import inside_vault, vault_root
+
+    text = rel_path.replace("\\", "/")
+    if not text or PurePosixPath(text).is_absolute() or PureWindowsPath(rel_path).is_absolute() or PureWindowsPath(rel_path).drive:
+        return False
+    parts = text.split("/")
+    if ".." in parts or not parts[-1].lower().endswith((".md", ".markdown")) or _vault_path_is_credential(text):
+        return False
+    root = vault_root()
+    return root is not None and inside_vault(root, root / text)
 
 
 def _args_suggest_credential(arguments: dict[str, Any]) -> bool:
@@ -313,13 +313,26 @@ def resolve_action_effect(
             target=approval_target(args),
             recovery_summary="Exact target/action approval required" if runtime else "Local analysis of a prepared snapshot",
         )
+    if name == "self_development":
+        from ..tools.self_development import APPROVAL_ACTIONS, approval_target, describe_change, pending_change
+        change = pending_change({**args, "action": act}) if act in APPROVAL_ACTIONS else None
+        # A scheduler change needs the owner's tap bound to the exact change; reads and incomplete
+        # calls need none (the tool refuses those itself and never acts without a grant).
+        return ActionEffectMeta(
+            tool_name=name, action=act,
+            reversibility=ReversibilityClass.UNKNOWN if change else ReversibilityClass.REVERSIBLE,
+            high_consequence=bool(change), side_effecting=bool(change),
+            target=approval_target(change) if change else "",
+            recovery_summary=describe_change(change) if change else "Self-development read or refused call",
+        )
     command = str(args.get("command") or "") if args else ""
     destructive = is_destructive_operation(name, args, command or None)
-    credential = _args_suggest_credential(args) or name in {"vault_memory"} and act in {
-        "reveal",
-        "export_secret",
-        "set_secret",
-    }
+    vault_rel = str(args.get("rel_path") or "").strip() if name == "vault_memory" else ""
+    credential = (
+        _args_suggest_credential(args)
+        or (name == "vault_memory" and act in {"reveal", "export_secret", "set_secret"})
+        or (bool(vault_rel) and _vault_path_is_credential(vault_rel))
+    )
     financial = _args_suggest_financial(args)
     external = name in _EXTERNAL_TOOLS or name.startswith("mcp_")
 
@@ -548,6 +561,21 @@ def resolve_action_effect(
             recovery_summary="financial effects require an ApprovalGrant",
         )
 
+    # Ordinary vault lookups skip approval; credential-bearing ones were gated just above.
+    if (
+        name == "vault_memory"
+        and act in {"search", "read", "resolve", "neighborhood", "follow"}
+        and (not vault_rel or _vault_path_is_ordinary_note(vault_rel))
+    ):
+        return ActionEffectMeta(
+            tool_name=name,
+            action=act,
+            reversibility=ReversibilityClass.REVERSIBLE,
+            side_effecting=False,
+            target=str(args.get("rel_path") or args.get("query") or ""),
+            recovery_summary="read-only vault lookup; no undo required",
+        )
+
     if name in {"settings", "config"} or (name == "chat_projects" and act in {"update", "write", "delete"}):
         if act in {"delete", "reset"}:
             return ActionEffectMeta(
@@ -641,7 +669,7 @@ def resolve_action_effect(
         )
 
     if name == "mcp_call" or name.startswith("mcp_"):
-        if _mcp_tool_looks_observational(args, act):
+        if _mcp_tool_is_read_only(name, args):
             return _observation_meta(
                 name,
                 act or str(args.get("mcp_tool") or "list"),
