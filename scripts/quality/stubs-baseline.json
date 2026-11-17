@@ -1,0 +1,12 @@
+{
+  "note": "legacy stub/bypass findings frozen at onboarding; shrink, never grow",
+  "fingerprints": [
+    "2f04b996a99678f9ec230b65",
+    "507f3d453a09b4c3e31e3a5f",
+    "a09d68343ff8838ec25e610c",
+    "a8fc8c82a62639405f0a0247",
+    "bbe8c23bfcd8275f21b53d33"
+  ],
+  "source_commit": "fa054a9efb6123e0416cc5cec558d095126dc478",
+  "source_repository": "Daan298261/Jarvis"
+}

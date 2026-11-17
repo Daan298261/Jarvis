@@ -195,7 +195,7 @@ def test_planner_hook_extracts_path():
     # Must not accept PEM paste as a path
     assert (
         lta_protected_folder_path(
-            "open this protected folder: -----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----"
+            "open this protected folder: -----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----" # es:allow-secret Synthetic credential marker for detector/redaction regression test; no live credential.
         )
         is None
     )
@@ -408,7 +408,7 @@ def test_openssl_cms_decrypt_passes_debug_decrypt(tmp_path, monkeypatch):
 
     monkeypatch.setattr(lta_archive.subprocess, "run", fake_run)
     monkeypatch.setattr(lta_archive.shutil, "which", lambda _name: "/usr/bin/openssl")
-    assert lta_archive._decrypt_openssl_cms(b"blob", b"-----BEGIN PRIVATE KEY-----") == "S3cret-pass"
+    assert lta_archive._decrypt_openssl_cms(b"blob", b"-----BEGIN PRIVATE KEY-----") == "S3cret-pass" # es:allow-secret Synthetic credential marker for detector/redaction regression test; no live credential.
     assert len(seen) == 1
     assert seen[0][1:3] == ["cms", "-decrypt"]
     assert "-debug_decrypt" in seen[0]
