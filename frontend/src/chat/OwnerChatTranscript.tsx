@@ -67,7 +67,7 @@ export function OwnerChatTranscript({
   const [thoughtOpen, setThoughtOpen] = useState(false)
   const [internalOpen, setInternalOpen] = useState(false)
   const running = isTaskRunning(status)
-  const livePreview = useLiveAssistantPreview(taskId, running)
+  const livePreview = useLiveAssistantPreview(taskId, running && !(pending?.length), prompt || "")
   const confirmation = useMemo(() => parseConfirmationPayload(confirmation_payload), [confirmation_payload])
   const workEvents = useMemo(() => filterWorkEvents(events), [events])
   const thoughtEvents = useMemo(() => filterThoughtEvents(events), [events])

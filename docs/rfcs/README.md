@@ -43,6 +43,8 @@ Copy [`TEMPLATE.md`](TEMPLATE.md) to `docs/rfcs/NNNN-short-slug.md` and fill it 
 
 ANZU Model Manager: [0247](0247-model-manager.md) extends RFC-0210 with bounded discovery, explicit lifecycle controls, VRAM review and an independent Manager panel (**accepted**).
 
+HUD chat readability and follow-up turns: [0243](0243-chat-readability-and-current-turn.md) bounded HUD chat column with a persistent Chat background toggle, prior runner drained before a follow-up, no previous-turn replay on reconnect, per-continuation durable model keys, and output-aware non-streaming deadlines (**accepted**; open PR #683).
+
 Living spec: [`JARVIS_1.4_SPECS.md`](../../JARVIS_1.4_SPECS.md). Implement tickets:
 
 PC first-response latency (P0): [0230](0230-pc-first-response-latency.md) — measured breakdown (box + VRPC, sources per number), per-turn latency trace + one-command PC repro (S0), first audible word ≤ 1.5 s target, STT/front/worker-load/TTS/reflex slices (**accepted**; first on shared files; reuses #648/#649).

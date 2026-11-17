@@ -68,8 +68,10 @@ def compute_chat_call_deadline_ms(
     *,
     prompt_tokens: int,
     prompt_tps: float | None,
+    max_tokens: int = 0,
+    generation_tps: float | None = None,
 ) -> float:
-    """Non-stream chat returns one body, so the budget is first-token plus idle.
+    """Non-stream chat needs prompt processing, output generation and idle margin.
 
     Scaled with the same prompt-size rules as streaming. Callers pass the
     result into ``ModelProvider.chat``; this function does not invent a
@@ -80,7 +82,15 @@ def compute_chat_call_deadline_ms(
         prompt_tokens=prompt_tokens,
         prompt_tps=prompt_tps,
     )
-    return first_ms + idle_ms
+    rate = float(generation_tps or 0.0)
+    if rate <= 0:
+        rate = settings.generation_tps_fallback
+    generation_ms = max(0, int(max_tokens or 0)) / rate * 1000.0
+    # The prompt-only budget (first token plus idle) is the floor: it already honours the owner's
+    # stream_first_token_max_ms. chat_call_max_ms bounds only the generation allowance added on top,
+    # so a large prompt or a raised first-token cap never gets less time than it had before.
+    prompt_only_ms = first_ms + idle_ms
+    return max(prompt_only_ms, min(float(settings.chat_call_max_ms), prompt_only_ms + generation_ms))
 
 
 def record_stream_stall(

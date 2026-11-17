@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 
 from ...db.models import ExecutionAttempt, ExecutionStep, Task, utcnow
@@ -43,6 +43,23 @@ class RunNotRecoverable(Exception):
 
 class StepBlocked(Exception):
     """Predecessor not committed or run is terminal."""
+
+
+class InputsChanged(StepBlocked):
+    """The step already committed an answer for other inputs; it must never be reused for these ones."""
+
+
+class StepSuperseded(StepBlocked):
+    """This attempt lost the step (its lease lapsed and another attempt took it); its result is discarded."""
+
+
+async def _lock_step(session, step_id: int, now: datetime) -> None:
+    """Open the transaction with a write on the step row, so SQLite grants this connection its write lock
+    before anything is read (BEGIN IMMEDIATE semantics). Every check after this, and the writes that
+    follow, run as one serialized transaction: a concurrent claim or commit waits for it to finish."""
+    locked = await session.execute(update(ExecutionStep).where(ExecutionStep.id == step_id).values(updated_at=now))
+    if locked.rowcount == 0:
+        raise ValueError(f"step {step_id} missing")
 
 
 class AmbiguousEffectError(Exception):
@@ -150,13 +167,24 @@ async def commit_step_result(
     cost_ms: float = 0.0,
     cost_usd: float = 0.0,
     success: bool = True,
+    expected_input_hash: str | None = None,
+    attempt_id: int | None = None,
 ) -> ExecutionStep:
+    """Commit the step's result. With ``expected_input_hash`` / ``attempt_id`` the commit only lands while
+    the step still carries those inputs and that attempt still holds it; the check and the write are one
+    locked transaction, so a claim for other inputs can never slip in between them."""
     now = utcnow()
     status = StepStatus.COMPLETED.value if success else StepStatus.FAILED.value
     async with SessionLocal() as session:
+        await _lock_step(session, step_id, now)
         step = await session.get(ExecutionStep, step_id)
-        if step is None:
-            raise ValueError(f"step {step_id} missing")
+        if expected_input_hash is not None and step.input_hash != expected_input_hash:
+            # Another attempt claimed the step for other inputs after this one's lease lapsed.
+            raise StepSuperseded(f"step {step.step_key} now belongs to other inputs; this result is discarded")
+        if attempt_id is not None:
+            attempt = await session.get(ExecutionAttempt, attempt_id)
+            if attempt is None or attempt.status != AttemptStatus.ACTIVE.value:
+                raise StepSuperseded(f"step {step.step_key} was taken over by another attempt; this result is discarded")
         step.status = status
         step.result_json = json.dumps(result, default=str)
         step.evidence_ref = evidence_ref
@@ -221,30 +249,46 @@ async def mark_step_running(step_id: int) -> None:
         await session.commit()
 
 
-async def claim_attempt(step_id: int, worker_id: str, lease_seconds: int = DEFAULT_LEASE_SECONDS) -> ExecutionAttempt:
+async def claim_attempt(
+    step_id: int,
+    worker_id: str,
+    lease_seconds: int | None = None,
+    *,
+    input_hash: str | None = None,
+    idempotency_key: str | None = None,
+) -> ExecutionAttempt:
+    """Claim the step's lease. With ``input_hash``, an uncommitted step is re-pointed at those inputs
+    in the same transaction, only once no other live attempt holds it (a committed step never is).
+    The whole claim is one locked transaction, so two concurrent claims can never both win."""
     now = utcnow()
-    lease_until = now + timedelta(seconds=lease_seconds)
+    lease_until = now + timedelta(seconds=DEFAULT_LEASE_SECONDS if lease_seconds is None else lease_seconds)
     async with SessionLocal() as session:
+        await _lock_step(session, step_id, now)
         step = await session.get(
             ExecutionStep,
             step_id,
             options=(selectinload(ExecutionStep.attempts),),
         )
-        if step is None:
-            raise ValueError(f"step {step_id} missing")
 
         for attempt in step.attempts:
             if attempt.status != AttemptStatus.ACTIVE.value:
                 continue
             expires = _utc(attempt.lease_expires_at)
             if expires and expires > now:
-                if attempt.worker_id == worker_id:
+                if attempt.worker_id == worker_id and (input_hash is None or step.input_hash == input_hash):
                     attempt.heartbeat_at = now
                     attempt.lease_expires_at = lease_until
                     await session.commit()
                     await session.refresh(attempt)
                     return attempt
-                raise StepBlocked("another worker holds an active lease")
+                raise StepBlocked("another attempt holds an active lease")
+
+        if input_hash is not None and step.input_hash != input_hash:
+            if step.status == StepStatus.COMPLETED.value:
+                raise InputsChanged(f"step {step.step_key} already committed for other inputs")
+            step.input_hash = input_hash
+            if idempotency_key is not None:
+                step.idempotency_key = idempotency_key
 
         for attempt in step.attempts:
             if attempt.status == AttemptStatus.ACTIVE.value:
@@ -265,15 +309,33 @@ async def claim_attempt(step_id: int, worker_id: str, lease_seconds: int = DEFAU
         return attempt
 
 
-async def heartbeat_attempt(attempt_id: int, lease_seconds: int = DEFAULT_LEASE_SECONDS) -> None:
+async def heartbeat_attempt(
+    attempt_id: int, lease_seconds: int | None = None, *, busy_timeout_ms: int | None = None
+) -> bool:
+    """Extend a still-active attempt's lease. Returns False once the attempt no longer holds the step.
+    ``busy_timeout_ms`` bounds this one write's wait for another connection's lock (the engine's default
+    is 30 s); the connection's own timeout is restored before it goes back to the pool."""
     now = utcnow()
+    lease_until = now + timedelta(seconds=DEFAULT_LEASE_SECONDS if lease_seconds is None else lease_seconds)
     async with SessionLocal() as session:
-        attempt = await session.get(ExecutionAttempt, attempt_id)
-        if attempt is None or attempt.status != AttemptStatus.ACTIVE.value:
-            return
-        attempt.heartbeat_at = now
-        attempt.lease_expires_at = now + timedelta(seconds=lease_seconds)
-        await session.commit()
+        conn = await session.connection()
+        restore = None
+        if busy_timeout_ms is not None:
+            restore = (await conn.exec_driver_sql("PRAGMA busy_timeout")).scalar()
+            await conn.exec_driver_sql(f"PRAGMA busy_timeout = {int(busy_timeout_ms)}")
+        try:
+            renewed = await session.execute(
+                update(ExecutionAttempt)
+                .where(ExecutionAttempt.id == attempt_id, ExecutionAttempt.status == AttemptStatus.ACTIVE.value)
+                .values(heartbeat_at=now, lease_expires_at=lease_until)
+            )
+            await session.commit()
+            return renewed.rowcount > 0
+        finally:
+            if restore is not None:
+                await session.rollback()
+                await (await session.connection()).exec_driver_sql(f"PRAGMA busy_timeout = {int(restore)}")
+                await session.commit()
 
 
 async def finish_attempt(attempt_id: int, status: AttemptStatus) -> None:

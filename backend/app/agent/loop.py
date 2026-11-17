@@ -13,6 +13,7 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from weakref import WeakValueDictionary
 
 log = logging.getLogger("jarvis.agent.loop")
 
@@ -22,7 +23,7 @@ from ..coding.usage import record_task_usage
 from ..config import AppSettings, load_settings
 from sqlalchemy import func, select, update
 
-from ..db.models import Checkpoint, Task, ToolCallRecord, utcnow
+from ..db.models import Checkpoint, Task, TaskEvent, ToolCallRecord, utcnow
 from ..db.session import SessionLocal
 from ..events import BUS
 from ..inference.backends import is_inference_template_error
@@ -38,8 +39,14 @@ from ..inference.prompt_budget import (
     recover_context_after_overflow,
 )
 from ..inference.vision import messages_need_vision, should_load_vision
-from .durable_execution.repository import get_task_status, last_committed_step_key
-from .durable_execution.runner import run_model_step, run_tool_step
+from .durable_execution.repository import (
+    InputsChanged,
+    RunNotRecoverable,
+    StepSuperseded,
+    get_task_status,
+    last_committed_step_key,
+)
+from .durable_execution.runner import MODEL_INPUTS_CHANGED, run_model_step, run_tool_step
 from ..providers.base import ChatMessage, ChatResult, parse_tool_arguments, tool_arguments_valid
 from ..providers.openai_compat import OpenAICompatProvider
 from ..providers.tool_call_compat import validate_turn_calls
@@ -426,6 +433,39 @@ def _permission_denied_observation(tool_name: str | None, arguments: dict[str, A
 _OWNER_TURN_CACHE_MAX = 64
 
 
+def _is_phone_submission(task_id: str) -> bool:
+    """Read-only check for the phone's submission record: never creates companion.db, runs no DDL and
+    takes no write lock (a phone-store writer holding it doesn't block this read)."""
+    import sqlite3
+
+    from ..mobile import store
+
+    path = store.data_dir() / "mobile" / "companion.db"
+    if not path.is_file():
+        return False
+    conn = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=2)
+    try:
+        return store.get(conn, "submission", task_id) is not None
+    finally:
+        conn.close()
+
+
+async def model_inputs_changed_reasons(task_id: str) -> tuple[str, str]:
+    """(error, result) for MODEL_INPUTS_CHANGED, each naming the action on the surface that shows it.
+    ``task.error`` is read only by the desktop (api/tasks: the HUD task card and chat), so it names the
+    desktop's New task. ``task.result`` is the reply text in the task's chat; for a phone submission
+    (mobile/service.submit journals one per task) that chat is the phone's, whose action is a new chat."""
+    desktop = f"{MODEL_INPUTS_CHANGED} Click New task and ask again."
+    try:
+        phone = await asyncio.to_thread(_is_phone_submission, task_id)
+    except Exception:
+        log.warning("task %s: phone-submission lookup failed; using the desktop wording", task_id, exc_info=True)
+        phone = False
+    if phone:
+        return desktop, f"{MODEL_INPUTS_CHANGED} Start a new chat and ask again."
+    return desktop, desktop
+
+
 class AgentRuntime:
     def __init__(self) -> None:
         self._tasks: dict[str, asyncio.Task] = {}
@@ -434,6 +474,34 @@ class AgentRuntime:
         self._cancel = set()
         self._front_tasks: dict[str, asyncio.Task] = {}
         self._owner_turns: OrderedDict[str, Any] = OrderedDict()
+        self._continuation_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
+        self._turn_jobs: dict[str, set[asyncio.Task]] = {}
+
+    def _spawn_turn_job(self, task_id: str, coroutine: Any) -> asyncio.Task:
+        job = asyncio.create_task(coroutine)
+        jobs = self._turn_jobs.setdefault(task_id, set())
+        jobs.add(job)
+
+        def finished(done: asyncio.Task) -> None:
+            jobs.discard(done)
+            if not jobs and self._turn_jobs.get(task_id) is jobs:
+                self._turn_jobs.pop(task_id, None)
+
+        job.add_done_callback(finished)
+        return job
+
+    async def _stop_previous_turn(self, task_id: str) -> None:
+        jobs = set(self._turn_jobs.pop(task_id, set()))
+        runner = self._tasks.get(task_id)
+        front = self._front_tasks.pop(task_id, None)
+        jobs.update(job for job in (runner, front) if job is not None)
+        for job in jobs:
+            if not job.done():
+                job.cancel()
+        if jobs:
+            await asyncio.gather(*jobs, return_exceptions=True)
+        clear_worker_progress_for_task(task_id)
+        clear_stream_speak_state(f"task:{task_id}")
 
     def _remember_owner_turn(self, task_id: str, turn: Any) -> None:
         self._owner_turns.pop(task_id, None)
@@ -462,6 +530,8 @@ class AgentRuntime:
         self._heartbeat_tasks[task_id] = heartbeat
 
         def finish(_finished: asyncio.Task) -> None:
+            if self._tasks.get(task_id) is not _finished:
+                return
             current = self._heartbeat_tasks.pop(task_id, None)
             if current:
                 current.cancel()
@@ -564,11 +634,18 @@ class AgentRuntime:
         return task
 
     async def continue_task(self, task_id: str, prompt: str | None = None) -> Task:
+        lock = self._continuation_locks.setdefault(task_id, asyncio.Lock())
+        async with lock:
+            return await self._continue_task_locked(task_id, prompt)
+
+    async def _continue_task_locked(self, task_id: str, prompt: str | None) -> Task:
         if kill_switch_active():
             raise KillSwitchActive(
                 "Emergency stop is active (data/STOP_JARVIS). "
                 "New tasks are blocked until POST /api/self-dev/resume."
             )
+        await self._stop_previous_turn(task_id)
+        self._cancel.discard(task_id)
         async with SessionLocal() as session:
             task = await session.get(Task, task_id)
             if not task:
@@ -588,9 +665,15 @@ class AgentRuntime:
                     history.append(ChatMessage(role="user", content=prompt.strip()))
                 task.conversation_json = serialize_messages(history)
             task.status = "queued"
+            task.stage = "understand"
+            task.result = ""
+            task.error = ""
+            task.finished_at = None
             task.waiting_for_confirmation = False
             task.updated_at = utcnow()
+            session.add(TaskEvent(task_id=task_id, kind="owner_turn_started", title="New owner turn", detail="", stage="understand"))
             await session.commit()
+        await BUS.publish(task_id, "owner_turn_started", "New owner turn", stage="understand", persist=False)
         self._start_runner(task_id, self._run(task_id, continue_existing=True, extra_prompt=prompt))
         return task
 
@@ -983,8 +1066,9 @@ class AgentRuntime:
         *,
         current_action: str = "Failed",
         stage: str = "failed",
+        spoken: str | None = None,
     ) -> None:
-        spoken = plain_failure(error)
+        spoken = spoken or plain_failure(error)
         await self._await_managed_front(task_id)
         fields: dict[str, Any] = {
             "status": "failed",
@@ -1292,7 +1376,11 @@ class AgentRuntime:
             for message in (history or [])
             if message.role in {"user", "assistant"} and (message.content or "").strip()
         ]
-        user_text = (extra_prompt or "").strip() or prompt
+        user_text = (extra_prompt or "").strip() or next(
+            (message.content for message in reversed(prior) if message.role == "user"),
+            prompt.rsplit("\n\nFollow-up: ", 1)[-1],
+        )
+        prompt = user_text  # Speech and delivery metadata belong to this turn too.
         from ..agent.turn_working_set import (
             MAX_RECENT_CHARS,
             MAX_RECENT_TURNS,
@@ -1328,7 +1416,7 @@ class AgentRuntime:
         route_kind = resolve_route_kind(user_text, stored_route=stored_route)
 
         # Front before weather HTTP — ack/first-audible must not wait on Open-Meteo.
-        weather_task = asyncio.create_task(weather_system_message(user_text))
+        weather_task = self._spawn_turn_job(task_id, weather_system_message(user_text))
 
         # Lean prompt for fast-path only — vault/Supermemory compose happens after miss.
         # Briefing is injected after the front lane when the weather task completes.
@@ -1447,7 +1535,7 @@ class AgentRuntime:
                     needs_tools=False,
                 )
 
-            retrieval_task = asyncio.create_task(_prefetch_conversation_ws())
+            retrieval_task = self._spawn_turn_job(task_id, _prefetch_conversation_ws())
 
         if front_worker_should_overlap(
             settings,
@@ -1456,7 +1544,7 @@ class AgentRuntime:
             action=str(getattr(turn, "front_action", "") or ""),
             decision=turn,
         ):
-            overlap_task = asyncio.create_task(_produce_conversation_worker())
+            overlap_task = self._spawn_turn_job(task_id, _produce_conversation_worker())
             sentence_watch = QueueSentenceWatch(overlap_queue)
             sentence_watch.start()
 
@@ -1667,7 +1755,7 @@ class AgentRuntime:
         # RFC-0127: start the 60s progress watchdog before heavy answer routing /
         # model load so slow prepare_answer_route (e.g. hotswap after hard-bypass
         # miss) cannot leave the owner silent past the first progress deadline.
-        progress_watch = asyncio.create_task(
+        progress_watch = self._spawn_turn_job(task_id,
             run_worker_progress_watchdog(
                 task_id,
                 turn_started=turn_started,
@@ -2453,8 +2541,8 @@ class AgentRuntime:
                     needs_tools=working.ingress_needs_tools,
                 )
 
-            managed_retrieval = asyncio.create_task(_prefetch_managed_ws())
-            progress_watch = asyncio.create_task(
+            managed_retrieval = self._spawn_turn_job(task_id, _prefetch_managed_ws())
+            progress_watch = self._spawn_turn_job(task_id,
                 run_worker_progress_watchdog(
                     task_id,
                     turn_started=turn_started,
@@ -2463,7 +2551,7 @@ class AgentRuntime:
                 )
             )
             if settings.front_responder.enabled:
-                self._front_tasks[task_id] = asyncio.create_task(
+                self._front_tasks[task_id] = self._spawn_turn_job(task_id,
                     self._run_managed_front_lane(
                         task_id,
                         extra_prompt or prompt,
@@ -3011,7 +3099,7 @@ class AgentRuntime:
             tools_used = True
 
         workflow_system = next((m for m in messages if m.role == "system"), None)
-        if workflow is not None:
+        if workflow is not None or continue_existing:
             # New calls after recovery get distinct durable model keys. Completed
             # tool effects still reconcile through the existing tool runner.
             from .durable_execution.repository import list_steps
@@ -3146,6 +3234,14 @@ class AgentRuntime:
                             "tool_rounds": tool_rounds,
                             "verifying": verifying,
                             "force_final": force_final,
+                            "messages": serialize_messages(messages),
+                            "tools": turn_tools,
+                            "model": getattr(MANAGER.provider, "model", profile.name),
+                            "thinking": think,
+                            "max_tokens": turn_max_tokens,
+                            "temperature": profile.temperature,
+                            "top_p": profile.top_p,
+                            "top_k": profile.top_k,
                         }
 
                         def _model_cost(chat: ChatResult) -> tuple[int, float, float]:
@@ -3227,7 +3323,7 @@ class AgentRuntime:
                             max_tokens=turn_max_tokens,
                             active_context=MANAGER.live_context_size(),
                         )
-                        err = context_capacity_error(budget)
+                        err = context_capacity_error(budget, server_error=str(exc))
                         await self._update(
                             task_id,
                             status="failed",
@@ -3721,6 +3817,14 @@ class AgentRuntime:
             await complete_coding_route(task_id, "cancelled")
             await self._release_lazy_vision()
             raise
+        except (StepSuperseded, RunNotRecoverable) as exc:
+            # Another runner took this task's step over (or already finished the task): its outcome stands,
+            # so this runner stops without writing a terminal state over it.
+            log.warning("task %s: runner stopped, superseded: %s", task_id, exc)
+            await self._release_lazy_vision()
+        except InputsChanged:
+            error, reply = await model_inputs_changed_reasons(task_id)
+            await self._fail_task(task_id, error, working, metrics, spoken=reply)
         except Exception as exc:
             log.exception("Agent task %s failed", task_id)
             await self._fail_task(task_id, str(exc), working, metrics)
