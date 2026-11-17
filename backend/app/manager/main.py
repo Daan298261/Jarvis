@@ -516,6 +516,35 @@ class ModelChoiceRequest(BaseModel):
     confirm: bool = False
 
 
+@app.get("/api/manager/v1/model-processes")
+async def manager_model_processes():
+    from .model_processes import snapshot
+    return await asyncio.to_thread(snapshot)
+
+
+@app.post("/api/manager/v1/model-processes/{identifier}/kill")
+async def manager_model_process_kill(identifier: str, body: ControlRequest,
+                                    token: str | None = Header(default=None, alias=TOKEN_HEADER),
+                                    origin: str | None = Header(default=None)):
+    _model_token(token)
+    if origin not in MANAGER_ORIGINS:
+        raise HTTPException(403, "Use the Manager window on this computer")
+    if not body.confirm:
+        raise HTTPException(400, "Explicit confirmation is required")
+    if len(identifier) != 24 or any(c not in "0123456789abcdef" for c in identifier):
+        raise HTTPException(400, "Invalid process identifier")
+    from .model_processes import hard_kill
+    debug_log.write("INFO", "control_start", action="model_hard_kill", detail={"id": identifier})
+    try:
+        result = await asyncio.to_thread(hard_kill, identifier)
+    except ValueError as exc:
+        debug_log.write("WARNING", "control_end", action="model_hard_kill", ok=False,
+                        detail={"id": identifier, "error": str(exc)})
+        raise HTTPException(409, str(exc)) from exc
+    debug_log.write("INFO", "control_end", action="model_hard_kill", ok=True, detail=result)
+    return result
+
+
 @app.post("/api/manager/v1/models/{identifier}/choice")
 async def manager_model_choice(identifier: str, body: ModelChoiceRequest,
                                token: str | None = Header(default=None, alias=TOKEN_HEADER)):

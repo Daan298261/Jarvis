@@ -8,7 +8,7 @@ public final class Main {
     static final String API = "https://api.fixture.anzu-test.example.com/v1/login";
     static final String PUSH = "wss://push.fixture.anzu-test.example.com/socket";
     static final String GOOGLE_KEY = "AIzaSyFixtureKeyForAnzuTesting012345678";
-    static final String AWS_KEY = "AKIAFIXTUREANZU12345";
+    static final String AWS_KEY = "AKIAFIXTUREANZU12345"; // es:allow-secret Synthetic credential marker for detector/redaction regression test; no live credential.
     static final String BUCKET = "https://anzu-fixture.s3.amazonaws.com/upload";
 
     public static byte[] seal(byte[] data) throws Exception {

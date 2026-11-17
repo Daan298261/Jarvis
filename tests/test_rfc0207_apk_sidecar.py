@@ -1468,7 +1468,7 @@ public class Vault {
         c.init(1, key);
         return c.doFinal(data);
     }
-    static final String PEM = "-----BEGIN RSA PRIVATE KEY-----\\nMIIBOgIBAAJBAKj34GkxFhD90vcNLYLInFEX6Ppy1tPf9Cnzj4p4WGeKLs1Pt8Qu";
+    static final String PEM = "-----BEGIN RSA PRIVATE KEY-----\\nMIIBOgIBAAJBAKj34GkxFhD90vcNLYLInFEX6Ppy1tPf9Cnzj4p4WGeKLs1Pt8Qu"; // es:allow-secret Synthetic credential marker for detector/redaction regression test; no live credential.
 }
 """
 HASH_JAVA = "\n".join(["package org.anzu.test.crypto;", "public class Hashes {"] + ["    // filler"] * 30 + [
@@ -1566,7 +1566,7 @@ def test_crypto_hints_and_network_security(env):
     assert set(generic) == {"Zx8Qp2Lr9Tm4Vn6Bc1Kd7Hs3Jw5Fg0Ae", "Qw3rTy8UiOp2AsDfGh5JkLzXcVbNm1"}  # AIza not duplicated
     assert generic["Qw3rTy8UiOp2AsDfGh5JkLzXcVbNm1"]["references"] == ["res/values/strings.xml:3"]
     pem = rules["private_key_pem"][0]
-    assert pem["severity"] == "critical" and pem["value"] == "-----BEGIN RSA PRIVATE KEY-----"
+    assert pem["severity"] == "critical" and pem["value"] == "-----BEGIN RSA PRIVATE KEY-----" # es:allow-secret Synthetic credential marker for detector/redaction regression test; no live credential.
     assert "MIIB" not in json.dumps(out)  # key material is never copied
     ecb = {f["value"] for f in rules["ecb_mode"]}
     assert ecb == {"AES/ECB/PKCS5Padding", "DES"} and "AES/GCM/NoPadding" not in json.dumps(rules.get("ecb_mode"))
@@ -1934,7 +1934,7 @@ def test_crypto_hints_over_real_dex_fixture(env):
     row = _dex_fixture(src)
     out = apk_sidecar.apk_crypto_hints(row["id"])
     rules = {f["rule"]: f for f in out["findings"]}
-    assert rules["aws_access_key_id"]["value"] == "AKIAFIXTUREANZU12345"
+    assert rules["aws_access_key_id"]["value"] == "AKIAFIXTUREANZU12345" # es:allow-secret Synthetic credential marker for detector/redaction regression test; no live credential.
     assert rules["google_api_key"]["value"] == "AIzaSyFixtureKeyForAnzuTesting012345678"
     assert rules["ecb_mode"]["value"] == "AES/ECB/PKCS5Padding" and rules["ecb_mode"]["confidence"] == "medium"
     assert rules["nsc_user_trust_anchor"]["severity"] == "high"
@@ -2220,7 +2220,7 @@ def test_real_toolchain_endpoints_and_crypto_on_dex_fixture(env, monkeypatch):
     for f in crypto["findings"]:
         rules.setdefault(f["rule"], []).append(f)
     assert any(any(r.startswith(main_java) for r in f["references"]) for f in rules["google_api_key"])
-    assert rules["aws_access_key_id"][0]["value"] == "AKIAFIXTUREANZU12345"
+    assert rules["aws_access_key_id"][0]["value"] == "AKIAFIXTUREANZU12345" # es:allow-secret Synthetic credential marker for detector/redaction regression test; no live credential.
     assert any(f["confidence"] == "high" for f in rules["ecb_mode"])
     assert rules["static_key"][0]["value"] == "0123456789ABCDEF"
     assert rules["weak_hash"][0]["value"] == "MD5"

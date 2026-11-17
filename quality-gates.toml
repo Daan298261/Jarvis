@@ -1,0 +1,85 @@
+# Existing project commands, plus pinned engineering-standards v1.0.0 scanners.
+# No gate is waived. The initial legacy scan baseline is tied to the recorded base SHA.
+[project]
+name = "ANZU"
+profile = "python-react-windows"
+standards_version = "1.0.0"
+
+[gates.install]
+status = "required"
+run = [["{python}", "-m", "pip", "install", "-r", "backend/requirements.txt"], ["npm.cmd", "--prefix", "frontend", "ci"], ["{python}", "scripts/quality/project_checks.py", "install-tools"], ["{python}", "scripts/quality/project_checks.py", "install-browsers"]]
+timeout = 1800
+
+[gates.format]
+status = "required"
+run = ["git", "diff", "--check", "origin/development"]
+
+[gates.lint]
+status = "required"
+run = [["{python}", "scripts/quality/project_checks.py", "lint"], ["npm.cmd", "--prefix", "frontend", "run", "lint"]]
+
+[gates.static_analysis]
+status = "required"
+run = ["{python}", "scripts/quality/es_stubs.py", "--baseline", "scripts/quality/stubs-baseline.json"]
+
+[gates.typecheck]
+status = "required"
+run = ["npm.cmd", "--prefix", "frontend", "exec", "--", "tsc", "-b", "frontend/tsconfig.json"]
+
+[gates.unit_tests]
+status = "required"
+run = ["{python}", "-m", "pytest", "-q", "-rs"]
+timeout = 3600
+env = { JARVIS_SKIP_MODEL = "1" }
+
+[gates.integration_tests]
+status = "required"
+run = ["{python}", "-m", "pytest", "-q", "tests/test_manager_supervisor.py", "tests/test_rfc0196_anzu_manager.py", "tests/test_rfc0247_model_manager.py", "tests/test_manager_model_processes.py"]
+env = { JARVIS_SKIP_MODEL = "1" }
+
+[gates.contract_tests]
+status = "required"
+run = [["{python}", "-m", "pytest", "-q", "tests/test_rfc0124_installer_contract.py", "tests/test_rfc0229_manager_js_mime.py"], ["npm.cmd", "--prefix", "frontend", "run", "test:manager-controls"]]
+env = { JARVIS_SKIP_MODEL = "1" }
+
+[gates.db_migrations]
+status = "required"
+run = ["{python}", "scripts/quality/project_checks.py", "database"]
+
+[gates.build]
+status = "required"
+run = ["npm.cmd", "--prefix", "frontend", "run", "build"]
+
+[gates.startup]
+status = "required"
+run = ["{python}", "scripts/quality/manager_smoke.py", "startup"]
+timeout = 120
+
+[gates.health_checks]
+status = "required"
+run = ["{python}", "scripts/quality/manager_smoke.py", "health"]
+timeout = 120
+
+[gates.e2e_tests]
+status = "required"
+run = ["{python}", "scripts/quality/manager_smoke.py", "e2e"]
+timeout = 180
+
+[gates.dependency_scan]
+status = "required"
+run = [["{python}", "scripts/quality/project_checks.py", "dependency-scan"], ["npm.cmd", "--prefix", "frontend", "audit"]]
+timeout = 900
+
+[gates.secret_scan]
+status = "required"
+run = ["{python}", "scripts/quality/es_secrets.py"]
+
+[gates.extra.windows_installer]
+status = "required"
+run = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "installer/windows/build-installer.ps1"]
+timeout = 14400
+
+[gates.extra.model_process_coverage]
+status = "required"
+run = ["{python}", "scripts/quality/project_checks.py", "coverage"]
+timeout = 300

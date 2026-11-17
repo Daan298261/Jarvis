@@ -181,7 +181,7 @@ def _iter_index_files(roots: list[Path]) -> list[Path]:
 
 def _relative_source(path: Path) -> str:
     try:
-        return str(path.resolve().relative_to(repo_root().resolve()))
+        return path.resolve().relative_to(repo_root().resolve()).as_posix()
     except ValueError:
         return str(path)
 

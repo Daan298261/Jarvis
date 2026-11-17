@@ -147,7 +147,7 @@ def skill_forge_store(tmp_path, monkeypatch):
 
 def test_eligibility_rejects_secrets():
     traj = _traj(
-        tools=[("python", {"api_key": "sk-abcdefghijklmnopqrstuvwxyz0123456789", "script": "x"})]
+        tools=[("python", {"api_key": "sk-abcdefghijklmnopqrstuvwxyz0123456789", "script": "x"})] # es:allow-secret Synthetic credential marker for detector/redaction regression test; no live credential.
     )
     result = evaluate_trajectory_eligibility(traj)
     assert result.eligible is False

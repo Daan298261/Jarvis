@@ -6,7 +6,7 @@ import json
 import logging
 import uuid
 from collections import defaultdict
-from typing import Any, AsyncIterator, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, AsyncIterator, Literal, TypedDict
 import time
 
 from ..config import load_settings
@@ -50,6 +50,9 @@ from ..agent.segmented_input import condense_segments
 from .inference_context import ensure_context_for_messages, model_lane_event_payload
 from ..agent.background_verify import schedule_background_verification
 from .slow_turn_feedback import SlowTurnNudger
+
+if TYPE_CHECKING:
+    from ..agent.turn_working_set import TurnWorkingSet
 
 OWNER_CHAT_SYSTEM = """You are Jarvis speaking with the owner in plain conversation.
 Reply immediately, naturally, and briefly in a British-inspired operations-assistant register.
