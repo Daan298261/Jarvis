@@ -50,6 +50,11 @@ def test_force_stop_binds_ciminstance_not_managementobject():
     assert "recorded-jarvis-pid" in text
     assert "Test-IsBlankElevatedPortOwner" in text
     assert "Register-RecordedJarvisPids" in text
+    assert "Test-IsTransientPortClient" in text
+    assert "ignore-transient-port-client" in text
+    assert "docker-mcp" in text
+    assert "Only a stranger Listen blocks Setup" in text
+    assert "$state -ne 'Listen'" in text
 
 
 def test_jarvis_iss_wires_force_stop_before_prepare():
