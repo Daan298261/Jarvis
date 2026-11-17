@@ -13,6 +13,8 @@ runtime/supermemory/
 
 # Installer-staged multi-GB model payloads
 installer/windows/payload/models/
+# PyInstaller sidecar extracts (same as frontend/src-tauri/sidecars/jarvis-backend/)
+installer/windows/payload/desktop/sidecars/
 
 # Application data
 data/

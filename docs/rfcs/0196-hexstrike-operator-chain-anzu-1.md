@@ -75,7 +75,7 @@ Implement PRs for this chain **must not** land:
 - Daybreak UI that lists tools but cannot invoke or install deps
 - Jobs that never persist logs/artifacts
 - Silent skip of discovered required host tools
-- `TODO` operator paths behind feature flags default-on in production HUD
+- Placeholder / unfinished operator paths behind feature flags default-on in production HUD
 - Tests that only assert HTTP 200 on `/health` without catalog/operate/job coverage
 
 ### 7. Supersedes / amends prior HexStrike RFCs

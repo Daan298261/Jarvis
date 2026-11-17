@@ -48,7 +48,7 @@ Linux cloud agents have **no GPU** and **no Windows desktop tools**. You **canno
 - Live harness tok/s / VRAM measurements
 - Office / pywinauto automation
 
-Implement and unit-test; leave P0 live-model items as `TODO` / desktop sign-off in the PR.
+Implement and unit-test; leave P0 live-model items as explicit desktop sign-off notes in the PR (not hidden in code comments).
 
 ### Do not
 
