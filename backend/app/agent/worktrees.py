@@ -177,10 +177,10 @@ def _unique_branch(when: datetime | None = None) -> str:
     return f"{TRIAL_BRANCH_PREFIX}{stamp}-{suffix}"
 
 
-def create_worktree(source: str | Path | None = None, dest: str | Path | None = None, branch: str | None = None) -> WorktreeSpec:
+def create_worktree(source: str | Path | None = None, dest: str | Path | None = None, branch: str | None = None, *, ref: str = "HEAD") -> WorktreeSpec:
     repo = resolve_repo(source)
     trusted = production_checkout(repo)
-    start = current_commit(repo)
+    start = _git_out(repo, ["rev-parse", "--verify", f"{ref}^{{commit}}"])
     branch_name = branch or _unique_branch()
     if not re.match(r"^jarvis/(autonomous-trial|self-dev|coding-task)-", branch_name):
         raise WorktreeError(
@@ -192,7 +192,7 @@ def create_worktree(source: str | Path | None = None, dest: str | Path | None = 
     if dest_path == trusted:
         raise WorktreeError("Refusing to create an experimental worktree on the trusted checkout")
     dest_path.parent.mkdir(parents=True, exist_ok=True)
-    run_git(repo, ["worktree", "add", "-b", branch_name, str(dest_path), "HEAD"])
+    run_git(repo, ["worktree", "add", "-b", branch_name, str(dest_path), start])
     run_git(dest_path, ["config", "user.email", "jarvis-self-dev@localhost"], check=False)
     run_git(dest_path, ["config", "user.name", "Jarvis Self-Development"], check=False)
     spec = WorktreeSpec(

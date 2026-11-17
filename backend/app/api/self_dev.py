@@ -17,8 +17,193 @@ from ..agent.self_dev import (
     start_trial,
 )
 from ..agent.worktrees import WorktreeError, discard_worktree, get_worktree, worktree_status
+from ..agent.development_queue import OWNER, StaleQueue
+from ..agent.development_scheduler import DEVELOPMENT, DevelopmentConfig
 
 router = APIRouter(prefix="/api/self-dev", tags=["self-dev"])
+
+
+class RfcSelection(BaseModel):
+    revision: str
+    queued: bool = True
+
+
+class DriveRfcImport(BaseModel):
+    file_id: str
+    title: str
+    content: str
+
+
+class MissionDecision(BaseModel):
+    task_id: str
+    expected_payload: str
+    approved: bool
+
+
+class QueueReorder(BaseModel):
+    order: list[str]
+    expected_revision: int
+    reason: str = ""
+
+
+class QueueMove(BaseModel):
+    item_id: str
+    expected_revision: int
+    to: int | None = None
+    delta: int = 0
+
+
+class QueueRelease(BaseModel):
+    item_id: str
+    expected_revision: int
+
+
+class QueueUndo(BaseModel):
+    history_id: str
+    expected_revision: int
+
+
+class AwayToggle(BaseModel):
+    enabled: bool
+
+
+def _queue_error(exc: ValueError) -> HTTPException:
+    return HTTPException(409, str(exc))
+
+
+async def _owner_tasks() -> list[dict]:
+    """Foreground owner work persisted by the agent, shown beside development work."""
+    from sqlalchemy import select
+
+    from ..db.models import Task
+    from ..db.session import SessionLocal
+
+    async with SessionLocal() as session:
+        rows = (await session.execute(
+            select(Task).where(Task.status.in_(["queued", "running", "waiting"])).order_by(Task.created_at)
+        )).scalars().all()
+    return [{"id": row.id, "title": row.title, "status": row.status, "stage": row.stage, "kind": "owner_task"} for row in rows]
+
+
+@router.get("/scheduler")
+async def scheduler_status():
+    return DEVELOPMENT.public()
+
+
+@router.get("/scheduler/queue")
+async def scheduler_queue():
+    view = DEVELOPMENT.queue_view(DEVELOPMENT.state())
+    return {**view, "owner_tasks": await _owner_tasks(), "status": DEVELOPMENT.phase(DEVELOPMENT.state())}
+
+
+@router.post("/scheduler/queue/reorder")
+async def scheduler_queue_reorder(body: QueueReorder):
+    try:
+        return await DEVELOPMENT.reorder(body.order, expected_revision=body.expected_revision, actor=OWNER, reason=body.reason or "Reordered by owner")
+    except (StaleQueue, ValueError) as exc:
+        raise _queue_error(exc) from exc
+
+
+@router.post("/scheduler/queue/move")
+async def scheduler_queue_move(body: QueueMove):
+    try:
+        return await DEVELOPMENT.move(body.item_id, expected_revision=body.expected_revision, actor=OWNER, reason="Moved by owner", to=body.to, delta=body.delta)
+    except (StaleQueue, ValueError) as exc:
+        raise _queue_error(exc) from exc
+
+
+@router.post("/scheduler/queue/release")
+async def scheduler_queue_release(body: QueueRelease):
+    try:
+        return await DEVELOPMENT.release_pin(body.item_id, expected_revision=body.expected_revision)
+    except (StaleQueue, ValueError) as exc:
+        raise _queue_error(exc) from exc
+
+
+@router.post("/scheduler/queue/undo")
+async def scheduler_queue_undo(body: QueueUndo):
+    try:
+        return await DEVELOPMENT.undo(body.history_id, expected_revision=body.expected_revision, actor=OWNER)
+    except (StaleQueue, ValueError) as exc:
+        raise _queue_error(exc) from exc
+
+
+@router.put("/scheduler/away")
+async def scheduler_away(body: AwayToggle):
+    try:
+        return await DEVELOPMENT.set_away(body.enabled, actor=OWNER, reason="Turned off by the owner")
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/scheduler/deliveries/{delivery_id}/publish")
+async def scheduler_publish(delivery_id: str):
+    try:
+        return await DEVELOPMENT.request_publish(delivery_id)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/scheduler/builds/{merge_sha}/retry")
+async def scheduler_build_retry(merge_sha: str):
+    try:
+        return await DEVELOPMENT.retry_build(merge_sha)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.put("/scheduler")
+async def scheduler_config(body: DevelopmentConfig):
+    try:
+        return await DEVELOPMENT.configure(body)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/scheduler/scan")
+async def scheduler_scan():
+    try:
+        return await DEVELOPMENT.scan()
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/scheduler/drive-import")
+async def scheduler_drive_import(body: DriveRfcImport):
+    try:
+        return await DEVELOPMENT.import_drive(body.file_id, body.title, body.content)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/scheduler/items/{item_id}")
+async def scheduler_select(item_id: str, body: RfcSelection):
+    try:
+        return await DEVELOPMENT.select(item_id, body.revision, body.queued)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/scheduler/run")
+async def scheduler_run():
+    try:
+        await DEVELOPMENT.scan()
+        return await DEVELOPMENT.launch()
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/scheduler/stop")
+async def scheduler_stop():
+    return await DEVELOPMENT.stop()
+
+
+@router.post("/scheduler/runs/{run_id}/decision")
+async def scheduler_decision(run_id: str, body: MissionDecision):
+    try:
+        return await DEVELOPMENT.command(run_id, body.task_id, body.expected_payload, body.approved)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 class StartBody(BaseModel):

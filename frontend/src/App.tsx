@@ -28,6 +28,7 @@ const ContextRepoPage = lazy(() => import("./pages/ContextRepo").then(module => 
 const TrajectoriesPage = lazy(() => import("./pages/Trajectories").then(module => ({ default: module.TrajectoriesPage })))
 const PortabilityPage = lazy(() => import("./pages/Portability").then(module => ({ default: module.PortabilityPage })))
 const CodingPage = lazy(() => import("./pages/Coding").then(module => ({ default: module.CodingPage })))
+const SelfDevelopmentPage = lazy(() => import("./pages/SelfDevelopment").then(module => ({ default: module.SelfDevelopmentPage })))
 const SkillForgePage = lazy(() => import("./pages/SkillForge").then(module => ({ default: module.SkillForgePage })))
 const CapabilityLabPage = lazy(() => import("./pages/CapabilityLab").then(module => ({ default: module.CapabilityLabPage })))
 const BlackGridStudioPage = lazy(() => import("./pages/BlackGridStudio").then(module => ({ default: module.BlackGridStudioPage })))
@@ -53,6 +54,7 @@ import { collectHealthIssues, type SelfCheckSnapshot } from "./hud/systemHealth"
 import { DesktopBridge, type BackendLifecycleStatus } from "./desktop/bridge"
 import { HelpPanel, HelpTrigger } from "./help/HelpPanel"
 import { PortalNav } from "./components/PortalNav"
+import { UpcomingTasks } from "./components/UpcomingTasks"
 import { BootNova } from "./boot/BootNova"
 import { HudShell } from "./hud/HudShell"
 import { PendingApprovalHost } from "./chat/PendingApprovalHost"
@@ -104,6 +106,7 @@ const ADMIN_LINKS = [
   { to: "/trajectories", label: "Trajectories" },
   { to: "/environments", label: "Environments" },
   { to: "/coding", label: "Coding" },
+  { to: "/self-development", label: "Self-development" },
   { to: "/skills", label: "Modules / Skills" },
   { to: "/capability-lab", label: "Capability Lab" },
   { to: "/packs", label: "Packs" },
@@ -498,6 +501,7 @@ function OwnerPortal() {
       <Route path="/environments" element={<WorkerEnvironmentsPage />} />
       <Route path="/environments/:environmentId" element={<WorkerEnvironmentsPage />} />
       <Route path="/coding" element={<CodingPage />} />
+      <Route path="/self-development" element={<SelfDevelopmentPage />} />
       <Route path="/coding/:taskId" element={<CodingPage />} />
       <Route path="/skills" element={<SkillForgePage />} />
       <Route path="/skills/:candidateId" element={<SkillForgePage />} />
@@ -570,6 +574,7 @@ function OwnerPortal() {
       >
         {routes}
       </HudShell>
+      <UpcomingTasks variant="hud" />
       </BootNova>
     )
   }
@@ -681,6 +686,7 @@ function OwnerPortal() {
       <main className={`main${chat ? " chat-main" : ""}${obsidian ? " obsidian-main" : ""}`}>
         {routes}
       </main>
+      <UpcomingTasks variant="classic" />
     </div>
     </BootNova>
   )

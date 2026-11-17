@@ -313,6 +313,18 @@ def resolve_action_effect(
             target=approval_target(args),
             recovery_summary="Exact target/action approval required" if runtime else "Local analysis of a prepared snapshot",
         )
+    if name == "self_development":
+        from ..tools.self_development import APPROVAL_ACTIONS, approval_target, describe_change, pending_change
+        change = pending_change({**args, "action": act}) if act in APPROVAL_ACTIONS else None
+        # A scheduler change needs the owner's tap bound to the exact change; reads and incomplete
+        # calls need none (the tool refuses those itself and never acts without a grant).
+        return ActionEffectMeta(
+            tool_name=name, action=act,
+            reversibility=ReversibilityClass.UNKNOWN if change else ReversibilityClass.REVERSIBLE,
+            high_consequence=bool(change), side_effecting=bool(change),
+            target=approval_target(change) if change else "",
+            recovery_summary=describe_change(change) if change else "Self-development read or refused call",
+        )
     command = str(args.get("command") or "") if args else ""
     destructive = is_destructive_operation(name, args, command or None)
     vault_rel = str(args.get("rel_path") or "").strip() if name == "vault_memory" else ""
