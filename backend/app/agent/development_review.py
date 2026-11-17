@@ -28,7 +28,7 @@ PROTECTED_SPECS = {
     "PORTAL_UX.md", "ANZU_PRODUCT_NORTH_STAR.md", "AGENTS.md", "docs/PROCESS.md",
 }
 # Built from fragments so unfinished-work scanners do not flag this detector itself.
-_STUB_TOKENS = ("TO" "DO", "FIX" "ME", "XXX")
+_STUB_TOKENS = ("TO" "DO", "FIX" "ME", "X" "X" "X")
 STUB_RE = re.compile(
     r"\b(" + "|".join(_STUB_TOKENS) + r")\b|NotImplementedError|raise NotImplemented\b|^\s*pass\s*#\s*stub|canned (?:success|response)",
     re.I,
