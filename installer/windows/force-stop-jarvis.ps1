@@ -454,17 +454,30 @@ function Invoke-ForceStopSingleRoot {
         }
     }
 
+    function Test-IsTransientPortClient {
+        # Health probes and polite-stop PowerShell leave CloseWait sockets that
+        # do not block a new Listen. Do not treat those as strangers.
+        param($Proc, [string]$State)
+        if ([string]$State -ne 'CloseWait') { return $false }
+        if (Test-IsProtectedInstallerProcess $Proc) { return $true }
+        $leaf = Get-ProcessNameLeaf ([string]$Proc.Name)
+        return ($leaf -in @('powershell', 'pwsh', 'curl', 'wget', 'http'))
+    }
+
     function Test-JarvisOwnsPortBlocking {
         param([array]$Bindings, [array]$Procs, [string]$RootNorm, [ref]$StrangerFound)
         $StrangerFound.Value = $false
         foreach ($b in $Bindings) {
             if ($b.Pid -le 0) { continue }
             $state = [string]$b.State
-            if ($state -notin @('Listen', 'CloseWait')) { continue }
+            # Only a stranger Listen blocks Setup. CloseWait is a dying client
+            # socket (often this stop script's own health probe).
+            if ($state -ne 'Listen') { continue }
             $owner = Get-ProcessByIdFromList $b.Pid $Procs
             if (-not $owner) {
                 continue
             }
+            if (Test-IsProtectedInstallerProcess $owner) { continue }
             if (Test-IsJarvisIdentityProcess $owner $RootNorm $Bindings) {
                 continue
             }
@@ -512,11 +525,19 @@ function Invoke-ForceStopSingleRoot {
         # This includes WebView2 and subprocess workers whose command lines do
         # not carry an install path. Never select an unrelated browser/runtime
         # merely by its executable name, and never select Setup's ancestors.
+        # Do not pull in Docker CLI / host tools ANZU merely launched — those
+        # are not install lockers and Access Denied on them confuses Setup.
+        $nonLockerChildLeaves = @(
+            'docker', 'dockerd', 'docker-mcp', 'com.docker.backend', 'com.docker.build',
+            'route', 'netsh', 'ping', 'nslookup', 'ipconfig'
+        )
         do {
             $addedChild = $false
             foreach ($proc in $procs) {
                 $childId = [int]$proc.ProcessId
                 if ($killMap.ContainsKey($childId) -or (Test-IsProtectedInstallerProcess $proc)) { continue }
+                $childLeaf = Get-ProcessNameLeaf ([string]$proc.Name)
+                if ($childLeaf -in $nonLockerChildLeaves) { continue }
                 if ($killMap.ContainsKey([int]$proc.ParentProcessId)) {
                     $killMap[$childId] = $proc
                     $addedChild = $true
@@ -559,16 +580,24 @@ function Invoke-ForceStopSingleRoot {
         $blocked = $false
         foreach ($b in $bindings) {
             if ($b.Pid -le 0) { continue }
-            if ([string]$b.State -notin @('Listen', 'CloseWait')) { continue }
+            $state = [string]$b.State
+            if ($state -notin @('Listen', 'CloseWait')) { continue }
             $owner = Get-ProcessByIdFromList $b.Pid $Procs
             if (-not $owner) { continue }
+            if (Test-IsProtectedInstallerProcess $owner) { continue }
+            if (Test-IsTransientPortClient $owner $state) {
+                Write-StopLog ("ignore-transient-port-client PID={0} name={1} port={2} state={3}" -f $b.Pid, $owner.Name, $b.Port, $state)
+                continue
+            }
             if (Test-IsJarvisIdentityProcess $owner $RootNorm $bindings) {
                 $blocked = $true
                 Write-StopLog ("post-kill-tcp-recheck jarvis-still-owns port={0} PID={1} state={2}" -f $b.Port, $b.Pid, $b.State)
                 continue
             }
+            # Stranger CloseWait cannot block a new Listen; only Listen is fatal.
+            if ($state -ne 'Listen') { continue }
             $StrangerOnPort.Value = $true
-            Write-StopLog ("stranger-holds-port PID={0} name={1} port={2}" -f $b.Pid, $owner.Name, $b.Port)
+            Write-StopLog ("stranger-holds-port PID={0} name={1} port={2} state={3}" -f $b.Pid, $owner.Name, $b.Port, $state)
         }
         return $blocked
     }

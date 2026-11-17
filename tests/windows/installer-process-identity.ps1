@@ -33,7 +33,10 @@ $script:snapshot = @(
     [pscustomobject]@{ProcessId=900005;ParentProcessId=1;Name='python.exe';ExecutablePath='C:\Python\python.exe';CommandLine='GrokbotTrading\trading_server.py'},
     [pscustomobject]@{ProcessId=900006;ParentProcessId=900001;Name='AnzuSetup.exe';ExecutablePath='C:\Temp\AnzuSetup.exe';CommandLine=''},
     [pscustomobject]@{ProcessId=900007;ParentProcessId=1;Name='python.exe';ExecutablePath='C:\Python\python.exe';CommandLine='-m uvicorn app.main:app --port 4780'},
-    [pscustomobject]@{ProcessId=900008;ParentProcessId=1;Name='msedgewebview2.exe';ExecutablePath='C:\Edge\msedgewebview2.exe';CommandLine='--unrelated-browser'}
+    [pscustomobject]@{ProcessId=900008;ParentProcessId=1;Name='msedgewebview2.exe';ExecutablePath='C:\Edge\msedgewebview2.exe';CommandLine='--unrelated-browser'},
+    [pscustomobject]@{ProcessId=900009;ParentProcessId=900007;Name='docker.exe';ExecutablePath='C:\Program Files\Docker\Docker\resources\bin\docker.exe';CommandLine='docker run hello-world'},
+    [pscustomobject]@{ProcessId=900010;ParentProcessId=900007;Name='docker-mcp.exe';ExecutablePath='C:\Program Files\Docker\Docker\resources\bin\docker-mcp.exe';CommandLine=''},
+    [pscustomobject]@{ProcessId=900011;ParentProcessId=1;Name='powershell.exe';ExecutablePath='C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe';CommandLine='-File force-stop-jarvis.ps1'}
 )
 function Get-CimOrWmiProcesses { return $script:snapshot }
 function Get-PortBindings { param([ref]$TcpLookupFailed) $TcpLookupFailed.Value=$false; return @() }
@@ -45,9 +48,24 @@ $ids = @($targets | ForEach-Object {[int]$_.ProcessId})
 foreach ($expected in @(900001,900002,900003,900004,900007)) {
     if ($expected -notin $ids) { throw "Missing ANZU process $expected" }
 }
-foreach ($unrelated in @(900005,900006,900008)) {
+foreach ($unrelated in @(900005,900006,900008,900009,900010,900011)) {
     if ($unrelated -in $ids) { throw "Selected unrelated or installer process $unrelated" }
 }
+# CloseWait from the stop script's own health probe must not abort as stranger.
+function Get-PortBindings {
+    param([ref]$TcpLookupFailed)
+    $TcpLookupFailed.Value = $false
+    return @(
+        @{ Pid = 900011; Port = 4780; State = 'CloseWait' },
+        @{ Pid = 900007; Port = 4780; State = 'Listen' }
+    )
+}
+$script:ProtectedPids = New-Object 'System.Collections.Generic.HashSet[int]'
+[void]$script:ProtectedPids.Add(900011)
+$scanFailed=$false; $stranger=$false; $tcpFailed=$false
+$null = @(Get-JarvisKillTargets 'C:\IdentityTestNoInstall' ([ref]$scanFailed) ([ref]$stranger) ([ref]$tcpFailed))
+if ($stranger) { throw 'CloseWait force-stop PowerShell was treated as stranger-holds-port' }
+'PASS: docker CLI children and CloseWait stop-script sockets are not fatal'
 # Core-only manager control must preserve its manager and WebView descendants.
 $PreserveManager=$true
 $ids=@(Get-JarvisKillTargets 'C:\IdentityTestNoInstall' ([ref]$scanFailed) ([ref]$stranger) ([ref]$tcpFailed) | ForEach-Object {[int]$_.ProcessId})
