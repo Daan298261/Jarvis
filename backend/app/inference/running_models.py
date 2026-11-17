@@ -760,7 +760,8 @@ class RunningModels:
                     row["choice"] = "leave"
                 settings = load_settings()
                 # Startup waits for this owner choice instead of competing for VRAM.
-                if model_enabled(settings) and not MANAGER.state.loaded and not MANAGER.state.loading and settings.inference.auto_load:
+                if (model_enabled(settings) and not MANAGER.state.loaded and not MANAGER.state.loading
+                        and settings.inference.auto_load and not IDLE_UNLOAD.background_blocked()):
                     await MANAGER.load(settings)
                 return self.snapshot()
             if not prior:
@@ -776,18 +777,6 @@ class RunningModels:
                 raise ValueError("Another client is using this model; wait for it to finish")
             choices = await asyncio.to_thread(self.choices)
             settings = load_settings()
-<<<<<<< HEAD
-=======
-            if action == "leave":
-                choices[identifier] = "leave"
-                await asyncio.to_thread(self._save, choices)
-                row["choice"] = "leave"
-                # Startup waits for this owner choice instead of competing for VRAM.
-                if (model_enabled(settings) and not MANAGER.state.loaded and not MANAGER.state.loading
-                        and settings.inference.auto_load and not IDLE_UNLOAD.background_blocked()):
-                    await MANAGER.load(settings)
-                return self.snapshot()
->>>>>>> origin/development
             async with MANAGER._request_lease.exclusive() as acquired:
                 if not acquired:
                     raise ValueError("ANZU is answering a request; try again when it finishes")

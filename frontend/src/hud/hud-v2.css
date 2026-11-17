@@ -2001,7 +2001,6 @@ html[data-session-mode] .hud-app {
 .running-model-row { margin-top: 16px; }
 .running-model-row small { display: block; overflow-wrap: anywhere; opacity: .75; }
 .running-model-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
-<<<<<<< HEAD
 /* color:inherit + browser default light button face made labels invisible (white on white). */
 .running-model-offer button,
 .running-model-actions button {
@@ -2025,7 +2024,8 @@ html[data-session-mode] .hud-app {
 }
 .running-model-dismiss {
   margin-top: 12px;
-=======
+}
+
 
 /* RFC-0243 compact chat (default on, "Compact chat" toggle). Every cap is scoped to .chat-compact,
    so with the toggle off the classic .hud-chat / .hud-thread rules above, fade mask included, apply unchanged. */
@@ -2077,5 +2077,4 @@ html[data-session-mode] .hud-app {
   padding: 9px 12px;
   font-size: clamp(14px, 0.8vw, 16px);
   line-height: 1.5;
->>>>>>> origin/development
 }
