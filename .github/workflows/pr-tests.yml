@@ -139,6 +139,9 @@ jobs:
       - name: Manager control feedback tests (RFC-0229 S1)
         run: npm run test:manager-controls
 
+      - name: Running models contrast and dismiss tests
+        run: npm run test:running-models-contrast
+
   installer-compile:
     name: installer-compile
     runs-on: windows-latest

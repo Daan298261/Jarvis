@@ -694,24 +694,32 @@ class RunningModels:
 
         async with self._choice_lock:
             prior = next((r for r in self.rows if r["id"] == identifier), None)
+            # Leave must always dismiss the offer — including ghost rows after the
+            # server vanished — so the HUD is never stuck with no way to close.
+            if action == "leave":
+                if prior:
+                    await self.scan(force=True)
+                choices = await asyncio.to_thread(self.choices)
+                choices[identifier] = "leave"
+                await asyncio.to_thread(self._save, choices)
+                row = next((r for r in self.rows if r["id"] == identifier), None)
+                if row:
+                    row["choice"] = "leave"
+                settings = load_settings()
+                # Startup waits for this owner choice instead of competing for VRAM.
+                if model_enabled(settings) and not MANAGER.state.loaded and not MANAGER.state.loading and settings.inference.auto_load:
+                    await MANAGER.load(settings)
+                return self.snapshot()
             if not prior:
                 raise ValueError("That model is no longer available; scan again")
             await self.scan(force=True)
             row = next((r for r in self.rows if r["id"] == identifier), None)
             if not row or row.get("process") != prior.get("process"):
                 raise ValueError("The server changed; scan again before choosing")
-            if row.get("busy") and action != "leave":
+            if row.get("busy"):
                 raise ValueError("Another client is using this model; wait for it to finish")
             choices = await asyncio.to_thread(self.choices)
             settings = load_settings()
-            if action == "leave":
-                choices[identifier] = "leave"
-                await asyncio.to_thread(self._save, choices)
-                row["choice"] = "leave"
-                # Startup waits for this owner choice instead of competing for VRAM.
-                if model_enabled(settings) and not MANAGER.state.loaded and not MANAGER.state.loading and settings.inference.auto_load:
-                    await MANAGER.load(settings)
-                return self.snapshot()
             async with MANAGER._request_lease.exclusive() as acquired:
                 if not acquired:
                     raise ValueError("ANZU is answering a request; try again when it finishes")

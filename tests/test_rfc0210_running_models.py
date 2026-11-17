@@ -183,6 +183,23 @@ async def test_stale_server_and_inflight_request_block_choices(service, monkeypa
         await runtime.decide(identifier, "use")
 
 
+async def test_leave_dismisses_missing_and_vanished_offers(service, monkeypatch):
+    """Leave alone / Dismiss must clear the HUD even when the model is gone."""
+    runtime, settings, manager = service
+    await runtime.scan()
+    identifier = runtime.rows[0]["id"]
+    monkeypatch.setattr(rm, "probe", AsyncMock(return_value=None))
+    snapshot = await runtime.decide(identifier, "leave")
+    assert runtime.choices()[identifier] == "leave"
+    assert all(row["choice"] for row in snapshot["servers"]) or identifier not in {
+        row["id"] for row in snapshot["servers"]
+    }
+    ghost = "deadbeefdeadbeefdeadbeef"
+    vanished = await runtime.decide(ghost, "leave")
+    assert runtime.choices()[ghost] == "leave"
+    assert isinstance(vanished, dict)
+
+
 async def test_unknown_server_cannot_be_killed(service):
     runtime, settings, manager = service
     await runtime.scan()

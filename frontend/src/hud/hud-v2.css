@@ -2001,3 +2001,27 @@ html[data-session-mode] .hud-app {
 .running-model-row { margin-top: 16px; }
 .running-model-row small { display: block; overflow-wrap: anywhere; opacity: .75; }
 .running-model-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+/* color:inherit + browser default light button face made labels invisible (white on white). */
+.running-model-offer button,
+.running-model-actions button {
+  background: #2a2218;
+  color: #f3ebe0;
+  border: 1px solid #c08d51;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font: inherit;
+}
+.running-model-offer button:hover:not(:disabled),
+.running-model-actions button:hover:not(:disabled) {
+  background: #3a2e20;
+  color: #fff8ef;
+}
+.running-model-offer button:disabled,
+.running-model-actions button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+.running-model-dismiss {
+  margin-top: 12px;
+}

@@ -61,6 +61,10 @@ def test_start_jarvis_allows_voice_only_without_gguf():
     assert "throw \"llama-server.exe missing" not in text
     assert "Show-StartupFailure" in text
     assert "Press Enter to close" in text
+    failure = text.split("function Show-StartupFailure", 1)[1].split("\nfunction ", 1)[0]
+    assert "ForegroundColor Yellow" in failure
+    assert "Exception.Message" in failure
+    assert "Out-String" not in failure
     assert "RegisterLogonTask" in text
     assert "Register-ScheduledTask" in text
     assert "Verb RunAs" in text

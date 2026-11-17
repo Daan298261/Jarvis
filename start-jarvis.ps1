@@ -211,17 +211,36 @@ function Show-StartupFailure {
     Write-Host ""
     Write-Host "Jarvis did not start." -ForegroundColor Red
     if ($ErrorRecord) {
-        Write-Host ($ErrorRecord | Out-String)
+        # Prefer Exception.Message over a full dump so the error stays readable.
+        $message = $null
+        if ($ErrorRecord.Exception -and $ErrorRecord.Exception.Message) {
+            $message = [string]$ErrorRecord.Exception.Message
+        } elseif ($ErrorRecord.ToString) {
+            $message = [string]$ErrorRecord.ToString()
+        } else {
+            $message = [string]$ErrorRecord
+        }
+        if ($message) {
+            Write-Host $message -ForegroundColor Yellow
+        }
+        if ($ErrorRecord.InvocationInfo -and $ErrorRecord.InvocationInfo.PositionMessage) {
+            Write-Host $ErrorRecord.InvocationInfo.PositionMessage -ForegroundColor DarkYellow
+        }
     }
     Write-Host "This window stays open so the error is readable." -ForegroundColor Yellow
-    Write-Host "Press Enter to close."
+    Write-Host "Press Enter to close." -ForegroundColor Cyan
     try {
         if ([Console]::IsInputRedirected) {
             Start-Sleep -Seconds 30
             return
         }
     } catch { }
-    [void](Read-Host)
+    try {
+        [void](Read-Host)
+    } catch {
+        # Last resort when the host has no interactive input: keep the text visible, then exit.
+        Start-Sleep -Seconds 45
+    }
 }
 
 try {
