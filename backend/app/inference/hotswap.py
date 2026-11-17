@@ -12,6 +12,7 @@ from .backends import (
     resolve_advertised_model,
     suggested_port,
 )
+from .idle_unload import IDLE_UNLOAD
 from .manager import MANAGER
 from .profiles import PROFILES
 from .runtime_profiles import RuntimeProfile
@@ -205,6 +206,7 @@ async def activate_runtime_profile(runtime: RuntimeProfile, *, force: bool = Fal
 
     from ..engine_mode import require_model
     require_model(load_settings())
+    IDLE_UNLOAD.explicit_load()  # choosing a runtime is an explicit Load
     if HEXSTRIKE.is_running:
         await HEXSTRIKE.stop()
 

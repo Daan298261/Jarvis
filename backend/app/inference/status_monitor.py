@@ -38,6 +38,7 @@ DEFAULT_POLL_INTERVAL_SECONDS = 5.0
 _LIVE_STATE_KEYS = (
     "loaded",
     "loading",
+    "manually_unloaded",
     "last_error",
     "profile",
     "pid",

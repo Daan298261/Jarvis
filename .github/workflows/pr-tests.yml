@@ -89,7 +89,9 @@ jobs:
             tests/test_runtime_profiles.py \
             tests/test_security_gates.py \
             tests/test_nkeep_context.py \
-            tests/test_tool_exposure.py
+            tests/test_tool_exposure.py \
+            tests/test_keep_warm_idle_unload.py \
+            tests/test_rfc0242_keep_warm_contract.py
 
       - name: Run full backend suite
         run: python -m pytest -q -rs
@@ -138,6 +140,9 @@ jobs:
 
       - name: Manager control feedback tests (RFC-0229 S1)
         run: npm run test:manager-controls
+
+      - name: Keep warm HUD tests (keep-warm ticket)
+        run: npm run test:keep-warm-hud
 
   installer-compile:
     name: installer-compile
