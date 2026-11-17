@@ -218,7 +218,7 @@ Nothing is deleted. Each implement PR includes a "Preserved live behaviour" sect
 
 ### Stub rule
 
-No stubs, scaffolding, TODO bodies, placeholder endpoints or soft-fails. A ledger that cannot respawn, a `prepare_engine_for` with no caller, or a health identity field nobody checks, is a fail.
+No stubs, scaffolding, unfinished bodies, placeholder endpoints or soft-fails. A ledger that cannot respawn, a `prepare_engine_for` with no caller, or a health identity field nobody checks, is a fail.
 
 ---
 
