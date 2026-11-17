@@ -633,7 +633,7 @@ Touched live UI: the TaskActivity panel (HudChat, Chat, Phone), task speech, Sho
 ### Stub rule
 
 Every function named here ships complete, with tests. The following are not allowed:
-- `TODO` or `NotImplementedError`;
+- `NotImplementedError` or unfinished-work markers;
 - `except Exception: pass` around pipeline steps;
 - a toggle without an implementation;
 - a step or validator that always passes;

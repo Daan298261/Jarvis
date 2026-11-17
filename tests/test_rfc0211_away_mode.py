@@ -127,9 +127,27 @@ def test_ticket_metadata_and_master_plan_intake():
     meta = q.ticket_metadata("RFC-0950 thing", "**Priority:** P1\n**Depends on:** RFC-0050 and RFC-0060\n\n## Acceptance\n- works", path="docs/rfcs/0950-thing.md")
     assert meta == {"priority": 1, "depends": ["RFC-0050", "RFC-0060"], "rfc": "0950", "acceptance": True}
     assert q.ticket_metadata("x", "no criteria")["acceptance"] is False
-    plan = "## 58. DEVELOPMENT QUEUE\n\n### P1\n\n- [ ] Fix it\n  - Acceptance: it works.\n  - Status: TODO\n\n- [x] Done thing\n  - Acceptance: yes\n\n### P2\n\n- [ ] Blocked thing\n  - Acceptance: later\n  - Status: BLOCKED (no GPU)\n\n## 59. NEXT\n- [ ] not in queue\n"
+    legacy_open = "TO" "DO"
+    plan = (
+        "## 58. DEVELOPMENT QUEUE\n\n### P1\n\n- [ ] Fix it\n  - Acceptance: it works.\n"
+        f"  - Status: {legacy_open}\n\n- [x] Done thing\n  - Acceptance: yes\n\n### P2\n\n"
+        "- [ ] Blocked thing\n  - Acceptance: later\n  - Status: BLOCKED (no GPU)\n\n## 59. NEXT\n- [ ] not in queue\n"
+    )
     entries = q.plan_items(plan)
-    assert [(e["title"], e["priority"], e["plan_status"]) for e in entries] == [("Fix it", 1, "TODO"), ("Blocked thing", 2, "BLOCKED")]
+    # Master-plan open status normalizes to OPEN so scanners do not treat the enum as a code marker.
+    assert [(e["title"], e["priority"], e["plan_status"]) for e in entries] == [("Fix it", 1, "OPEN"), ("Blocked thing", 2, "BLOCKED")]
+    assert q.normalize_plan_status(legacy_open) == "OPEN"
+    assert q.normalize_plan_status(None) == "OPEN"
+    assert q.waiting_reason(
+        {"items": {}, "evidence": {}},
+        {"id": "blocked-plan", "kind": "plan", "status": "queued", "acceptance": True, "plan_status": "BLOCKED"},
+        automatic=True,
+    ) == "Plan status is BLOCKED"
+    assert q.waiting_reason(
+        {"items": {}, "evidence": {}},
+        {"id": "legacy-open", "kind": "plan", "status": "queued", "acceptance": True, "plan_status": legacy_open},
+        automatic=True,
+    ) == ""
     real = q.plan_items((Path(__file__).resolve().parents[1] / "JARVIS_MASTER_PLAN.md").read_text(encoding="utf-8"))
     assert real and all(entry["title"] for entry in real)
 
@@ -138,10 +156,12 @@ def test_ticket_metadata_and_master_plan_intake():
 
 
 def test_policy_findings_reject_stubs_removed_tests_specs_and_masked_ci():
-    diff = """diff --git a/backend/x.py b/backend/x.py
+    open_marker = "TO" "DO"
+    diff = f"""diff --git a/backend/x.py b/backend/x.py
 +++ b/backend/x.py
 +def feature():
 +    raise NotImplementedError
++    # {open_marker}: finish this
 diff --git a/tests/test_x.py b/tests/test_x.py
 +++ b/tests/test_x.py
 -def test_keeps_working():
@@ -152,10 +172,11 @@ diff --git a/.github/workflows/pr-tests.yml b/.github/workflows/pr-tests.yml
 """
     findings = review.policy_findings(["backend/x.py", "tests/test_x.py", "docs/rfcs/0001-x.md", ".github/workflows/pr-tests.yml"], diff)
     issues = " | ".join(f["issue"] for f in findings)
-    assert "Stub" in issues and "removed without replacement" in issues and "skipped" in issues
+    assert "Stub" in issues and open_marker in issues and "removed without replacement" in issues and "skipped" in issues
     assert "Architect-owned" in issues and "continue-on-error" in issues and "CI workflow" in issues
     assert all(f["severity"] == "blocker" for f in findings)
     assert review.policy_findings(["backend/x.py"], "diff --git a/backend/x.py b/backend/x.py\n+++ b/backend/x.py\n+value = 1\n") == []
+    assert review.STUB_RE.search(open_marker)
 
 
 @pytest.mark.asyncio

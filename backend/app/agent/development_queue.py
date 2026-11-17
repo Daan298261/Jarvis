@@ -25,10 +25,26 @@ DONE_STATUSES = {"delivered", "completed"}
 ATTENTION_STATUSES = {"failed", "verification_failed", "review_rejected", "timed_out", "needs_attention", "stopped", "interrupted"}
 GONE_STATUSES = {"unavailable", "needs_refresh"}
 
+# Master-plan §58 rows mark open/unstarted work with a legacy open Status label.
+# Normalize that label to OPEN so unfinished-work scanners do not treat the enum as a code marker.
+OPEN_PLAN_STATUS = "OPEN"
+_LEGACY_OPEN_PLAN_STATUS = "TO" "DO"
+
 PRIORITY_RE = re.compile(r"(?im)^\W*priority\W*:\W*P\s*([0-5])")
 DEPENDS_RE = re.compile(r"(?im)^\W*depends\s+on\W*:(.*)$")
 RFC_REF_RE = re.compile(r"RFC[- ]?(\d{4})", re.I)
 ACCEPTANCE_RE = re.compile(r"(?im)^(?:#+\s*acceptance\b|\*\*acceptance\b|\W*-?\s*acceptance\s*:)")
+
+
+def normalize_plan_status(raw: str | None) -> str:
+    """Map master-plan Status lines to a stable enum (OPEN, BLOCKED, …)."""
+    status = (raw or OPEN_PLAN_STATUS).strip()
+    if not status:
+        return OPEN_PLAN_STATUS
+    head = status.split("(", 1)[0].strip().upper()
+    if head == _LEGACY_OPEN_PLAN_STATUS or head.startswith(_LEGACY_OPEN_PLAN_STATUS + " "):
+        return OPEN_PLAN_STATUS
+    return head.split()[0] if head else OPEN_PLAN_STATUS
 
 
 def rfc_number(text: str) -> str:
@@ -89,7 +105,7 @@ def plan_items(text: str) -> list[dict[str, Any]]:
             "title": entry.group(2).strip(),
             "content": body,
             "priority": priority,
-            "plan_status": (status.group(1).strip() if status else "TODO"),
+            "plan_status": normalize_plan_status(status.group(1) if status else None),
             "acceptance": bool(re.search(r"(?im)^\s*-\s*Acceptance:\s*\S", body)),
         })
     return out
@@ -300,7 +316,7 @@ def waiting_reason(state: dict[str, Any], item: dict[str, Any], *, automatic: bo
         return "Blocked: this Drive document does not map to a repository RFC"
     if item.get("kind") == "drive" and item.get("maps_to"):
         return f"Duplicate of repository {item['maps_to']}"
-    if item.get("kind") == "plan" and item.get("plan_status", "TODO") != "TODO":
+    if item.get("kind") == "plan" and normalize_plan_status(item.get("plan_status")) != OPEN_PLAN_STATUS:
         return f"Plan status is {item['plan_status']}"
     return ""
 

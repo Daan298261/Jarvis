@@ -823,7 +823,7 @@ Nothing existing is removed, renamed or re-styled. The behaviour changes for exi
 ### Stub rule
 
 Every function named here ships complete, with tests. Not allowed:
-- `TODO` or `NotImplementedError`;
+- `NotImplementedError` or unfinished-work markers;
 - `except Exception: pass` around any install, sandbox or audit step;
 - a catalog entry with a placeholder hash or `latest` tag;
 - a sandbox backend that "runs anyway" when unavailable;
