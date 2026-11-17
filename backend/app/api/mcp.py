@@ -55,6 +55,12 @@ async def list_mcp():
 async def add_mcp(body: MCPServerIn):
     settings = load_settings()
     item = body.model_dump()
+    wanted = str(item.get("name") or "").strip()
+    item["name"] = wanted
+    # Tools are keyed by server name (mcp_<name>_<tool>), so a second server with the same name would
+    # shadow or impersonate the first.
+    if any(str(server.get("name") or "").strip().casefold() == wanted.casefold() for server in settings.mcp_servers):
+        raise HTTPException(409, f"An MCP server named {wanted!r} already exists; choose another name")
     item["id"] = str(uuid.uuid4())
     if not str(item.get("cwd") or "").strip():
         item.pop("cwd", None)

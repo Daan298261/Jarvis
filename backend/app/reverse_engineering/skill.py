@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-_INTENT = re.compile(r"\b(?:reverse[ -]?engineer(?:ing)?|decompile|disassemble)\b", re.I)
+_INTENT = re.compile(r"\b(?:reverse[ -]?engineer(?:ing)?|decompile|disassemble|use\s+(?:the\s+)?rea|rea\s+this)\b", re.I)
 ROOT = Path(__file__).parent / "skill"
 
 

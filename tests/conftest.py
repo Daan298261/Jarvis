@@ -74,6 +74,42 @@ async def _mcp_runtime_hygiene_after_test():
         pass
 
 
+@pytest.fixture
+def connected_mcp():
+    """Register a connected MCP tool as MCPRuntime.refresh would (server name, tool, optional annotations)."""
+    from app.tools.mcp_runtime import MCP, mcp_tool_key
+
+    def connect(server: str, tool: str, annotations: dict | None = None) -> str:
+        key = mcp_tool_key(server, tool)
+        MCP._tools[key] = {
+            "server": {"id": server, "name": server, "transport": "stdio", "enabled": True},
+            "tool": {"name": tool, "inputSchema": {"type": "object"}, "annotations": annotations},
+            "remote_name": tool,
+        }
+        return key
+
+    yield connect
+    MCP.reset_for_tests()
+
+
+@pytest.fixture
+def connected_mcp_server():
+    """Register a connected MCP tool for a full server config (id, command, args) as refresh would."""
+    from app.tools.mcp_runtime import MCP, mcp_tool_key
+
+    def connect(server: dict, tool: str, annotations: dict | None = None) -> str:
+        key = mcp_tool_key(str(server["name"]), tool)
+        MCP._tools[key] = {
+            "server": server,
+            "tool": {"name": tool, "inputSchema": {"type": "object"}, "annotations": annotations},
+            "remote_name": tool,
+        }
+        return key
+
+    yield connect
+    MCP.reset_for_tests()
+
+
 @pytest.fixture(autouse=True)
 def _clock_log_isolated(tmp_path, monkeypatch):
     """Keep the daily UTC clock log off the repo data/ dir so suite order cannot leak."""

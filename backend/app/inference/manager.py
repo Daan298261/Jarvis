@@ -1025,7 +1025,8 @@ class InferenceManager:
         self.state.advertised_models = list(probe.get("models") or [])
         self.state.health_path = str(probe.get("health_path") or "")
         self.state.remote_model = self.provider_model(settings, self.state.advertised_models)
-        live = int(probe.get("n_ctx") or probe.get("context_size") or 0)
+        loaded_contexts = probe.get("loaded_model_contexts") or {}
+        live = int(loaded_contexts.get(self.state.remote_model) or probe.get("n_ctx") or probe.get("context_size") or 0)
         if live > 0:
             self.adopt_server_n_ctx(live)
 

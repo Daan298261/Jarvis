@@ -117,7 +117,9 @@ def gate_side_effect(
         log.debug("harm veto unavailable after allow: %s", exc)
         cancel = None
 
-    if cancel is True:
+    # Authorization, firewall and reversibility have already admitted reads.
+    # The learned harm veto applies to actions that can change state.
+    if cancel is True and decision.effect.side_effecting:
         return SideEffectDecision(
             allowed=False,
             requires_approval=False,
