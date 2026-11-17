@@ -88,8 +88,15 @@ async def test_completed_task_writes_a_trajectory_and_later_task_sees_it(jarvis_
     first = await AGENT.create_task(f"Write primes.txt at {target}", autonomy="autonomous", profile="fast")
     await AGENT._tasks[first.id]
 
-    async with SessionLocal() as session:
-        rows = (await session.execute(select(Trajectory))).scalars().all()
+    # RFC-0247: optional learning is eventually persisted after result delivery.
+    import asyncio
+    async with asyncio.timeout(5):
+        while True:
+            async with SessionLocal() as session:
+                rows = (await session.execute(select(Trajectory))).scalars().all()
+            if rows:
+                break
+            await asyncio.sleep(0.01)
     assert len(rows) == 1
     assert rows[0].outcome == "completed"
     assert json.loads(rows[0].tools_json) == ["filesystem"]

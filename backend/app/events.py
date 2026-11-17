@@ -6,9 +6,9 @@ from collections import defaultdict
 from datetime import timezone
 from typing import Any, AsyncIterator
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
-from .db.models import TaskEvent, utcnow
+from .db.models import PostResponseJob, TaskEvent, utcnow
 from .db.session import SessionLocal
 
 
@@ -49,6 +49,7 @@ class EventBus:
         *,
         source: str = "jarvis-agent",
         persist: bool = True,
+        completion_id: str | None = None,
     ) -> None:
         event = {
             "task_id": task_id,
@@ -61,6 +62,12 @@ class EventBus:
         }
         if persist:
             async with SessionLocal() as session:
+                if kind == "completed" and completion_id is not None:
+                    # Release exactly this reply's jobs in the event transaction.
+                    await session.execute(update(PostResponseJob).where(
+                        PostResponseJob.task_id == task_id,
+                        PostResponseJob.completion_id == completion_id,
+                    ).values(released=True))
                 session.add(
                     TaskEvent(
                         task_id=task_id,

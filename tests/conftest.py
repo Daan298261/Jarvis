@@ -23,6 +23,14 @@ async def _database_engine_hygiene_after_test():
 
 
 @pytest.fixture(autouse=True)
+async def _post_response_worker_hygiene(_database_engine_hygiene_after_test):
+    yield
+    from app.agent.post_response import stop
+
+    await stop()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_optional_worker_test_paths(tmp_path, monkeypatch):
     """Unit tests must never install into or detect the owner's worker environments."""
     from app.workers import isolated_runtime

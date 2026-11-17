@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
@@ -26,7 +28,6 @@ from .repository import (
     commit_step_result,
     finish_attempt,
     mark_ambiguous_effect,
-    mark_step_running,
     park_step,
     resume_parked_step,
     upsert_step,
@@ -36,6 +37,7 @@ from .types import AttemptStatus, CrashBoundary, EffectClass, OperationType, Rep
 T = TypeVar("T")
 
 _worker_id = f"jarvis-worker-{os.getpid()}"
+log = logging.getLogger(__name__)
 
 
 def set_worker_id(worker_id: str) -> None:
@@ -80,6 +82,7 @@ async def run_durable_step(
     worker_id: str | None = None,
 ) -> tuple[T, dict[str, Any]]:
     """Execute one durable step with crash-safe commit ordering."""
+    prepared_at = time.perf_counter()
     worker = worker_id or _worker_id
     predecessors = list(predecessor_keys or [])
     input_hash = _hash_payload(input_fingerprint)
@@ -122,9 +125,9 @@ async def run_durable_step(
     if step.status == StepStatus.AMBIGUOUS_EFFECT.value:
         raise AmbiguousEffectError(step_key)
 
-    attempt = await claim_attempt(step.id, worker)
-    await mark_step_running(step.id)
+    attempt = await claim_attempt(step.id, worker, mark_running=True)
     check_crash_boundary(step_key, CrashBoundary.BEFORE_EXECUTE)
+    operation_at = time.perf_counter()
 
     executed_value: T | None = None
     crash_before_commit = False
@@ -151,6 +154,7 @@ async def run_durable_step(
         raise
 
     tokens, ms, usd = (0, 0.0, 0.0)
+    commit_at = time.perf_counter()
     if cost_extractor and executed_value is not None:
         tokens, ms, usd = cost_extractor(executed_value)
 
@@ -166,9 +170,10 @@ async def run_durable_step(
         cost_ms=ms,
         cost_usd=usd,
         success=True,
+        completed_attempt_id=attempt.id,
     )
     check_crash_boundary(step_key, CrashBoundary.AFTER_COMMIT)
-    await finish_attempt(attempt.id, AttemptStatus.COMPLETED)
+    publication_at = time.perf_counter()
 
     ledger = ledger_for_run(run_id)
     if operation_type == OperationType.MODEL_CALL:
@@ -187,6 +192,10 @@ async def run_durable_step(
             "replay_policy": replay_policy.value,
         },
     )
+    log.info("Durable timing run=%s step=%s prepare_ms=%.1f operation_ms=%.1f commit_ms=%.1f publish_ms=%.1f",
+             run_id, step_key, (operation_at - prepared_at) * 1000,
+             (commit_at - operation_at) * 1000, (publication_at - commit_at) * 1000,
+             (time.perf_counter() - publication_at) * 1000)
     return executed_value, {"reused": False, "step_key": step_key, "attempt_id": attempt.attempt_uuid}
 
 
