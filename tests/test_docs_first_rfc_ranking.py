@@ -273,6 +273,89 @@ def test_android_companion_spec_question_surfaces_the_companion_rfcs(query):
     assert sources[0].startswith("docs/rfcs/"), sources
 
 
+# --- Spec-intent words are not topic words; ties break on relevance -------------
+#
+# RFC-0233 (a long spec about capability-gap self-build) tied RFC-0059
+# ("Android companion delivery") at 255 for the companion question below, and
+# the old code broke the tie on the path string, so the companion test passed
+# only because "0059" sorts before "0233". Its score came from saying "spec"
+# 113 times: under spec intent the intent word itself was counted as a topic
+# term in every RFC body. These tests use generated RFCs so they do not depend
+# on the wording of any real RFC.
+
+COMPANION_SPEC_QUERIES = (
+    "where is the spec for the android companion",
+    "what does the spec say about the android companion",
+)
+
+
+def off_topic_long_spec(spec_mentions: int = 150) -> str:
+    """A long spec on another topic that says "spec" a lot and mentions the companion in passing."""
+    lines = [
+        "# RFC-0000: Capability-gap self-build (detect, propose, install)",
+        "",
+        "**Status:** Proposed",
+        "",
+        "The android companion and the companion app are out of scope here.",
+        "",
+    ]
+    for idx in range(spec_mentions):
+        lines.append(f"S{idx}: this spec requires the spec checker to verify the spec gate.")
+    return "\n".join(lines) + "\n"
+
+
+@pytest.mark.parametrize("query", COMPANION_SPEC_QUERIES)
+def test_off_topic_spec_that_repeats_spec_does_not_push_out_the_companion_rfcs(tmp_path, monkeypatch, query):
+    # "0000-" sorts before every real RFC, so a path tie-break cannot rescue the companion RFCs.
+    name = "0000-capability-gap-self-build.md"
+    _index_extra_rfcs(monkeypatch, tmp_path, {name: off_topic_long_spec()})
+
+    hits = search_internal_references(query, max_results=8)
+    sources = [hit.source_path for hit in hits]
+
+    for number in ("0204-", "0139-", "0059-"):
+        assert any(f"docs/rfcs/{number}" in src for src in sources), (number, sources)
+    positions = {src: idx for idx, src in enumerate(sources)}
+    off_topic = [idx for src, idx in positions.items() if src.endswith(name)]
+    companion = [idx for src, idx in positions.items() if "docs/rfcs/0059-" in src]
+    assert not off_topic or off_topic[0] > companion[0], sources
+
+
+def test_spec_intent_words_do_not_score_as_topic_terms():
+    query = "what does the spec say about the android companion"
+    terms = grounding._tokenize(query)
+    path = Path("/repo/docs/rfcs/0000-capability-gap-self-build.md")
+
+    few = grounding._rank_score(path, off_topic_long_spec(5), terms, query)
+    many = grounding._rank_score(path, off_topic_long_spec(500), terms, query)
+
+    assert few == many
+
+
+def test_equal_scores_break_on_title_relevance_not_on_the_path(tmp_path, monkeypatch):
+    # Both RFCs get the same score; the off-topic one sorts first by path.
+    off_topic = "9970-capability-gap-self-build.md"
+    on_topic = "9971-android-companion-delivery.md"
+    _index_extra_rfcs(
+        monkeypatch,
+        tmp_path,
+        {
+            off_topic: "# RFC-9970: Capability-gap self-build\n\nThe android companion is out of scope.\n",
+            on_topic: "# RFC-9971: Android companion delivery\n\nShip the android companion.\n",
+        },
+    )
+    ours = {off_topic, on_topic}
+    monkeypatch.setattr(
+        grounding,
+        "_rank_score",
+        lambda path, *_args, **_kwargs: 500 if path.name in ours else 1,
+    )
+
+    hits = search_internal_references("where is the spec for the android companion", max_results=2)
+
+    assert [Path(hit.source_path).name for hit in hits] == [on_topic, off_topic]
+
+
 def test_rfc_number_parsing_and_rfc_path_detection():
     assert requested_rfc_numbers("RFC-0228 and rfc 60 and rfc_0003") == {228, 60, 3}
     assert is_rfc_spec(Path("/repo/docs/rfcs/0228-x.md"))

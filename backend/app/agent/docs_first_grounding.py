@@ -338,7 +338,32 @@ def _score_rfc_document(
     return int((body + bonus) * RFC_HELP_QUERY_WEIGHT)
 
 
+# Words that express spec intent ("what does the spec say about X") say which
+# kind of document is wanted, not what it is about. Spec intent already earns
+# RFC_SPEC_QUERY_BONUS, so counting these words in document bodies as well let
+# a long spec on an unrelated topic outrank the RFC about X just by repeating
+# "spec" (RFC-0233 tied RFC-0059 for the android companion question).
+SPEC_INTENT_TERMS = frozenset(
+    {"spec", "specs", "specification", "specifications", "rfc", "rfcs", "proposal", "proposals"}
+)
+
+
+def _topic_terms(terms: list[str], query: str) -> list[str]:
+    """Query terms that name the topic: spec-intent words are dropped for spec questions."""
+    if not query_targets_specs(query):
+        return terms
+    topic = [term for term in terms if term not in SPEC_INTENT_TERMS]
+    return topic or terms
+
+
+def _title_coverage(path: Path, text: str, terms: list[str]) -> int:
+    """Distinct query terms named in the file name or the document title (first line)."""
+    title = f"{path.name}\n{text.split(chr(10), 1)[0]}".lower()
+    return sum(1 for term in set(terms) if term in title)
+
+
 def _rank_score(path: Path, text: str, terms: list[str], query: str, *, rfc_only_match: bool = False) -> int:
+    terms = _topic_terms(terms, query)
     if is_rfc_spec(path):
         return _score_rfc_document(path, text, terms, query, rfc_only_match=rfc_only_match)
     return _score_document(path, text, terms)
@@ -478,9 +503,19 @@ def search_internal_references(query: str, *, max_results: int = 5) -> list[Grou
             continue
         ranked.append((score, path, text))
     # On equal scores, help questions prefer user-facing docs and spec
-    # questions prefer the RFCs.
+    # questions prefer the RFCs; then the document whose name or title names
+    # more of the question's topic wins. The path is only the last resort, so
+    # an alphabetically earlier but less relevant document never wins a tie.
     spec_query = query_targets_specs(query)
-    ranked.sort(key=lambda item: (-item[0], is_rfc_spec(item[1]) != spec_query, str(item[1])))
+    topic = _topic_terms(terms, query)
+    ranked.sort(
+        key=lambda item: (
+            -item[0],
+            is_rfc_spec(item[1]) != spec_query,
+            -_title_coverage(item[1], item[2], topic),
+            str(item[1]),
+        )
+    )
     snippets: list[GroundingSnippet] = []
     total = 0
     for idx, (_score, path, text) in enumerate(ranked[:max_results], start=1):
