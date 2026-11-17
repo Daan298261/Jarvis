@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 import os
 import re
+import uuid
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from pathlib import Path
@@ -202,15 +204,14 @@ def streamable_http_proxy_bypass_param(server: dict[str, Any], opener: Any | Non
 
 @dataclass
 class _LiveClient:
-    stack: AsyncExitStack
-    session: Any
+    owner: asyncio.Task[None]
+    stop: asyncio.Event
+    ready: asyncio.Future[Any]
     fingerprint: str
 
 
 class MCPRuntime:
     def __init__(self) -> None:
-        import asyncio
-
         self._tools: dict[str, dict[str, Any]] = {}
         self._status: dict[str, dict[str, Any]] = {}
         self._sessions: dict[str, _LiveClient] = {}
@@ -243,10 +244,11 @@ class MCPRuntime:
         live = self._sessions.pop(server_id, None)
         if live is None:
             return
-        try:
-            await live.stack.aclose()
-        except Exception:
-            log.debug("MCP session close failed for %s", server_id, exc_info=True)
+        if not live.ready.done():
+            live.ready.cancel()
+            live.owner.cancel()
+        live.stop.set()
+        await asyncio.gather(live.owner, return_exceptions=True)
 
     async def close_all(self) -> None:
         for server_id in list(self._sessions):
@@ -282,58 +284,78 @@ class MCPRuntime:
         return status
 
     async def _connect(self, server: dict[str, Any]) -> Any:
-        from mcp import ClientSession
-
         server_id = self._server_id(server)
         fingerprint = self._fingerprint(server)
         live = self._sessions.get(server_id)
-        if live is not None and live.fingerprint == fingerprint:
-            return live.session
+        if live is not None and live.fingerprint == fingerprint and not live.owner.done():
+            return await asyncio.shield(live.ready)
         if live is not None:
             await self._close_session(server_id)
 
-        stack = AsyncExitStack()
+        ready = asyncio.get_running_loop().create_future()
+        stop = asyncio.Event()
+        owner = asyncio.create_task(self._own_session(server, ready, stop), name=f"mcp:{server_id}")
+        self._sessions[server_id] = _LiveClient(owner=owner, stop=stop, ready=ready, fingerprint=fingerprint)
+        try:
+            return await asyncio.shield(ready)
+        except (Exception, asyncio.CancelledError):
+            await self._close_session(server_id)
+            raise
+
+    async def _own_session(
+        self, server: dict[str, Any], ready: asyncio.Future[Any], stop: asyncio.Event,
+    ) -> None:
+        # MCP transports and ClientSession open AnyIO cancel scopes. The same
+        # task must enter and exit them even when refresh and calls come from
+        # different HTTP requests or agent tasks.
         transport = (server.get("transport") or "stdio").lower()
         try:
-            if transport == "stdio":
-                from mcp.client.stdio import StdioServerParameters, stdio_client
+            from mcp import ClientSession
 
-                launch = prepare_stdio_launch(server)
-                params = StdioServerParameters(
-                    command=launch["command"],
-                    args=launch["args"],
-                    env=launch["env"],
-                    cwd=launch["cwd"],
-                )
-                read, write = await stack.enter_async_context(stdio_client(params))
-            elif transport in {"http", "sse", "streamable-http"}:
-                opener = _streamable_http_opener()
-                url = str(server.get("url") or "")
-                kwargs: dict[str, Any] = {}
-                param = streamable_http_proxy_bypass_param(server, opener)
-                if param == "http_client":
-                    client = _mcp_direct_http_client()
-                    await stack.enter_async_context(client)
-                    kwargs["http_client"] = client
-                elif param == "httpx_client_factory":
-                    kwargs["httpx_client_factory"] = lambda **factory_kw: _mcp_direct_http_client(**factory_kw)
-                streams = await stack.enter_async_context(opener(url, **kwargs))
-                read, write = streams[0], streams[1]
+            async with AsyncExitStack() as stack:
+                if transport == "stdio":
+                    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+                    launch = prepare_stdio_launch(server)
+                    params = StdioServerParameters(
+                        command=launch["command"],
+                        args=launch["args"],
+                        env=launch["env"],
+                        cwd=launch["cwd"],
+                    )
+                    read, write = await stack.enter_async_context(stdio_client(params))
+                elif transport in {"http", "sse", "streamable-http"}:
+                    opener = _streamable_http_opener()
+                    url = str(server.get("url") or "")
+                    kwargs: dict[str, Any] = {}
+                    param = streamable_http_proxy_bypass_param(server, opener)
+                    if param == "http_client":
+                        client = _mcp_direct_http_client()
+                        await stack.enter_async_context(client)
+                        kwargs["http_client"] = client
+                    elif param == "httpx_client_factory":
+                        kwargs["httpx_client_factory"] = lambda **factory_kw: _mcp_direct_http_client(**factory_kw)
+                    streams = await stack.enter_async_context(opener(url, **kwargs))
+                    read, write = streams[0], streams[1]
+                else:
+                    raise RuntimeError(f"Unsupported MCP transport {transport}")
+                session = await stack.enter_async_context(ClientSession(read, write))
+                await session.initialize()
+                ready.set_result(session)
+                await stop.wait()
+        except Exception as exc:
+            if not ready.done():
+                ready.set_exception(exc)
             else:
-                await stack.aclose()
-                raise RuntimeError(f"Unsupported MCP transport {transport}")
-            session = await stack.enter_async_context(ClientSession(read, write))
-            await session.initialize()
-        except Exception:
-            await stack.aclose()
-            raise
-        self._sessions[server_id] = _LiveClient(stack=stack, session=session, fingerprint=fingerprint)
-        return session
+                log.debug("MCP session ended for %s", self._server_id(server), exc_info=True)
+        finally:
+            if not ready.done():
+                ready.cancel()
 
     async def _list_tools(self, server: dict[str, Any]) -> list[dict[str, Any]]:
         session = await self._connect(server)
         listing = await session.list_tools()
-        return [t.model_dump() if hasattr(t, "model_dump") else dict(t) for t in listing.tools]
+        return [t.model_dump(by_alias=True) if hasattr(t, "model_dump") else dict(t) for t in listing.tools]
 
     def _lookup(self, tool_key: str) -> dict[str, Any] | None:
         spec = self._tools.get(tool_key)
@@ -344,6 +366,27 @@ class MCPRuntime:
             if key == tool_key or key.endswith(f"_{cleaned}") or row.get("remote_name") == tool_key:
                 return row
         return None
+
+    def is_read_only(self, tool_key: str, allowlist: frozenset[tuple[str, str]] = frozenset()) -> bool:
+        """True only for a connected tool whose (pinned image, tool name) pair is allowlisted and whose server
+        is a backend-registered one (uuid id) launching exactly that image with `docker run`. The server's
+        own annotations never make a tool a read; a destructiveHint makes any tool a write."""
+        spec = self._lookup(tool_key)
+        if not spec:
+            return False
+        if (spec["tool"].get("annotations") or {}).get("destructiveHint") is True:
+            return False
+        server = spec["server"]
+        try:
+            uuid.UUID(str(server.get("id") or ""))
+        except ValueError:
+            return False
+        command = Path(str(server.get("command") or "")).name.lower().removesuffix(".exe")
+        args = [str(arg) for arg in server.get("args") or []]
+        if str(server.get("transport") or "stdio") != "stdio" or command != "docker" or args[:1] != ["run"]:
+            return False
+        remote = str(spec.get("remote_name") or "")
+        return any((image, remote) in allowlist for image in args[1:])
 
     async def call(self, tool_key: str, arguments: dict[str, Any]) -> ToolResult:
         spec = self._lookup(tool_key)
@@ -500,23 +543,22 @@ class MCPRuntime:
             except PathNotAllowed as exc:
                 return ToolResult(False, "", error=exc.code, data=exc.as_dict())
         for attempt in range(2):
-            try:
-                async with self._lock:
-                    if attempt:
-                        await self._close_session(server_id)
+            async with self._lock:
+                try:
                     session = await self._connect(server)
                     result = await session.call_tool(name, call_args or {})
-                is_error = bool(getattr(result, "is_error", False) or getattr(result, "isError", False))
-                content = getattr(result, "content", [])
-                structured = getattr(result, "structuredContent", None)
-                data = {"mcp_text": "\n".join(str(getattr(block, "text", "")) for block in content if getattr(block, "type", "") == "text")}
-                if isinstance(structured, dict):
-                    data["structuredContent"] = structured
-                return ToolResult(not is_error, str(getattr(result, "content", result)), data=data)
-            except Exception as exc:
-                last_error = str(exc)
-                log.debug("MCP call %s attempt %s failed: %s", tool_key, attempt + 1, exc)
-                await self._close_session(server_id)
+                except Exception as exc:
+                    last_error = str(exc)
+                    log.debug("MCP call %s attempt %s failed: %s", tool_key, attempt + 1, exc)
+                    await self._close_session(server_id)
+                    continue
+            is_error = bool(getattr(result, "is_error", False) or getattr(result, "isError", False))
+            content = getattr(result, "content", result)
+            if isinstance(content, list) and all(getattr(item, "type", None) == "text" for item in content):
+                output = "\n".join(str(item.text) for item in content)
+            else:
+                output = str(content)
+            return ToolResult(not is_error, output, error=output if is_error else "")
         return ToolResult(False, "", error=last_error or f"MCP call failed for {tool_key}")
 
     def openai_tools(self) -> list[dict[str, Any]]:

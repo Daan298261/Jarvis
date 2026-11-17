@@ -60,7 +60,7 @@ Every implement PR includes a **reviewer reasoning pass**: a short section listi
 
 ### Stub rule
 
-**Single exception:** `onCloudToPersonaMorph` (S5) — typed, exported, no-op body, doc comment citing Taco's 2026-10-14 authorization. Everything else is fully wired. No other stubs, scaffolding, TODO bodies, or soft-fails.
+**Single exception:** `onCloudToPersonaMorph` (S5) — typed, exported, no-op body, doc comment citing Taco's 2026-10-14 authorization. Everything else is fully wired. No other stubs, scaffolding, unfinished bodies, or soft-fails.
 
 ### Switch behaviour (normative)
 

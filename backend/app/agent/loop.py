@@ -396,6 +396,11 @@ def _side_effect_decision(
     )
 
 
+def tool_results_fallback(working: WorkingState, reason: str) -> str:
+    observations = "\n\n".join(working.observations[-3:])
+    return f"Recorded tool results\n\n{observations}\n\n{reason}" if observations else reason
+
+
 _TERMINAL_TASK_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 
@@ -729,6 +734,30 @@ class AgentRuntime:
             await session.commit()
         self._start_runner(task_id, self._run(task_id, continue_existing=True, pending_tool=payload))
         return task
+
+    async def cancel_running_for_owner_unload(self, reason: str, *, wait_seconds: float = 10.0) -> list[str]:
+        """Owner pressed Unload model: cancel every running task visibly, then wait for its runner to end.
+
+        Each task is marked ``cancelled`` (the task list and its event stream show ``reason``), so the
+        pipeline ends in front of the owner and its engine lease is released before the models are.
+        """
+        running = {task_id: runner for task_id, runner in self._tasks.items() if not runner.done()}
+        for task_id in running:
+            self.cancel(task_id)
+            async with SessionLocal() as session:
+                task = await session.get(Task, task_id)
+                if task is not None and task.status not in _TERMINAL_TASK_STATUSES:
+                    task.status = "cancelled"
+                    task.stage = "cancelled"
+                    task.waiting_for_confirmation = False
+                    await session.commit()
+            try:
+                await BUS.publish(task_id, "cancelled", reason)
+            except Exception:  # the task is already marked cancelled; a missed event never blocks the unload
+                log.warning("Could not publish the unload cancellation for %s", task_id, exc_info=True)
+        if running:
+            await asyncio.wait(list(running.values()), timeout=wait_seconds)
+        return list(running)
 
     def cancel(self, task_id: str) -> None:
         self._cancel.add(task_id)
@@ -3222,7 +3251,8 @@ class AgentRuntime:
                             continue
                         if tools_used and work_wrap_retries < 1:
                             work_wrap_retries += 1
-                            wrap = "The requested work already ran on disk."
+                            log.warning("Model report failed for task %s with HTTP %s", task_id, exc.status_code)
+                            wrap = tool_results_fallback(working, "The model could not finish the final report.")
                             if await self._complete(
                                 task_id,
                                 messages,
@@ -3253,10 +3283,7 @@ class AgentRuntime:
                 except TimeoutError:
                     await self._release_lazy_vision()
                     if tools_used and verifying:
-                        content = (
-                            "The model timed out while writing the final report. "
-                            "Actions already executed are in the activity log; verify files from that log."
-                        )
+                        content = tool_results_fallback(working, "The model timed out while writing the final report.")
                         if await self._complete(task_id, messages, content, "Timed out after verification tools ran.", working, metrics):
                             return
                         continue
@@ -3695,6 +3722,7 @@ class AgentRuntime:
             await self._release_lazy_vision()
             raise
         except Exception as exc:
+            log.exception("Agent task %s failed", task_id)
             await self._fail_task(task_id, str(exc), working, metrics)
         finally:
             if progress_watch is not None:

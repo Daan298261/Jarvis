@@ -260,3 +260,28 @@ def test_elevation_snapshot_has_pid():
     if snap.get("platform") == "nt" and not snap["logon_task_registered"]:
         assert "RegisterLogonTask" not in str(snap["logon_task_hint"])
         assert "nothing to type" in str(snap["logon_task_hint"]).lower() or "allow full pc control" in str(snap["logon_task_hint"]).lower()
+
+
+def test_learned_veto_respects_observational_mcp_effect(monkeypatch, connected_mcp_server):
+    from app.policy.action_gate import gate_side_effect
+    from app.decision.types import DecisionResult
+
+    key = connected_mcp_server({
+        "id": "0b9f3c52-6a1e-4d55-9c1f-1d2f8f3e7a10", "name": "time", "transport": "stdio", "command": "docker",
+        "args": ["run", "-i", "--rm", "mcp/time@sha256:9c46a918633fb474bf8035e3ee90ebac6bcf2b18ccb00679ac4c179cba0ebfcf"],
+        "enabled": True,
+    }, "get_current_time")
+
+    monkeypatch.setattr("app.policy.reversibility_gate.authorize", lambda *a, **k: _allow())
+    monkeypatch.setattr(
+        "app.policy.action_gate.decide",
+        lambda *a, **k: DecisionResult(
+            answers={"cancel": Answer("cancel", "choice", "cancel", 0.99)},
+            source="laya", decision_class="harm_veto", provider="laya",
+        ),
+    )
+    read = gate_side_effect(key, arguments={"timezone": "UTC"})
+    assert read.allowed
+    launch = gate_side_effect("apps", action="open", arguments={"name": "notepad"})
+    assert not launch.allowed
+    assert "Laya cancelled" in launch.reason

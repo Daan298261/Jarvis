@@ -82,6 +82,10 @@ class InferenceSettings(BaseModel):
     cache_type_v: str = "q8_0"
     threads: int = 0
     auto_load: bool = True
+    # Keep warm defaults OFF: every ANZU-loaded model unloads after idle_unload_seconds
+    # without use (inference/idle_unload.py). ON keeps today's always-warm behaviour.
+    keep_warm: bool = False
+    idle_unload_seconds: int = Field(default=300, ge=30, le=86400)
     vision: bool = False
     vision_mode: str = "lazy"
     remote_model: str = ""
