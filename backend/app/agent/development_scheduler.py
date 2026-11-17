@@ -106,7 +106,7 @@ def with_defaults(state):
 def models_held_unloaded() -> bool:
     """The owner's manual unload guard (#690): background work must not load models.
 
-    Same bridge as ``model_launch.idle_keep_alive``: builds without the #690 guard have
+    Same bridge as ``inference.idle_unload.warm_blocked``: builds without the #690 guard have
     no manual-unload flag, so nothing is held.
     """
     try:
@@ -118,8 +118,8 @@ def models_held_unloaded() -> bool:
 
 def ollama_keep_alive() -> str:
     """Every scheduler/worker Ollama request uses the shared idle keep-alive helper."""
-    from ..inference.model_launch import idle_keep_alive
-    return idle_keep_alive()
+    from ..inference.keep_alive import ollama_keep_alive as shared_keep_alive
+    return shared_keep_alive()
 
 
 MODEL_POLICY = "model_policy.json"
