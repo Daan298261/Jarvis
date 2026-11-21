@@ -126,6 +126,11 @@ def _persist_enabled(enabled: bool, warm: bool) -> None:
         log.warning("Could not persist Laya settings: %s", exc)
 
 
+def loaded_version() -> str:
+    with _LOCK:
+        return _STATE.version
+
+
 def status() -> dict[str, Any]:
     ok, reason, manifest = pins.verify_installed(allow_fixture=True)
     with _LOCK:
@@ -564,9 +569,9 @@ def decide_local(
     from ...engine_mode import decision_engines_enabled
     if not decision_engines_enabled():
         raise RuntimeError("Laya is bypassed in Model only mode")
+    started = time.perf_counter()
     if not is_ready():
         raise RuntimeError("Laya runtime is not warm/enabled or is busy")
-    started = time.perf_counter()
     with _LOCK:
         fixture = _STATE.fixture
     if _DECIDE_FN is not None or fixture:
@@ -586,7 +591,10 @@ def decide_local(
     model_state = state if plan["strategy"] != "compressed" else _compress_state(state, plan["budget"], focus)
     payload, effective = _to_laya_questions(questions, model_state)
 
+    expires_at = started + deadline_ms / 1000.0
     with _LOCK:
+        if time.perf_counter() >= expires_at:
+            raise TimeoutError("Laya input preparation exhausted the decision deadline")
         if _STATE.busy:
             raise RuntimeError("Laya busy with a previous request")
         _STATE.busy = True
@@ -598,8 +606,13 @@ def decide_local(
             with _LOCK:
                 _STATE.busy = False
 
-    future: Future = _executor().submit(_job)
-    remaining_s = max(0.001, (deadline_ms - (time.perf_counter() - started) * 1000.0) / 1000.0)
+    try:
+        future = _executor().submit(_job)
+    except RuntimeError:
+        with _LOCK:
+            _STATE.busy = False
+        raise
+    remaining_s = max(0.0, expires_at - time.perf_counter())
     try:
         raw, infer_ms, windows = future.result(timeout=remaining_s)
     except FutureTimeout as exc:

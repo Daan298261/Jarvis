@@ -321,3 +321,33 @@ def test_status_does_not_import_torch_heavy_package(monkeypatch):
     monkeypatch.setattr("builtins.__import__", guard)
     laya_runtime.status()
     assert not imported.is_set()
+
+def test_adapter_uses_loaded_version_without_collecting_diagnostics(monkeypatch):
+    from app.decision.adapters import laya_adapter
+
+    _enable_fake_agent(monkeypatch, _SlowAgent(0.0))
+    laya_runtime._STATE.version = "loaded-checkpoint"
+    monkeypatch.setattr(laya_runtime, "status", lambda: pytest.fail("diagnostics on decision path"))
+    result = laya_adapter.decide(
+        state={"user_message": "x"},
+        questions=[Question(id="q", type="noul", prompt="q?")],
+        decision_class="probe",
+        deadline_ms=2000,
+    )
+    assert result.provider_version == result.model == "loaded-checkpoint"
+
+
+def test_expired_preparation_does_not_submit_inference(monkeypatch):
+    _enable_fake_agent(monkeypatch, _SlowAgent(0.0))
+    ticks = iter([10.0, 10.1])
+    monkeypatch.setattr(laya_runtime, "time", type("Clock", (), {"perf_counter": lambda: next(ticks)}))
+    monkeypatch.setattr(laya_runtime, "_executor", lambda: pytest.fail("inference submitted after deadline"))
+
+    with pytest.raises(TimeoutError):
+        laya_runtime.decide_local(
+            state={"user_message": "x"},
+            questions=[Question(id="q", type="noul", prompt="q?")],
+            decision_class="probe",
+            deadline_ms=50,
+        )
+    assert laya_runtime.is_ready()
