@@ -31,14 +31,14 @@ def decide(
         decision_class=decision_class,
         deadline_ms=deadline_ms,
     )
-    status = laya_runtime.status()
+    version = laya_runtime.loaded_version() or VERSION
     return DecisionResult(
         answers=answers,
         source="laya",
         decision_class=decision_class,
         provider="laya",
-        provider_version=str(status.get("version") or VERSION),
-        model=str(status.get("version") or VERSION),
+        provider_version=version,
+        model=version,
         latency=LatencyBreakdown(inference_ms=elapsed, total_ms=elapsed),
         fixture=bool(fixture),
     )
